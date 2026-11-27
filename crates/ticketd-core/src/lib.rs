@@ -164,8 +164,8 @@ pub use chats::{
     ChatCatchUp, ChatChange, ChatCreationReplay, ChatDelivery, ChatDeliveryDecision,
     ChatHistoryPage, ChatInputChange, ChatInputReceipt, ChatInputStanding, ChatInteraction,
     ChatInteractionKind, ChatInteractionState, ChatItem, ChatLink, ChatLinkKind, ChatLinkedRecord,
-    ChatListFilter, ChatMessage, ChatNotice, ChatObservation, ChatQueueEdit, ChatRecord, ChatRole,
-    ChatSession, ChatSessionOrigin, ChatSnapshot, ChatStartPicks, ChatSubmissionAttempt,
+    ChatListFilter, ChatMessage, ChatNotice, ChatObservation, ChatOwner, ChatQueueEdit, ChatRecord,
+    ChatRole, ChatSession, ChatSessionOrigin, ChatSnapshot, ChatStartPicks, ChatSubmissionAttempt,
     ChatSubmissionIntent, ChatSummary, ChatTool, ChatToolState, ChatTurn, ChatTurnReceipt,
     ChatTurnState, FolderChat, NewChat, PreparedChatInput,
 };

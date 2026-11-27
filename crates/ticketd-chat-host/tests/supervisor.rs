@@ -3483,7 +3483,7 @@ async fn storage_recovery_after_chat_off_and_on_keeps_the_lost_turns_receipt() {
     let [receipt] = receipts.as_slice() else {
         panic!("expected one Turn receipt, got {receipts:?}");
     };
-    assert_eq!(receipt.turn_id, turn_id);
+    assert_eq!(receipt.turn_id.as_deref(), Some(turn_id.as_str()));
     assert!(matches!(
         problem_after_enabling,
         Some(ChatProblem::StorageFailed { .. })
@@ -3634,7 +3634,7 @@ async fn storage_recovery_keeps_the_observed_turn_ending_and_its_receipt() {
         let [receipt] = receipts.as_slice() else {
             panic!("expected one Turn receipt, got {receipts:?}");
         };
-        assert_eq!(receipt.turn_id, turn_id);
+        assert_eq!(receipt.turn_id.as_deref(), Some(turn_id.as_str()));
         assert_eq!(
             serde_json::from_str::<Vec<ChatAgentChange>>(&receipt.input).unwrap(),
             [
@@ -3685,7 +3685,8 @@ async fn a_chat_write_before_the_first_turn_event_is_kept_in_its_transcript() {
     assert_eq!(turn.ended_at.as_deref(), Some(turn.started_at.as_str()));
     let changes = f.items().into_iter().find_map(|item| match item {
         ChatItem::Tool(tool)
-            if tool.name == AGENT_CHANGES_RECORD_NAME && tool.turn_id == turn.id =>
+            if tool.name == AGENT_CHANGES_RECORD_NAME
+                && tool.turn_id.as_deref() == Some(turn.id.as_str()) =>
         {
             Some(serde_json::from_str::<Vec<ticketd_core::ChatAgentChange>>(&tool.input).unwrap())
         }

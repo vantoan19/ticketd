@@ -193,6 +193,11 @@ records are authoritative for ticketd's history; reconstructing a Chat from all
 raw provider events is not required. Exact table names and schema are internal
 implementation details.
 
+A Step or an approval belongs to an owner, the Chat's main agent or one sub-agent
+its harness started (format 105), and its turn is optional: work a sub-agent does
+outside the main agent's turns has no turn. The owner is the harness's native ID of
+the sub-agent within the Chat, and absent for the main agent.
+
 The storage half of this design exists: the core's Chat workflows
 (`crates/ticketd-core/src/chats.rs`) own these records and the change log. Chat
 tables do not move the workspace change token, so streaming a turn does not make

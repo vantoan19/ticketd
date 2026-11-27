@@ -74,8 +74,9 @@ pub fn report(
     live: &ChatLive,
     shown: &dyn Fn(&str) -> String,
 ) -> Option<Report> {
-    let active = chat.active_turn.as_ref().map(|turn| &turn.id) == Some(&tool.turn_id);
-    let turn_id = tool.turn_id.clone();
+    // The host's turn records always belong to a turn; a Step with none is not one.
+    let turn_id = tool.turn_id.clone()?;
+    let active = chat.active_turn.as_ref().map(|turn| &turn.id) == Some(&turn_id);
     if let Some(record) =
         records::read::<ReasoningRecord>(&tool.name, REASONING_RECORD_NAME, &tool.input)
     {
@@ -487,7 +488,8 @@ mod tests {
         let tool = ChatTool {
             id: "plan".to_owned(),
             position: 1,
-            turn_id: "turn".to_owned(),
+            turn_id: Some("turn".to_owned()),
+            owner: ticketd_core::ChatOwner::Main,
             name: PLAN_RECORD_NAME.to_owned(),
             input: r#"{"steps":[{"text":"Read","status":"completed","active_label":null},{"text":"Write","status":"in_progress","active_label":"Writing"}],"explanation":null}"#.to_owned(),
             state: ChatToolState::Completed,

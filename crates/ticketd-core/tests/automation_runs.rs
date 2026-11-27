@@ -810,6 +810,37 @@ fn the_upkeep_removes_finished_runs_older_than_90_days_with_their_chats() {
     workspace
         .save_chat_input(None, &chat, "Triage this")
         .unwrap();
+    // A sub-agent's Step and approval, which belong to no turn, go with the Chat.
+    workspace
+        .record_chat_observations(
+            &chat,
+            vec![
+                ticketd_core::ChatObservation::Tool {
+                    tool_id: "sub-tool".into(),
+                    turn_id: None,
+                    owner: ticketd_core::ChatOwner::SubAgent {
+                        native_id: "agent-1".into(),
+                    },
+                    name: "Bash".into(),
+                    input: "ls".into(),
+                    state: ticketd_core::ChatToolState::Completed,
+                    output: None,
+                },
+                ticketd_core::ChatObservation::InteractionRequested {
+                    interaction_id: "sub-ask".into(),
+                    turn_id: None,
+                    owner: ticketd_core::ChatOwner::SubAgent {
+                        native_id: "agent-1".into(),
+                    },
+                    kind: ticketd_core::ChatInteractionKind::Approval,
+                    native_request_id: None,
+                    prompt: "Allow ls?".into(),
+                    reason: None,
+                    tool_id: Some("sub-tool".into()),
+                },
+            ],
+        )
+        .unwrap();
     workspace
         .advance_automation_run(&run.id, Some(StepOutcome::Completed))
         .unwrap();
@@ -832,6 +863,9 @@ fn the_upkeep_removes_finished_runs_older_than_90_days_with_their_chats() {
         [&active.id]
     );
     assert!(workspace.chat(&chat).is_err());
+    let exported = workspace.export().unwrap();
+    assert_eq!(exported["chat_tools"].as_array().unwrap().len(), 0);
+    assert_eq!(exported["chat_interactions"].as_array().unwrap().len(), 0);
 }
 
 #[test]

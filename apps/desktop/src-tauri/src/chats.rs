@@ -2769,7 +2769,7 @@ impl Chats {
             }
             ChatItem::Tool(tool) if tool.id == response_id => {
                 let turn = snapshot.items.iter().find_map(|item| match item {
-                    ChatItem::Turn(turn) if turn.id == tool.turn_id => Some(turn),
+                    ChatItem::Turn(turn) if tool.turn_id.as_ref() == Some(&turn.id) => Some(turn),
                     _ => None,
                 });
                 let date = turn.map_or(String::new(), |turn| shown_date(&turn.started_at));

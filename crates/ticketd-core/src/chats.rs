@@ -207,6 +207,37 @@ pub(crate) fn migrate_turn_ending(connection: &Connection) -> Result<(), Error> 
     Ok(())
 }
 
+/// Format 105: every Step and approval records its owner (`sub_agent_id`, see
+/// [`ChatOwner`]; `NULL`, the main agent, for everything recorded before) and may have no
+/// turn. SQLite cannot drop `NOT NULL` from a column, so both tables are rebuilt with
+/// `turn_id` nullable, keeping every row, position and column.
+/// Like every migration step it may run again over a schema that already has it.
+pub(crate) fn migrate_owner_and_optional_turn(connection: &Connection) -> Result<(), Error> {
+    let done: bool = connection.query_row(
+        "SELECT EXISTS(SELECT 1 FROM pragma_table_info('chat_tools') WHERE name = 'sub_agent_id')",
+        [],
+        |row| row.get(0),
+    )?;
+    if done {
+        return Ok(());
+    }
+    connection.execute_batch(
+        "CREATE TABLE chat_tools_new (id TEXT PRIMARY KEY, chat_id TEXT NOT NULL REFERENCES chats(id), position INTEGER NOT NULL UNIQUE, turn_id TEXT REFERENCES chat_turns(id), name TEXT NOT NULL, input TEXT NOT NULL, state TEXT NOT NULL, output TEXT, output_truncated INTEGER NOT NULL DEFAULT 0, started_at TEXT, sub_agent_id TEXT);
+         INSERT INTO chat_tools_new (id, chat_id, position, turn_id, name, input, state, output, output_truncated, started_at)
+             SELECT id, chat_id, position, turn_id, name, input, state, output, output_truncated, started_at FROM chat_tools;
+         DROP TABLE chat_tools;
+         ALTER TABLE chat_tools_new RENAME TO chat_tools;
+         CREATE INDEX chat_tools_chat ON chat_tools(chat_id, position);
+         CREATE TABLE chat_interactions_new (id TEXT PRIMARY KEY, chat_id TEXT NOT NULL REFERENCES chats(id), position INTEGER NOT NULL UNIQUE, turn_id TEXT REFERENCES chat_turns(id), kind TEXT NOT NULL, native_request_id TEXT, prompt TEXT NOT NULL, reason TEXT, state TEXT NOT NULL, response TEXT, tool_id TEXT, asked_at TEXT, resolved_at TEXT, sub_agent_id TEXT);
+         INSERT INTO chat_interactions_new (id, chat_id, position, turn_id, kind, native_request_id, prompt, reason, state, response, tool_id, asked_at, resolved_at)
+             SELECT id, chat_id, position, turn_id, kind, native_request_id, prompt, reason, state, response, tool_id, asked_at, resolved_at FROM chat_interactions;
+         DROP TABLE chat_interactions;
+         ALTER TABLE chat_interactions_new RENAME TO chat_interactions;
+         CREATE INDEX chat_interactions_chat ON chat_interactions(chat_id, position);",
+    )?;
+    Ok(())
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum ChatLinkKind {
@@ -579,11 +610,54 @@ pub enum ChatToolState {
     Unknown,
 }
 
+/// Which agent a Step or an approval belongs to (format 105).
+///
+/// Every Step and approval has exactly one owner: the Chat's main agent, or one
+/// sub-agent the Chat's harness started. A sub-agent is identified inside its Chat by the
+/// harness's native ID (Claude's task ID, Codex's child thread ID, Antigravity's child
+/// conversation ID). The core keeps that ID as given and decides nothing from it; the
+/// sub-agent record keyed by (Chat, native ID) is a later addition.
+///
+/// Stored as one nullable column, `sub_agent_id`, on `chat_tools` and `chat_interactions`:
+/// `NULL` is the main agent, so all data from before format 105 is the main agent's.
+#[derive(Debug, Clone, Default, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[serde(tag = "kind", rename_all = "snake_case")]
+pub enum ChatOwner {
+    #[default]
+    Main,
+    SubAgent {
+        /// The harness's native ID of the sub-agent, unique within the Chat.
+        native_id: String,
+    },
+}
+
+impl ChatOwner {
+    /// The value of the `sub_agent_id` column: `None` for the main agent.
+    fn column(&self) -> Option<&str> {
+        match self {
+            ChatOwner::Main => None,
+            ChatOwner::SubAgent { native_id } => Some(native_id),
+        }
+    }
+
+    fn from_column(native_id: Option<String>) -> Self {
+        native_id.map_or(ChatOwner::Main, |native_id| ChatOwner::SubAgent {
+            native_id,
+        })
+    }
+}
+
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct ChatTool {
     pub id: String,
     pub position: i64,
-    pub turn_id: String,
+    /// The turn the Step ran in. `None` when no turn owns it: a sub-agent's Step outside
+    /// the main agent's turns (format 105).
+    #[serde(default)]
+    pub turn_id: Option<String>,
+    /// The agent that ran the Step.
+    #[serde(default)]
+    pub owner: ChatOwner,
     pub name: String,
     pub input: String,
     pub state: ChatToolState,
@@ -615,7 +689,12 @@ pub enum ChatInteractionState {
 pub struct ChatInteraction {
     pub id: String,
     pub position: i64,
-    pub turn_id: String,
+    /// The turn the request arrived in; `None` when no turn owns it (format 105).
+    #[serde(default)]
+    pub turn_id: Option<String>,
+    /// The agent that asked.
+    #[serde(default)]
+    pub owner: ChatOwner,
     pub kind: ChatInteractionKind,
     pub native_request_id: Option<String>,
     /// For an approval, what would run or change; for a question, its text.
@@ -743,7 +822,12 @@ pub enum ChatObservation {
     },
     Tool {
         tool_id: String,
-        turn_id: String,
+        /// The turn the Step belongs to, when one does. Must be this Chat's.
+        #[serde(default)]
+        turn_id: Option<String>,
+        /// The agent that ran it. An existing record keeps the owner it was recorded with.
+        #[serde(default)]
+        owner: ChatOwner,
         name: String,
         input: String,
         state: ChatToolState,
@@ -751,7 +835,12 @@ pub enum ChatObservation {
     },
     InteractionRequested {
         interaction_id: String,
-        turn_id: String,
+        /// The turn it arrived in, when one does. Must be this Chat's.
+        #[serde(default)]
+        turn_id: Option<String>,
+        /// The agent that asked.
+        #[serde(default)]
+        owner: ChatOwner,
         kind: ChatInteractionKind,
         native_request_id: Option<String>,
         prompt: String,
@@ -1056,7 +1145,7 @@ fn read_item(connection: &Connection, kind: &str, id: &str) -> Result<Option<Cha
             .map(ChatItem::Session),
         "tool" => connection
             .query_row(
-                "SELECT id, position, turn_id, name, input, state, output, output_truncated, started_at FROM chat_tools WHERE id = ?1",
+                "SELECT id, position, turn_id, name, input, state, output, output_truncated, started_at, sub_agent_id FROM chat_tools WHERE id = ?1",
                 [id],
                 |row| {
                     Ok(ChatTool {
@@ -1069,6 +1158,7 @@ fn read_item(connection: &Connection, kind: &str, id: &str) -> Result<Option<Cha
                         output: row.get(6)?,
                         output_truncated: row.get(7)?,
                         started_at: row.get(8)?,
+                        owner: ChatOwner::from_column(row.get(9)?),
                     })
                 },
             )
@@ -1076,7 +1166,7 @@ fn read_item(connection: &Connection, kind: &str, id: &str) -> Result<Option<Cha
             .map(ChatItem::Tool),
         "interaction" => connection
             .query_row(
-                "SELECT id, position, turn_id, kind, native_request_id, prompt, state, response, reason, tool_id, asked_at, resolved_at FROM chat_interactions WHERE id = ?1",
+                "SELECT id, position, turn_id, kind, native_request_id, prompt, state, response, reason, tool_id, asked_at, resolved_at, sub_agent_id FROM chat_interactions WHERE id = ?1",
                 [id],
                 |row| {
                     Ok(ChatInteraction {
@@ -1092,6 +1182,7 @@ fn read_item(connection: &Connection, kind: &str, id: &str) -> Result<Option<Cha
                         tool_id: row.get(9)?,
                         asked_at: row.get(10)?,
                         resolved_at: row.get(11)?,
+                        owner: ChatOwner::from_column(row.get(12)?),
                     })
                 },
             )
@@ -1861,7 +1952,8 @@ fn observe(
                 chat_id,
                 ChatObservation::Tool {
                     tool_id: format!("{turn_id}:ticketd-changes"),
-                    turn_id,
+                    turn_id: Some(turn_id),
+                    owner: ChatOwner::Main,
                     name: AGENT_CHANGES_RECORD_NAME.to_owned(),
                     input: serde_json::to_string(&changes)?,
                     state: ChatToolState::Completed,
@@ -1900,12 +1992,15 @@ fn observe(
         ChatObservation::Tool {
             tool_id,
             turn_id,
+            owner,
             name: tool_name,
             input,
             state,
             output,
         } => {
-            require_turn(connection, chat_id, &turn_id)?;
+            if let Some(turn_id) = &turn_id {
+                require_turn(connection, chat_id, turn_id)?;
+            }
             let (output, truncated) = match output.map(bounded) {
                 Some((output, truncated)) => (Some(output), truncated),
                 None => (None, false),
@@ -1919,8 +2014,8 @@ fn observe(
             } else {
                 let position = log(connection, chat_id, "tool", &tool_id)?;
                 connection.execute(
-                    &format!("INSERT INTO chat_tools (id, chat_id, position, turn_id, name, input, state, output, output_truncated, started_at) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, {NOW})"),
-                    params![tool_id, chat_id, position, turn_id, tool_name, input, name(state)?, output, truncated],
+                    &format!("INSERT INTO chat_tools (id, chat_id, position, turn_id, sub_agent_id, name, input, state, output, output_truncated, started_at) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, {NOW})"),
+                    params![tool_id, chat_id, position, turn_id, owner.column(), tool_name, input, name(state)?, output, truncated],
                 )?;
             }
             Ok(())
@@ -1928,13 +2023,16 @@ fn observe(
         ChatObservation::InteractionRequested {
             interaction_id,
             turn_id,
+            owner,
             kind,
             native_request_id,
             prompt,
             reason,
             tool_id,
         } => {
-            require_turn(connection, chat_id, &turn_id)?;
+            if let Some(turn_id) = &turn_id {
+                require_turn(connection, chat_id, turn_id)?;
+            }
             if owned(connection, "chat_interactions", chat_id, &interaction_id)? {
                 return Ok(());
             }
@@ -1942,8 +2040,8 @@ fn observe(
             let reason: Option<String> =
                 reason.map(|reason| reason.chars().take(CHAT_NOTICE_LIMIT).collect());
             connection.execute(
-                &format!("INSERT INTO chat_interactions (id, chat_id, position, turn_id, kind, native_request_id, prompt, reason, state, tool_id, asked_at) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, 'pending', ?9, {NOW})"),
-                params![interaction_id, chat_id, position, turn_id, name(kind)?, native_request_id, prompt, reason, tool_id],
+                &format!("INSERT INTO chat_interactions (id, chat_id, position, turn_id, sub_agent_id, kind, native_request_id, prompt, reason, state, tool_id, asked_at) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, 'pending', ?10, {NOW})"),
+                params![interaction_id, chat_id, position, turn_id, owner.column(), name(kind)?, native_request_id, prompt, reason, tool_id],
             )?;
             Ok(())
         }

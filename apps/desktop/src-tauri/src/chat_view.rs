@@ -732,7 +732,7 @@ impl Tracker {
                     self.refold.push(tool_id.clone());
                 }
             }
-            ChatItem::Tool(tool) if chat_reports::is_report(tool) => {
+            ChatItem::Tool(tool) if chat_reports::is_report(tool) && tool.turn_id.is_some() => {
                 self.touch(tool.started_at.as_deref());
                 // Only the latest turn can still be running.
                 self.reports.retain(|_, kept| kept.turn_id == tool.turn_id);
@@ -740,15 +740,20 @@ impl Tracker {
             }
             ChatItem::Tool(tool) => {
                 self.touch(tool.started_at.as_deref());
+                // The latest turn's calls are tracked by turn; a Step no turn owns (a
+                // sub-agent's) is shown as it stands and tracked by nothing.
+                let Some(turn_id) = &tool.turn_id else {
+                    return;
+                };
                 if let Some(changes) = agent_changes(tool)
                     && !changes.is_empty()
                 {
-                    if self.changes_turn.as_ref() != Some(&tool.turn_id) {
+                    if self.changes_turn.as_ref() != Some(turn_id) {
                         self.changes.clear();
-                        self.changes_turn = Some(tool.turn_id.clone());
+                        self.changes_turn = Some(turn_id.clone());
                     }
-                    let segment = self.steers.get(&tool.turn_id).copied().unwrap_or(0);
-                    let calls = self.turn_changes.entry(tool.turn_id.clone()).or_default();
+                    let segment = self.steers.get(turn_id).copied().unwrap_or(0);
+                    let calls = self.turn_changes.entry(turn_id.clone()).or_default();
                     match calls.iter_mut().find(|call| call.tool_id == tool.id) {
                         Some(call) => call.changes.clone_from(&changes),
                         None => calls.push(CallChanges {
@@ -797,10 +802,19 @@ impl Tracker {
     /// segment, so the changes before it are not netted in again. `tool` counts
     /// whether or not it was noted yet.
     fn turn_net(&self, tool: &ChatTool, changes: &[ChatAgentChange]) -> Vec<ChatAgentChange> {
-        let calls = self.turn_changes.get(&tool.turn_id);
+        let calls = tool
+            .turn_id
+            .as_ref()
+            .and_then(|turn_id| self.turn_changes.get(turn_id));
         let noted = calls.and_then(|calls| calls.iter().find(|call| call.tool_id == tool.id));
         let segment = noted.map_or_else(
-            || self.steers.get(&tool.turn_id).copied().unwrap_or(0),
+            || {
+                tool.turn_id
+                    .as_ref()
+                    .and_then(|turn_id| self.steers.get(turn_id))
+                    .copied()
+                    .unwrap_or(0)
+            },
             |call| call.segment,
         );
         let mut all: Vec<ChatAgentChange> = calls
@@ -828,7 +842,7 @@ impl Tracker {
         let latest = self.last_turn.as_ref()?;
         self.reports
             .values()
-            .filter(|tool| tool.turn_id == latest.id)
+            .filter(|tool| tool.turn_id.as_ref() == Some(&latest.id))
             .find_map(|tool| {
                 ticketd_chat_host::records::read::<ticketd_chat_host::records::FilesRecord>(
                     &tool.name,
@@ -1150,7 +1164,7 @@ fn request(interaction: &ChatInteraction, live: &ChatLive, harness: &str, steps:
     });
     Item::Request {
         id: interaction.id.clone(),
-        turn_id: Some(interaction.turn_id.clone()),
+        turn_id: interaction.turn_id.clone(),
         request: if approval { "approval" } else { "question" },
         title,
         reason: interaction
@@ -1406,7 +1420,8 @@ fn steps(tool: &ChatTool, harness: &str, chat: &Chat, home: Option<&str>) -> Vec
             ..base
         }];
     }
-    let active = chat.active_turn.as_ref().map(|turn| &turn.id) == Some(&tool.turn_id);
+    let active = tool.turn_id.is_some()
+        && chat.active_turn.as_ref().map(|turn| &turn.id) == tool.turn_id.as_ref();
     let state = match tool.state {
         ChatToolState::Running if active => "running",
         ChatToolState::Running => "not_finished",
@@ -1545,7 +1560,7 @@ pub fn item(
                 net_gone: vec![None; net.len()],
                 net,
                 changes,
-                turn_id: Some(tool.turn_id.clone()),
+                turn_id: tool.turn_id.clone(),
             }
         }
         ChatItem::Tool(tool) => Item::Steps {
@@ -1559,7 +1574,7 @@ pub fn item(
                     ..step
                 })
                 .collect(),
-            turn_id: Some(tool.turn_id.clone()),
+            turn_id: tool.turn_id.clone(),
         },
         ChatItem::Interaction(interaction) => {
             let rows = interaction
@@ -2202,8 +2217,8 @@ mod tests {
     };
     use serde_json::json;
     use ticketd_chat_host::{STOPPED_BY_TICKETD, StopReason, TurnEnding};
-    use ticketd_core::ChatItem;
     use ticketd_core::ChatSessionOrigin;
+    use ticketd_core::{ChatItem, ChatOwner};
 
     /// U16, U21: work before the session's first turn runs is the session opening.
     #[test]
@@ -2281,7 +2296,8 @@ mod tests {
         ChatTool {
             id: "t".to_owned(),
             position: 0,
-            turn_id: "turn".to_owned(),
+            turn_id: Some("turn".to_owned()),
+            owner: ChatOwner::Main,
             name: name.to_owned(),
             input: input.to_owned(),
             state,
@@ -2461,7 +2477,8 @@ mod tests {
         let approval = ChatItem::Interaction(ChatInteraction {
             id: "ask".to_owned(),
             position: 1,
-            turn_id: "turn".to_owned(),
+            turn_id: Some("turn".to_owned()),
+            owner: ChatOwner::Main,
             kind: ChatInteractionKind::Approval,
             native_request_id: None,
             prompt: "Apply file changes".to_owned(),
@@ -2700,7 +2717,8 @@ mod tests {
         let interaction = ChatInteraction {
             id: "ask".to_owned(),
             position: 0,
-            turn_id: "turn".to_owned(),
+            turn_id: Some("turn".to_owned()),
+            owner: ChatOwner::Main,
             kind: ChatInteractionKind::Approval,
             native_request_id: None,
             prompt: script.clone(),
@@ -2752,7 +2770,8 @@ mod tests {
         let interaction = ChatInteraction {
             id: "ask-1".to_owned(),
             position: 0,
-            turn_id: "turn".to_owned(),
+            turn_id: Some("turn".to_owned()),
+            owner: ChatOwner::Main,
             kind: ChatInteractionKind::Approval,
             native_request_id: Some("0".to_owned()),
             prompt: "touch hello.txt".to_owned(),
@@ -2827,7 +2846,8 @@ mod tests {
         let approval = ChatItem::Interaction(ChatInteraction {
             id: "ask".to_owned(),
             position: 0,
-            turn_id: "turn".to_owned(),
+            turn_id: Some("turn".to_owned()),
+            owner: ChatOwner::Main,
             kind: ChatInteractionKind::Approval,
             native_request_id: None,
             prompt: "Permission to change the configuration".to_owned(),
@@ -2869,7 +2889,8 @@ mod tests {
         let approval = ChatItem::Interaction(ChatInteraction {
             id: "ask".to_owned(),
             position: 0,
-            turn_id: "turn".to_owned(),
+            turn_id: Some("turn".to_owned()),
+            owner: ChatOwner::Main,
             kind: ChatInteractionKind::Approval,
             native_request_id: None,
             prompt: "Permission to edit the file".to_owned(),
@@ -2945,7 +2966,8 @@ mod tests {
         let approval = ChatItem::Interaction(ChatInteraction {
             id: "ask".to_owned(),
             position: 0,
-            turn_id: "turn".to_owned(),
+            turn_id: Some("turn".to_owned()),
+            owner: ChatOwner::Main,
             kind: ChatInteractionKind::Approval,
             native_request_id: None,
             prompt: "Permission to move files".to_owned(),
@@ -3087,7 +3109,8 @@ mod tests {
         let approval = ChatItem::Interaction(ChatInteraction {
             id: "ask".to_owned(),
             position: 0,
-            turn_id: "turn".to_owned(),
+            turn_id: Some("turn".to_owned()),
+            owner: ChatOwner::Main,
             kind: ChatInteractionKind::Approval,
             native_request_id: None,
             prompt: "Permission to write files".to_owned(),
@@ -3126,7 +3149,8 @@ mod tests {
         let record = |name: &str, input: &str, state| {
             ChatItem::Tool(ChatTool {
                 id: name.to_owned(),
-                turn_id: "turn-1".to_owned(),
+                turn_id: Some("turn-1".to_owned()),
+                owner: ChatOwner::Main,
                 ..tool(name, input, state, None)
             })
         };
@@ -3190,7 +3214,8 @@ mod tests {
         let interaction = ChatInteraction {
             id: "ask-2".to_owned(),
             position: 0,
-            turn_id: "turn".to_owned(),
+            turn_id: Some("turn".to_owned()),
+            owner: ChatOwner::Main,
             kind: ChatInteractionKind::Question,
             native_request_id: None,
             prompt: "Fail open or closed?".to_owned(),
@@ -3588,7 +3613,8 @@ mod tests {
         let changes = |id: &str, turn: &str, input: &str| {
             ChatItem::Tool(ChatTool {
                 id: id.to_owned(),
-                turn_id: turn.to_owned(),
+                turn_id: Some(turn.to_owned()),
+                owner: ChatOwner::Main,
                 ..tool(
                     ticketd_chat_host::AGENT_CHANGES_RECORD_NAME,
                     input,
@@ -3664,7 +3690,8 @@ mod tests {
         let call = |id: &str, turn: &str, input: &str| {
             ChatItem::Tool(ChatTool {
                 id: id.to_owned(),
-                turn_id: turn.to_owned(),
+                turn_id: Some(turn.to_owned()),
+                owner: ChatOwner::Main,
                 ..tool(
                     ticketd_chat_host::AGENT_CHANGES_RECORD_NAME,
                     input,
@@ -3746,7 +3773,8 @@ mod tests {
         let call = |id: &str, input: &str| {
             ChatItem::Tool(ChatTool {
                 id: id.to_owned(),
-                turn_id: "t1".to_owned(),
+                turn_id: Some("t1".to_owned()),
+                owner: ChatOwner::Main,
                 ..tool(
                     ticketd_chat_host::AGENT_CHANGES_RECORD_NAME,
                     input,

@@ -124,11 +124,11 @@ const EXPORTED: &[(&str, &str)] = &[
     ),
     (
         "chat_tools",
-        "id, chat_id, position, turn_id, name, input, state, output, output_truncated, started_at",
+        "id, chat_id, position, turn_id, sub_agent_id, name, input, state, output, output_truncated, started_at",
     ),
     (
         "chat_interactions",
-        "id, chat_id, position, turn_id, kind, tool_id, native_request_id, prompt, reason, state, response, asked_at, resolved_at",
+        "id, chat_id, position, turn_id, sub_agent_id, kind, tool_id, native_request_id, prompt, reason, state, response, asked_at, resolved_at",
     ),
     (
         "chat_notices",

@@ -2,8 +2,9 @@ use ticketd_core::{
     CHAT_CHANGE_TAIL, CHAT_EFFECTIVE_SETTINGS_LIMIT, CHAT_NOTICE_LIMIT, CHAT_RESET_TIME_MAX,
     CHAT_TOOL_OUTPUT_LIMIT, Chat, ChatCatchUp, ChatDelivery, ChatDeliveryDecision, ChatInputChange,
     ChatInputStanding, ChatInteractionKind, ChatInteractionState, ChatItem, ChatLink, ChatLinkKind,
-    ChatListFilter, ChatMessage, ChatObservation, ChatQueueEdit, ChatRecord, ChatSessionOrigin,
-    ChatSubmissionIntent, ChatToolState, ChatTurnState, Error, NewChat, Workspace,
+    ChatListFilter, ChatMessage, ChatObservation, ChatOwner, ChatQueueEdit, ChatRecord,
+    ChatSessionOrigin, ChatSubmissionIntent, ChatToolState, ChatTurnState, Error, NewChat,
+    Workspace,
 };
 
 /// A Workspace file as format `version` left it, holding one Chat (`chat-1`) with one
@@ -1222,7 +1223,8 @@ fn saved_input_possible_submission_acknowledgment_processing_and_outcome_are_sep
                 },
                 ChatObservation::Tool {
                     tool_id: "tool-1".into(),
-                    turn_id: "turn-1".into(),
+                    turn_id: Some("turn-1".into()),
+                    owner: ChatOwner::Main,
                     name: "Bash".into(),
                     input: "cargo test".into(),
                     state: ChatToolState::Completed,
@@ -1230,7 +1232,8 @@ fn saved_input_possible_submission_acknowledgment_processing_and_outcome_are_sep
                 },
                 ChatObservation::InteractionRequested {
                     interaction_id: "ask-1".into(),
-                    turn_id: "turn-1".into(),
+                    turn_id: Some("turn-1".into()),
+                    owner: ChatOwner::Main,
                     kind: ChatInteractionKind::Approval,
                     native_request_id: Some("req-1".into()),
                     prompt: "Allow Bash?".into(),
@@ -1395,7 +1398,8 @@ fn losing_contact_marks_work_uncertain_and_keeps_the_queue_without_dispatching()
                 },
                 ChatObservation::Tool {
                     tool_id: "tool-1".into(),
-                    turn_id: "turn-1".into(),
+                    turn_id: Some("turn-1".into()),
+                    owner: ChatOwner::Main,
                     name: "Bash".into(),
                     input: "sleep 100".into(),
                     state: ChatToolState::Running,
@@ -1403,7 +1407,8 @@ fn losing_contact_marks_work_uncertain_and_keeps_the_queue_without_dispatching()
                 },
                 ChatObservation::InteractionRequested {
                     interaction_id: "ask-1".into(),
-                    turn_id: "turn-1".into(),
+                    turn_id: Some("turn-1".into()),
+                    owner: ChatOwner::Main,
                     kind: ChatInteractionKind::Question,
                     native_request_id: None,
                     prompt: "Which branch?".into(),
@@ -2236,7 +2241,8 @@ fn an_approval_keeps_why_it_was_asked_apart_from_what_would_run() {
             &chat.id,
             vec![ChatObservation::InteractionRequested {
                 interaction_id: "ask-1".into(),
-                turn_id: "t1".into(),
+                turn_id: Some("t1".into()),
+                owner: ChatOwner::Main,
                 kind: ChatInteractionKind::Approval,
                 native_request_id: Some("req-1".into()),
                 prompt: "npm install".into(),
@@ -2740,7 +2746,8 @@ fn adjacent_turns_credit_only_their_own_tagged_writes_at_the_same_millisecond() 
             .iter()
             .find_map(|item| match item {
                 ChatItem::Tool(tool)
-                    if tool.turn_id == turn && tool.name == AGENT_CHANGES_RECORD_NAME =>
+                    if tool.turn_id.as_deref() == Some(turn)
+                        && tool.name == AGENT_CHANGES_RECORD_NAME =>
                 {
                     Some(&tool.input)
                 }
@@ -3028,7 +3035,8 @@ fn the_chats_written_since_a_sequence_are_named_with_their_latest_change() {
             &busy.id,
             vec![ChatObservation::Tool {
                 tool_id: "tool-1".into(),
-                turn_id: "turn-1".into(),
+                turn_id: Some("turn-1".into()),
+                owner: ChatOwner::Main,
                 name: "Bash".into(),
                 input: "cargo test".into(),
                 state: ChatToolState::Completed,
@@ -3054,4 +3062,292 @@ fn the_chats_written_since_a_sequence_are_named_with_their_latest_change() {
         workspace.chat_tool_output(&quiet.id, "tool-1").unwrap(),
         None
     );
+}
+
+fn sub_agent() -> ChatOwner {
+    ChatOwner::SubAgent {
+        native_id: "agent-1".into(),
+    }
+}
+
+/// A Step and an approval of a sub-agent, recorded while no turn is active.
+#[allow(clippy::unwrap_used)]
+fn record_turnless_sub_agent_work(workspace: &mut Workspace, chat: &Chat) {
+    workspace
+        .record_chat_observations(
+            &chat.id,
+            vec![
+                ChatObservation::Tool {
+                    tool_id: "sub-tool".into(),
+                    turn_id: None,
+                    owner: sub_agent(),
+                    name: "Bash".into(),
+                    input: "cargo test".into(),
+                    state: ChatToolState::Running,
+                    output: None,
+                },
+                ChatObservation::InteractionRequested {
+                    interaction_id: "sub-ask".into(),
+                    turn_id: None,
+                    owner: sub_agent(),
+                    kind: ChatInteractionKind::Approval,
+                    native_request_id: Some("req-sub".into()),
+                    prompt: "Allow Bash?".into(),
+                    reason: None,
+                    tool_id: Some("sub-tool".into()),
+                },
+            ],
+        )
+        .unwrap();
+}
+
+#[allow(clippy::unwrap_used)]
+fn steps_and_approvals(
+    workspace: &Workspace,
+    chat: &Chat,
+) -> (
+    Vec<ticketd_core::ChatTool>,
+    Vec<ticketd_core::ChatInteraction>,
+) {
+    let items = workspace.chat_snapshot(&chat.id, 500).unwrap().items;
+    let tools = items
+        .iter()
+        .filter_map(|item| match item {
+            ChatItem::Tool(tool) => Some(tool.clone()),
+            _ => None,
+        })
+        .collect();
+    let asks = items
+        .iter()
+        .filter_map(|item| match item {
+            ChatItem::Interaction(ask) => Some(ask.clone()),
+            _ => None,
+        })
+        .collect();
+    (tools, asks)
+}
+
+#[test]
+fn a_sub_agents_step_and_approval_need_no_turn_and_keep_their_owner() {
+    let dir = tempfile::tempdir().unwrap();
+    let (mut workspace, chat) = workspace_with_chat(&dir);
+    // The main agent's records are owned by it and keep their turn, as before.
+    start_turn(&mut workspace, &chat, "First", "turn-1");
+    workspace
+        .record_chat_observations(
+            &chat.id,
+            vec![ChatObservation::Tool {
+                tool_id: "main-tool".into(),
+                turn_id: Some("turn-1".into()),
+                owner: ChatOwner::Main,
+                name: "Read".into(),
+                input: "src/lib.rs".into(),
+                state: ChatToolState::Completed,
+                output: None,
+            }],
+        )
+        .unwrap();
+    record_turnless_sub_agent_work(&mut workspace, &chat);
+
+    let (tools, asks) = steps_and_approvals(&workspace, &chat);
+    let main = tools.iter().find(|tool| tool.id == "main-tool").unwrap();
+    assert_eq!(
+        (main.turn_id.as_deref(), &main.owner),
+        (Some("turn-1"), &ChatOwner::Main)
+    );
+    let sub = tools.iter().find(|tool| tool.id == "sub-tool").unwrap();
+    assert_eq!((sub.turn_id.as_deref(), &sub.owner), (None, &sub_agent()));
+    assert_eq!(
+        (asks[0].turn_id.as_deref(), &asks[0].owner),
+        (None, &sub_agent())
+    );
+
+    // Repeating an observation leaves the record, owner included, as it was.
+    workspace
+        .record_chat_observations(
+            &chat.id,
+            vec![ChatObservation::Tool {
+                tool_id: "sub-tool".into(),
+                turn_id: Some("turn-1".into()),
+                owner: ChatOwner::Main,
+                name: "Bash".into(),
+                input: "cargo test".into(),
+                state: ChatToolState::Completed,
+                output: Some("ok".into()),
+            }],
+        )
+        .unwrap();
+    let (tools, _) = steps_and_approvals(&workspace, &chat);
+    let sub = tools.iter().find(|tool| tool.id == "sub-tool").unwrap();
+    assert_eq!(
+        (sub.state, sub.turn_id.as_deref(), &sub.owner),
+        (ChatToolState::Completed, None, &sub_agent())
+    );
+
+    // A turn that is named must still be this Chat's.
+    assert!(matches!(
+        workspace.record_chat_observations(
+            &chat.id,
+            vec![ChatObservation::Tool {
+                tool_id: "stray".into(),
+                turn_id: Some("nope".into()),
+                owner: ChatOwner::Main,
+                name: "Bash".into(),
+                input: String::new(),
+                state: ChatToolState::Running,
+                output: None,
+            }],
+        ),
+        Err(Error::Chat(_))
+    ));
+}
+
+#[test]
+fn history_pages_include_turnless_records() {
+    let dir = tempfile::tempdir().unwrap();
+    let (mut workspace, chat) = workspace_with_chat(&dir);
+    start_turn(&mut workspace, &chat, "First", "turn-1");
+    end_turn(&mut workspace, &chat, "turn-1");
+    record_turnless_sub_agent_work(&mut workspace, &chat);
+
+    let snapshot = workspace.chat_snapshot(&chat.id, 500).unwrap();
+    let last = snapshot.items.len();
+    let positions: Vec<i64> = snapshot
+        .items
+        .iter()
+        .map(|item| match item {
+            ChatItem::Session(item) => item.position,
+            ChatItem::Message(item) => item.position,
+            ChatItem::Turn(item) => item.position,
+            ChatItem::Tool(item) => item.position,
+            ChatItem::Interaction(item) => item.position,
+            ChatItem::Notice(item) => item.position,
+        })
+        .collect();
+    let newest = *positions.iter().max().unwrap();
+    // Page two items back from the newest; the turnless pair is what lies after.
+    let page = workspace
+        .chat_history(&chat.id, newest + 1, last - 1)
+        .unwrap();
+    let ids: Vec<&str> = page
+        .items
+        .iter()
+        .filter_map(|item| match item {
+            ChatItem::Tool(tool) => Some(tool.id.as_str()),
+            ChatItem::Interaction(ask) => Some(ask.id.as_str()),
+            _ => None,
+        })
+        .collect();
+    assert_eq!(ids, ["sub-tool", "sub-ask"]);
+    let older = workspace.chat_history(&chat.id, newest - 1, 1).unwrap();
+    assert_eq!(older.items.len(), 1);
+}
+
+#[test]
+fn losing_contact_ends_turnless_work_and_it_outlives_a_turns_end() {
+    let dir = tempfile::tempdir().unwrap();
+    let (mut workspace, chat) = workspace_with_chat(&dir);
+    start_turn(&mut workspace, &chat, "First", "turn-1");
+    record_turnless_sub_agent_work(&mut workspace, &chat);
+    // A turn ending does not touch what no turn owns.
+    end_turn(&mut workspace, &chat, "turn-1");
+    let (tools, asks) = steps_and_approvals(&workspace, &chat);
+    assert_eq!(tools[0].state, ChatToolState::Running);
+    assert_eq!(asks[0].state, ChatInteractionState::Pending);
+
+    // With no active turn, the running Step and open request still count as live work.
+    assert_eq!(
+        workspace
+            .mark_chat_contact_lost(None, "the harness process exited", "contact_lost")
+            .unwrap(),
+        vec![chat.id.clone()]
+    );
+    let (tools, asks) = steps_and_approvals(&workspace, &chat);
+    assert_eq!(tools[0].state, ChatToolState::Unknown);
+    assert_eq!(asks[0].state, ChatInteractionState::Expired);
+}
+
+#[test]
+fn the_owner_and_the_missing_turn_are_exported_and_survive_backup_and_restore() {
+    let dir = tempfile::tempdir().unwrap();
+    let path = dir.path().join("workspace.sqlite3");
+    let backup = dir.path().join("backup.sqlite3");
+    let mut workspace = Workspace::open(&path).unwrap();
+    let chat = workspace.create_chat(None, new_chat()).unwrap();
+    start_turn(&mut workspace, &chat, "First", "turn-1");
+    workspace
+        .record_chat_observations(
+            &chat.id,
+            vec![ChatObservation::Tool {
+                tool_id: "main-tool".into(),
+                turn_id: Some("turn-1".into()),
+                owner: ChatOwner::Main,
+                name: "Read".into(),
+                input: "src/lib.rs".into(),
+                state: ChatToolState::Completed,
+                output: None,
+            }],
+        )
+        .unwrap();
+    record_turnless_sub_agent_work(&mut workspace, &chat);
+
+    let export = workspace.export().unwrap();
+    let row = |table: &str, id: &str| {
+        export[table]
+            .as_array()
+            .unwrap()
+            .iter()
+            .find(|row| row["id"] == id)
+            .unwrap()
+            .clone()
+    };
+    let sub_tool = row("chat_tools", "sub-tool");
+    assert_eq!(sub_tool["sub_agent_id"], "agent-1");
+    assert!(sub_tool["turn_id"].is_null());
+    let sub_ask = row("chat_interactions", "sub-ask");
+    assert_eq!(sub_ask["sub_agent_id"], "agent-1");
+    assert!(sub_ask["turn_id"].is_null());
+    let main_tool = row("chat_tools", "main-tool");
+    assert!(main_tool["sub_agent_id"].is_null());
+    assert_eq!(main_tool["turn_id"], "turn-1");
+
+    let saved = workspace.chat_snapshot(&chat.id, 500).unwrap();
+    workspace.backup(&backup).unwrap();
+    drop(workspace);
+    let restored_path = dir.path().join("restored.sqlite3");
+    Workspace::restore(&restored_path, &backup).unwrap();
+    let restored = Workspace::open(&restored_path).unwrap();
+    assert_eq!(restored.chat_snapshot(&chat.id, 500).unwrap(), saved);
+}
+
+#[test]
+fn upgrading_from_format_104_makes_existing_steps_and_approvals_main_agent_work() {
+    let dir = tempfile::tempdir().unwrap();
+    let path = dir.path().join("workspace.sqlite3");
+    old_chat_workspace(&path, 104, "completed");
+    let db = rusqlite::Connection::open(&path).unwrap();
+    db.execute_batch(
+        "INSERT INTO chat_tools (id, chat_id, position, turn_id, name, input, state) \
+             VALUES ('tool-1', 'chat-1', 2, 'turn-1', 'Bash', 'ls', 'completed');
+         INSERT INTO chat_interactions (id, chat_id, position, turn_id, kind, prompt, state) \
+             VALUES ('ask-1', 'chat-1', 3, 'turn-1', 'approval', 'Allow ls?', 'answered');",
+    )
+    .unwrap();
+    drop(db);
+
+    let mut workspace = Workspace::open(&path).unwrap();
+    let chat = workspace.chat("chat-1").unwrap();
+    let (tools, asks) = steps_and_approvals(&workspace, &chat);
+    assert_eq!(
+        (tools[0].turn_id.as_deref(), &tools[0].owner),
+        (Some("turn-1"), &ChatOwner::Main)
+    );
+    assert_eq!(
+        (asks[0].turn_id.as_deref(), &asks[0].owner),
+        (Some("turn-1"), &ChatOwner::Main)
+    );
+    // The upgraded tables take turnless records.
+    record_turnless_sub_agent_work(&mut workspace, &chat);
+    let (tools, _) = steps_and_approvals(&workspace, &chat);
+    assert_eq!(tools.len(), 2);
 }
