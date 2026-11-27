@@ -855,7 +855,8 @@ export function workedFor(
  */
 export function turns(
   items: TranscriptItem[],
-  chat: Pick<ChatState, "activity" | "problem">,
+  chat: Pick<ChatState, "activity" | "problem"> &
+    Partial<Pick<ChatState, "turn_running">>,
   now = Date.now(),
   agent?: SubAgentWords,
 ): TranscriptPart[] {
@@ -898,7 +899,9 @@ export function turns(
   const last = lastOf(parts, (part) => !("kind" in part));
   const unconfirmedStop =
     chat.problem?.kind === "stop_unconfirmed" && !chat.problem.past;
-  const live = chat.activity === "working" || chat.activity === "waiting";
+  const live =
+    (chat.activity === "working" || chat.activity === "waiting") &&
+    chat.turn_running !== false;
   return parts.flatMap((part): TranscriptPart[] => {
     if ("kind" in part) return [part];
     const first = part.members[0];
@@ -1063,9 +1066,15 @@ const builtTurns = new WeakMap<
  * Requests and stopping are said before it.
  */
 export function turnStatus(
-  chat: Pick<ChatState, "activity" | "problem">,
+  chat: Pick<ChatState, "activity" | "problem"> &
+    Partial<Pick<ChatState, "turn_running" | "sub_agents">>,
   items: TranscriptItem[],
 ) {
+  // Work goes on after the reply: said once, never each sub-agent's start or end.
+  if (isLive(chat) && chat.turn_running === false && chat.sub_agents) {
+    const n = runningAgents({ sub_agents: chat.sub_agents });
+    if (n > 0) return `${n} ${n === 1 ? "sub-agent" : "sub-agents"} running`;
+  }
   if (chat.activity === "working") return "Working";
   if (chat.activity === "waiting") return "Waiting for you";
   const last = lastOf(turns(items, chat), (part) => part.kind === "turn");
@@ -1166,9 +1175,35 @@ export const needsYou = (status: ChatStatus) =>
 export const emphasised = (status: ChatStatus) =>
   needsYou(status) || status.unseen;
 
-/** A turn is in progress, so it can be stopped. */
-export function isLive(chat: ChatState) {
+/** The Chat has work going on, so Stop is offered. */
+export function isLive(chat: Pick<ChatState, "activity">) {
   return chat.activity === "working" || chat.activity === "waiting";
+}
+
+/**
+ * A main-agent turn runs. False while only sub-agents run after the reply: the
+ * message box then starts a turn instead of steering, and nothing "works" in
+ * the transcript, where the strip is the live signal.
+ */
+export function turnRuns(chat: Pick<ChatState, "activity" | "turn_running">) {
+  return isLive(chat) && chat.turn_running !== false;
+}
+
+/** How many sub-agents run now, nested ones too. */
+export const runningAgents = (chat: Pick<ChatState, "sub_agents">) =>
+  chat.sub_agents.filter((agent) => agent.status === "running").length;
+
+/**
+ * What Stop in the composer says it stops: "Stop 2 sub-agents" while only they
+ * run, "Stop the turn and 2 sub-agents" while both do, else "Stop".
+ */
+export function stopWords(
+  chat: Pick<ChatState, "activity" | "turn_running" | "sub_agents">,
+) {
+  const n = runningAgents(chat);
+  if (n === 0) return "Stop";
+  const agents = `${n} ${n === 1 ? "sub-agent" : "sub-agents"}`;
+  return turnRuns(chat) ? `Stop the turn and ${agents}` : `Stop ${agents}`;
 }
 
 /**
@@ -1180,12 +1215,17 @@ export function asStarting(
   chat: ChatState,
   items: readonly TranscriptItem[],
 ): ChatState {
-  if (isLive(chat) || chat.problem || !chat.has_composer) return chat;
+  if (turnRuns(chat) || chat.problem || !chat.has_composer) return chat;
   const sending = items.some(
     (item) => item.kind === "user" && item.delivery === "sending",
   );
   return sending
-    ? { ...chat, activity: "working", opening: chat.opening ?? "start" }
+    ? {
+        ...chat,
+        activity: "working",
+        turn_running: null,
+        opening: chat.opening ?? "start",
+      }
     : chat;
 }
 
@@ -1224,7 +1264,7 @@ export function composerControls(
 ): ComposerControls {
   const typed = text.trim() !== "" || hasAttachments;
   const blocked = blocksSend(chat.problem);
-  if (!isLive(chat)) return { send: "send", enabled: typed && !blocked };
+  if (!turnRuns(chat)) return { send: "send", enabled: typed && !blocked };
   if (answering) return { send: "send", enabled: typed && !chat.stopping };
   // Stopping: Send waits for the turn to end; queueing stays possible.
   if (chat.stopping) return { send: "send", enabled: false, queues: typed };
@@ -1253,13 +1293,36 @@ export type PendingRequest = Extract<TranscriptItem, { kind: "request" }>;
  * the question itself. It names the request group and is what arrives in the
  * live announcement.
  */
-export function requestLabel(request: PendingRequest, name?: RecordName) {
+export function requestLabel(
+  request: PendingRequest,
+  name?: RecordName,
+  /** The sub-agent that asks: an approval's title begins with its name. */
+  asker?: string,
+) {
   if (request.request === "question") return request.subject || request.title;
+  const by = asker ? `${cutTitle(asker)} ` : "";
   if (request.ticketd?.length)
-    return `${request.title} ${partsText(ticketdParts(request.ticketd, 2, name, true))}`;
+    return `${by}${request.title} ${partsText(ticketdParts(request.ticketd, 2, name, true))}`;
   return request.subject
-    ? `${request.title} ${request.subject}`
-    : request.title;
+    ? `${by}${request.title} ${request.subject}`
+    : `${by}${request.title}`;
+}
+
+/** A sub-agent's title as a request names it: cut at about 40 characters. */
+export function cutTitle(title: string, limit = 40) {
+  return title.length > limit
+    ? `${title.slice(0, limit - 1).trimEnd()}…`
+    : title;
+}
+
+/** The sub-agent a pending request is for, when it has one the Chat knows. */
+export function askerOf(
+  request: PendingRequest,
+  agents: readonly SubAgent[],
+): SubAgent | undefined {
+  return request.owner
+    ? agents.find((agent) => agent.id === request.owner)
+    : undefined;
 }
 
 /** What the message box says it will do with what is typed. */
@@ -1270,7 +1333,7 @@ export function composerPlaceholder(
   hasImages = false,
 ) {
   const harness = chat.harness.name;
-  if (!isLive(chat) || chat.stopping) return `Message ${harness}`;
+  if (!turnRuns(chat) || chat.stopping) return `Message ${harness}`;
   if (answering) return "Answer, or pick above";
   if (!canSteer(chat, hasImages)) return `Queue for ${harness}`;
   return afterDeny ? `Tell ${harness} what to do instead` : `Steer ${harness}`;

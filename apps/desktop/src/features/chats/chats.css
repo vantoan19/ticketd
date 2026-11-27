@@ -1884,3 +1884,69 @@
 .chat-turn-unit + .chat-end {
   margin-top: -28px;
 }
+
+/* The strip: one recessed pill in the tray beside the plan's; both on one line. */
+.chat-activity-slot[data-line] {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+.chat-subagent-pill .chat-plan-pill-count {
+  color: var(--foreground);
+}
+
+/* The strip's list: 32px rows, nested ones 16px in; Stop shows on hover or focus. */
+.chat-subagent-list {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  display: flex;
+  flex-direction: column;
+}
+.chat-subagent-list li {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  min-height: 32px;
+  border-radius: var(--radius-control, 6px);
+  padding: 0 4px 0 8px;
+}
+.chat-subagent-list li[data-depth="1"] {
+  padding-left: 24px;
+}
+.chat-subagent-list li:hover,
+.chat-subagent-list li:focus-within {
+  background: var(--accent);
+}
+.chat-subagent-item {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex: 1;
+  min-width: 0;
+  height: 32px;
+  text-align: left;
+  color: var(--foreground);
+}
+.chat-subagent-item .chat-subagent-title {
+  flex: 0 1 auto;
+}
+.chat-subagent-item .chat-subagent-time {
+  flex: none;
+  margin-left: auto;
+  padding-left: 12px;
+  color: var(--muted-foreground);
+  font-variant-numeric: tabular-nums;
+}
+.chat-subagent-list .chat-subagent-stop {
+  visibility: hidden;
+}
+.chat-subagent-list li:hover .chat-subagent-stop,
+.chat-subagent-list li:focus-within .chat-subagent-stop {
+  visibility: visible;
+}
+@media (hover: none) {
+  .chat-subagent-list .chat-subagent-stop {
+    visibility: visible;
+  }
+}

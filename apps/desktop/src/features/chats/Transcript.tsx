@@ -74,6 +74,7 @@ import {
   markerText,
   workedFor,
   isLive,
+  turnRuns,
   lastOf,
   recordNamer,
   type RecordName,
@@ -118,6 +119,12 @@ import {
   SubAgentsContext,
 } from "@/features/chats/sub-agent-context";
 
+/**
+ * Opens a sub-agent's view by id, from the part that names it. `opener` is that
+ * part's `data-sub-agent` value: going back returns focus to it.
+ */
+export type ShowSubAgent = (agent: string, opener: string) => void;
+
 /** What transcript items can ask of the Chat that owns them. Keep the object stable. */
 export type TranscriptActions = {
   saveAsDocument: (response: ItemOf<"response">) => void;
@@ -127,6 +134,8 @@ export type TranscriptActions = {
   openFile: (path: string) => Promise<void>;
   /** Opens a sub-agent's view from the row (`origin`) that asked; focus returns there. */
   openSubAgent?: (item: ItemOf<"sub_agent">, origin: HTMLElement) => void;
+  /** Opens a sub-agent from a line that names it ("Started by ... · Title"). */
+  showSubAgent?: ShowSubAgent;
   exportAttachment: (file: ChatAttachment) => Promise<void>;
 };
 
@@ -1702,7 +1711,9 @@ export function Transcript({
     ),
     chat.catching_up,
   );
-  const working = chat.activity === "working";
+  // Only sub-agents run after the reply: the strip is the live signal, not a working line.
+  const turnOn = turnRuns(chat);
+  const working = chat.activity === "working" && turnOn;
   const opening = working && Boolean(chat.opening);
   const waiting = useMemo(
     () => steersAwaitingRead(items, working),
@@ -1841,7 +1852,7 @@ export function Transcript({
                 )}
                 {chat.catching_up ? (
                   <WorkingLine label="Catching up…" />
-                ) : chat.activity === "waiting" ? (
+                ) : chat.activity === "waiting" && turnOn ? (
                   // The dock already shows the request; the slot keeps its height.
                   chat.has_composer && asking ? (
                     <WorkingSlot />
