@@ -684,6 +684,21 @@ impl HostScript {
             .expect_err("the host refuses it")
     }
 
+    /// The person presses Stop on one sub-agent, the fixture plays on to `mark` (the
+    /// harness answers the host's requests), and the host reports it did not succeed.
+    pub async fn stop_sub_agent_then_refused(&mut self, native_id: &str, mark: &str) -> HostError {
+        let (host, chat, native_id) = (
+            self.host.clone(),
+            self.chat.id.clone(),
+            native_id.to_owned(),
+        );
+        let call = tokio::spawn(async move { host.stop_sub_agent(&chat, &native_id).await });
+        self.play_to(mark).await;
+        call.await
+            .expect("the call ran")
+            .expect_err("the host did not report success")
+    }
+
     /// The harness process exits with `code`, whatever the fixture still holds.
     pub async fn lose_process(&mut self, code: i32) {
         self.peer().await.exit(code);

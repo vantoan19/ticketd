@@ -240,6 +240,36 @@ mod codex {
         );
     }
 
+    /// Codex leaves a child's commands running when its turn is interrupted; cleaning its
+    /// terminals ends them. When that fails the Stop is not a success: the person is told
+    /// the commands may still run, and the turn's own end is still recorded.
+    #[tokio::test(start_paused = true)]
+    async fn a_stop_whose_terminal_cleanup_fails_says_commands_may_still_run() {
+        let mut h = HostScript::codex()
+            .process([
+                fixture!("codex", "handshake"),
+                fixture!("codex", "sub_agent_stop_one_cleanup_fails"),
+            ])
+            .start();
+        h.send(ASK).await;
+        h.play_to("two sub-agents run commands").await;
+        let first = h
+            .sub_agents()
+            .into_iter()
+            .map(|record| record.native_id)
+            .min()
+            .unwrap();
+
+        let refused = h
+            .stop_sub_agent_then_refused(&first, "the first sub-agent was stopped")
+            .await;
+        let HostError::SubAgentNotStopped(reason) = refused else {
+            panic!("{refused:?}");
+        };
+        assert!(reason.contains("commands"), "{reason}");
+        assert_eq!(run(&h, &first).state, ChatSubAgentState::Stopped);
+    }
+
     /// F-X5: Codex completes the command a Stop cut off as failed (exit code -1) after it
     /// reports the child's turn interrupted. The Stop did that: no Step of the stopped
     /// sub-agent is stored as failed.

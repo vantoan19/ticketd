@@ -1545,9 +1545,7 @@ fn open_thread(session: &mut Session) {
 fn a_sub_agent_announced_after_its_own_frames_gets_its_parent_and_launch_step() {
     let mut session = Session::default();
     open_thread(&mut session);
-    let started = |thread: &str, turn: &str| {
-        json!({"threadId": thread, "turn": {"id": turn, "rootTurnId": "turn_1"}})
-    };
+    let started = |thread: &str, turn: &str| json!({"threadId": thread, "turn": {"id": turn, "rootTurnId": "turn_1"}});
     session.notification("turn/started", &started("thr_c", "turn_c"));
     let first = session.notification("turn/started", &started("thr_g", "turn_g"));
     let [EventKind::SubAgentStarted(guessed)] = first.as_slice() else {
@@ -1573,8 +1571,14 @@ fn a_sub_agent_announced_after_its_own_frames_gets_its_parent_and_launch_step() 
     let [start] = started.as_slice() else {
         panic!("{events:?}");
     };
-    assert_eq!(start.parent.as_ref().map(|parent| parent.0.as_str()), Some("thr_c"));
-    assert_eq!(start.tool.as_ref().map(|tool| tool.0.as_str()), Some("call_g"));
+    assert_eq!(
+        start.parent.as_ref().map(|parent| parent.0.as_str()),
+        Some("thr_c")
+    );
+    assert_eq!(
+        start.tool.as_ref().map(|tool| tool.0.as_str()),
+        Some("call_g")
+    );
     // The run it already has, not another.
     assert_eq!(start.run.as_deref(), Some("turn_g"));
     assert_eq!(
@@ -1601,9 +1605,8 @@ fn a_sub_agent_announced_after_its_own_frames_gets_its_parent_and_launch_step() 
 fn a_late_end_of_an_older_turn_leaves_the_current_turns_approvals_and_commands_alone() {
     let mut session = Session::default();
     open_thread(&mut session);
-    let started = |turn: &str| {
-        json!({"threadId": "thr_c", "turn": {"id": turn, "rootTurnId": "turn_1"}})
-    };
+    let started =
+        |turn: &str| json!({"threadId": "thr_c", "turn": {"id": turn, "rootTurnId": "turn_1"}});
     session.notification("turn/started", &started("turn_a"));
     session.notification("turn/started", &started("turn_b"));
     session.notification(
@@ -1644,7 +1647,10 @@ fn a_late_end_of_an_older_turn_leaves_the_current_turns_approvals_and_commands_a
     assert!(
         output.iter().any(|event| matches!(
             event,
-            EventKind::SubAgentToolUpdated { detail: Some(_), .. }
+            EventKind::SubAgentToolUpdated {
+                detail: Some(_),
+                ..
+            }
         )),
         "{output:?}"
     );

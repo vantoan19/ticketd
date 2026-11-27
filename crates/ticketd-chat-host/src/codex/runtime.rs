@@ -684,13 +684,14 @@ impl CodexRuntime {
     /// Codex leaves a child's command running when its turn is interrupted (an interrupted
     /// turn's commands are not reported ended either); cleaning the child's background
     /// terminals is what ends them. That request is answered only on the experimental API,
-    /// which every Chat opens with, and a refusal changes nothing the turn's own end said.
+    /// which every Chat opens with. The second value says the cleaning was asked for and
+    /// not confirmed, so commands may still run.
     async fn interrupt_child(
         &self,
         generation: RuntimeGeneration,
         thread: &str,
         turn: &str,
-    ) -> InterruptOutcome {
+    ) -> (InterruptOutcome, bool) {
         let params = json!({"threadId": thread, "turnId": turn});
         let outcome = self
             .connection
@@ -700,17 +701,18 @@ impl CodexRuntime {
                 Ok((params, Call::Plain))
             })
             .await;
-        if !matches!(outcome, InterruptOutcome::NotSent(_)) {
-            let params = json!({"threadId": thread});
-            let _ = self
-                .connection
-                .rpc
-                .interrupt(generation, "thread/backgroundTerminals/clean", |_| {
-                    Ok((params, Call::Plain))
-                })
-                .await;
+        if matches!(outcome, InterruptOutcome::NotSent(_)) {
+            return (outcome, false);
         }
-        outcome
+        let params = json!({"threadId": thread});
+        let cleaned = self
+            .connection
+            .rpc
+            .interrupt(generation, "thread/backgroundTerminals/clean", |_| {
+                Ok((params, Call::Plain))
+            })
+            .await;
+        (outcome, cleaned != InterruptOutcome::Acknowledged)
     }
 }
 
@@ -883,10 +885,12 @@ impl HarnessRuntime for CodexRuntime {
             .session
             .live_child_turns_under(&thread);
         let mut outcome = StopSubAgentOutcome::NotRunning;
+        let mut left_running = false;
         for (member, turn) in turns {
-            let asked = self
+            let (asked, uncleaned) = self
                 .interrupt_child(request.generation, &member, &turn)
                 .await;
+            left_running |= uncleaned;
             if member == thread {
                 outcome = match asked {
                     InterruptOutcome::Acknowledged => StopSubAgentOutcome::Asked,
@@ -894,6 +898,13 @@ impl HarnessRuntime for CodexRuntime {
                     InterruptOutcome::Unconfirmed => StopSubAgentOutcome::Unconfirmed,
                 };
             }
+        }
+        // The turn was asked to stop, but Codex did not end the commands it left running.
+        // Stop again to retry while the sub-agent still shows as running.
+        if left_running && outcome == StopSubAgentOutcome::Asked {
+            return StopSubAgentOutcome::Refused {
+                reason: "Codex stopped it but could not end its commands, which may still be running. Stop it again to retry".to_owned(),
+            };
         }
         outcome
     }

@@ -108,7 +108,12 @@ impl Session {
                     child.tool = tool.map(str::to_owned);
                 }
                 let child = &*child;
-                return vec![started(child, child.run.clone(), child.tool.as_deref(), native)];
+                return vec![started(
+                    child,
+                    child.run.clone(),
+                    child.tool.as_deref(),
+                    native,
+                )];
             }
             return vec![EventKind::SubAgentUpdated {
                 sub_agent: NativeSubAgentId::new(thread),
