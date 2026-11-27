@@ -323,6 +323,7 @@ fn a_save_that_was_interrupted_leaves_nothing_in_the_list_and_is_cleared_next_ti
 
 /// A point whose record is damaged, and the only one that needs an attachment file: the
 /// attachment is purged from the Workspace after it, so no newer point names its file.
+#[allow(clippy::unwrap_used)] // Setup that fails fails the test.
 fn damaged_record_point_alone_needs_a_file(dir: &Path) -> (Workspace, std::path::PathBuf) {
     let mut workspace = open(dir);
     let file = dir.join("first.txt");
@@ -339,6 +340,7 @@ fn damaged_record_point_alone_needs_a_file(dir: &Path) -> (Workspace, std::path:
     (workspace, database)
 }
 
+#[allow(clippy::unwrap_used)] // Setup that fails fails the test.
 fn save_more_than_seven_points(workspace: &Workspace) {
     for number in 11..20 {
         workspace.save_daily_restore_point_at(day(number)).unwrap();
