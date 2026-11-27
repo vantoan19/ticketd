@@ -323,6 +323,24 @@ of that harness had an observed Turn running. The host captures the receipt in
 the same transaction as the Turn end, including when contact is lost. Save as
 Document is the ordinary Document-creation workflow applied to a stored response.
 
+The same tags say which agent of the Chat wrote, so a ticket can credit a
+sub-agent (ADR 0029). The credit needs no Turn, so a background sub-agent's
+writes count too, and is read from what is stored when it is asked for. A
+harness that names each command it runs (a descriptor's `call_variable`, Codex's
+`CODEX_TOOL_CALL_ID`) has the CLI record that key with the write; the Step whose
+native ID is the key says who ran it, and a key no Step has credits the Chat
+alone. Otherwise the host tells the core which Steps are shell commands
+(`ChatObservation::ShellStep`) and the core keeps a **window** for each: the
+two feeds' heads when the Step was first seen and when it ended (`chat_step_windows`).
+A write inside one window is that Step's owner's; inside several, the one Step
+whose plain `ticketd` call (parsed from its command) could be that write, when
+only one could; anywhere else it stays with the Chat, with the sub-agent unknown.
+Commands are never changed and printed output is never matched. Only status moves
+and Activities are credited; evidence and Documents are not. Credit is
+device-local, because Chats do not sync: the interface's `credited_to` is filled
+only where the Chat is on the computer, and only for a sub-agent.
+`ticket_write_credits` and `ticket_writing_agents` read it.
+
 A harness process started for an Automation run also gets the run's ID in
 `TICKETD_AUTOMATION_RUN_ID`. A CLI that inherits a non-blank value logs every ticket
 change it makes as a Workspace event with actor `automation`, and such events never
