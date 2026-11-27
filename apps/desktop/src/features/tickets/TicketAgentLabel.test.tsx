@@ -207,6 +207,18 @@ test("a request that arrives while the ticket is open takes the slot, so its sen
   expect(asked().subAgent).toBe("sa-tests");
 });
 
+test("a working agent that arrives after the ticket opened empty shows its label", async () => {
+  const client = open([]);
+  await screen.findByText("ready");
+  expect(screen.queryByRole("status", { name: "Ticket agent" })).toBeNull();
+  await act(async () =>
+    client.setTicketAgents(ticket.id, ticketAgentFixtures().one),
+  );
+  const strip = await label();
+  expect(strip.textContent).toContain("is working on this ticket");
+  expect(within(strip).getByRole("button", { name: /Open Chat/ })).toBeTruthy();
+});
+
 test("a ticket nobody works on has no label", async () => {
   open([]);
   await screen.findByText("ready");
