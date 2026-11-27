@@ -5660,6 +5660,78 @@ mod tests {
         }
     }
 
+    /// What the host sends of a Codex Chat right after ticketd woke the main agent for the
+    /// sub-agent that finished first, while the other still runs: the host's stored history
+    /// (`sub_agent_wake.stored.json`, written by its test) and the live state it has then.
+    /// The file is what `codex-wake-view.test.ts` parses and the board is compared with.
+    /// Regenerated only with `TICKETD_UPDATE_VIEW_FIXTURES=1`.
+    #[test]
+    fn the_view_of_a_wake_ticketd_sent_is_the_contract_the_interface_parses() {
+        let stored_file = concat!(
+            env!("CARGO_MANIFEST_DIR"),
+            "/../../../crates/ticketd-chat-host/tests/fixtures/codex/sub_agent_wake.stored.json"
+        );
+        let view_file = concat!(
+            env!("CARGO_MANIFEST_DIR"),
+            "/../src/features/chats/codex-wake-view.json"
+        );
+        let stored: ticketd_core::ChatSnapshot =
+            serde_json::from_str(&std::fs::read_to_string(stored_file).expect("stored"))
+                .expect("the stored history reads");
+        let tracker = Tracker::from_snapshot(&stored.items, &stored.sub_agents);
+        let live = ChatLive {
+            activity: Activity::Working,
+            running: true,
+            sub_agents: 1,
+            ..ChatLive::idle()
+        };
+        let state = super::chat_state(&stored.chat, &live, &tracker, &Surroundings::default());
+        let rows: Vec<Item> = stored
+            .items
+            .iter()
+            .flat_map(|record| items(record, &stored.chat, &live, None, &tracker))
+            .collect();
+        let view = serde_json::to_string_pretty(&json!({
+            "chat": state,
+            "items": rows,
+            "cursor": 0,
+        }))
+        .unwrap();
+        if std::env::var_os("TICKETD_UPDATE_VIEW_FIXTURES").is_some() {
+            std::fs::write(view_file, format!("{view}\n")).expect("the view is written");
+        }
+        let kept = std::fs::read_to_string(view_file).expect(
+            "the view; regenerate it with TICKETD_UPDATE_VIEW_FIXTURES=1 cargo test -p ticketd-desktop --lib chat_view",
+        );
+        assert!(
+            kept.trim_end() == view,
+            "the view changed; if that is intended, regenerate {view_file} with TICKETD_UPDATE_VIEW_FIXTURES=1"
+        );
+        // The second turn says ticketd started it, after which sub-agent, and no message of
+        // the person's stands in its place.
+        let all: Vec<serde_json::Value> = rows
+            .iter()
+            .map(|row| serde_json::to_value(row).unwrap())
+            .collect();
+        let turns: Vec<&serde_json::Value> = all
+            .iter()
+            .filter(|row| row["kind"] == "turn" && row.get("owner").is_none())
+            .collect();
+        assert_eq!(turns.len(), 2);
+        assert!(turns[0].get("origin").is_none());
+        assert_eq!(turns[1]["origin"]["by"], "ticketd");
+        assert!(turns[1]["origin"]["sub_agent"].is_string());
+        assert_eq!(
+            all.iter().filter(|row| row["kind"] == "user").count(),
+            1,
+            "the woken turn has no message of the person's"
+        );
+        // The Chats list keeps saying what runs.
+        let summary = super::summary(&stored.chat, &live, &tracker, &Surroundings::default());
+        assert_eq!(summary.status.line(), "Working · 1 sub-agent");
+        assert_eq!(state.turn_running, Some(false));
+    }
+
     #[test]
     fn the_view_of_a_sub_agent_that_speaks_is_the_contract_the_interface_parses() {
         let (_, state, rows) = pinned_view(STORED_MESSAGES, VIEW_MESSAGES);

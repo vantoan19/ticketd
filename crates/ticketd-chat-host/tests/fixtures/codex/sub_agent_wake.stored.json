@@ -1,0 +1,306 @@
+{
+  "chat": {
+    "id": "00000000-0000-4000-8000-000000000001",
+    "title": null,
+    "harness": "codex",
+    "execution_folder": "/work/chat-1",
+    "folder_managed": false,
+    "archived": false,
+    "trashed": false,
+    "queue_paused": false,
+    "effective_settings": "{\"cliVersion\":\"0.163.0\",\"model\":\"gpt-test\",\"modelProvider\":\"openai\",\"reasoningEffort\":null,\"approvalPolicy\":\"on-request\",\"approvalsReviewer\":\"user\",\"sandbox\":{\"type\":\"workspaceWrite\"},\"cwd\":\"/work/chat-1\",\"instructionSources\":[\"/work/chat-1/AGENTS.md\"],\"own\":{\"approvalPolicy\":\"on-request\",\"sandboxPolicy\":{\"type\":\"workspaceWrite\"}},\"reopen_with\":{\"permission\":\"own\"}}",
+    "native_session_id": "thr_1",
+    "links": [],
+    "active_turn": null,
+    "seen_through": 0,
+    "read_through": null,
+    "marked_unread": false,
+    "muted": false,
+    "created_at": "2026-11-27T10:00:00.000Z"
+  },
+  "sequence": 0,
+  "items": [
+    {
+      "kind": "message",
+      "value": {
+        "id": "00000000-0000-4000-8000-000000000002",
+        "position": 1,
+        "role": "user",
+        "text": "Upgrade the payment client to v5. Split the refund calls and the webhook handler between two agents.",
+        "attachments": [],
+        "complete": true,
+        "turn_id": null,
+        "owner": {
+          "kind": "main"
+        },
+        "queued": false,
+        "editing": false,
+        "requires_link_context": false,
+        "attempts": [
+          {
+            "id": "00000000-0000-4000-8000-000000000003",
+            "intent": "new_turn",
+            "delivery": "acknowledged",
+            "turn_id": "00000000-0000-4000-8000-000000000004:00000000-0000-4000-8000-000000000005",
+            "detail": null,
+            "decision": null,
+            "recorded_at": "2026-11-27T10:00:00.000Z"
+          }
+        ],
+        "created_at": "2026-11-27T10:00:00.000Z"
+      }
+    },
+    {
+      "kind": "session",
+      "value": {
+        "id": "00000000-0000-4000-8000-000000000006",
+        "position": 2,
+        "native_session_id": "thr_1",
+        "origin": "new",
+        "started_at": "2026-11-27T10:00:00.000Z"
+      }
+    },
+    {
+      "kind": "turn",
+      "value": {
+        "id": "00000000-0000-4000-8000-000000000004:00000000-0000-4000-8000-000000000005",
+        "position": 3,
+        "native_turn_id": "00000000-0000-4000-8000-000000000005",
+        "state": "completed",
+        "detail": null,
+        "problem": null,
+        "problem_resets_at": null,
+        "ending": "completed",
+        "started_at": "2026-11-27T10:00:00.000Z",
+        "ended_at": "2026-11-27T10:00:00.000Z",
+        "origin": null
+      }
+    },
+    {
+      "kind": "message",
+      "value": {
+        "id": "00000000-0000-4000-8000-000000000004:msg_01",
+        "position": 4,
+        "role": "assistant",
+        "text": "I’ll start both agents now.",
+        "attachments": [],
+        "complete": true,
+        "turn_id": "00000000-0000-4000-8000-000000000004:00000000-0000-4000-8000-000000000005",
+        "owner": {
+          "kind": "main"
+        },
+        "queued": false,
+        "editing": false,
+        "requires_link_context": false,
+        "attempts": [],
+        "created_at": "2026-11-27T10:00:00.000Z"
+      }
+    },
+    {
+      "kind": "sub_agent_run",
+      "value": {
+        "id": "00000000-0000-4000-8000-000000000001:sub-agent:00000000-0000-4000-8000-000000000007:run-1",
+        "position": 5,
+        "sub_agent": "00000000-0000-4000-8000-000000000007",
+        "run": 1,
+        "native_run_id": null,
+        "turn_id": "00000000-0000-4000-8000-000000000004:00000000-0000-4000-8000-000000000005",
+        "state": "completed",
+        "stopped_by": null,
+        "stop_reason": null,
+        "detail": null,
+        "started_at": "2026-11-27T10:00:00.000Z",
+        "ended_at": "2026-11-27T10:00:00.000Z"
+      }
+    },
+    {
+      "kind": "sub_agent_run",
+      "value": {
+        "id": "00000000-0000-4000-8000-000000000001:sub-agent:00000000-0000-4000-8000-000000000008:run-1",
+        "position": 6,
+        "sub_agent": "00000000-0000-4000-8000-000000000008",
+        "run": 1,
+        "native_run_id": null,
+        "turn_id": "00000000-0000-4000-8000-000000000004:00000000-0000-4000-8000-000000000005",
+        "state": "running",
+        "stopped_by": null,
+        "stop_reason": null,
+        "detail": null,
+        "started_at": "2026-11-27T10:00:00.000Z",
+        "ended_at": null
+      }
+    },
+    {
+      "kind": "message",
+      "value": {
+        "id": "00000000-0000-4000-8000-000000000004:msg_02",
+        "position": 7,
+        "role": "assistant",
+        "text": "Two agents are on it: one for the refund calls, one for the webhook handler. I'll check their changes when they finish.",
+        "attachments": [],
+        "complete": true,
+        "turn_id": "00000000-0000-4000-8000-000000000004:00000000-0000-4000-8000-000000000005",
+        "owner": {
+          "kind": "main"
+        },
+        "queued": false,
+        "editing": false,
+        "requires_link_context": false,
+        "attempts": [],
+        "created_at": "2026-11-27T10:00:00.000Z"
+      }
+    },
+    {
+      "kind": "message",
+      "value": {
+        "id": "00000000-0000-4000-8000-000000000004:00000000-0000-4000-8000-000000000007:msg_03",
+        "position": 8,
+        "role": "assistant",
+        "text": "I’ll run the command and report its output when it finishes.",
+        "attachments": [],
+        "complete": true,
+        "turn_id": null,
+        "owner": {
+          "kind": "sub_agent",
+          "native_id": "00000000-0000-4000-8000-000000000007"
+        },
+        "queued": false,
+        "editing": false,
+        "requires_link_context": false,
+        "attempts": [],
+        "created_at": "2026-11-27T10:00:00.000Z"
+      }
+    },
+    {
+      "kind": "tool",
+      "value": {
+        "id": "00000000-0000-4000-8000-000000000004:exec-00000000-0000-4000-8000-000000000009",
+        "position": 9,
+        "turn_id": null,
+        "owner": {
+          "kind": "sub_agent",
+          "native_id": "00000000-0000-4000-8000-000000000007"
+        },
+        "name": "/bin/zsh -lc 'sleep 45; echo child-done'",
+        "input": "{\"type\":\"commandExecution\",\"id\":\"exec-00000000-0000-4000-8000-000000000009\",\"pluginId\":null,\"scriptPath\":null,\"command\":\"/bin/zsh -lc 'sleep 45; echo child-done'\",\"cwd\":\"/work/chat-1\",\"processId\":\"74338\",\"source\":\"unifiedExecStartup\",\"status\":\"completed\",\"commandActions\":[{\"type\":\"unknown\",\"command\":\"sleep 45; echo child-done\"}],\"completedAtMs\":2,\"exitCode\":0,\"durationMs\":1,\"startedAtMs\":1}",
+        "state": "completed",
+        "output": "child-done\n",
+        "output_truncated": false,
+        "started_at": "2026-11-27T10:00:00.000Z"
+      }
+    },
+    {
+      "kind": "message",
+      "value": {
+        "id": "00000000-0000-4000-8000-000000000004:00000000-0000-4000-8000-000000000007:msg_04",
+        "position": 10,
+        "role": "assistant",
+        "text": "child-done",
+        "attachments": [],
+        "complete": true,
+        "turn_id": null,
+        "owner": {
+          "kind": "sub_agent",
+          "native_id": "00000000-0000-4000-8000-000000000007"
+        },
+        "queued": false,
+        "editing": false,
+        "requires_link_context": false,
+        "attempts": [],
+        "created_at": "2026-11-27T10:00:00.000Z"
+      }
+    },
+    {
+      "kind": "turn",
+      "value": {
+        "id": "00000000-0000-4000-8000-000000000004:00000000-0000-4000-8000-000000000010",
+        "position": 11,
+        "native_turn_id": "00000000-0000-4000-8000-000000000010",
+        "state": "completed",
+        "detail": null,
+        "problem": null,
+        "problem_resets_at": null,
+        "ending": "completed",
+        "started_at": "2026-11-27T10:00:00.000Z",
+        "ended_at": "2026-11-27T10:00:00.000Z",
+        "origin": {
+          "by": "ticketd",
+          "sub_agent": "00000000-0000-4000-8000-000000000007"
+        }
+      }
+    },
+    {
+      "kind": "message",
+      "value": {
+        "id": "00000000-0000-4000-8000-000000000004:msg_w6",
+        "position": 12,
+        "role": "assistant",
+        "text": "The refund calls use the v5 client now, and the payment tests pass. The webhook agent is still working; I'll review its change when it's done.",
+        "attachments": [],
+        "complete": true,
+        "turn_id": "00000000-0000-4000-8000-000000000004:00000000-0000-4000-8000-000000000010",
+        "owner": {
+          "kind": "main"
+        },
+        "queued": false,
+        "editing": false,
+        "requires_link_context": false,
+        "attempts": [],
+        "created_at": "2026-11-27T10:00:00.000Z"
+      }
+    }
+  ],
+  "earlier": false,
+  "sub_agents": [
+    {
+      "id": "00000000-0000-4000-8000-000000000001:sub-agent:00000000-0000-4000-8000-000000000007",
+      "native_id": "00000000-0000-4000-8000-000000000007",
+      "parent": null,
+      "tool_id": null,
+      "background": true,
+      "payload": "{\"description\":\"Update the refund calls\",\"agentPath\":\"/root/update_the_refund_calls\",\"model\":\"gpt-test\",\"reasoningEffort\":\"low\",\"root_turn\":\"00000000-0000-4000-8000-000000000005\"}",
+      "created_at": "2026-11-27T10:00:00.000Z",
+      "runs": [
+        {
+          "id": "00000000-0000-4000-8000-000000000001:sub-agent:00000000-0000-4000-8000-000000000007:run-1",
+          "position": 5,
+          "sub_agent": "00000000-0000-4000-8000-000000000007",
+          "run": 1,
+          "native_run_id": null,
+          "turn_id": "00000000-0000-4000-8000-000000000004:00000000-0000-4000-8000-000000000005",
+          "state": "completed",
+          "stopped_by": null,
+          "stop_reason": null,
+          "detail": null,
+          "started_at": "2026-11-27T10:00:00.000Z",
+          "ended_at": "2026-11-27T10:00:00.000Z"
+        }
+      ]
+    },
+    {
+      "id": "00000000-0000-4000-8000-000000000001:sub-agent:00000000-0000-4000-8000-000000000008",
+      "native_id": "00000000-0000-4000-8000-000000000008",
+      "parent": null,
+      "tool_id": null,
+      "background": true,
+      "payload": "{\"description\":\"Update the webhook handler\",\"agentPath\":\"/root/update_the_webhook_handler\",\"model\":\"gpt-test\",\"reasoningEffort\":\"low\",\"root_turn\":\"00000000-0000-4000-8000-000000000005\"}",
+      "created_at": "2026-11-27T10:00:00.000Z",
+      "runs": [
+        {
+          "id": "00000000-0000-4000-8000-000000000001:sub-agent:00000000-0000-4000-8000-000000000008:run-1",
+          "position": 6,
+          "sub_agent": "00000000-0000-4000-8000-000000000008",
+          "run": 1,
+          "native_run_id": null,
+          "turn_id": "00000000-0000-4000-8000-000000000004:00000000-0000-4000-8000-000000000005",
+          "state": "running",
+          "stopped_by": null,
+          "stop_reason": null,
+          "detail": null,
+          "started_at": "2026-11-27T10:00:00.000Z",
+          "ended_at": null
+        }
+      ]
+    }
+  ]
+}

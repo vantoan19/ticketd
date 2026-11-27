@@ -1,0 +1,238 @@
+{
+  "chat": {
+    "id": "00000000-0000-4000-8000-000000000001",
+    "title": "Untitled Chat",
+    "harness": {
+      "id": "codex",
+      "name": "Codex",
+      "permissions": "Uses your own Codex settings and permissions. ticketd changes none of them. Codex reported: cliVersion 0.163.0, model gpt-test, modelProvider openai, approvalPolicy on-request, approvalsReviewer user, cwd /work/chat-1."
+    },
+    "folder": {
+      "path": "/work/chat-1",
+      "name": "chat-1",
+      "managed": false,
+      "missing": false,
+      "shared_with": [],
+      "branch": null,
+      "project": null
+    },
+    "retention": "active",
+    "activity": "working",
+    "turn_running": false,
+    "problem": null,
+    "doing": null,
+    "opening": null,
+    "catching_up": false,
+    "steering": {
+      "available": false,
+      "images_refused": false,
+      "effect": null
+    },
+    "stopping": false,
+    "links": [],
+    "queue": [],
+    "queue_paused": false,
+    "context": null,
+    "settings": null,
+    "unseen": true,
+    "muted": false,
+    "has_composer": true,
+    "read_through": null,
+    "trashed_links": [],
+    "commands": [],
+    "sub_agents": [
+      {
+        "id": "00000000-0000-4000-8000-000000000007",
+        "native_id": "00000000-0000-4000-8000-000000000007",
+        "title": "Update the refund calls",
+        "model": "gpt-test",
+        "status": "completed",
+        "started_at": "2026-11-27T10:00:00.000Z",
+        "ended_at": "2026-11-27T10:00:00.000Z",
+        "runs": 1,
+        "brief": {
+          "source": "main_agent"
+        },
+        "capabilities": {
+          "brief": false,
+          "text": true,
+          "end": true,
+          "stop": false,
+          "resume": false
+        }
+      },
+      {
+        "id": "00000000-0000-4000-8000-000000000008",
+        "native_id": "00000000-0000-4000-8000-000000000008",
+        "title": "Update the webhook handler",
+        "model": "gpt-test",
+        "status": "running",
+        "started_at": "2026-11-27T10:00:00.000Z",
+        "runs": 1,
+        "brief": {
+          "source": "main_agent"
+        },
+        "capabilities": {
+          "brief": false,
+          "text": true,
+          "end": true,
+          "stop": false,
+          "resume": false
+        }
+      }
+    ]
+  },
+  "items": [
+    {
+      "kind": "user",
+      "id": "00000000-0000-4000-8000-000000000002",
+      "at": "2026-11-27T10:00:00.000Z",
+      "text": "Upgrade the payment client to v5. Split the refund calls and the webhook handler between two agents.",
+      "delivery": "delivered",
+      "turn_id": "00000000-0000-4000-8000-000000000004:00000000-0000-4000-8000-000000000005",
+      "steer": false
+    },
+    {
+      "kind": "turn",
+      "id": "turn:00000000-0000-4000-8000-000000000004:00000000-0000-4000-8000-000000000005",
+      "at": "2026-11-27T10:00:00.000Z",
+      "turn_id": "00000000-0000-4000-8000-000000000004:00000000-0000-4000-8000-000000000005",
+      "started_at": "2026-11-27T10:00:00.000Z",
+      "ended_at": "2026-11-27T10:00:00.000Z",
+      "outcome": "completed"
+    },
+    {
+      "kind": "response",
+      "id": "00000000-0000-4000-8000-000000000004:msg_01",
+      "at": "2026-11-27T10:00:00.000Z",
+      "text": "I’ll start both agents now.",
+      "state": "complete",
+      "turn_id": "00000000-0000-4000-8000-000000000004:00000000-0000-4000-8000-000000000005"
+    },
+    {
+      "kind": "sub_agent",
+      "id": "00000000-0000-4000-8000-000000000007:row-1",
+      "at": "2026-11-27T10:00:00.000Z",
+      "turn_id": "00000000-0000-4000-8000-000000000004:00000000-0000-4000-8000-000000000005",
+      "sub_agent": "00000000-0000-4000-8000-000000000007",
+      "run": 1,
+      "status": "completed",
+      "stopped_by": null,
+      "stop_reason": null,
+      "started_at": "2026-11-27T10:00:00.000Z",
+      "ended_at": "2026-11-27T10:00:00.000Z"
+    },
+    {
+      "kind": "turn",
+      "id": "turn:00000000-0000-4000-8000-000000000007:run-1",
+      "at": "2026-11-27T10:00:00.000Z",
+      "turn_id": "00000000-0000-4000-8000-000000000007:run-1",
+      "started_at": "2026-11-27T10:00:00.000Z",
+      "ended_at": "2026-11-27T10:00:00.000Z",
+      "outcome": "completed",
+      "owner": "00000000-0000-4000-8000-000000000007"
+    },
+    {
+      "kind": "sub_agent",
+      "id": "00000000-0000-4000-8000-000000000008:row-1",
+      "at": "2026-11-27T10:00:00.000Z",
+      "turn_id": "00000000-0000-4000-8000-000000000004:00000000-0000-4000-8000-000000000005",
+      "sub_agent": "00000000-0000-4000-8000-000000000008",
+      "run": 1,
+      "status": "running",
+      "stopped_by": null,
+      "stop_reason": null,
+      "started_at": "2026-11-27T10:00:00.000Z",
+      "ended_at": null
+    },
+    {
+      "kind": "turn",
+      "id": "turn:00000000-0000-4000-8000-000000000008:run-1",
+      "at": "2026-11-27T10:00:00.000Z",
+      "turn_id": "00000000-0000-4000-8000-000000000008:run-1",
+      "started_at": "2026-11-27T10:00:00.000Z",
+      "ended_at": null,
+      "outcome": "active",
+      "owner": "00000000-0000-4000-8000-000000000008"
+    },
+    {
+      "kind": "response",
+      "id": "00000000-0000-4000-8000-000000000004:msg_02",
+      "at": "2026-11-27T10:00:00.000Z",
+      "text": "Two agents are on it: one for the refund calls, one for the webhook handler. I'll check their changes when they finish.",
+      "state": "complete",
+      "turn_id": "00000000-0000-4000-8000-000000000004:00000000-0000-4000-8000-000000000005"
+    },
+    {
+      "kind": "response",
+      "id": "00000000-0000-4000-8000-000000000004:00000000-0000-4000-8000-000000000007:msg_03",
+      "at": "2026-11-27T10:00:00.000Z",
+      "text": "I’ll run the command and report its output when it finishes.",
+      "state": "complete",
+      "turn_id": "00000000-0000-4000-8000-000000000007:run-1",
+      "owner": "00000000-0000-4000-8000-000000000007"
+    },
+    {
+      "kind": "steps",
+      "id": "00000000-0000-4000-8000-000000000004:exec-00000000-0000-4000-8000-000000000009",
+      "at": "",
+      "steps": [
+        {
+          "kind": "run",
+          "variant": null,
+          "target": "sleep 45; echo child-done",
+          "targets": [],
+          "command": "sleep 45; echo child-done",
+          "exit_code": 0,
+          "folder": null,
+          "timed_out": false,
+          "duration_ms": 1,
+          "no_matches": false,
+          "state": "done",
+          "result": null,
+          "output": "child-done\n",
+          "full_output": null,
+          "started_at": "2026-11-27T10:00:00.000Z",
+          "added_lines": null,
+          "removed_lines": null,
+          "decision": null,
+          "ticketd": null,
+          "awaiting": false
+        }
+      ],
+      "turn_id": "00000000-0000-4000-8000-000000000007:run-1",
+      "owner": "00000000-0000-4000-8000-000000000007"
+    },
+    {
+      "kind": "response",
+      "id": "00000000-0000-4000-8000-000000000004:00000000-0000-4000-8000-000000000007:msg_04",
+      "at": "2026-11-27T10:00:00.000Z",
+      "text": "child-done",
+      "state": "complete",
+      "turn_id": "00000000-0000-4000-8000-000000000007:run-1",
+      "owner": "00000000-0000-4000-8000-000000000007"
+    },
+    {
+      "kind": "turn",
+      "id": "turn:00000000-0000-4000-8000-000000000004:00000000-0000-4000-8000-000000000010",
+      "at": "2026-11-27T10:00:00.000Z",
+      "turn_id": "00000000-0000-4000-8000-000000000004:00000000-0000-4000-8000-000000000010",
+      "started_at": "2026-11-27T10:00:00.000Z",
+      "ended_at": "2026-11-27T10:00:00.000Z",
+      "outcome": "completed",
+      "origin": {
+        "by": "ticketd",
+        "sub_agent": "00000000-0000-4000-8000-000000000007"
+      }
+    },
+    {
+      "kind": "response",
+      "id": "00000000-0000-4000-8000-000000000004:msg_w6",
+      "at": "2026-11-27T10:00:00.000Z",
+      "text": "The refund calls use the v5 client now, and the payment tests pass. The webhook agent is still working; I'll review its change when it's done.",
+      "state": "complete",
+      "turn_id": "00000000-0000-4000-8000-000000000004:00000000-0000-4000-8000-000000000010"
+    }
+  ],
+  "cursor": 0
+}

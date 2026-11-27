@@ -7,7 +7,7 @@ use super::{HostScript, fixture};
 use crate::attention::Rank;
 use ticketd_core::{
     ChatInteractionState, ChatItem, ChatOwner, ChatSubAgent, ChatSubAgentRun, ChatSubAgentState,
-    ChatSubAgentStopper, ChatTurnState,
+    ChatSubAgentStopper, ChatTurnStarter, ChatTurnState,
 };
 
 /// The child thread of the first fixture, as the fixtures name it.
@@ -110,7 +110,14 @@ async fn a_child_that_finishes_after_the_parents_turn_ended_is_still_followed() 
     h.finish().await;
 
     assert_eq!(latest(&h), ChatSubAgentState::Completed);
-    assert_eq!(h.turns().len(), 1, "a child's turn is not a Chat turn");
+    // A child's turn is not a Chat turn: the second is the one ticketd starts to tell the
+    // main agent it finished (codex_wake.rs).
+    let turns = h.turns();
+    assert_eq!(turns.len(), 2, "{:?}", h.transcript());
+    assert_eq!(
+        turns[1].origin.as_ref().map(|origin| origin.by),
+        Some(ChatTurnStarter::Ticketd)
+    );
     let record = only_sub_agent(&h);
     assert!(record.runs[0].ended_at.is_some());
     let own = h.sub_agent_transcript(&record.native_id);
@@ -136,12 +143,21 @@ async fn a_new_parent_turn_while_a_child_runs_leaves_the_child_alone() {
     h.play_all().await;
     h.finish().await;
 
+    // The person's two turns, then the one ticketd starts to tell the main agent the
+    // sub-agent finished (codex_wake.rs).
     let turns = h.turns();
-    assert_eq!(turns.len(), 2, "{turns:?}");
+    assert_eq!(turns.len(), 3, "{turns:?}");
     assert!(
         turns
             .iter()
             .all(|turn| turn.state == ChatTurnState::Completed)
+    );
+    assert_eq!(
+        turns
+            .iter()
+            .map(|turn| turn.origin.is_some())
+            .collect::<Vec<_>>(),
+        [false, false, true]
     );
     // One run, which ended on its own, whatever the parent's turns did.
     let record = only_sub_agent(&h);
@@ -495,7 +511,13 @@ async fn a_child_s_approval_outlives_the_main_agent_s_turn_and_can_still_be_answ
         h.requests(),
         [(asked_by_the_child(), ChatInteractionState::Answered)]
     );
-    assert_eq!(h.turns().len(), 1);
+    // The child's finish wakes the main agent: the second turn is ticketd's (codex_wake.rs).
+    let turns = h.turns();
+    assert_eq!(turns.len(), 2, "{:?}", h.transcript());
+    assert_eq!(
+        turns[1].origin.as_ref().map(|origin| origin.by),
+        Some(ChatTurnStarter::Ticketd)
+    );
 }
 
 #[tokio::test(start_paused = true)]

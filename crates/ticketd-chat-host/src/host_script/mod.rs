@@ -138,6 +138,8 @@ mod antigravity_sub_agents;
 #[cfg(test)]
 mod codex_sub_agents;
 #[cfg(test)]
+mod codex_wake;
+#[cfg(test)]
 mod resume;
 #[cfg(test)]
 mod sub_agents;

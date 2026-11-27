@@ -179,6 +179,9 @@ pub struct SubAgentSupport {
     pub stop: bool,
     /// A sub-agent that was lost can be resumed.
     pub resume: bool,
+    /// The harness never resumes the main agent when a sub-agent finishes, so ticketd
+    /// sends the message that does.
+    pub wake: bool,
     /// The environment variable the harness sets on each command it runs, naming that one
     /// command (Codex's `CODEX_TOOL_CALL_ID`, which is the command Step's item ID). The CLI
     /// records it with a write, so the write is credited to the exact agent that ran the
@@ -253,6 +256,7 @@ pub static CLAUDE_CODE: HarnessDescriptor = HarnessDescriptor {
         end: true,
         stop: false,
         resume: true,
+        wake: false,
         // Claude Code gives a sub-agent's command no key of its own: its writes are
         // credited by commit order.
         call_variable: None,
@@ -311,6 +315,7 @@ pub static CODEX: HarnessDescriptor = HarnessDescriptor {
         end: true,
         stop: false,
         resume: false,
+        wake: true,
         call_variable: Some("CODEX_TOOL_CALL_ID"),
         call_key_path: &[],
     },
@@ -384,6 +389,7 @@ pub static ANTIGRAVITY: HarnessDescriptor = HarnessDescriptor {
         end: false,
         stop: false,
         resume: false,
+        wake: false,
         // `ANTIGRAVITY_SOURCE_METADATA` is JSON that carries the ID of the tool call that
         // runs the command (the ID a sub-agent's Step has after its `<childId>:` prefix).
         call_variable: Some("ANTIGRAVITY_SOURCE_METADATA"),
