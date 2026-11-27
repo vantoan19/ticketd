@@ -76,7 +76,7 @@
           "brief": false,
           "text": true,
           "end": true,
-          "stop": false,
+          "stop": true,
           "resume": false
         }
       }
