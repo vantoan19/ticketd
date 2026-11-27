@@ -1474,7 +1474,7 @@ impl Origin {
         Self {
             chat_id: read(ticketd_core::CHAT_ID_VARIABLE),
             automation_run_id: read(ticketd_core::AUTOMATION_RUN_ID_VARIABLE),
-            call_id: ticketd_core::harnesses::call_variables().find_map(read),
+            call_id: ticketd_core::harnesses::call_key(read),
         }
     }
 }

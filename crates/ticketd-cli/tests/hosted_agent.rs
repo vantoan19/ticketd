@@ -473,7 +473,7 @@ fn writes_made_inside_an_automation_run_are_logged_with_actor_automation() {
     );
 }
 
-/// Codex gives each command it runs a key; the CLI records it with the write, so the
+/// Codex and Antigravity give each command they run a key; the CLI records it with the write, so the
 /// write is credited to the agent whose Step has that ID. A command without the key is
 /// credited to the Chat only.
 #[test]
@@ -511,6 +511,18 @@ fn a_write_made_with_the_harness_call_key_is_credited_to_the_agent_that_ran_the_
                     output: None,
                 },
                 ChatObservation::Tool {
+                    // Antigravity names a sub-agent's Step `<childId>:<call id>`.
+                    tool_id: "run-1:conv-9:call_77".into(),
+                    turn_id: None,
+                    owner: ChatOwner::SubAgent {
+                        native_id: "conv-9".into(),
+                    },
+                    name: "run_command".into(),
+                    input: String::new(),
+                    state: ChatToolState::Running,
+                    output: None,
+                },
+                ChatObservation::Tool {
                     tool_id: "run-1:exec-main".into(),
                     turn_id: None,
                     owner: ChatOwner::Main,
@@ -529,17 +541,36 @@ fn a_write_made_with_the_harness_call_key_is_credited_to_the_agent_that_ran_the_
             .current_dir(path)
             .env("TICKETD_TEST_WORKSPACE", workspace_path(path))
             .env(CHAT_ID_VARIABLE, &chat.id)
-            .env_remove("CODEX_TOOL_CALL_ID");
+            .env_remove("CODEX_TOOL_CALL_ID")
+            .env_remove("ANTIGRAVITY_SOURCE_METADATA");
         if let Some(key) = key {
             command.env("CODEX_TOOL_CALL_ID", key);
         }
         let output = command.output().unwrap();
         assert!(output.status.success(), "{output:?}");
     };
+    // Antigravity's variable is JSON; the key is the ID of the tool call inside it.
+    let run_antigravity = |metadata: &str, brief: &str| {
+        let output = Command::new(env!("CARGO_BIN_EXE_ticketd"))
+            .args(["activity", "add", &ticket.reference, "--brief", brief])
+            .current_dir(path)
+            .env("TICKETD_TEST_WORKSPACE", workspace_path(path))
+            .env(CHAT_ID_VARIABLE, &chat.id)
+            .env_remove("CODEX_TOOL_CALL_ID")
+            .env("ANTIGRAVITY_SOURCE_METADATA", metadata)
+            .output()
+            .unwrap();
+        assert!(output.status.success(), "{output:?}");
+    };
     run(Some("exec-child"), "From the child");
     run(Some("exec-main"), "From the main agent");
     run(Some("  "), "A blank key names nothing");
     run(None, "No key");
+    run_antigravity(
+        r#"{"tool":{"conversationId":"conv-9","stepIndex":3,"toolCall":{"id":"call_77","name":"run_command"}}}"#,
+        "From the Antigravity child",
+    );
+    run_antigravity("not json", "Metadata that is not JSON names nothing");
 
     let credits = workspace.ticket_write_credits(&ticket.reference).unwrap();
     let by_brief = |brief: &str| {
@@ -556,5 +587,10 @@ fn a_write_made_with_the_harness_call_key_is_credited_to_the_agent_that_ran_the_
     assert_eq!(by_brief("From the main agent"), None);
     assert_eq!(by_brief("A blank key names nothing"), None);
     assert_eq!(by_brief("No key"), None);
-    assert_eq!(credits.activities.len(), 4);
+    assert_eq!(
+        by_brief("From the Antigravity child").as_deref(),
+        Some("conv-9")
+    );
+    assert_eq!(by_brief("Metadata that is not JSON names nothing"), None);
+    assert_eq!(credits.activities.len(), 6);
 }

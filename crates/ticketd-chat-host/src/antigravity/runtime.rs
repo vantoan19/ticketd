@@ -23,10 +23,11 @@ use crate::{
     ADAPTER_CLOSE_TIMEOUT, ApprovalOption, CHECK_TIMEOUT, CloseOutcome, ContextUsage,
     DeliveryEvidence, DispatchOutcome, EventKind, FileChange, HarnessCommand, HarnessRuntime,
     InteractionAnswer, InteractionKind, InteractionRequest, InteractionResponse, InterruptOutcome,
-    InterruptRequest, NativeItemId, NativeRequestId, NativeSessionId, NativeTurnId, NoticeKind,
-    OpenRequest, OpenedRuntime, Plan, PlanStep, PlanStepStatus, Problem, ProblemKind,
-    ProviderDetail, Refusal, RespondOutcome, RuntimeEvent, SessionStart, SettingChange, SettingKey,
-    SettingOutcome, Submission, SubmissionId, TurnOutcome,
+    InterruptRequest, NativeItemId, NativeRequestId, NativeSessionId, NativeSubAgentId,
+    NativeTurnId, NoticeKind, OpenRequest, OpenedRuntime, Plan, PlanStep, PlanStepStatus, Problem,
+    ProblemKind, ProviderDetail, Refusal, RespondOutcome, RuntimeEvent, SessionStart,
+    SettingChange, SettingKey, SettingOutcome, SubAgentOutcome, SubAgentStart, SubAgentStopper,
+    Submission, SubmissionId, TurnOutcome,
 };
 
 use super::{capabilities, problem, settings, steps};
@@ -42,9 +43,44 @@ enum Call {
     Prompt(NativeTurnId),
 }
 
+/// The tool the main agent calls to start a sub-agent. It completes at launch and names
+/// no child.
+const LAUNCH_TOOL: &str = "invoke_subagent";
+
+/// The child conversation a tool call belongs to: its ID is `<childId>:<call id>` when a
+/// sub-agent made the call, and a bare call ID when the main agent did.
+fn child_of(tool: &acp::ToolCallId) -> Option<&str> {
+    tool.0
+        .split_once(':')
+        .filter(|(child, call)| !child.is_empty() && !call.is_empty())
+        .map(|(child, _)| child)
+}
+
+/// A launch call that no child has been tied to yet.
+struct Launch {
+    item: acp::ToolCallId,
+    /// The child that made the call; `None` for the main agent.
+    owner: Option<String>,
+    role: Option<String>,
+    brief: Option<String>,
+    claimed: bool,
+}
+
+/// A sub-agent of this Prompt: a child conversation that made a tool call.
+struct Child {
+    id: String,
+    /// The files its calls changed, apart from the main agent's.
+    files: BTreeMap<String, FileChange>,
+}
+
 struct Prompt {
     turn: NativeTurnId,
     submission: SubmissionId,
+    /// The model the Chat's session ran with when the Prompt was sent. Antigravity names
+    /// no model for a sub-agent: it runs with the Chat's.
+    model: Option<String>,
+    children: Vec<Child>,
+    launches: Vec<Launch>,
     message: String,
     message_number: usize,
     quota_diagnostic: Option<String>,
@@ -57,10 +93,13 @@ struct Prompt {
 }
 
 impl Prompt {
-    fn new(turn: NativeTurnId, submission: SubmissionId) -> Self {
+    fn new(turn: NativeTurnId, submission: SubmissionId, model: Option<String>) -> Self {
         Self {
             turn,
             submission,
+            model,
+            children: Vec::new(),
+            launches: Vec::new(),
             message: String::new(),
             message_number: 0,
             quota_diagnostic: None,
@@ -140,12 +179,78 @@ impl Prompt {
             self.cancelled_approvals.insert(id.clone());
         }
     }
+    /// A launch call was seen: the one call that can say what a child was asked, once a
+    /// child's own calls show it exists.
+    fn note_launch(&mut self, call: &acp::ToolCall) {
+        if call.name.as_deref() != Some(LAUNCH_TOOL)
+            || self.launches.iter().any(|launch| launch.item == call.tool_call_id)
+        {
+            return;
+        }
+        let said = |key: &str| {
+            call.raw_input
+                .as_ref()
+                .and_then(|input| input[key].as_str())
+                .filter(|said| !said.trim().is_empty())
+                .map(str::to_owned)
+        };
+        self.launches.push(Launch {
+            item: call.tool_call_id.clone(),
+            owner: child_of(&call.tool_call_id).map(str::to_owned),
+            role: said("Role"),
+            brief: said("Prompt"),
+            claimed: false,
+        });
+    }
+
+    /// A child made its first call in this Prompt: it is a sub-agent from now on. Its launch
+    /// call names no child, so it is tied to this one only when it is the single launch no
+    /// child has claimed: with several parallel launches the order the children appear in
+    /// says nothing of which was which, and a wrong brief is worse than none.
+    fn announce(&mut self, child: &str, events: &mut Vec<EventKind>) {
+        if self.children.iter().any(|known| known.id == child) {
+            return;
+        }
+        self.children.push(Child {
+            id: child.to_owned(),
+            files: BTreeMap::new(),
+        });
+        let mut open = self.launches.iter_mut().filter(|launch| !launch.claimed);
+        let launch = match (open.next(), open.next()) {
+            (Some(only), None) => Some(only),
+            _ => None,
+        };
+        let mut native = json!({"model": self.model});
+        let (mut parent, mut tool) = (None, None);
+        if let Some(launch) = launch {
+            launch.claimed = true;
+            native["description"] = json!(launch.role);
+            native["prompt"] = json!(launch.brief);
+            parent = launch.owner.as_deref().map(NativeSubAgentId::new);
+            tool = Some(NativeItemId::new(launch.item.0.as_ref()));
+        }
+        events.push(EventKind::SubAgentStarted(SubAgentStart {
+            sub_agent: NativeSubAgentId::new(child),
+            // Each Prompt is one run: a child seen again in a later one was resumed.
+            run: Some(self.turn.0.clone()),
+            parent,
+            tool,
+            // The Prompt is held open until its children finish.
+            background: false,
+            native,
+        }));
+    }
+
     fn report_tool(
         &mut self,
         id: &acp::ToolCallId,
         update_files: bool,
         events: &mut Vec<EventKind>,
     ) -> bool {
+        let child = child_of(id).map(str::to_owned);
+        if let Some(child) = &child {
+            self.announce(child, events);
+        }
         let Some(tool) = self.tools.get(id) else {
             return false;
         };
@@ -155,23 +260,76 @@ impl Prompt {
             declined,
             self.cancelled_approvals.contains(id),
         );
-        events.push(event);
+        events.push(match &child {
+            Some(child) => owned_by(event, child),
+            None => event,
+        });
+        let files = match &child {
+            Some(child) => self
+                .children
+                .iter_mut()
+                .find(|known| known.id == *child)
+                .map(|known| &mut known.files),
+            None => Some(&mut self.files),
+        };
         let mut files_changed = false;
-        if update_files && !declined && tool.status() == acp::ToolCallStatus::Completed {
+        if let Some(files) = files
+            && update_files
+            && !declined
+            && tool.status() == acp::ToolCallStatus::Completed
+        {
             for file in tool.changes() {
-                if self.files.get(&file.path) != Some(&file) {
-                    self.files.insert(file.path.clone(), file);
+                if files.get(&file.path) != Some(&file) {
+                    files.insert(file.path.clone(), file);
                     files_changed = true;
                 }
             }
         }
         if files_changed {
-            events.push(EventKind::FilesChanged {
-                turn: self.turn.clone(),
-                files: self.files.values().cloned().collect(),
+            let changed: Vec<_> = match &child {
+                Some(child) => self
+                    .children
+                    .iter()
+                    .find(|known| known.id == *child)
+                    .map(|known| known.files.values().cloned().collect())
+                    .unwrap_or_default(),
+                None => self.files.values().cloned().collect(),
+            };
+            events.push(match child {
+                Some(child) => EventKind::SubAgentFilesChanged {
+                    sub_agent: NativeSubAgentId::new(child),
+                    run: Some(self.turn.0.clone()),
+                    files: changed,
+                },
+                None => EventKind::FilesChanged {
+                    turn: self.turn.clone(),
+                    files: changed,
+                },
             });
         }
         command_unavailable
+    }
+}
+
+/// A tool event of the main agent, said of a sub-agent's Step instead.
+fn owned_by(event: EventKind, child: &str) -> EventKind {
+    match event {
+        EventKind::ToolUpdated {
+            item,
+            title,
+            status,
+            output,
+            detail,
+            ..
+        } => EventKind::SubAgentToolUpdated {
+            sub_agent: NativeSubAgentId::new(child),
+            item,
+            title,
+            status,
+            output,
+            detail,
+        },
+        other => other,
     }
 }
 
@@ -337,8 +495,12 @@ impl Session {
                 prompt.add_thought(&text.text, &mut events);
             }
             acp::SessionUpdate::ToolCall(tool) => {
-                prompt.flush_message(&mut events);
-                prompt.flush_thought(&mut events);
+                // A sub-agent's call is not the main agent's: its words go on through it.
+                if child_of(&tool.tool_call_id).is_none() {
+                    prompt.flush_message(&mut events);
+                    prompt.flush_thought(&mut events);
+                }
+                prompt.note_launch(&tool);
                 let id = tool.tool_call_id.clone();
                 prompt
                     .tools
@@ -346,7 +508,9 @@ impl Session {
                 prompt.report_tool(&id, true, &mut events);
             }
             acp::SessionUpdate::ToolCallUpdate(update) => {
-                prompt.flush_thought(&mut events);
+                if child_of(&update.tool_call_id).is_none() {
+                    prompt.flush_thought(&mut events);
+                }
                 prompt.tool_update(update, &mut events);
             }
             acp::SessionUpdate::Plan(plan) => {
@@ -462,8 +626,10 @@ impl Session {
             .processing(prompt.submission.clone(), prompt.turn.clone())
             .into_iter()
             .collect();
-        prompt.flush_message(&mut events);
-        prompt.flush_thought(&mut events);
+        if child_of(&tool).is_none() {
+            prompt.flush_message(&mut events);
+            prompt.flush_thought(&mut events);
+        }
         if prompt.tool_update(request.tool_call, &mut events) {
             if !reason.is_empty() {
                 reason.insert(0, '\n');
@@ -512,6 +678,19 @@ impl Session {
         if !prompt.thought.is_empty() {
             events.push(prompt.take_thought(false));
         }
+        // Antigravity says nothing of when a sub-agent finishes, and holds the Prompt open
+        // until they all have: they end with it. A Stop cancels them with it.
+        let ended = if matches!(prompt_outcome(reply), TurnOutcome::Interrupted) {
+            SubAgentOutcome::Stopped(SubAgentStopper::Person)
+        } else {
+            SubAgentOutcome::Completed
+        };
+        events.extend(prompt.children.iter().map(|child| EventKind::SubAgentEnded {
+            sub_agent: NativeSubAgentId::new(&child.id),
+            run: Some(turn.0.clone()),
+            outcome: ended,
+            detail: None,
+        }));
         let outcome = match (prompt_outcome(reply), prompt.quota_diagnostic) {
             (TurnOutcome::Completed, Some(diagnostic)) => {
                 TurnOutcome::Failed(problem(ProblemKind::QuotaExhausted, diagnostic))
@@ -1011,7 +1190,9 @@ impl HarnessRuntime for AcpRuntime {
                 let turn = NativeTurnId::new(uuid::Uuid::new_v4().to_string());
                 session.runtime.turn_started(&turn);
                 session.runtime.submission_written(&submission);
-                session.prompt = Some(Prompt::new(turn.clone(), submission));
+                let model = settings::select(&session.configs, SettingKey::Model)
+                    .map(|(_, select)| select.current_value.0.to_string());
+                session.prompt = Some(Prompt::new(turn.clone(), submission, model));
                 Ok((params, Call::Prompt(turn)))
             })
             .await;
