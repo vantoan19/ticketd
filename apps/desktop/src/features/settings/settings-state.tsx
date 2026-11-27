@@ -5,6 +5,7 @@ import {
   useRef,
   useState,
   type ReactNode,
+  type RefObject,
 } from "react";
 import { agentSkillsClient, type AgentSkill } from "@/lib/api/agent-skills";
 import { client, type AgentUpdate } from "@/lib/api/client";
@@ -24,7 +25,12 @@ import {
   skillsNeedSetup,
 } from "@/features/settings/settings-indicators";
 
-import type { SettingsPageId } from "@/features/settings/settings-sections";
+import { pageNeedingYou } from "@/features/settings/settings-needs";
+import { useNeedsFrom } from "@/features/settings/use-needs";
+import type {
+  SettingsPageId,
+  SettingsSectionId,
+} from "@/features/settings/settings-sections";
 import {
   SettingsStateContext,
   type IndicatorSection,
@@ -36,12 +42,18 @@ import {
 export function SettingsStateProvider({
   active = true,
   onOpenPage = () => {},
+  needsPageRef,
   children,
 }: {
   /** Opens a Settings page; the page that is open belongs to the parent. */
   onOpenPage?: (page: SettingsPageId) => void;
   /** False while Settings is closed; indicators are read at startup and on each open. */
   active?: boolean;
+  /**
+   * Kept up to date with the first page that needs the person, which the app
+   * reads when Settings opens (`initialSettingsPage`).
+   */
+  needsPageRef?: RefObject<SettingsSectionId | null>;
   children: ReactNode;
 }) {
   const [query, setQuery] = useState("");
@@ -193,6 +205,10 @@ export function SettingsStateProvider({
       notifications,
     ],
   );
+  const firstNeed = pageNeedingYou(useNeedsFrom(needsSetup));
+  useEffect(() => {
+    if (needsPageRef) needsPageRef.current = firstNeed;
+  }, [needsPageRef, firstNeed]);
   // Once every step has been ticked, the checklist is finished for good.
   const { setupHidden, setupFinished } = usePreferences();
   useEffect(() => {

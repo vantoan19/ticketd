@@ -149,15 +149,28 @@ export const SETTINGS_GROUPS: SettingsGroup[] = [
   "Help",
 ];
 
-/** What decides which page Settings opens on. T-UB261 adds the pages that need the person first here. */
+/** What decides which page Settings opens on. */
 export interface SettingsOpening {
   /** Set up ticketd is neither finished nor hidden. */
   setupPending: boolean;
+  /** The first page with a problem the person has to fix (`pageNeedingYou`), if any. */
+  needs?: SettingsSectionId | null;
+  /** The page the person last used, as stored: an old name, or one that no longer exists, is tolerated. */
+  last?: string | null;
 }
 
-/** The page Settings opens on: the one that needs the person first, else Appearance. */
+/**
+ * The page Settings opens on, in this order: the page that needs the person,
+ * else Set up ticketd while it is unfinished, else the page last visited, else
+ * Appearance. This is the one place the rule lives.
+ */
 export function initialSettingsPage(opening: SettingsOpening): SettingsPageId {
-  return opening.setupPending ? "setup" : "appearance";
+  if (opening.needs) return opening.needs;
+  if (opening.setupPending) return "setup";
+  const last = opening.last ? resolveSettingsPage(opening.last) : null;
+  // Set up ticketd has left the sidebar by now; Search and a thing opened in place are not pages to come back to.
+  if (last && navSectionOf(last) === last && last !== "setup") return last;
+  return "appearance";
 }
 
 /** The id of the search field in the nav, which ⌘F and Ctrl+F focus. */

@@ -35,6 +35,7 @@ test("choices persist and unknown stored values fall back to defaults", () => {
     documentGroups: {},
     setupHidden: false,
     setupFinished: false,
+    settingsPage: "appearance",
   });
   expect(setPreference("theme", "dark")).toBe(true);
   expect(setPreference("openTickets", "expanded")).toBe(true);
