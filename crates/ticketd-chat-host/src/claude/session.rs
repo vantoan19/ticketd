@@ -542,11 +542,10 @@ impl Session {
                 }
                 Some("thinking") => {
                     let said = text(block, "text").unwrap_or_default();
-                    events.push(self.reports.sub_agent_thinking_text(
-                        &task,
-                        run.as_deref(),
-                        said,
-                    ));
+                    events.push(
+                        self.reports
+                            .sub_agent_thinking_text(&task, run.as_deref(), said),
+                    );
                 }
                 Some("other") if text(block, "block_type") == Some("redacted_thinking") => {}
                 _ => events.push(unknown(
@@ -852,10 +851,12 @@ impl Session {
                 failed,
                 &event["outcome"],
             )),
-            (None, Some(turn)) => events.extend(
-                self.reports
-                    .file_result(&turn, id, failed, &event["outcome"]),
-            ),
+            (None, Some(turn)) => {
+                events.extend(
+                    self.reports
+                        .file_result(&turn, id, failed, &event["outcome"]),
+                )
+            }
             (None, None) => {}
         }
         self.foreground_agent_returned(tool_use, failed, events);

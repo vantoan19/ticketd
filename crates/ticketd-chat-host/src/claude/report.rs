@@ -11,8 +11,7 @@ use crate::wire::{capitalized, text};
 use crate::{
     AppliesFrom, ContextCategory, ContextUsage, EventKind, FileChange, FileChangeKind,
     HarnessOptions, HarnessSettings, ModelChoice, NativeItemId, NativeSubAgentId, NativeTurnId,
-    Plan, PlanStep,
-    PlanStepStatus, Setting, SettingOption,
+    Plan, PlanStep, PlanStepStatus, Setting, SettingOption,
 };
 
 /// Tools whose calls are the plan, shown as the plan and never as steps.

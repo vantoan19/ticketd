@@ -64,7 +64,9 @@ async fn a_foreground_sub_agent_is_one_row_in_the_turn_and_its_steps_are_its_own
         "{own:?}"
     );
     assert!(
-        !transcript.iter().any(|line| line.contains("README.txt states")),
+        !transcript
+            .iter()
+            .any(|line| line.contains("README.txt states")),
         "{transcript:?}"
     );
 
@@ -407,8 +409,8 @@ async fn the_stored_history_of_a_nested_sub_agent_is_the_file_the_desktop_builds
 }
 
 #[tokio::test(start_paused = true)]
-async fn the_stored_history_of_a_sub_agent_that_speaks_is_the_file_the_desktop_builds_its_view_from(
-) {
+async fn the_stored_history_of_a_sub_agent_that_speaks_is_the_file_the_desktop_builds_its_view_from()
+ {
     assert_pinned(
         [
             fixture!("claude", "handshake"),

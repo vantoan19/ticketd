@@ -817,14 +817,16 @@ impl Tracker {
             .filter(|kept| {
                 kept.id != tool.id
                     && kept.owner == owner_of(native_id)
-                    && self.run_at(native_id, kept.position).map(|run| run.id.as_str())
+                    && self
+                        .run_at(native_id, kept.position)
+                        .map(|run| run.id.as_str())
                         == run.map(|run| run.id.as_str())
             })
             .collect();
         calls.sort_by_key(|call| call.position);
         let mut all: Vec<ChatAgentChange> = calls
             .into_iter()
-            .filter_map(|call| agent_changes(call))
+            .filter_map(agent_changes)
             .flatten()
             .collect();
         all.extend(changes.iter().cloned());
@@ -1738,9 +1740,7 @@ pub fn item(
                 .is_some_and(|attempt| attempt.intent == ChatSubmissionIntent::Steer),
         },
         // A sub-agent's message is one of its run's, and complete when it was said.
-        ChatItem::Message(message)
-            if let ChatOwner::SubAgent { native_id } = &message.owner =>
-        {
+        ChatItem::Message(message) if let ChatOwner::SubAgent { native_id } = &message.owner => {
             Item::Response {
                 id: message.id.clone(),
                 at: message.created_at.clone(),
@@ -1809,13 +1809,11 @@ pub fn item(
             let running = run.is_some_and(|run| run.state == ChatSubAgentState::Running);
             let this_run = run_id(native_id, run);
             // Its reasoning and files, and the records it changed, are its run's report.
-            if let Some(report) = chat_reports::sub_agent_report(
-                tool,
-                this_run.clone(),
-                running,
-                chat,
-                &|path| shown_path(path, &chat.execution_folder, home_folder().as_deref()),
-            ) {
+            if let Some(report) =
+                chat_reports::sub_agent_report(tool, this_run.clone(), running, chat, &|path| {
+                    shown_path(path, &chat.execution_folder, home_folder().as_deref())
+                })
+            {
                 return Some(report_item(tool, report, Some(native_id.clone())));
             }
             if let Some(changes) = agent_changes(tool) {
@@ -4862,7 +4860,12 @@ mod tests {
                 shown[0]["owner"].as_str(),
                 shown[0]["turn_id"].as_str()
             ),
-            (Some("reasoning"), Some("running"), Some("a"), Some("a:run-2"))
+            (
+                Some("reasoning"),
+                Some("running"),
+                Some("a"),
+                Some("a:run-2")
+            )
         );
         let files = ChatItem::Tool(report_by(
             "a",
@@ -4896,7 +4899,8 @@ mod tests {
             vec![sub_agent_run("a", 1, 10, ChatSubAgentState::Completed)],
         );
         let mut tracker = Tracker::from_snapshot(&[], &[record]);
-        let status = r#"[{"kind":"status","reference":"T-12","title":"Demo","from":"Todo","to":"Done"}]"#;
+        let status =
+            r#"[{"kind":"status","reference":"T-12","title":"Demo","from":"Todo","to":"Done"}]"#;
         let changed = ChatItem::Tool(report_by(
             "a",
             "c1",
@@ -4941,7 +4945,10 @@ mod tests {
 
     /// The view of the stored history at `stored`, compared with the file at `view` (or
     /// written to it when asked). Returns what was built, to say what it holds.
-    fn pinned_view(stored: &str, view: &str) -> (ticketd_core::ChatSnapshot, super::ChatState, Vec<Item>) {
+    fn pinned_view(
+        stored: &str,
+        view: &str,
+    ) -> (ticketd_core::ChatSnapshot, super::ChatState, Vec<Item>) {
         let stored: ticketd_core::ChatSnapshot =
             serde_json::from_str(&std::fs::read_to_string(stored).expect("the stored history"))
                 .expect("the stored history reads");
@@ -5023,7 +5030,15 @@ mod tests {
             .collect();
         assert_eq!(
             own,
-            ["turn", "reasoning", "response", "steps", "steps", "files", "response"]
+            [
+                "turn",
+                "reasoning",
+                "response",
+                "steps",
+                "steps",
+                "files",
+                "response"
+            ]
         );
         assert!(
             all.iter()

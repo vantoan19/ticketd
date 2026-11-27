@@ -1578,7 +1578,10 @@ mod sub_agents {
         let (events, _) = session
             .event(
                 "assistant_content",
-                &said("toolu_a", json!({"type": "text", "text": "Looking at the limiter."})),
+                &said(
+                    "toolu_a",
+                    json!({"type": "text", "text": "Looking at the limiter."}),
+                ),
             )
             .expect("modeled");
         assert_eq!(messages(&events), ["Looking at the limiter."]);
@@ -1597,16 +1600,18 @@ mod sub_agents {
     }
 
     #[test]
-    fn a_sub_agents_final_report_is_stored_once_whether_a_message_said_it_or_only_the_notification() {
-        let ended = |summary: &str| {
-            json!({"task_id": "t1", "run_id": "r1", "tool_use_id": "toolu_a", "status": "completed", "reason": null, "summary": summary})
-        };
+    fn a_sub_agents_final_report_is_stored_once_whether_a_message_said_it_or_only_the_notification()
+    {
+        let ended = |summary: &str| json!({"task_id": "t1", "run_id": "r1", "tool_use_id": "toolu_a", "status": "completed", "reason": null, "summary": summary});
         // A message already said it: the notification repeats it.
         let mut session = Session::default();
         session.event("sub_agent_started", &started("t1", "toolu_a", false));
         session.event(
             "assistant_content",
-            &said("toolu_a", json!({"type": "text", "text": "The limit is 5."})),
+            &said(
+                "toolu_a",
+                json!({"type": "text", "text": "The limit is 5."}),
+            ),
         );
         let (events, _) = session
             .event("sub_agent_ended", &ended("The limit is 5.\n"))
@@ -1649,9 +1654,10 @@ mod sub_agents {
             .event("sub_agent_started", &started("t1", "toolu_a", false))
             .expect("modeled");
         assert_eq!(messages(&events), ["Early words."]);
-        assert!(events
-            .iter()
-            .any(|event| matches!(event, EventKind::SubAgentReasoningUpdated { running: true, .. })));
+        assert!(events.iter().any(|event| matches!(
+            event,
+            EventKind::SubAgentReasoningUpdated { running: true, .. }
+        )));
     }
 
     #[test]
@@ -1669,7 +1675,9 @@ mod sub_agents {
             "{events:?}"
         );
         assert!(
-            !events.iter().any(|event| matches!(event, EventKind::FilesChanged { .. })),
+            !events
+                .iter()
+                .any(|event| matches!(event, EventKind::FilesChanged { .. })),
             "{events:?}"
         );
         let (done, _) = session
@@ -1683,7 +1691,9 @@ mod sub_agents {
             "{done:?}"
         );
         assert!(
-            !done.iter().any(|event| matches!(event, EventKind::FilesChanged { .. })),
+            !done
+                .iter()
+                .any(|event| matches!(event, EventKind::FilesChanged { .. })),
             "{done:?}"
         );
     }
