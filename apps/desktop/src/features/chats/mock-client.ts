@@ -751,6 +751,44 @@ export function createMockChatClient(
       unseen: get(id).chat.unseen,
     });
   };
+  /**
+   * The person stopped these running sub-agents: each record, its rows and its
+   * active run turns say so, as the host will write them.
+   */
+  const stopAgents = (id: string, ids: readonly string[]) => {
+    const entry = get(id);
+    const at = new Date().toISOString();
+    const stopped = { status: "stopped", stopped_by: "person" } as const;
+    for (const item of [...entry.items]) {
+      if (item.kind === "sub_agent" && ids.includes(item.sub_agent)) {
+        if (item.status === "running")
+          push(id, { ...item, ...stopped, ended_at: at });
+      } else if (
+        item.kind === "turn" &&
+        item.owner &&
+        ids.includes(item.owner) &&
+        item.outcome === "active"
+      )
+        push(id, { ...item, outcome: "stopped", ended_at: at });
+    }
+    patch(id, {
+      sub_agents: entry.chat.sub_agents.map((agent) =>
+        ids.includes(agent.id) && agent.status === "running"
+          ? { ...agent, ...stopped, ended_at: at }
+          : agent,
+      ),
+    });
+  };
+  const runningAgents = (id: string) =>
+    get(id)
+      .chat.sub_agents.filter((agent) => agent.status === "running")
+      .map((agent) => agent.id);
+  /** With nothing left running, the Chat is at rest. */
+  const restIfQuiet = (id: string) => {
+    const { chat } = get(id);
+    if (chat.turn_running === false && runningAgents(id).length === 0)
+      patch(id, { activity: "idle", turn_running: null, doing: null });
+  };
   const startTurn = (
     id: string,
     text: string,
@@ -767,6 +805,7 @@ export function createMockChatClient(
     patch(id, {
       activity: "working",
       problem: null,
+      turn_running: null,
       doing: { label: "Working", since: now },
     });
   };
@@ -1288,7 +1327,35 @@ export function createMockChatClient(
     },
     async stop(id) {
       const entry = get(id);
-      if (live(entry.chat)) commit(entry, () => halt(id, "stopped"));
+      if (!live(entry.chat)) return;
+      commit(entry, () => {
+        const agents = runningAgents(id);
+        if (entry.chat.turn_running === false) {
+          // Only sub-agents run: Stop all ends them and says so below the reply.
+          stopAgents(id, agents);
+          push(id, {
+            id: nextId("marker"),
+            at: now,
+            kind: "marker",
+            reason: "sub_agents_stopped",
+            count: Math.max(1, agents.length),
+          });
+          restIfQuiet(id);
+        } else {
+          stopAgents(id, agents);
+          halt(id, "stopped");
+        }
+      });
+    },
+    async stopSubAgent(id, subAgent) {
+      const entry = get(id);
+      const record = entry.chat.sub_agents.find((one) => one.id === subAgent);
+      if (record?.status !== "running")
+        throw new ChatError("stale", "That sub-agent is no longer running.");
+      commit(entry, () => {
+        stopAgents(id, [subAgent]);
+        restIfQuiet(id);
+      });
     },
     async answer(id, requestId, answer) {
       const request = get(id).items.find((item) => item.id === requestId);

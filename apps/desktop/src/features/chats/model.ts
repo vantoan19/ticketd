@@ -1709,6 +1709,10 @@ export function markerText(
       const reason = detailShown ? "" : detail || ` ${harness} gave no reason.`;
       return `This turn failed.${reason} What it finished before that is kept.`;
     }
+    case "sub_agents_stopped": {
+      const n = item.count ?? 1;
+      return `You stopped ${n} ${n === 1 ? "sub-agent" : "sub-agents"}.`;
+    }
     case "note":
     case "warning":
       return item.message ?? "";
