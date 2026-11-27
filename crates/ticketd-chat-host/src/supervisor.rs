@@ -249,6 +249,10 @@ struct SubAgentNote {
     title: String,
     /// What it said last.
     report: Option<String>,
+    /// The Chat's turn that was running when it started, if one was. Codex files a
+    /// sub-agent's completion under the turn that started it, so only that turn sees it
+    /// finish.
+    spawned_in: Option<String>,
 }
 
 /// Submissions ticketd itself makes to wake the main agent are named `wake-N`; the
@@ -1712,17 +1716,20 @@ impl Supervisor {
     fn sub_agent_ended(&mut self, native: &str, outcome: &SubAgentOutcome) {
         self.sub_agents.remove(native);
         if self.wakes_main_agent_for_sub_agents() {
-            // This harness never resumes the main agent by itself. A direct sub-agent that
-            // finished while the main agent is idle is told to it, in one message a moment
-            // from now. A nested one is its parent's business, and a turn that runs now
-            // sees the finish itself.
-            let direct = self
-                .sub_agent_notes
-                .get(native)
-                .is_none_or(|note| note.parent.is_none());
+            // This harness never resumes the main agent by itself, and it files a child's
+            // completion under the turn that started it: only that turn sees the finish.
+            // A direct sub-agent that finished in any other turn, or with none running, is
+            // told to the main agent in one message once no turn runs, a moment from now
+            // (the same message covers those that finish meanwhile). A nested one is its
+            // parent's business.
+            let note = self.sub_agent_notes.get(native);
+            let direct = note.is_none_or(|note| note.parent.is_none());
+            let seen_by_its_turn = self.active.as_ref().is_some_and(|active| {
+                note.and_then(|note| note.spawned_in.as_deref()) == Some(active.turn_id.as_str())
+            });
             if direct
                 && self.unattended.is_none()
-                && self.active.is_none()
+                && !seen_by_its_turn
                 && matches!(
                     outcome,
                     SubAgentOutcome::Completed | SubAgentOutcome::Failed
@@ -1732,18 +1739,6 @@ impl Supervisor {
                     native: native.to_owned(),
                     failed: *outcome == SubAgentOutcome::Failed,
                 };
-                // The person's message is on its way and no turn runs yet: the turn it
-                // starts sees the finish itself, so the finish rides that message and
-                // wakes nothing. Only if the message is not accepted is it told later.
-                if let Some(dispatch) = self
-                    .dispatching
-                    .as_mut()
-                    .filter(|dispatch| dispatch.starts_turn && !is_wake(&dispatch.attempt))
-                {
-                    dispatch.finished.retain(|one| one.native != native);
-                    dispatch.finished.push(finished);
-                    return;
-                }
                 self.unreported.retain(|one| one.native != native);
                 self.unreported.push(finished);
                 self.wake_after
@@ -3937,8 +3932,10 @@ impl Supervisor {
                         parent: None,
                         title: "Sub-agent".to_owned(),
                         report: None,
+                        spawned_in: None,
                     });
                 note.parent = start.parent.as_ref().map(|parent| parent.0.clone());
+                note.spawned_in = self.active.as_ref().map(|active| active.turn_id.clone());
                 if let Some(title) = ticketd_core::sub_agent_title(&start.native) {
                     note.title = title;
                 }
