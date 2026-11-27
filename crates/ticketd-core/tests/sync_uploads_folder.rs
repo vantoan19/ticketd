@@ -357,3 +357,55 @@ fn joining_through_replace_leaves_uploads_on_this_computer_and_asks_drive_nothin
     assert!(!b.follow_sync_uploads(&remote(&sim)).unwrap());
     assert_eq!(sim.requests().len(), seen);
 }
+
+/// Signing in again to recover sync must come back as the account sync is signed in with:
+/// another account would leave sync and Files on two accounts, with the sync folder out of
+/// the new account's reach.
+#[test]
+fn signing_in_again_as_another_account_is_refused_and_leaves_both_on_the_first() {
+    let sim = DriveSim::default();
+    let (_dir, mut a, _) = synced(&sim);
+    a.use_sync_uploads_folder(&remote(&sim)).unwrap();
+    let before = a.attachment_upload_destination().unwrap();
+    let status_before = a.sync_status().unwrap();
+
+    let error = a.sync_connect(OTHER, "other@example.com").unwrap_err();
+
+    assert!(
+        error.to_string().contains("another Google account"),
+        "{error}"
+    );
+    assert_eq!(a.sync_status().unwrap(), status_before);
+    assert_eq!(a.attachment_upload_destination().unwrap(), before);
+    assert_eq!(
+        a.google_sign_in().unwrap().unwrap().connection_id,
+        CONNECTION
+    );
+
+    // The same account again is what recovery needs; only the address shown may change.
+    let status = a.sync_connect(CONNECTION, "renamed@example.com").unwrap();
+    assert_eq!(status.connection_id.as_deref(), Some(CONNECTION));
+    assert_eq!(status.account.as_deref(), Some("renamed@example.com"));
+    assert_eq!(status.folder, status_before.folder);
+}
+
+/// A folder chosen for Files holds the Google account Workspace sync must use too, also
+/// when sync is not signed in (yet, or any more).
+#[test]
+fn sync_will_not_sign_in_as_another_account_than_the_files_folder_uses() {
+    let sim = DriveSim::default();
+    let directory = tempfile::tempdir().unwrap();
+    let mut files_only = Workspace::open(directory.path().join("Desk")).unwrap();
+    chosen_folder(&sim, &mut files_only);
+
+    let error = files_only
+        .sync_connect(OTHER, "other@example.com")
+        .unwrap_err();
+
+    assert!(
+        error.to_string().contains("another Google account"),
+        "{error}"
+    );
+    assert_eq!(files_only.sync_status().unwrap().connection_id, None);
+    files_only.sync_connect(CONNECTION, ACCOUNT).unwrap();
+}

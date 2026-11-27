@@ -294,6 +294,15 @@ pub struct S3Binding {
     pub endpoint: Option<String>,
 }
 
+/// Why a sign-in as another Google account is refused while Files or Workspace sync is
+/// already on one.
+pub(crate) fn other_google_account() -> Error {
+    Error::Sync(
+        "Workspace sync and Files are signed in to another Google account; sign in with that account, or use another Google account for both in Settings › Files"
+            .into(),
+    )
+}
+
 /// What a person is told when a profile reaches another S3 service than the one the
 /// Workspace's bucket was connected through. The endpoints are as [`S3Binding::endpoint`]
 /// keeps them.
@@ -912,7 +921,23 @@ impl Workspace {
 
     /// Remember the storage sign-in, before a folder is chosen. Both values are
     /// the desktop's own: the core only keeps them with the Workspace.
+    ///
+    /// Files and Workspace sync share one Google account, so the sign-in has to be the one
+    /// the Files folder already uses, and, once a folder is bound, the one that folder was
+    /// made with: signing in again as another account would leave the two on different
+    /// accounts. [`Workspace::switch_google_account`] is how both move together.
     pub fn sync_connect(
+        &mut self,
+        connection_id: &str,
+        account: &str,
+    ) -> Result<SyncStatus, Error> {
+        self.refuse_other_files_google_sign_in(connection_id)?;
+        self.connect_google(connection_id, account)
+    }
+
+    /// [`Workspace::sync_connect`] without the shared-account check on the Files folder, for
+    /// the caller that moves the Files destination along with the sign-in.
+    pub(crate) fn connect_google(
         &mut self,
         connection_id: &str,
         account: &str,
@@ -927,6 +952,14 @@ impl Workspace {
                     "this Workspace syncs with {}; disconnect it before connecting to Google Drive",
                     state.provider.name()
                 )));
+            }
+            if state.folder.is_some()
+                && state
+                    .connection
+                    .as_deref()
+                    .is_some_and(|held| held != connection_id)
+            {
+                return Err(other_google_account());
             }
             scope.execute(
                 "UPDATE sync_state SET provider = 'google_drive', s3_bucket = NULL, s3_prefix = NULL, aws_profile = NULL, s3_endpoint = NULL, connection = ?1, account = ?2",

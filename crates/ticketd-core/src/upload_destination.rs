@@ -232,6 +232,22 @@ impl Workspace {
         }
     }
 
+    /// The Files folder, when it is on Google Drive, holds the account sync has to sign in
+    /// with: a sign-in as another account is refused.
+    pub(crate) fn refuse_other_files_google_sign_in(
+        &self,
+        connection_id: &str,
+    ) -> Result<(), Error> {
+        match self.attachment_upload_destination()? {
+            AttachmentUploadDestination::GoogleDrive { destination, .. }
+                if destination.connection_id != connection_id =>
+            {
+                Err(crate::sync::other_google_account())
+            }
+            _ => Ok(()),
+        }
+    }
+
     /// Send new files to the Uploads folder inside the folder Workspace sync uses on Google
     /// Drive, with the sign-in sync already holds. The folder is found or made through
     /// `uploads`. Files already uploaded stay where they are.
@@ -309,7 +325,7 @@ impl Workspace {
             if current != connection_id && self.sync_binding()?.is_some() {
                 self.sync_disconnect()?;
             }
-            self.sync_connect(connection_id, account)?;
+            self.connect_google(connection_id, account)?;
         }
         if let AttachmentUploadDestination::GoogleDrive {
             destination,
