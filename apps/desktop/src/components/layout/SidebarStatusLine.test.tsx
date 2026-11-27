@@ -162,7 +162,7 @@ test("with nothing to fix and nothing connected, the status line says nothing", 
 
 test("a missing command is one line with one action that opens the Command line page", () => {
   line({ needsSetup: { "command-line": true } });
-  expect(screen.getByText("Command line needs setup")).toBeTruthy();
+  expect(screen.getByText("Command needs setup")).toBeTruthy();
   fireEvent.click(
     screen.getByRole("button", { name: "Set up the command line" }),
   );
@@ -173,9 +173,7 @@ test("a missing command is one line with one action that opens the Command line 
 
 test("an agent without the skill is its own line and opens Agent skills", () => {
   line({ needsSetup: { "agent-skills": true } });
-  fireEvent.click(
-    screen.getByRole("button", { name: /Agent skills need setup/ }),
-  );
+  fireEvent.click(screen.getByRole("button", { name: /Skills need setup/ }));
   expect(openPage).toHaveBeenLastCalledWith("agent-skills");
   fireEvent.click(screen.getByRole("button", { name: "Set up agent skills" }));
   expect(openPage).toHaveBeenLastCalledWith("agent-skills");

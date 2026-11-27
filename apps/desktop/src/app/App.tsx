@@ -350,7 +350,7 @@ function AppContent() {
   const { setupHidden, setupFinished, settingsPage } = usePreferences();
   const setupPending = !setupHidden && !setupFinished;
   // The first page with a problem to fix, kept by the Settings state.
-  const needsPage = useRef<SettingsSectionId | null>(null);
+  const needsPageRef = useRef<SettingsSectionId | null>(null);
   // The page last used comes back when nothing needs the person.
   useEffect(() => {
     if (view !== "settings") return;
@@ -371,7 +371,7 @@ function AppContent() {
       setSettingsSection(
         initialSettingsPage({
           setupPending,
-          needs: needsPage.current,
+          needs: needsPageRef.current,
           last: settingsPage,
         }),
       );
@@ -1019,7 +1019,7 @@ function AppContent() {
                   <SettingsStateProvider
                     active={view === "settings"}
                     onOpenPage={setSettingsSection}
-                    needsPage={needsPage}
+                    needsPageRef={needsPageRef}
                   >
                     <SidebarProvider open={!sidebarCollapsed}>
                       <StatusLineSpot>

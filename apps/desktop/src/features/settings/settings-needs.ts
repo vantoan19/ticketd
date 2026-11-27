@@ -51,7 +51,7 @@ export function syncNeedsYou(status: SyncStatus | null): status is SyncStatus {
   return (
     status !== null &&
     status.connection === "connected" &&
-    status.recovery !== null &&
+    !!status.recovery &&
     status.recovery !== "offline" &&
     status.recovery !== "rate_limited"
   );

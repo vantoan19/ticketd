@@ -143,7 +143,7 @@ export function SourceStatusFooter() {
         <NeedLine
           id="sidebar-command-line"
           tone="attention"
-          label="Command line needs setup"
+          label="Command needs setup"
           detail="Agents can’t use ticketd yet"
           action="Set up"
           actionName="Set up the command line"
@@ -155,7 +155,7 @@ export function SourceStatusFooter() {
         <NeedLine
           id="sidebar-agent-skills"
           tone="attention"
-          label="Agent skills need setup"
+          label="Skills need setup"
           detail="An agent doesn’t know ticketd"
           action="Set up"
           actionName="Set up agent skills"

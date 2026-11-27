@@ -41,7 +41,7 @@ import {
 export function SettingsStateProvider({
   active = true,
   onOpenPage = () => {},
-  needsPage,
+  needsPageRef,
   children,
 }: {
   /** Opens a Settings page; the page that is open belongs to the parent. */
@@ -52,7 +52,7 @@ export function SettingsStateProvider({
    * Kept up to date with the first page that needs the person, which the app
    * reads when Settings opens (`initialSettingsPage`).
    */
-  needsPage?: RefObject<SettingsSectionId | null>;
+  needsPageRef?: RefObject<SettingsSectionId | null>;
   children: ReactNode;
 }) {
   const [query, setQuery] = useState("");
@@ -195,8 +195,8 @@ export function SettingsStateProvider({
   );
   const firstNeed = pageNeedingYou(useNeedsFrom(needsSetup));
   useEffect(() => {
-    if (needsPage) needsPage.current = firstNeed;
-  }, [needsPage, firstNeed]);
+    if (needsPageRef) needsPageRef.current = firstNeed;
+  }, [needsPageRef, firstNeed]);
   // Once every step has been ticked, the checklist is finished for good.
   const { setupHidden, setupFinished } = usePreferences();
   useEffect(() => {
