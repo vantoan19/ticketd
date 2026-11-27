@@ -1416,7 +1416,18 @@ impl Chats {
     pub fn read_through(&self, chat_id: &str, item_id: &str) -> Outcome<()> {
         // A turn's timing item is named after its turn.
         let record = item_id.strip_prefix("turn:").unwrap_or(item_id);
-        self.workspace()?.mark_chat_read_through(chat_id, record)?;
+        let mut workspace = self.workspace()?;
+        // A sub-agent's row has an ID of the view's own (`{sub-agent}:row-{run}`): it is
+        // kept as the item read, and placed where the run it shows began.
+        if let Some((native_id, run)) = record.rsplit_once(":row-")
+            && let Ok(run) = run.parse::<i64>()
+            && let Some(sub_agent) = workspace.chat_sub_agent(chat_id, native_id)?
+            && let Some(run) = sub_agent.runs.iter().find(|stored| stored.run == run)
+        {
+            workspace.mark_chat_read_through_at(chat_id, record, &run.id)?;
+            return Ok(());
+        }
+        workspace.mark_chat_read_through(chat_id, record)?;
         Ok(())
     }
 
@@ -2110,6 +2121,9 @@ impl Chats {
                 _ = &mut resynced => Update::Chat(None),
             };
             let mut ended = false;
+            // A Step the view shows that its sub-agent's row now replaces: a change
+            // cannot remove it, so the view reads the history again.
+            let mut hidden = false;
             let records = match update {
                 Update::Projects => {
                     let projects = projects.borrow_and_update().clone();
@@ -2125,6 +2139,10 @@ impl Chats {
                     for change in &changes {
                         if let ChatRecord::SubAgent(record) = &change.record {
                             view.tracker.note_sub_agent(record);
+                            hidden |= std::iter::once(record.tool_id.as_deref())
+                                .chain(record.runs.iter().map(|run| run.tool_id.as_deref()))
+                                .flatten()
+                                .any(|tool_id| view.sent.contains_key(tool_id));
                         }
                     }
                     for change in changes {
@@ -2258,7 +2276,14 @@ impl Chats {
             let fresh = self.fresh(&view.chat.id);
             for record in records {
                 let tracker = &view.tracker;
-                for item in chat_view::items(&record, &view.chat, &view.live, fresh, tracker) {
+                let shown = chat_view::items(&record, &view.chat, &view.live, fresh, tracker);
+                if let ChatItem::Tool(tool) = &record
+                    && shown.is_empty()
+                    && view.sent.contains_key(&tool.id)
+                {
+                    hidden = true;
+                }
+                for item in shown {
                     let item = match &item {
                         Item::Records { .. } => match self.lend(&mut lent) {
                             Ok(workspace) => with_gone(workspace, item),
@@ -2279,6 +2304,9 @@ impl Chats {
                     view.sent.insert(id, item.clone());
                     batch.push(number(&mut view, json!({ "kind": "item", "item": item })));
                 }
+            }
+            if hidden {
+                break;
             }
             // If the workspace cannot be read the view keeps what it shows; the next
             // change tries again.
