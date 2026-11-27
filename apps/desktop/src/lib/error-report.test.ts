@@ -81,6 +81,24 @@ test("an unhandled rejection is reported, including a reason that is not an Erro
   expect(JSON.stringify(sent)).not.toContain("plain text");
 });
 
+test("a ResizeObserver loop notice is not an error: WebKit raises it as a window error with no error and only a message", () => {
+  install("chats");
+  for (const message of [
+    "ResizeObserver loop completed with undelivered notifications.",
+    "ResizeObserver loop limit exceeded",
+  ])
+    window.dispatchEvent(new ErrorEvent("error", { message }));
+  expect(sent).toEqual([]);
+});
+
+test("a window error that carries only a message is named for what it is, so it is told apart from a rejection", () => {
+  install("chats");
+  window.dispatchEvent(new ErrorEvent("error", { message: "Script error." }));
+  rejection("plain text");
+  expect(sent.map(({ name }) => name)).toEqual(["ErrorEvent", "NonError"]);
+  expect(JSON.stringify(sent)).not.toContain("Script error.");
+});
+
 test("the React root's uncaught-error callback reports through the same path", () => {
   const reporter = install();
   reporter.report(failure("render failed"));
