@@ -39,6 +39,7 @@ vi.mock("@/lib/sync-api", async (original) => ({
   syncApi: {
     status: vi.fn(),
     connect: vi.fn(),
+    connectS3: vi.fn(),
     setupOptions: vi.fn(),
     uploadWorkspace: vi.fn(),
     reconnect: vi.fn(),
@@ -52,6 +53,7 @@ vi.mock("@/lib/sync-api", async (original) => ({
 vi.mock("@/lib/api/workspace", () => ({
   workspaceClient: { reveal: vi.fn(), info: vi.fn() },
 }));
+Element.prototype.scrollIntoView ??= () => {};
 const api = vi.mocked(syncApi);
 const info = vi.mocked(workspaceClient.info);
 /** The api as shipped, over the mocked bridge. */
@@ -661,4 +663,27 @@ test("the step track follows setup from step 1 to in sync", async () => {
   show();
   await screen.findByRole("heading", { name: "Options" });
   expect(stage()).toBe("In sync");
+});
+
+test("while Connect S3 is pending the storage cannot be switched to Google Drive", async () => {
+  vi.mocked(s3Api.identity).mockResolvedValue({
+    state: "signed_in",
+    identity: "arn:aws:sts::123456789012:assumed-role/Admin/mina",
+  });
+  vi.mocked(s3Api.buckets).mockResolvedValue(["team-ticketd"]);
+  api.connectS3.mockImplementation(() => new Promise(() => {}));
+  show();
+  await next();
+  fireEvent.click(await radio(/S3/));
+  fireEvent.click(await screen.findByRole("combobox", { name: "AWS profile" }));
+  fireEvent.click(await screen.findByRole("option", { name: "work" }));
+  fireEvent.click(await screen.findByRole("combobox", { name: "Bucket" }));
+  fireEvent.click(await screen.findByRole("option", { name: "team-ticketd" }));
+  fireEvent.click(screen.getByRole("button", { name: "Connect S3" }));
+
+  const drive = await radio(/Google Drive/);
+  await waitFor(() => expect(drive.hasAttribute("disabled")).toBe(true));
+  fireEvent.click(drive);
+  expect(screen.getByRole("button", { name: "Connect S3" })).toBeTruthy();
+  expect(screen.queryByRole("button", { name: "Connect Google Drive" })).toBeNull();
 });

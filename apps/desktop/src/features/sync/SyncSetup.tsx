@@ -211,6 +211,8 @@ type Storage = "google_drive" | "s3";
 function WhereItSyncs({ onBack }: { onBack: () => void }) {
   const { busy, failure, run } = useCommand();
   const [storage, setStorage] = useState<Storage>("google_drive");
+  // An S3 connect in flight: its answer would commit S3 under a Drive screen.
+  const [s3Busy, setS3Busy] = useState(false);
   // Whether this build has a Google Drive app configuration. Unknown until
   // read; only a plain "no" holds back the button.
   const [configured, setConfigured] = useState<boolean | null>(null);
@@ -239,7 +241,7 @@ function WhereItSyncs({ onBack }: { onBack: () => void }) {
           variant="rows"
           aria-label="Where it syncs"
           value={storage}
-          disabled={busy}
+          disabled={busy || s3Busy}
           onValueChange={(value) => setStorage(value as Storage)}
         >
           <ChoiceTile
@@ -255,7 +257,7 @@ function WhereItSyncs({ onBack }: { onBack: () => void }) {
         </ChoiceTiles>
       </SettingsSection>
       {storage === "s3" ? (
-        <S3Setup onBack={onBack} />
+        <S3Setup onBack={onBack} onBusyChange={setS3Busy} />
       ) : (
         <>
           <div className="sync-footer">
