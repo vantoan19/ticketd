@@ -68,6 +68,7 @@ import {
   type QueueEditStatus,
   type RequestAnswer,
   type ItemOf,
+  type SubAgent,
   type TranscriptItem,
 } from "@/features/chats/client";
 import { ChatActionsMenu } from "@/features/chats/ChatActionsMenu";
@@ -113,7 +114,10 @@ import {
   mainItems,
   unseenFrom,
   asStarting,
+  askerOf,
   isLive,
+  runningAgents,
+  stopWords,
   problemNotice,
   requestLabel,
   turns,
@@ -125,6 +129,7 @@ import {
 import {
   JumpToLatest,
   Transcript,
+  type ShowSubAgent,
   type TranscriptActions,
 } from "@/features/chats/Transcript";
 import {
@@ -133,8 +138,12 @@ import {
 } from "@/features/chats/use-transcript-scroll";
 import { useChat } from "@/features/chats/use-chats";
 import { SubAgentView } from "@/features/chats/SubAgentView";
+import { RestartNotice } from "@/features/chats/SubAgentNotices";
+import { SubAgentTray } from "@/features/chats/SubAgentTray";
+import { SubAgentStrip } from "@/features/chats/SubAgentStrip";
 import { backKey } from "@/features/chats/sub-agent-words";
 import {
+  STRIP_OPENER,
   subAgentView,
   targetSteps,
   viewPath,
@@ -408,12 +417,14 @@ function Conversation({
   onRequestsAnswered,
   notice,
   openSubAgent,
+  showSubAgent,
 }: {
   snapshot: ChatSnapshot;
   focusRequest: boolean;
   onRequestsAnswered?: () => void;
   notice?: ReactNode;
   openSubAgent: (item: ItemOf<"sub_agent">, origin: HTMLElement) => void;
+  showSubAgent: ShowSubAgent;
 }) {
   const client = useChatClient();
   const { chat: reported, items: all } = snapshot;
@@ -478,8 +489,9 @@ function Conversation({
       openFile: (path) => client.openFile(id, path),
       exportAttachment: (file) => client.exportAttachment(id, file),
       openSubAgent,
+      showSubAgent,
     }),
-    [client, id, openSubAgent],
+    [client, id, openSubAgent, showSubAgent],
   );
   // A message just sent shows its turn starting at once (LIVE-6).
   const chat = asStarting(reported, items);
@@ -981,7 +993,11 @@ function Conversation({
           {notice && <p className="chat-line chat-note">{notice}</p>}
           <div className="sr-only" aria-live="polite">
             {pending[0]
-              ? requestLabel(pending[0])
+              ? requestLabel(
+                  pending[0],
+                  undefined,
+                  askerOf(pending[0], chat.sub_agents)?.title,
+                )
               : chat.stopping
                 ? "Stopping…"
                 : turnStatus(chat, items)}
@@ -1073,6 +1089,35 @@ function Conversation({
                   }
                   requests={pending}
                   {...(plan && { plan: <PlanPill item={plan} /> })}
+                  {...(runningAgents(chat) > 0 && {
+                    strip: (
+                      <SubAgentStrip
+                        agents={chat.sub_agents}
+                        onOpen={(agent) => showSubAgent(agent.id, STRIP_OPENER)}
+                        onStop={(agent) =>
+                          quietly(
+                            client.stopSubAgent(id, agent.id),
+                            `stop ${agent.title}`,
+                          )
+                        }
+                      />
+                    ),
+                  })}
+                  {...(chat.restart_notice && {
+                    lead: (
+                      <RestartNotice
+                        notice={chat.restart_notice}
+                        harness={harness}
+                      />
+                    ),
+                  })}
+                  {...(chat.sub_agents.length > 0 && {
+                    asker: {
+                      agents: chat.sub_agents,
+                      open: (agent: SubAgent, opener: string) =>
+                        showSubAgent(agent.id, opener),
+                    },
+                  })}
                   dockRef={dock}
                   onAnswer={answer}
                   composerQuestion={answering ? question?.id : undefined}
@@ -1214,6 +1259,7 @@ function Conversation({
                     onArrowUpFromEmpty: () => focusFirstChoice(dock.current),
                   })}
                 {...(isLive(chat) && { onStop: stop })}
+                stopLabel={stopWords(chat)}
                 stopping={chat.stopping || unconfirmedStart}
                 leading={
                   <ComposerControls
@@ -1347,13 +1393,14 @@ export function ChatDetail({
       ? subAgentView(chat, snapshot.items, open.agent)
       : undefined;
   const returning = useRef<string | null>(null);
-  const openSubAgent = useCallback(
-    (item: ItemOf<"sub_agent">) =>
-      setSteps((current) => [
-        ...current,
-        { agent: item.sub_agent, row: item.id },
-      ]),
+  /** Opens a sub-agent from the part that names it; from another view it replaces that one. */
+  const showSubAgent = useCallback<ShowSubAgent>(
+    (agent, row) => setSteps((current) => [...current, { agent, row }]),
     [],
+  );
+  const openSubAgent = useCallback(
+    (item: ItemOf<"sub_agent">) => showSubAgent(item.sub_agent, item.id),
+    [showSubAgent],
   );
   /** Goes back to the view (or Chat) at depth `to`; focus returns to the row that opened what was left. */
   const back = (to: number) => {
@@ -1364,16 +1411,17 @@ export function ChatDetail({
   useLayoutEffect(() => {
     const row = returning.current;
     returning.current = null;
-    // A view opened from outside has no row: going back lands on the heading.
-    const found =
-      row &&
-      [...document.querySelectorAll<HTMLElement>("[data-sub-agent]")].find(
-        (one) => one.dataset.subAgent === row,
-      );
-    if (found) found.focus({ preventScroll: true });
-    else if (depth > 0 || row === "")
+    if (row) {
+      const opener = [
+        ...document.querySelectorAll<HTMLElement>("[data-sub-agent]"),
+      ].find((one) => one.dataset.subAgent === row);
+      // The part that opened it may be gone (a sub-agent that finished leaves the strip).
+      if (opener) opener.focus({ preventScroll: true });
+      else document.getElementById("chat-heading")?.focus();
+      // A view opened from outside has no row: going back lands on the heading.
+    } else if (depth > 0 || row === "")
       document.getElementById("chat-heading")?.focus();
-  }, [depth]);
+  }, [depth, open?.agent]);
   const actionsOf = useMemo<TranscriptActions>(
     () => ({
       saveAsDocument: () => {},
@@ -1381,8 +1429,9 @@ export function ChatDetail({
       openFile: (path) => client.openFile(id, path),
       exportAttachment: (file) => client.exportAttachment(id, file),
       openSubAgent,
+      showSubAgent,
     }),
-    [client, id, openSubAgent],
+    [client, id, openSubAgent, showSubAgent],
   );
   const retain = (name: string, action: () => Promise<void>): void =>
     void action().then(
@@ -1533,6 +1582,21 @@ export function ChatDetail({
           view={view}
           items={snapshot.items}
           actions={actionsOf}
+          tray={
+            <SubAgentTray
+              view={view}
+              items={snapshot.items}
+              onStop={() =>
+                retain(`stop ${view.agent.title}`, () =>
+                  client.stopSubAgent(id, view.agent.id),
+                )
+              }
+              onReview={(agent) =>
+                setSteps(agent ? [{ agent, row: "needs-you" }] : [])
+              }
+              onLeave={() => document.getElementById("chat-heading")?.focus()}
+            />
+          }
         />
       )}
       {snapshot && !view && (
@@ -1543,6 +1607,7 @@ export function ChatDetail({
           {...(onRequestsAnswered && { onRequestsAnswered })}
           notice={notice}
           openSubAgent={openSubAgent}
+          showSubAgent={showSubAgent}
         />
       )}
     </section>

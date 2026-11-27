@@ -410,6 +410,8 @@ export function createHostChatClient(
     sendQueuedNow: (id, queuedId) =>
       run("chat_send_queued_now", { chatId: id, queuedId }),
     stop: (id) => run("chat_stop", { chatId: id }),
+    stopSubAgent: (id, subAgent) =>
+      run("chat_stop_sub_agent", { chatId: id, subAgent }),
     answer: (id, requestId, answer) =>
       run("chat_answer", { chatId: id, requestId, answer }),
     resolveUncertain: (id, messageId, decision) =>

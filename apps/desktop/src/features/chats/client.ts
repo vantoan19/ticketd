@@ -495,6 +495,30 @@ const chatAttachmentSchema = z.object({
   media_type: z.string(),
 });
 export type ChatAttachment = z.infer<typeof chatAttachmentSchema>;
+/**
+ * A turn the person did not start (T-UB270): the harness resumed the main agent
+ * after a sub-agent finished ("Started by Claude Code: sub-agent finished"), or
+ * ticketd woke it ("Started by ticketd: sub-agent finished").
+ */
+export const turnOriginSchema = z.object({
+  by: z.enum(["harness", "ticketd"]),
+  /** The `SubAgent.id` whose finishing started the turn; the line's title opens it. */
+  sub_agent: z.string().nullish(),
+});
+export type TurnOrigin = z.infer<typeof turnOriginSchema>;
+
+/**
+ * What ticketd added to a message the person sent. `lost_sub_agents`: the sub-agents
+ * that lost contact when ticketd quit, and the exact `text` it told the harness.
+ */
+export const messageNoteSchema = z.object({
+  kind: z.literal("lost_sub_agents"),
+  /** `SubAgent.id`s the note names, in the order it names them. */
+  sub_agents: z.array(z.string()),
+  text: z.string(),
+});
+export type MessageNote = z.infer<typeof messageNoteSchema>;
+
 export const transcriptItemSchema = z.discriminatedUnion("kind", [
   z.object({
     ...item,
@@ -514,6 +538,8 @@ export const transcriptItemSchema = z.discriminatedUnion("kind", [
     /** Images sent with the message, kept as Attachments. */
     images: z.array(attachmentSchema).optional(),
     attachments: z.array(chatAttachmentSchema).optional(),
+    /** What ticketd added to this message, shown under it ("With a note on 2 lost sub-agents"). */
+    note: messageNoteSchema.nullish(),
   }),
   z.object({
     ...item,
@@ -554,6 +580,11 @@ export const transcriptItemSchema = z.discriminatedUnion("kind", [
       "failed",
       "lost",
     ]),
+    /**
+     * Who started the turn when the person did not. Absent: the person did, with
+     * the message that opens the turn.
+     */
+    origin: turnOriginSchema.nullish(),
   }),
   z.object({
     ...item,
@@ -601,9 +632,13 @@ export const transcriptItemSchema = z.discriminatedUnion("kind", [
       "failed",
       "note",
       "warning",
+      /** The person stopped every running sub-agent while no turn ran. */
+      "sub_agents_stopped",
     ]),
     /** Required reading for `failed` and `note`; optional detail otherwise. */
     message: z.string().nullish(),
+    /** With `sub_agents_stopped`: how many sub-agents it stopped ("You stopped 2 sub-agents."). */
+    count: z.number().int().positive().nullish(),
   }),
   z.object({
     ...item,
@@ -844,6 +879,27 @@ export const chatStateSchema = z.object({
   read_through: z.string().nullish(),
   /** Every sub-agent the harness started in this Chat, oldest first. */
   sub_agents: z.array(subAgentSchema).default([]),
+  /**
+   * Whether a main-agent turn is running. Absent or null: what `activity` says
+   * (working or waiting means a turn runs). `false` while `activity` is working
+   * or waiting means only sub-agents run: the composer says "Message {Harness}"
+   * and sends a new turn, Stop all says "Stop 2 sub-agents", and the transcript
+   * has no working line (the strip is the live signal).
+   */
+  turn_running: z.boolean().nullish(),
+  /**
+   * Set while ticketd keeps a note on lost sub-agents for the person's next
+   * message: the tray says so. Cleared when the message is sent (the note then
+   * shows on that message as `note`).
+   */
+  restart_notice: z
+    .object({
+      /** `SubAgent.id`s that lost contact when ticketd quit. */
+      sub_agents: z.array(z.string()),
+      /** The harness can resume them (Claude Code); Codex cannot. */
+      resume: z.boolean(),
+    })
+    .nullish(),
 });
 export type ChatState = z.infer<typeof chatStateSchema>;
 
@@ -1065,6 +1121,8 @@ export interface ChatClient {
   /** Sends one queued message now, alone: it steers the turn or starts one; a paused queue stays paused. */
   sendQueuedNow(id: string, queuedId: string): Promise<void>;
   stop(id: string): Promise<void>;
+  /** Stops one sub-agent, where its record's `capabilities.stop` allows. No confirmation. */
+  stopSubAgent(id: string, subAgent: string): Promise<void>;
   /** Rejects with a `stale` ChatError unless the request is the live one. */
   answer(id: string, requestId: string, answer: RequestAnswer): Promise<void>;
   /** The person's decision about a submission that may or may not have arrived. */

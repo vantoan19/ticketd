@@ -29,6 +29,7 @@ import {
   LoaderCircle,
   MessageSquareText,
   Pencil,
+  CornerDownRight,
   RotateCcw,
   Search,
   Square,
@@ -56,7 +57,9 @@ import {
   type TranscriptItem,
   type ItemOf,
   type LinkedRecord,
+  type SubAgent,
 } from "@/features/chats/client";
+import { NoteCaption } from "@/features/chats/SubAgentNotices";
 import {
   FilesSummary,
   PlanCard,
@@ -74,6 +77,7 @@ import {
   markerText,
   workedFor,
   isLive,
+  turnRuns,
   lastOf,
   recordNamer,
   type RecordName,
@@ -118,6 +122,12 @@ import {
   SubAgentsContext,
 } from "@/features/chats/sub-agent-context";
 
+/**
+ * Opens a sub-agent's view by id, from the part that names it. `opener` is that
+ * part's `data-sub-agent` value: going back returns focus to it.
+ */
+export type ShowSubAgent = (agent: string, opener: string) => void;
+
 /** What transcript items can ask of the Chat that owns them. Keep the object stable. */
 export type TranscriptActions = {
   saveAsDocument: (response: ItemOf<"response">) => void;
@@ -127,6 +137,8 @@ export type TranscriptActions = {
   openFile: (path: string) => Promise<void>;
   /** Opens a sub-agent's view from the row (`origin`) that asked; focus returns there. */
   openSubAgent?: (item: ItemOf<"sub_agent">, origin: HTMLElement) => void;
+  /** Opens a sub-agent from a line that names it ("Started by ... · Title"). */
+  showSubAgent?: ShowSubAgent;
   exportAttachment: (file: ChatAttachment) => Promise<void>;
 };
 
@@ -337,6 +349,7 @@ function UserMessage({
           </Button>
         )}
         {caption && <div className="chat-caption">{caption}</div>}
+        {item.note && <NoteCaption note={item.note} />}
       </Arrives>
     </div>
   );
@@ -1383,6 +1396,16 @@ function StopMarker({
 }) {
   const subAgent = useContext(InSubAgent);
   const words = markerText(item, harness, detailShown);
+  // Stop all with no turn: the same quiet row a sub-agent's ending has.
+  if (item.reason === "sub_agents_stopped")
+    return (
+      <p className="chat-line chat-end-marker">
+        <span className="chat-row-icon" aria-hidden="true">
+          <Square size={12} fill="currentColor" className="chat-stop-mark" />
+        </span>
+        <span>{words}</span>
+      </p>
+    );
   return (
     <p className="chat-line">
       {/* Filled, the stop sign does not read as an empty checkbox. */}
@@ -1467,6 +1490,46 @@ const Item = memo(function Item({
       return null;
   }
 });
+
+/**
+ * Where a message would be, when the person did not start the turn: "Started by
+ * Claude Code: sub-agent finished · Title". The title opens that sub-agent.
+ */
+function StartedLine({
+  by,
+  agent,
+  opener,
+  onOpen,
+}: {
+  by: string;
+  agent: SubAgent | undefined;
+  opener: string;
+  onOpen: ShowSubAgent | undefined;
+}) {
+  return (
+    <div className="chat-part" data-kind="started" data-anchor="">
+      <p className="chat-started">
+        <span className="chat-row-icon" aria-hidden="true">
+          <CornerDownRight size={16} />
+        </span>
+        <span>{`Started by ${by}: sub-agent finished`}</span>
+        {agent && (
+          <>
+            <span aria-hidden="true">·</span>
+            <button
+              type="button"
+              className="chat-started-link"
+              data-sub-agent={opener}
+              onClick={() => onOpen?.(agent.id, opener)}
+            >
+              {agent.title}
+            </button>
+          </>
+        )}
+      </p>
+    </div>
+  );
+}
 
 /**
  * The live line: the spinner and what the turn is doing, shown only while no step
@@ -1702,7 +1765,9 @@ export function Transcript({
     ),
     chat.catching_up,
   );
-  const working = chat.activity === "working";
+  // Only sub-agents run after the reply: the strip is the live signal, not a working line.
+  const turnOn = turnRuns(chat);
+  const working = chat.activity === "working" && turnOn;
   const opening = working && Boolean(chat.opening);
   const waiting = useMemo(
     () => steersAwaitingRead(items, working),
@@ -1760,6 +1825,14 @@ export function Transcript({
   // Words are streaming in now: the newest thing in the Chat is a response still arriving.
   const newest = lastOf(items, (item) => item.kind !== "turn");
   const writing = newest?.kind === "response" && newest.state === "streaming";
+  const agentsRun = parts.some(
+    (part) =>
+      part.kind === "turn" &&
+      part.turn.live &&
+      part.turn.rows.some(
+        (row) => row.kind === "sub_agent" && row.item.status === "running",
+      ),
+  );
   const empty = items.length === 0 && !chat.catching_up && !isLive(chat);
   const asking = items.some(
     (item) => item.kind === "request" && item.state === "pending",
@@ -1788,6 +1861,18 @@ export function Transcript({
                         <RotateCcw size={16} aria-hidden />
                         <span>{part.label}</span>
                       </div>
+                    );
+                  if (part.kind === "started")
+                    return (
+                      <StartedLine
+                        key={part.key}
+                        by={part.by === "ticketd" ? "ticketd" : harness}
+                        agent={chat.sub_agents.find(
+                          (one) => one.id === part.subAgent,
+                        )}
+                        opener={part.key}
+                        onOpen={actions.showSubAgent}
+                      />
                     );
                   const marker = newFrom !== undefined &&
                     (part.kind === "turn"
@@ -1841,7 +1926,7 @@ export function Transcript({
                 )}
                 {chat.catching_up ? (
                   <WorkingLine label="Catching up…" />
-                ) : chat.activity === "waiting" ? (
+                ) : chat.activity === "waiting" && turnOn ? (
                   // The dock already shows the request; the slot keeps its height.
                   chat.has_composer && asking ? (
                     <WorkingSlot />
@@ -1875,7 +1960,7 @@ export function Transcript({
                         since={chat.doing.since}
                         items={items}
                       />
-                    ) : (
+                    ) : agentsRun ? null : ( // A sub-agent's row spins and the strip counts it: no second line.
                       <WorkingLine label="Working…" />
                     )}
                   </BetweenSteps>

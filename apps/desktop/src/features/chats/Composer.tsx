@@ -57,6 +57,7 @@ export function Composer({
   onSend,
   onQueue,
   onStop,
+  stopLabel = "Stop",
   stopping = false,
   beforeStop,
   leading,
@@ -96,6 +97,8 @@ export function Composer({
   draft?: ComposerDraft;
   /** Pass only while a turn is in progress. */
   onStop?: () => void;
+  /** What Stop says it stops: "Stop 2 sub-agents". */
+  stopLabel?: string;
   /** Stop was asked for and has not finished: Stop waits. */
   stopping?: boolean;
   /** Fixed before Stop, so Send leads: the context count. */
@@ -429,7 +432,7 @@ export function Composer({
               type="button"
               variant="ghost"
               size="icon-compact"
-              label="Stop"
+              label={stopLabel}
               shortcut="Esc"
               aria-keyshortcuts="Escape"
               disabled={stopping}
