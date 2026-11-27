@@ -77,6 +77,33 @@ pub fn report(
     // The host's turn records always belong to a turn; a Step with none is not one.
     let turn_id = tool.turn_id.clone()?;
     let active = chat.active_turn.as_ref().map(|turn| &turn.id) == Some(&turn_id);
+    report_of(tool, turn_id, active, chat, live.stop, shown)
+}
+
+/// The report a sub-agent's `tool` keeps, as part of the run `run_id` it belongs to: its
+/// reasoning or the files it changed. It runs while its run does. A sub-agent has no
+/// plan of its own: its to-do list is a Step.
+pub fn sub_agent_report(
+    tool: &ChatTool,
+    run_id: String,
+    running: bool,
+    chat: &Chat,
+    shown: &dyn Fn(&str) -> String,
+) -> Option<Report> {
+    match report_of(tool, run_id, running, chat, None, shown)? {
+        report @ (Report::Reasoning { .. } | Report::Files { .. }) => Some(report),
+        Report::Plan { .. } => None,
+    }
+}
+
+fn report_of(
+    tool: &ChatTool,
+    turn_id: String,
+    active: bool,
+    chat: &Chat,
+    stop: Option<StopState>,
+    shown: &dyn Fn(&str) -> String,
+) -> Option<Report> {
     if let Some(record) =
         records::read::<ReasoningRecord>(&tool.name, REASONING_RECORD_NAME, &tool.input)
     {
@@ -93,7 +120,7 @@ pub fn report(
         });
     }
     if let Some(plan) = records::read::<PlanRecord>(&tool.name, PLAN_RECORD_NAME, &tool.input) {
-        let state = match (active, live.stop) {
+        let state = match (active, stop) {
             (true, Some(StopState::Unconfirmed)) => "unconfirmed",
             (true, _) => "running",
             (false, _) => "ended",

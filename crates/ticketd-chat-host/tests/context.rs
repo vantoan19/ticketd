@@ -215,7 +215,8 @@ fn an_assistant_response_is_saved_with_the_ordinary_document_workflow() {
                 },
                 ChatObservation::AssistantText {
                     message_id: "reply-1".into(),
-                    turn_id: "turn-1".into(),
+                    turn_id: Some("turn-1".into()),
+                    owner: ticketd_core::ChatOwner::Main,
                     text: "# Findings\n\nThe cache was stale.".into(),
                     complete: true,
                 },

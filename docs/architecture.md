@@ -213,6 +213,14 @@ monitors, ambient and transcript-less tasks are not sub-agents) and tags every f
 the tool use that started the task. The adapter routes a tagged frame to its
 sub-agent; a frame that arrives before its task is announced waits for it. A sub-agent's
 to-do list is one of its own Steps: only the main agent's plan is the turn's.
+A sub-agent's words are its own too: an assistant message has the same optional owner
+(`chat_messages.sub_agent_id`), and so do the reasoning and files records the host keeps
+for a run (a sub-agent's edits are its run's files, never the turn's). Its messages come
+whole, not streamed, and never become the Chat's last response, the Chat list's preview
+or history a fresh session carries. Its final report is its last message: Claude Code's
+task notification repeats it, so the host stores the notification's summary only when no
+message said it.
+
 For Codex a sub-agent is a child thread of the Chat's thread, announced by a
 `subAgentActivity` item (multi-agent v2) or a `spawnAgent` call (v1). The adapter routes
 every notification by its `threadId`: a child's `turn/started` starts a run of its record
@@ -221,8 +229,8 @@ stopped, and none of it is a turn of the Chat or touches the thread's active tur
 children run on when their parent's turn ends or is interrupted, so they are background
 sub-agents and Stop interrupts the Chat's turn and then each child's live turn through
 `HarnessRuntime::interrupt_sub_agents`, also when no turn runs. A child's messages are
-owned records named `ticketd message` (the text is the output), so nothing that reads
-the Chat's own messages takes them for the main agent's. Codex reports no brief.
+owned assistant messages, as a Claude sub-agent's are, so nothing that reads the Chat's
+own messages takes them for the main agent's. Codex reports no brief.
 
 A sub-agent's approval lives as long as the sub-agent that asked, not the turn it arrived
 in. Claude Code names the asker in `canUseTool`'s `agentID` (the task ID the bridge

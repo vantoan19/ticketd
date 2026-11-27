@@ -129,8 +129,8 @@ use crate::{
     SendMode, WorkspaceOpener,
 };
 use ticketd_core::{
-    Chat, ChatInteractionState, ChatItem, ChatMessage, ChatOwner, ChatRole, ChatSubAgent, ChatTurn,
-    NewChat, Workspace, WorkspaceSession,
+    Chat, ChatInteractionState, ChatItem, ChatMessage, ChatOwner, ChatRole, ChatSubAgent, ChatTool,
+    ChatTurn, NewChat, Workspace, WorkspaceSession,
 };
 
 #[cfg(test)]
@@ -732,7 +732,11 @@ impl HostScript {
         snapshot
             .items
             .iter()
-            .filter(|item| !matches!(item, ChatItem::Tool(tool) if tool.owner != ChatOwner::Main))
+            .filter(|item| match item {
+                ChatItem::Tool(tool) => tool.owner == ChatOwner::Main,
+                ChatItem::Message(message) => message.owner == ChatOwner::Main,
+                _ => true,
+            })
             .filter(|item| match item {
                 // A nested sub-agent's row is in its parent's view.
                 ChatItem::SubAgentRun(run) => snapshot
@@ -765,8 +769,9 @@ impl HostScript {
             .items
             .iter()
             .filter(|item| match item {
-                ChatItem::Tool(tool) => matches!(
-                    &tool.owner,
+                ChatItem::Tool(ChatTool { owner, .. })
+                | ChatItem::Message(ChatMessage { owner, .. }) => matches!(
+                    owner,
                     ChatOwner::SubAgent { native_id: owner } if owner == native_id
                 ),
                 ChatItem::SubAgentRun(run) => snapshot
@@ -945,9 +950,6 @@ fn line(item: &ChatItem, sub_agents: &[ChatSubAgent]) -> String {
             format!("{who}: {}{cut}", message.text)
         }
         ChatItem::Turn(turn) => format!("turn {}", format!("{:?}", turn.state).to_lowercase()),
-        ChatItem::Tool(tool) if tool.name == crate::records::MESSAGE_RECORD_NAME => {
-            format!("agent: {}", tool.output.as_deref().unwrap_or_default())
-        }
         ChatItem::Tool(tool) => format!(
             "tool {} {}",
             tool.name,

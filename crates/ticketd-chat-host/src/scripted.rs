@@ -282,6 +282,21 @@ fn difference(expected: &Value, actual: &Value, path: &str) -> String {
     }
 }
 
+fn files_brief(files: &[crate::FileChange]) -> String {
+    let files: Vec<String> = files
+        .iter()
+        .map(|file| {
+            let counts = match (file.added_lines, file.removed_lines) {
+                (Some(added), Some(removed)) => format!(" +{added} -{removed}"),
+                _ => String::new(),
+            };
+            let unconfirmed = if file.confirmed { "" } else { " unconfirmed" };
+            format!("{:?} {}{counts}{unconfirmed}", file.kind, file.path)
+        })
+        .collect();
+    format!("files {files:?}")
+}
+
 /// One event in short form, for comparing sequences.
 pub(crate) fn brief(kind: &EventKind) -> String {
     match kind {
@@ -340,6 +355,34 @@ pub(crate) fn brief(kind: &EventKind) -> String {
         } => format!(
             "sub-agent-tool {} {} {title:?} {status:?} {output:?}",
             sub_agent.0, item.0
+        ),
+        EventKind::SubAgentMessage {
+            sub_agent,
+            item,
+            text,
+        } => format!("sub-agent-message {} {} {text:?}", sub_agent.0, item.0),
+        EventKind::SubAgentReasoningUpdated {
+            sub_agent,
+            run,
+            item,
+            running,
+            started_at,
+            ended_at,
+            text,
+        } => format!(
+            "sub-agent-reasoning {} run {run:?} {} {} {started_at:?} {ended_at:?} {text:?}",
+            sub_agent.0,
+            item.0,
+            if *running { "running" } else { "done" }
+        ),
+        EventKind::SubAgentFilesChanged {
+            sub_agent,
+            run,
+            files,
+        } => format!(
+            "sub-agent-{} {} run {run:?}",
+            files_brief(files),
+            sub_agent.0
         ),
         EventKind::InteractionRequested(request) => match &request.kind {
             InteractionKind::Approval {
@@ -429,20 +472,7 @@ pub(crate) fn brief(kind: &EventKind) -> String {
                 .collect();
             format!("plan {steps:?} {:?}", plan.explanation)
         }
-        EventKind::FilesChanged { files, .. } => {
-            let files: Vec<String> = files
-                .iter()
-                .map(|file| {
-                    let counts = match (file.added_lines, file.removed_lines) {
-                        (Some(added), Some(removed)) => format!(" +{added} -{removed}"),
-                        _ => String::new(),
-                    };
-                    let unconfirmed = if file.confirmed { "" } else { " unconfirmed" };
-                    format!("{:?} {}{counts}{unconfirmed}", file.kind, file.path)
-                })
-                .collect();
-            format!("files {files:?}")
-        }
+        EventKind::FilesChanged { files, .. } => files_brief(files),
         EventKind::ContextUsage(usage) => format!(
             "context {} of {} {:?} {:?}",
             usage.used,

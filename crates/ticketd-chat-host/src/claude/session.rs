@@ -122,6 +122,8 @@ struct Agent {
     background: bool,
     /// The model its own messages reported last.
     model: Option<String>,
+    /// What its latest message said: its final report repeats it.
+    last_text: Option<String>,
 }
 
 fn text<'a>(event: &'a Value, field: &str) -> Option<&'a str> {
@@ -288,8 +290,10 @@ impl Session {
                 }
             }
             "delta" => self.delta(event, &mut events),
-            // A sub-agent's thinking is not shown, and opens no turn.
-            "thinking" if !event["parent_tool_use_id"].is_null() => {}
+            // A sub-agent's thinking is its own, and opens no turn.
+            "thinking" if !event["parent_tool_use_id"].is_null() => {
+                self.sub_agent_thinking(event, &mut events);
+            }
             "thinking" => {
                 let turn = self.turn(&mut events);
                 events.extend(self.reports.thinking(&turn, event));
@@ -499,13 +503,33 @@ impl Session {
         }
     }
 
-    /// A frame of the sub-agent the tool use `parent` started: its tool calls are its own
-    /// Steps. Its messages and reasoning are not shown yet.
+    /// A `thinking` frame of a sub-agent: its reasoning item.
+    fn sub_agent_thinking(&mut self, event: &Value, events: &mut Vec<EventKind>) {
+        let Some(parent) = text(event, "parent_tool_use_id") else {
+            return;
+        };
+        let Some(task) = self.sub_agents.by_tool_use.get(parent).cloned() else {
+            return self.hold(parent, "thinking", event);
+        };
+        let run = self.sub_agents.known.get(&task).and_then(|a| a.run.clone());
+        events.extend(
+            self.reports
+                .sub_agent_thinking(&task, run.as_deref(), event),
+        );
+    }
+
+    /// A frame of the sub-agent the tool use `parent` started: its messages, reasoning
+    /// and tool calls are its own, and open no turn.
     fn sub_agent_content(&mut self, parent: &str, event: &Value, events: &mut Vec<EventKind>) {
         let Some(task) = self.sub_agents.by_tool_use.get(parent).cloned() else {
             return self.hold(parent, "assistant_content", event);
         };
         let turn = self.active_turn().cloned();
+        let run = self
+            .sub_agents
+            .known
+            .get(&task)
+            .and_then(|agent| agent.run.clone());
         if let Some(model) = text(event, "model")
             && let Some(agent) = self.sub_agents.known.get_mut(&task)
             && agent.model.as_deref() != Some(model)
@@ -536,12 +560,15 @@ impl Session {
                     };
                     let title = text(block, "name").unwrap_or("tool").to_owned();
                     // Only the main agent's plan is the turn's plan: a sub-agent's list
-                    // stays a Step of its own.
+                    // stays a Step of its own. Its edits are its run's files, not the turn's.
                     self.sub_agents.owner.insert(id.to_owned(), task.clone());
-                    if let Some(turn) = &turn {
-                        let changed = self.reports.file_tool(turn, id, &title, &block["input"]);
-                        events.extend(changed);
-                    }
+                    let changed = self.reports.sub_agent_file_tool(
+                        &task,
+                        run.as_deref(),
+                        id,
+                        &title,
+                        &block["input"],
+                    );
                     self.observe_tool_input(
                         Who::SubAgent(&task),
                         id,
@@ -549,9 +576,29 @@ impl Session {
                         &block["input"],
                         events,
                     );
+                    events.extend(changed);
                 }
-                // Its messages and reasoning are not shown yet.
-                Some("text" | "thinking") => {}
+                Some("text") => {
+                    let said = text(block, "text").unwrap_or_default();
+                    if said.trim().is_empty() {
+                        continue;
+                    }
+                    if let Some(agent) = self.sub_agents.known.get_mut(&task) {
+                        agent.last_text = Some(said.to_owned());
+                    }
+                    events.push(EventKind::SubAgentMessage {
+                        sub_agent: NativeSubAgentId::new(&task),
+                        item: self.new_item(),
+                        text: said.to_owned(),
+                    });
+                }
+                Some("thinking") => {
+                    let said = text(block, "text").unwrap_or_default();
+                    events.push(
+                        self.reports
+                            .sub_agent_thinking_text(&task, run.as_deref(), said),
+                    );
+                }
                 Some("other") if text(block, "block_type") == Some("redacted_thinking") => {}
                 _ => events.push(unknown(
                     "Claude Code sent content ticketd does not show",
@@ -692,18 +739,34 @@ impl Session {
         let Some(agent) = self.sub_agents.known.get_mut(task) else {
             return;
         };
-        if run.is_none() || agent.run.is_none() || agent.run == run {
+        let current = run.is_none() || agent.run.is_none() || agent.run == run;
+        if current {
             if agent.running
                 && !matches!(outcome, SubAgentOutcome::Stopped(_))
                 && self.runtime.active_turn_id().is_none()
             {
                 self.sub_agents.finished_at_rest = Some(task.to_owned());
             }
-            let agent = self.sub_agents.known.get_mut(task);
-            if let Some(agent) = agent {
-                agent.running = false;
-            }
+            agent.running = false;
         }
+        // Its final report is its last message; the notification repeats it, and says it
+        // alone when the sub-agent's messages did not arrive.
+        let report = text(event, "summary")
+            .map(str::trim)
+            .filter(|report| !report.is_empty())
+            .filter(|_| current && outcome == SubAgentOutcome::Completed)
+            .filter(|report| agent.last_text.as_deref().map(str::trim) != Some(*report))
+            .map(str::to_owned);
+        if let Some(report) = report {
+            agent.last_text = Some(report.clone());
+            events.push(EventKind::SubAgentMessage {
+                sub_agent: NativeSubAgentId::new(task),
+                item: self.new_item(),
+                text: report,
+            });
+        }
+        self.reports.sub_agent_ended(task);
+        // What it asked and nobody answered goes with it.
         events.extend(self.runtime.withdraw_owned(&NativeSubAgentId::new(task)));
         events.push(EventKind::SubAgentEnded {
             sub_agent: NativeSubAgentId::new(task),
@@ -732,10 +795,12 @@ impl Session {
             return;
         }
         agent.running = false;
-        events.extend(self.runtime.withdraw_owned(&NativeSubAgentId::new(task)));
+        let (task, run) = (task.clone(), agent.run.clone());
+        self.reports.sub_agent_ended(&task);
+        events.extend(self.runtime.withdraw_owned(&NativeSubAgentId::new(&task)));
         events.push(EventKind::SubAgentEnded {
             sub_agent: NativeSubAgentId::new(task),
-            run: agent.run.clone(),
+            run,
             outcome: if failed {
                 SubAgentOutcome::Failed
             } else {
@@ -847,11 +912,20 @@ impl Session {
             Some(output),
             Some(detail),
         ));
-        if let Some(turn) = self.active_turn().cloned() {
-            events.extend(
-                self.reports
-                    .file_result(&turn, id, failed, &event["outcome"]),
-            );
+        match (&owner, self.active_turn().cloned()) {
+            (Some(task), _) => events.extend(self.reports.sub_agent_file_result(
+                task,
+                id,
+                failed,
+                &event["outcome"],
+            )),
+            (None, Some(turn)) => {
+                events.extend(
+                    self.reports
+                        .file_result(&turn, id, failed, &event["outcome"]),
+                )
+            }
+            (None, None) => {}
         }
         self.foreground_agent_returned(tool_use, failed, events);
     }
