@@ -4349,3 +4349,80 @@ fn an_approval_comes_first_then_chat_by_chat_main_agent_before_its_sub_agents() 
         ]
     );
 }
+
+/// What the command sends is what the ticket's label reads: the desktop tests parse and
+/// open the same file (`TicketAgentCommand.test.tsx`).
+#[tokio::test(start_paused = true)]
+async fn the_command_sends_what_the_desktops_label_reads() {
+    let f = Fixture::with_adapter(FakeAdapter::claude()).await;
+    let ticket = f.core().create_ticket("Rate limiter").unwrap();
+    let mut input = f.input("Review the rate limiter");
+    input.links = vec![LinkRef {
+        kind: LinkKind::Ticket,
+        id: ticket.id.clone(),
+    }];
+    let chat_id = f.chats.create(input).await.unwrap().chat_id;
+    settle().await;
+    // Claude Code starts its turn on its own word.
+    f.emit(EventKind::TurnStarted { turn: turn() }).await;
+    let model = |current: &str, models: &[(&str, &str)]| {
+        Some(ticketd_chat_host::Setting {
+            current: Some(current.to_owned()),
+            options: models
+                .iter()
+                .map(|(id, label)| ticketd_chat_host::SettingOption {
+                    label: (*label).to_owned(),
+                    ..offered(id, false)
+                })
+                .collect(),
+            unchangeable: None,
+            applies_from: ticketd_chat_host::AppliesFrom::NextTurn,
+            answered_by: None,
+        })
+    };
+    f.emit(EventKind::SettingsState(HarnessSettings {
+        model: model(
+            "claude-opus-5-5",
+            &[
+                ("claude-opus-5-5", "Claude Opus 5.5"),
+                ("claude-sonnet-5-5", "Claude Sonnet 5.5"),
+            ],
+        ),
+        ..HarnessSettings::default()
+    }))
+    .await;
+    f.start_sub_agent(
+        "sa-tests",
+        json!({
+            "description": "Check limiter test coverage",
+            "model": "claude-sonnet-5-5-20260301",
+        }),
+    )
+    .await;
+    f.sub_agent_writes(&chat_id, "sa-tests", &ticket.reference);
+
+    let mut sent = serde_json::to_value(f.agents(&ticket.id)).unwrap();
+    // What differs from one run to the next: the Chat's id and the clock.
+    for agent in sent.as_array_mut().unwrap() {
+        let agent = agent.as_object_mut().unwrap();
+        for (key, value) in agent.iter_mut() {
+            match (key.as_str(), value.as_str()) {
+                ("started_at", _) => *value = json!("2026-11-27T10:00:00Z"),
+                (_, Some(text)) if text.starts_with(&chat_id) => {
+                    *value = json!(text.replacen(&chat_id, "c-limiter", 1));
+                }
+                _ => {}
+            }
+        }
+    }
+    let expected: serde_json::Value = serde_json::from_str(include_str!(
+        "../../src/features/chats/ticket-agents-command.fixture.json"
+    ))
+    .unwrap();
+    assert_eq!(
+        sent,
+        expected,
+        "the command now sends:\n{}",
+        serde_json::to_string_pretty(&sent).unwrap()
+    );
+}

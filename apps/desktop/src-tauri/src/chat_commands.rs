@@ -266,10 +266,10 @@ fn watch_overview(app: &AppHandle) {
             if refresh_projects && !projects_changed {
                 // A credited write on a ticket can bring an agent onto its label with no
                 // Chat record changing.
-                if labels_changed(&chats, &mut labels) {
-                    if let Ok(overview) = chats.overview() {
-                        let _ = app.emit(OVERVIEW_EVENT, overview);
-                    }
+                if labels_changed(&chats, &mut labels)
+                    && let Ok(overview) = chats.overview()
+                {
+                    let _ = app.emit(OVERVIEW_EVENT, overview);
                 }
                 continue;
             }
