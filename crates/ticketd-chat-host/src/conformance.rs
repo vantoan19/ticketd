@@ -20,7 +20,7 @@ use async_trait::async_trait;
 use crate::testing::FakeAdapter;
 use crate::{
     ApprovalDecision, DeliveryEvidence, DispatchOutcome, EventKind, EventStream, HarnessAdapter,
-    HarnessRuntime, InteractionAnswer, InteractionResponse, InterruptOutcome, InterruptRequest,
+    HarnessRuntime, InteractionAnswer, InteractionResolution, InteractionResponse, InterruptOutcome, InterruptRequest,
     NativeRequestId, NativeTurnId, OpenRequest, Refusal, RespondOutcome, RuntimeGeneration,
     SessionStart, StartSettings, Submission, SubmissionId, SubmissionKind,
 };
@@ -47,6 +47,17 @@ pub(crate) enum SubAgentFrames {
     /// The adapter does not model sub-agents yet (Codex until its sub-agent ticket,
     /// Antigravity until its own, and the fake): the property asserts nothing for it, and
     /// moves to `Separate` when the adapter does.
+    NotModelled,
+}
+
+/// Whether the adapter tells a sub-agent's approval apart from the turn it arrives in.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum SubAgentApprovals {
+    /// The request names the sub-agent that asked, belongs to no turn, and goes only when
+    /// that sub-agent's run ends (Claude Code, Codex).
+    Owned,
+    /// The adapter does not model sub-agents' approvals yet (Antigravity until its own
+    /// ticket, and the fake): the properties assert nothing for it.
     NotModelled,
 }
 
@@ -119,6 +130,29 @@ pub(crate) trait Provider: Send {
     /// for a provider that declares [`SubAgentFrames::Separate`].
     async fn play_sub_agent_at_rest(&mut self) {
         unimplemented!("declared SubAgentFrames::Separate without playing a sub-agent")
+    }
+
+    /// Whether the adapter keeps a sub-agent's approval apart from the turn it arrived in.
+    fn sub_agent_approvals(&self) -> SubAgentApprovals {
+        SubAgentApprovals::NotModelled
+    }
+
+    /// While the turn the submission `id` started runs, a sub-agent starts and asks for
+    /// approval of a command. Only called for a provider that declares
+    /// [`SubAgentApprovals::Owned`]; returns the request.
+    async fn play_sub_agent_approval(&mut self, _id: &str) -> NativeRequestId {
+        unimplemented!("declared SubAgentApprovals::Owned without playing a request")
+    }
+
+    /// The main agent's turn (the one `play_sub_agent_approval` ran in) ends, and the
+    /// sub-agent goes on.
+    async fn end_parent_turn(&mut self, _id: &str) {
+        unimplemented!("declared SubAgentApprovals::Owned without ending the turn")
+    }
+
+    /// The sub-agent's run ends without its request having been answered.
+    async fn end_sub_agent(&mut self) {
+        unimplemented!("declared SubAgentApprovals::Owned without ending the sub-agent")
     }
 
     /// Submits a new turn and plays the provider's usual reply to it.
@@ -354,6 +388,88 @@ async fn a_sub_agents_frames_never_open_a_turn(p: &mut dyn Provider) {
     p.assert_nothing_else_written().await;
 }
 
+/// Starts a turn and plays a sub-agent's approval in it; returns the request the adapter
+/// reported, which is the sub-agent's and no turn's.
+async fn a_sub_agent_asks_in_a_turn(p: &mut dyn Provider) -> NativeRequestId {
+    let outcome = p.start_turn("s1").await;
+    match (p.new_turn(), outcome) {
+        (NewTurn::Acknowledged, DispatchOutcome::Acknowledged { .. }) => {}
+        (NewTurn::WrittenThenProcessing, DispatchOutcome::Written) => {
+            p.show_processing("s1").await;
+        }
+        (declared, outcome) => panic!("declared {declared:?}, got {outcome:?}"),
+    }
+    drain(p.events()).await;
+    let request = p.play_sub_agent_approval("s1").await;
+    request
+}
+
+/// A sub-agent's approval is its own: it names the sub-agent, belongs to no turn, and is
+/// still there, and still answerable, after the main agent's turn has ended.
+async fn a_sub_agents_approval_outlives_the_parents_turn(p: &mut dyn Provider) {
+    if p.sub_agent_approvals() == SubAgentApprovals::NotModelled {
+        return;
+    }
+    let request = a_sub_agent_asks_in_a_turn(p).await;
+
+    p.end_parent_turn("s1").await;
+    let ended = drain(p.events()).await;
+    assert!(
+        ended
+            .iter()
+            .any(|event| matches!(event, EventKind::TurnEnded { .. })),
+        "the turn ended: {ended:?}"
+    );
+    assert!(
+        !ended
+            .iter()
+            .any(|event| matches!(event, EventKind::InteractionResolved { .. })),
+        "the sub-agent's request went with the turn: {ended:?}"
+    );
+
+    // Still answerable, and the answer is the one the harness reads.
+    let answered = p.respond(p.approval_answer(&request, GENERATION)).await;
+    assert_eq!(answered, RespondOutcome::Sent);
+    p.assert_nothing_else_written().await;
+}
+
+/// The request goes when its asker's run ends, and not before: nothing more can be
+/// answered then.
+async fn a_sub_agents_approval_goes_with_its_asker(p: &mut dyn Provider) {
+    if p.sub_agent_approvals() == SubAgentApprovals::NotModelled {
+        return;
+    }
+    let request = a_sub_agent_asks_in_a_turn(p).await;
+
+    p.end_sub_agent().await;
+    let ended = drain(p.events()).await;
+    let withdrawn = ended.iter().position(|event| {
+        matches!(
+            event,
+            EventKind::InteractionResolved {
+                request: gone,
+                resolution: InteractionResolution::Withdrawn,
+            } if *gone == request
+        )
+    });
+    let sub_agent_ended = ended
+        .iter()
+        .position(|event| matches!(event, EventKind::SubAgentEnded { .. }));
+    assert!(
+        withdrawn.is_some() && sub_agent_ended.is_some() && withdrawn < sub_agent_ended,
+        "its end withdraws what it asked, first: {ended:?}"
+    );
+    assert!(
+        !ended
+            .iter()
+            .any(|event| matches!(event, EventKind::TurnEnded { .. })),
+        "the sub-agent's end is not the turn's: {ended:?}"
+    );
+    let answered = p.respond(p.approval_answer(&request, GENERATION)).await;
+    assert_eq!(answered, RespondOutcome::NotSent(Refusal::UnknownRequest));
+    p.assert_nothing_else_written().await;
+}
+
 // ---------------------------------------------------------------------------
 // Providers and the suite's cases
 // ---------------------------------------------------------------------------
@@ -524,6 +640,18 @@ macro_rules! conformance {
             async fn a_sub_agents_frames_never_open_a_turn() {
                 let mut p = $provider.await;
                 super::a_sub_agents_frames_never_open_a_turn(&mut *p).await;
+            }
+
+            #[tokio::test(start_paused = true)]
+            async fn a_sub_agents_approval_outlives_the_parents_turn() {
+                let mut p = $provider.await;
+                super::a_sub_agents_approval_outlives_the_parents_turn(&mut *p).await;
+            }
+
+            #[tokio::test(start_paused = true)]
+            async fn a_sub_agents_approval_goes_with_its_asker() {
+                let mut p = $provider.await;
+                super::a_sub_agents_approval_goes_with_its_asker(&mut *p).await;
             }
 
             #[tokio::test(start_paused = true)]

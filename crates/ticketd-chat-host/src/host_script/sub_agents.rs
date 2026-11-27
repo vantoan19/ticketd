@@ -684,12 +684,33 @@ mod background_stored {
 
 // --- A sub-agent's approval -------------------------------------------------------------
 
-mod approvals {
+pub(super) mod approvals {
     use super::*;
     use crate::attention::Rank;
     use ticketd_core::{ChatInteractionState, ChatOwner};
 
     const PROMPT: &str = "Check that the limiter's tests cover its edge cases, in the background";
+
+    /// The Chat's stored history now must equal the file (made stable): what the desktop
+    /// builds the view of a pending sub-agent approval from.
+    pub(in crate::host_script) fn pinned(h: &HostScript, file: &str) {
+        let snapshot = h
+            .core()
+            .chat_snapshot(h.chat_id(), 5_000)
+            .expect("the Chat's history");
+        let stored = made_stable(&serde_json::to_string_pretty(&snapshot).expect("it serializes"));
+        let file = format!("{}/tests/fixtures/{file}", env!("CARGO_MANIFEST_DIR"));
+        if std::env::var_os("TICKETD_UPDATE_VIEW_FIXTURES").is_some() {
+            std::fs::write(&file, format!("{stored}\n")).expect("the file is written");
+        }
+        let kept = std::fs::read_to_string(&file).expect(
+            "the stored history; regenerate it with TICKETD_UPDATE_VIEW_FIXTURES=1 cargo test -p ticketd-chat-host --lib host_script",
+        );
+        assert!(
+            kept.trim_end() == stored,
+            "the stored history changed; if that is intended, regenerate {file} with TICKETD_UPDATE_VIEW_FIXTURES=1"
+        );
+    }
 
     fn asked_by_task_b() -> ChatOwner {
         ChatOwner::SubAgent {
@@ -725,6 +746,7 @@ mod approvals {
         // Its Step is the sub-agent's own, and it waits with the request.
         assert_eq!(h.sub_agent_transcript("task_b"), ["tool Bash running"]);
         assert!(h.notices().is_empty(), "{:?}", h.notices());
+        pinned(&h, "claude/sub_agent_approval.stored.json");
 
         // The answer goes back to Claude Code (the fixture holds the frame it must be).
         h.approve().await;

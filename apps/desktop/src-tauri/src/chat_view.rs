@@ -5,7 +5,7 @@ use std::collections::{HashMap, HashSet};
 
 use serde::Serialize;
 
-use ticketd_chat_host::attention::{self, Facts, Status};
+use ticketd_chat_host::attention::{self, Asking, Facts, Status};
 use ticketd_chat_host::conditions::ChatProblemKind;
 use ticketd_chat_host::{
     AGENT_CHANGES_RECORD_NAME, Activity, ApprovalDecision, CONTEXT_RECORD_NAME, ChatLive,
@@ -318,7 +318,12 @@ pub enum Item {
     Request {
         id: String,
         at: String,
+        /// For a sub-agent's request, the run it asked in (the sub-agent's own "turn").
         turn_id: Option<String>,
+        /// The sub-agent that asked; absent for the main agent. Its title is written before
+        /// `title` by the interface, which is why `title` then has no harness name.
+        #[serde(skip_serializing_if = "Option::is_none")]
+        owner: Option<String>,
         request: &'static str,
         title: String,
         subject: Option<String>,
@@ -1130,9 +1135,11 @@ impl Tracker {
             .any(|request| request.tool_id.as_deref() == Some(tool_id))
     }
 
-    /// A tool call of the latest turn, by its id.
+    /// A tool call of the latest turn, or a sub-agent's, by its id.
     fn tool(&self, id: &str) -> Option<&ChatTool> {
-        self.turn_tools.get(id)
+        self.turn_tools
+            .get(id)
+            .or_else(|| self.sub_agent_tools.get(id))
     }
 
     /// Tool calls to show again because an approval asked for them was decided since
@@ -1140,7 +1147,7 @@ impl Tracker {
     pub fn refolded(&mut self) -> Vec<ChatItem> {
         std::mem::take(&mut self.refold)
             .iter()
-            .filter_map(|id| self.turn_tools.get(id).cloned().map(ChatItem::Tool))
+            .filter_map(|id| self.tool(id).cloned().map(ChatItem::Tool))
             .collect()
     }
 
@@ -1306,31 +1313,37 @@ fn request(interaction: &ChatInteraction, live: &ChatLive, harness: &str, steps:
     let prompt = Some(interaction.prompt.clone()).filter(|prompt| !prompt.is_empty());
     let step = steps.first();
     let plan = steps.len() == 1 && step.is_some_and(|step| step.variant == Some("plan"));
+    // A sub-agent's request is worded without its asker's name: the interface writes the
+    // sub-agent's title (a link to its view) where the harness's name would stand.
+    let owner = match &interaction.owner {
+        ChatOwner::SubAgent { native_id } => Some(native_id.clone()),
+        ChatOwner::Main => None,
+    };
+    let by = |words: &str| match &owner {
+        Some(_) => words.to_owned(),
+        None => format!("{harness} {words}"),
+    };
     let (title, subject) = match (approval, asked_to(steps)) {
         // Its plan's path is the harness's own; the title says what it is.
-        (true, Some((wants, asked, _))) if plan => (
-            format!("{harness} {}", if pending { wants } else { asked }),
-            None,
-        ),
+        (true, Some((wants, asked, _))) if plan => {
+            (by(if pending { wants } else { asked }), None)
+        }
         (true, Some((wants, asked, what))) => (
-            format!("{harness} {}", if pending { wants } else { asked }),
+            by(if pending { wants } else { asked }),
             Some(what).filter(|what| !what.is_empty()).or(prompt),
         ),
         (true, None) if prompt.is_some() => (
-            format!(
-                "{harness} {}",
-                if pending {
-                    "wants approval for"
-                } else {
-                    "asked for approval for"
-                }
-            ),
+            by(if pending {
+                "wants approval for"
+            } else {
+                "asked for approval for"
+            }),
             prompt,
         ),
-        (true, None) if pending => (format!("{harness} is asking for approval"), None),
-        (true, None) => (format!("{harness} asked for approval"), None),
-        (false, _) if pending => (format!("{harness} is asking you"), prompt),
-        (false, _) => (format!("{harness} asked you"), prompt),
+        (true, None) if pending => (by("is asking for approval"), None),
+        (true, None) => (by("asked for approval"), None),
+        (false, _) if pending => (by("is asking you"), prompt),
+        (false, _) => (by("asked you"), prompt),
     };
     let (options, free_text) = match asked.map(|request| &request.kind) {
         Some(InteractionKind::Approval { decisions, .. }) => (
@@ -1380,6 +1393,7 @@ fn request(interaction: &ChatInteraction, live: &ChatLive, harness: &str, steps:
     Item::Request {
         id: interaction.id.clone(),
         turn_id: interaction.turn_id.clone(),
+        owner,
         request: if approval { "approval" } else { "question" },
         title,
         reason: interaction
@@ -1850,7 +1864,24 @@ pub fn item(
                 .and_then(|id| tracker.tool(id))
                 .map(|tool| steps(tool, harness, chat, home_folder().as_deref()))
                 .unwrap_or_default();
-            request(interaction, live, harness, &rows)
+            // A sub-agent the Chat has no record of has no name to show: its request reads
+            // as the harness's, and nothing owns it in the interface.
+            let asker = match &interaction.owner {
+                ChatOwner::SubAgent { native_id } if tracker.sub_agent(native_id).is_some() => {
+                    Some(native_id.as_str())
+                }
+                _ => None,
+            };
+            let mut shown = interaction.clone();
+            if asker.is_none() {
+                shown.owner = ChatOwner::Main;
+            }
+            let mut item = request(&shown, live, harness, &rows);
+            if let (Some(native_id), Item::Request { turn_id, .. }) = (asker, &mut item) {
+                let run = tracker.run_at(native_id, interaction.position);
+                *turn_id = Some(run_id(native_id, run));
+            }
+            item
         }
         // The person stopped sub-agents while no turn ran: the row counts them.
         ChatItem::Notice(notice) if notice.sub_agents_stopped.is_some() => Item::Marker {
@@ -2533,8 +2564,9 @@ pub fn chat_state(
         },
         retention: retention(chat),
         activity,
-        // Only sub-agents run (or the main agent is about to resume): no turn does.
-        turn_running: (activity == "working"
+        // Only sub-agents run (or the main agent is about to resume): no turn does. One
+        // of them may be waiting for the person's approval.
+        turn_running: (matches!(activity, "working" | "waiting")
             && chat.active_turn.is_none()
             && opening.is_none()
             && !live.delivery_unconfirmed
@@ -2609,12 +2641,61 @@ fn opening(activity: &str, origin: Option<ChatSessionOrigin>) -> Option<&'static
     }
 }
 
+/// A sub-agent's title as a request card names it: cut at about 40 characters.
+fn cut_title(title: &str) -> String {
+    const LIMIT: usize = 40;
+    if title.chars().count() <= LIMIT {
+        return title.to_owned();
+    }
+    let kept: String = title.chars().take(LIMIT - 1).collect();
+    format!("{}…", kept.trim_end())
+}
+
+/// The requests a sub-agent asked that wait for the person, with who asked and the card's
+/// title: what the Chats list and a notification say.
+fn asking(chat: &Chat, live: &ChatLive, tracker: &Tracker, harness: &str) -> Vec<Asking> {
+    let agents = tracker.sub_agent_views(chat, live);
+    live.interactions
+        .iter()
+        .filter_map(|waiting| {
+            let request = tracker.pending.get(&waiting.interaction_id)?;
+            let ChatOwner::SubAgent { native_id } = &request.owner else {
+                return None;
+            };
+            let agent = agents.iter().find(|agent| &agent.id == native_id)?;
+            let rows = request
+                .tool_id
+                .as_deref()
+                .and_then(|id| tracker.tool(id))
+                .map(|tool| steps(tool, harness, chat, home_folder().as_deref()))
+                .unwrap_or_default();
+            let Item::Request { title, subject, .. } = self::request(request, live, harness, &rows)
+            else {
+                return None;
+            };
+            let asker = cut_title(&agent.title);
+            let card = [Some(asker.as_str()), Some(title.as_str()), subject.as_deref()]
+                .into_iter()
+                .flatten()
+                .collect::<Vec<_>>()
+                .join(" ");
+            Some(Asking {
+                interaction_id: waiting.interaction_id.clone(),
+                asker,
+                card,
+            })
+        })
+        .collect()
+}
+
 pub fn summary(chat: &Chat, live: &ChatLive, tracker: &Tracker, around: &Surroundings) -> Summary {
     let first_change = tracker.first_change();
     let activity = activity(live, tracker);
     let problem = problem(chat, live, tracker, around);
     let harness = harness_name(&chat.harness);
+    let asking = asking(chat, live, tracker, harness);
     let status = attention::status(&Facts {
+        asking: &asking,
         chat,
         harness,
         live,
@@ -2694,7 +2775,7 @@ mod tests {
     };
     use serde_json::json;
     use ticketd_chat_host::Activity;
-    use ticketd_chat_host::{STOPPED_BY_TICKETD, StopReason, TurnEnding};
+    use ticketd_chat_host::{ApprovalDecision, STOPPED_BY_TICKETD, StopReason, TurnEnding};
     use ticketd_core::ChatSessionOrigin;
     use ticketd_core::{ChatItem, ChatOwner, ChatTurnStarter};
 
@@ -5183,5 +5264,150 @@ mod tests {
                 .iter()
                 .all(|agent| !agent.capabilities.brief)
         );
+    }
+
+    // --- A sub-agent's approval ---------------------------------------------------------
+
+    /// What the host sends of a Chat while a sub-agent waits for approval after the main
+    /// agent's turn ended: the host's stored history of each harness
+    /// (`sub_agent_approval.stored.json`) and the live state it has then. The files are what
+    /// `sub-agent-approval-view.test.ts` parses. Regenerated only with
+    /// `TICKETD_UPDATE_VIEW_FIXTURES=1`.
+    fn pending_approval(harness: &str) -> (ticketd_core::ChatSnapshot, ChatLive, ChatInteraction) {
+        let stored_file = format!(
+            "{}/../../../crates/ticketd-chat-host/tests/fixtures/{harness}/sub_agent_approval.stored.json",
+            env!("CARGO_MANIFEST_DIR")
+        );
+        let stored: ticketd_core::ChatSnapshot =
+            serde_json::from_str(&std::fs::read_to_string(&stored_file).expect("stored"))
+                .expect("the stored history reads");
+        let request = stored
+            .items
+            .iter()
+            .find_map(|item| match item {
+                ChatItem::Interaction(request) if request.state == ChatInteractionState::Pending => {
+                    Some(request.clone())
+                }
+                _ => None,
+            })
+            .expect("a pending request");
+        let live = ChatLive {
+            activity: Activity::WaitingForYou,
+            running: true,
+            sub_agents: 1,
+            interactions: vec![ticketd_chat_host::LiveInteraction {
+                interaction_id: request.id.clone(),
+                kind: ticketd_chat_host::InteractionKind::Approval {
+                    description: request.prompt.clone(),
+                    reason: None,
+                    decisions: vec![ApprovalDecision::Allow, ApprovalDecision::Deny],
+                },
+            }],
+            ..ChatLive::idle()
+        };
+        (stored, live, request)
+    }
+
+    #[test]
+    fn a_sub_agents_approval_names_the_sub_agent_and_waits_with_no_turn_running() {
+        for (harness, asker, run, subject) in [
+            (
+                "claude",
+                "Check limiter test coverage",
+                "task_b:run-1",
+                "npm test -- rate-limit",
+            ),
+            ("codex", "Editor", "thr_a:run-1", "touch notes.txt"),
+        ] {
+            let (stored, live, request) = pending_approval(harness);
+            let tracker = Tracker::from_snapshot(&stored.items, &stored.sub_agents);
+            let state = super::chat_state(&stored.chat, &live, &tracker, &Surroundings::default());
+            let rows: Vec<serde_json::Value> = stored
+                .items
+                .iter()
+                .flat_map(|record| items(record, &stored.chat, &live, None, &tracker))
+                .map(|row| serde_json::to_value(row).unwrap())
+                .collect();
+            let shown = rows
+                .iter()
+                .find(|row| row["kind"] == "request")
+                .expect("the request is shown");
+            // It is the sub-agent's, in its run, and says what it would run without the
+            // harness's name: the interface writes the sub-agent's before it.
+            assert_eq!(shown["owner"], request_owner(&request), "{harness}");
+            assert_eq!(shown["turn_id"], run, "{harness}");
+            assert_eq!(shown["state"], "pending", "{harness}");
+            assert_eq!(shown["title"], "wants to run", "{harness}");
+            assert_eq!(shown["subject"], subject, "{harness}");
+            // Its Step waits with it, and is the sub-agent's.
+            let step = rows
+                .iter()
+                .find(|row| row["kind"] == "steps" && row["owner"] == shown["owner"])
+                .expect("the sub-agent's Step");
+            assert_eq!(step["steps"][0]["awaiting"], true, "{harness}");
+            // The Chat waits for the person, with no turn running.
+            assert_eq!(state.activity, "waiting");
+            assert_eq!(state.turn_running, Some(false), "{harness}");
+
+            // The Chats list says who asks; the notification says the card.
+            let summary = super::summary(&stored.chat, &live, &tracker, &Surroundings::default());
+            assert_eq!(
+                summary.status.line(),
+                format!("Approval needed · {asker}"),
+                "{harness}"
+            );
+            assert_eq!(
+                summary.status.notification(),
+                format!("{asker} wants to run {subject}"),
+                "{harness}"
+            );
+
+            let view = serde_json::to_string_pretty(&json!({
+                "chat": state, "items": rows, "cursor": 0,
+            }))
+            .unwrap();
+            let view_file = format!(
+                "{}/../src/features/chats/{harness}-sub-agent-approval-view.json",
+                env!("CARGO_MANIFEST_DIR")
+            );
+            if std::env::var_os("TICKETD_UPDATE_VIEW_FIXTURES").is_some() {
+                std::fs::write(&view_file, format!("{view}\n")).expect("the view is written");
+            }
+            let kept = std::fs::read_to_string(&view_file).expect(
+                "the view; regenerate it with TICKETD_UPDATE_VIEW_FIXTURES=1 cargo test -p ticketd-desktop --lib chat_view",
+            );
+            assert!(
+                kept.trim_end() == view,
+                "the view changed; if that is intended, regenerate {view_file} with TICKETD_UPDATE_VIEW_FIXTURES=1"
+            );
+        }
+    }
+
+    fn request_owner(request: &ChatInteraction) -> serde_json::Value {
+        match &request.owner {
+            ChatOwner::SubAgent { native_id } => json!(native_id),
+            ChatOwner::Main => serde_json::Value::Null,
+        }
+    }
+
+    /// A request whose asker the Chat has no record of reads as the main agent's, with the
+    /// harness's own name: the interface has no sub-agent to name.
+    #[test]
+    fn an_approval_from_a_sub_agent_nobody_announced_reads_as_the_main_agents() {
+        let (mut stored, live, _) = pending_approval("claude");
+        stored.sub_agents.clear();
+        let tracker = Tracker::from_snapshot(&stored.items, &stored.sub_agents);
+        let rows: Vec<serde_json::Value> = stored
+            .items
+            .iter()
+            .flat_map(|record| items(record, &stored.chat, &live, None, &tracker))
+            .map(|row| serde_json::to_value(row).unwrap())
+            .collect();
+        let shown = rows
+            .iter()
+            .find(|row| row["kind"] == "request")
+            .expect("the request is shown");
+        assert!(shown.get("owner").is_none());
+        assert_eq!(shown["title"], "Claude Code wants to run");
     }
 }

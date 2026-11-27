@@ -1,0 +1,178 @@
+{
+  "chat": {
+    "id": "00000000-0000-4000-8000-000000000001",
+    "title": null,
+    "harness": "codex",
+    "execution_folder": "/work/chat-1",
+    "folder_managed": false,
+    "archived": false,
+    "trashed": false,
+    "queue_paused": false,
+    "effective_settings": "{\"cliVersion\":\"0.163.0\",\"model\":\"gpt-test\",\"modelProvider\":\"openai\",\"reasoningEffort\":null,\"approvalPolicy\":\"on-request\",\"approvalsReviewer\":\"user\",\"sandbox\":{\"type\":\"workspaceWrite\"},\"cwd\":\"/work/chat-1\",\"instructionSources\":[\"/work/chat-1/AGENTS.md\"],\"own\":{\"approvalPolicy\":\"on-request\",\"sandboxPolicy\":{\"type\":\"workspaceWrite\"}},\"reopen_with\":{\"permission\":\"own\"}}",
+    "native_session_id": "thr_1",
+    "links": [],
+    "active_turn": null,
+    "seen_through": 0,
+    "read_through": null,
+    "marked_unread": false,
+    "muted": false,
+    "created_at": "2026-11-27T10:00:00.000Z"
+  },
+  "sequence": 17,
+  "items": [
+    {
+      "kind": "message",
+      "value": {
+        "id": "00000000-0000-4000-8000-000000000002",
+        "position": 2,
+        "role": "user",
+        "text": "Have a sub-agent change a file",
+        "attachments": [],
+        "complete": true,
+        "turn_id": null,
+        "queued": false,
+        "editing": false,
+        "requires_link_context": false,
+        "attempts": [
+          {
+            "id": "00000000-0000-4000-8000-000000000003",
+            "intent": "new_turn",
+            "delivery": "acknowledged",
+            "turn_id": "00000000-0000-4000-8000-000000000004:turn_1",
+            "detail": null,
+            "decision": null,
+            "recorded_at": "2026-11-27T10:00:00.000Z"
+          }
+        ],
+        "created_at": "2026-11-27T10:00:00.000Z"
+      }
+    },
+    {
+      "kind": "session",
+      "value": {
+        "id": "00000000-0000-4000-8000-000000000005",
+        "position": 4,
+        "native_session_id": "thr_1",
+        "origin": "new",
+        "started_at": "2026-11-27T10:00:00.000Z"
+      }
+    },
+    {
+      "kind": "turn",
+      "value": {
+        "id": "00000000-0000-4000-8000-000000000004:turn_1",
+        "position": 8,
+        "native_turn_id": "turn_1",
+        "state": "completed",
+        "detail": null,
+        "problem": null,
+        "problem_resets_at": null,
+        "ending": "completed",
+        "started_at": "2026-11-27T10:00:00.000Z",
+        "ended_at": "2026-11-27T10:00:00.000Z",
+        "origin": null
+      }
+    },
+    {
+      "kind": "sub_agent_run",
+      "value": {
+        "id": "00000000-0000-4000-8000-000000000001:sub-agent:thr_a:run-1",
+        "position": 11,
+        "sub_agent": "thr_a",
+        "run": 1,
+        "native_run_id": null,
+        "turn_id": "00000000-0000-4000-8000-000000000004:turn_1",
+        "state": "running",
+        "stopped_by": null,
+        "stop_reason": null,
+        "detail": null,
+        "started_at": "2026-11-27T10:00:00.000Z",
+        "ended_at": null
+      }
+    },
+    {
+      "kind": "tool",
+      "value": {
+        "id": "00000000-0000-4000-8000-000000000004:exec_1",
+        "position": 13,
+        "turn_id": "00000000-0000-4000-8000-000000000004:turn_1",
+        "owner": {
+          "kind": "sub_agent",
+          "native_id": "thr_a"
+        },
+        "name": "/bin/zsh -lc 'touch notes.txt'",
+        "input": "{\"type\":\"commandExecution\",\"id\":\"exec_1\",\"pluginId\":null,\"scriptPath\":null,\"command\":\"/bin/zsh -lc 'touch notes.txt'\",\"cwd\":\"/work/chat-1\",\"processId\":\"1\",\"source\":\"unifiedExecStartup\",\"status\":\"inProgress\",\"commandActions\":[{\"type\":\"unknown\",\"command\":\"/bin/zsh -lc 'touch notes.txt'\"}],\"completedAtMs\":null,\"exitCode\":null,\"durationMs\":null,\"startedAtMs\":1}",
+        "state": "running",
+        "output": null,
+        "output_truncated": false,
+        "started_at": "2026-11-27T10:00:00.000Z"
+      }
+    },
+    {
+      "kind": "interaction",
+      "value": {
+        "id": "00000000-0000-4000-8000-000000000004:request:0",
+        "position": 14,
+        "turn_id": null,
+        "owner": {
+          "kind": "sub_agent",
+          "native_id": "thr_a"
+        },
+        "kind": "approval",
+        "native_request_id": "0",
+        "prompt": "touch notes.txt",
+        "reason": "Needs approval",
+        "state": "pending",
+        "response": null,
+        "tool_id": "00000000-0000-4000-8000-000000000004:exec_1",
+        "asked_at": "2026-11-27T10:00:00.000Z",
+        "resolved_at": null
+      }
+    },
+    {
+      "kind": "message",
+      "value": {
+        "id": "00000000-0000-4000-8000-000000000004:msg_2",
+        "position": 15,
+        "role": "assistant",
+        "text": "Waiting for the sub-agent.",
+        "attachments": [],
+        "complete": true,
+        "turn_id": "00000000-0000-4000-8000-000000000004:turn_1",
+        "queued": false,
+        "editing": false,
+        "requires_link_context": false,
+        "attempts": [],
+        "created_at": "2026-11-27T10:00:00.000Z"
+      }
+    }
+  ],
+  "earlier": false,
+  "sub_agents": [
+    {
+      "id": "00000000-0000-4000-8000-000000000001:sub-agent:thr_a",
+      "native_id": "thr_a",
+      "parent": null,
+      "tool_id": null,
+      "background": true,
+      "payload": "{\"description\":\"Editor\",\"agentPath\":\"/root/editor\",\"model\":\"gpt-test\",\"reasoningEffort\":\"low\",\"root_turn\":\"turn_1\"}",
+      "created_at": "2026-11-27T10:00:00.000Z",
+      "runs": [
+        {
+          "id": "00000000-0000-4000-8000-000000000001:sub-agent:thr_a:run-1",
+          "position": 11,
+          "sub_agent": "thr_a",
+          "run": 1,
+          "native_run_id": null,
+          "turn_id": "00000000-0000-4000-8000-000000000004:turn_1",
+          "state": "running",
+          "stopped_by": null,
+          "stop_reason": null,
+          "detail": null,
+          "started_at": "2026-11-27T10:00:00.000Z",
+          "ended_at": null
+        }
+      ]
+    }
+  ]
+}

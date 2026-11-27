@@ -14,7 +14,7 @@ use tokio::time::{sleep, timeout};
 use super::CodexAdapter;
 use super::mapping::Session;
 use super::runtime::{Options, login_state, open_over, probe_login, probe_options, probe_skills};
-use crate::conformance::{NewTurn, Provider};
+use crate::conformance::{NewTurn, Provider, SubAgentApprovals};
 use crate::outcome::read_end;
 use crate::scripted::{Peer, brief, pipes};
 use crate::{
@@ -2448,6 +2448,48 @@ impl Provider for AppServer {
 
     fn events(&mut self) -> &mut EventStream {
         &mut self.events
+    }
+
+    fn sub_agent_approvals(&self) -> SubAgentApprovals {
+        SubAgentApprovals::Owned
+    }
+
+    async fn play_sub_agent_approval(&mut self, _id: &str) -> NativeRequestId {
+        self.peer.load(
+            r#"{"server":{"method":"turn/started","params":{"threadId":"thr_a","turn":{"id":"turn_2","rootTurnId":"turn_1","items":[],"itemsView":"notLoaded","status":"inProgress","error":null}}}}
+{"server":{"id":0,"method":"item/commandExecution/requestApproval","params":{"threadId":"thr_a","turnId":"turn_2","itemId":"exec_1","startedAtMs":1,"command":"touch notes.txt","cwd":"/work/chat-1","reason":"Needs approval"}}}"#,
+        );
+        self.peer.play().await;
+        let shown = drain(&mut self.events).await;
+        shown
+            .into_iter()
+            .find_map(|event| match event {
+                EventKind::InteractionRequested(request) => {
+                    assert_eq!(request.turn, None, "a sub-agent's request has no turn");
+                    assert_eq!(
+                        request.owner,
+                        Some(crate::NativeSubAgentId::new("thr_a")),
+                        "it names the child thread"
+                    );
+                    Some(request.request)
+                }
+                _ => None,
+            })
+            .expect("app-server asked on the child's behalf")
+    }
+
+    async fn end_parent_turn(&mut self, _id: &str) {
+        self.peer.load(
+            r#"{"server":{"method":"turn/completed","params":{"threadId":"thr_1","turn":{"id":"turn_1","status":"completed","items":[],"error":null}}}}"#,
+        );
+        self.peer.play().await;
+    }
+
+    async fn end_sub_agent(&mut self) {
+        self.peer.load(
+            r#"{"server":{"method":"turn/completed","params":{"threadId":"thr_a","turn":{"id":"turn_2","status":"interrupted","items":[],"error":null}}}}"#,
+        );
+        self.peer.play().await;
     }
 
     async fn start_turn(&mut self, id: &str) -> DispatchOutcome {

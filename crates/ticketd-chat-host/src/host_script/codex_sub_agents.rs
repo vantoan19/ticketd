@@ -466,6 +466,7 @@ async fn a_child_s_approval_outlives_the_main_agent_s_turn_and_can_still_be_answ
     assert_eq!(h.live().await.interactions.len(), 1);
     let status = h.attention().await;
     assert_eq!(status.rank, Rank::Approval);
+    super::sub_agents::approvals::pinned(&h, "codex/sub_agent_approval.stored.json");
 
     h.approve().await;
     h.play_all().await;
