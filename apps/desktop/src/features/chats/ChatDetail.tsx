@@ -515,10 +515,10 @@ function Conversation({
     if (document.activeElement === document.body) messageBox.current?.focus();
   }, []);
   // Focus was in the strip when its last part left: the message box takes it.
-  const [stripFocus] = useState<StripFocus>({ at: null });
+  const stripFocus = useRef<StripFocus>(null);
   useLayoutEffect(() => {
-    if (stripFocus.at === null || runningAgents(chat) > 0) return;
-    stripFocus.at = null;
+    if (stripFocus.current === null || runningAgents(chat) > 0) return;
+    stripFocus.current = null;
     if (!document.activeElement || document.activeElement === document.body)
       messageBox.current?.focus();
   });
@@ -1104,7 +1104,7 @@ function Conversation({
                     strip: (
                       <SubAgentStrip
                         agents={chat.sub_agents}
-                        held={stripFocus}
+                        heldRef={stripFocus}
                         onOpen={(agent) => showSubAgent(agent.id, STRIP_OPENER)}
                         onStop={(agent) =>
                           quietly(

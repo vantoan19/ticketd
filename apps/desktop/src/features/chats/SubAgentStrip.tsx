@@ -3,6 +3,7 @@ import {
   useLayoutEffect,
   useState,
   type KeyboardEvent,
+  type RefObject,
 } from "react";
 import { ChevronRight, ChevronUp, LoaderCircle, Square } from "lucide-react";
 import { CrossfadeText } from "@/components/ui/motion";
@@ -28,7 +29,7 @@ function clock(agent: SubAgent, now: number) {
 }
 
 /** Where the keyboard was in the strip as a part of it left: a list row's place, or 0 for the pill. */
-export type StripFocus = { at: number | null };
+export type StripFocus = number | null;
 
 /** Where the strip's rows are in the open list, and its pill: what focus is handed to. */
 const LIST_ROW = ".chat-subagent-item";
@@ -39,19 +40,19 @@ const pillSelector = `[data-sub-agent="${STRIP_OPENER}"]`;
  * the list closed itself): as it detaches, it notes where focus was, so the
  * strip can hand focus on instead of dropping it to the page.
  */
-function useNoteLeaving(held: StripFocus) {
+function useNoteLeaving(heldRef: RefObject<StripFocus>) {
   return useCallback(
     (element: HTMLElement | null) => {
       if (!element) return;
       return () => {
         if (!element.contains(document.activeElement)) return;
         const row = element.closest("li");
-        held.at = row?.parentElement
+        heldRef.current = row?.parentElement
           ? [...row.parentElement.children].indexOf(row)
           : 0;
       };
     },
-    [held],
+    [heldRef],
   );
 }
 
@@ -65,24 +66,24 @@ export function SubAgentStrip({
   agents,
   onOpen,
   onStop,
-  held,
+  heldRef,
 }: {
   agents: readonly SubAgent[];
   onOpen: (agent: SubAgent) => void;
   onStop: (agent: SubAgent) => void;
   /** Filled in when focus was in a part of the strip as it left; the strip or its Chat then hands focus on. */
-  held: StripFocus;
+  heldRef: RefObject<StripFocus>;
 }) {
   const [open, setOpen] = useState(false);
   const tree = runningTree(agents);
   const now = useNow(tree.length > 0);
-  const noteLeaving = useNoteLeaving(held);
+  const noteLeaving = useNoteLeaving(heldRef);
   // After a commit that took the focused part away: the next row at its place
   // (or the last), else the pill; with the strip gone, its Chat's message box.
   useLayoutEffect(() => {
-    const at = held.at;
+    const at = heldRef.current;
     if (at === null || tree.length === 0) return;
-    held.at = null;
+    heldRef.current = null;
     if (document.activeElement && document.activeElement !== document.body)
       return;
     const rows = [...document.querySelectorAll<HTMLElement>(LIST_ROW)];
