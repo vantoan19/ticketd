@@ -778,7 +778,12 @@ impl HostScript {
             peer.exhausted(),
             "the test ended before the fixture did: play() on to its end"
         );
-        let extra = peer.try_written_within(Duration::from_secs(1)).await;
+        let extra = peer
+            .try_written_within(Duration::from_secs(1))
+            .await
+            .unwrap_or_else(|why| {
+                panic!("the adapter wrote a frame the fixture does not expect: {why}")
+            });
         drop(peer);
         assert!(
             extra.is_none(),
