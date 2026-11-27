@@ -354,6 +354,26 @@ async fn stop_with_no_turn_leaves_nothing_running(declared: Declared) {
     assert_nothing_runs(&h).await;
     assert_stopped_by_the_person(&h);
     assert!(!h.live().await.running, "the harness process still runs");
+    // The process that ended is the Stop's own doing, not lost contact: every sub-agent has
+    // its one run, no note waits for the person's next message, and the queue is as it was,
+    // so a later message or wake is dispatched.
+    for record in h.sub_agents() {
+        assert_eq!(
+            record.runs.len(),
+            1,
+            "{} ran again: {record:?}",
+            record.native_id
+        );
+    }
+    let chat = h.chat_id().to_owned();
+    assert!(
+        h.core().chat_restart_notice(&chat).unwrap().is_empty(),
+        "a note on lost sub-agents waits for the next message"
+    );
+    assert!(
+        !h.core().chat(&chat).unwrap().queue_paused,
+        "Stop at rest paused the queue"
+    );
     // What stopped is said once, with a plural that fits.
     let stopped = h
         .sub_agents()

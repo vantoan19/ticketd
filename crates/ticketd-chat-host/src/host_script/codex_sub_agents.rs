@@ -284,6 +284,88 @@ async fn stop_with_no_turn_running_still_interrupts_the_children() {
     assert_eq!(h.turns()[0].state, ChatTurnState::Completed);
 }
 
+/// F-X1 and F-X2 of the live Codex run: Stop with only a child running and no turn. The
+/// app-server ends, and the child's last frames still reach ticketd after it closed it.
+/// Nothing of that is lost contact, and the Chat is idle with its queue as it was.
+#[tokio::test(start_paused = true)]
+async fn stop_at_rest_leaves_the_chat_idle_and_the_exit_it_caused_is_not_contact_loss() {
+    let mut h = HostScript::codex()
+        .process([
+            fixture!("codex", "handshake"),
+            fixture!("codex", "sub_agent_stop_at_rest"),
+        ])
+        .start();
+    h.send("Start one sub-agent on the slow check, do not wait for it, and end your turn")
+        .await;
+    h.play_to("the parent's turn ended while the sub-agent runs")
+        .await;
+    assert_eq!(latest(&h), ChatSubAgentState::Running);
+
+    h.stop().await;
+    h.play_to("the sub-agent was told to stop").await;
+    h.play_all().await;
+    h.lose_process(0).await;
+    h.finish().await;
+
+    // One run, stopped by the person: no second run, nothing lost.
+    assert_eq!(
+        runs(&only_sub_agent(&h)),
+        [(
+            ChatSubAgentState::Stopped,
+            Some(ChatSubAgentStopper::Person)
+        )]
+    );
+    assert_eq!(h.notices(), ["You stopped 1 sub-agent."]);
+    let chat = h.chat_id().to_owned();
+    assert!(
+        h.core().chat_restart_notice(&chat).unwrap().is_empty(),
+        "no sub-agent is held for a note on the next message"
+    );
+    // The Chat is idle, not working, and Stop did not pause its queue.
+    assert!(!h.core().chat(&chat).unwrap().queue_paused);
+    let live = h.live().await;
+    assert_eq!(live.activity, crate::Activity::Idle);
+    assert_eq!(live.sub_agents, 0);
+    assert_ne!(h.attention().await.rank, Rank::Working);
+}
+
+/// F-X2: what the main agent does after a Stop at rest is not held back. The next message
+/// opens the session again, carries no note about lost sub-agents (the exit was the Stop's
+/// own), and when a sub-agent it starts then finishes at rest, the main agent is woken.
+#[tokio::test(start_paused = true)]
+async fn after_stop_at_rest_the_next_message_goes_out_plain_and_a_later_wake_still_starts() {
+    const PROMPT: &str =
+        "Start one sub-agent on the slow check, do not wait for it, and end your turn";
+    let mut h = HostScript::codex()
+        .process([
+            fixture!("codex", "handshake"),
+            fixture!("codex", "sub_agent_stop_at_rest"),
+        ])
+        .process([fixture!("codex", "sub_agent_after_stop")])
+        .start();
+    h.send(PROMPT).await;
+    h.play_to("the parent's turn ended while the sub-agent runs")
+        .await;
+    h.stop().await;
+    h.play_all().await;
+    h.lose_process(0).await;
+
+    h.send(PROMPT).await;
+    h.play_to("the parent's turn ended while the sub-agent runs")
+        .await;
+    h.play_to("the sub-agent runs its command").await;
+    h.play_to("the sub-agent finished").await;
+    h.pass(std::time::Duration::from_secs(5)).await;
+    h.play_to("the woken turn ended").await;
+    h.finish().await;
+
+    let turns = h.turns();
+    assert_eq!(turns.len(), 3, "{:?}", h.transcript());
+    let woken = turns[2].origin.clone().expect("the woken turn is labelled");
+    assert_eq!(woken.by, ChatTurnStarter::Ticketd);
+    assert!(!h.core().chat(h.chat_id()).unwrap().queue_paused);
+}
+
 /// Everything a sub-agent owns is stored with its owner.
 #[tokio::test(start_paused = true)]
 async fn what_a_child_does_is_stored_with_its_owner_and_opens_no_turn() {

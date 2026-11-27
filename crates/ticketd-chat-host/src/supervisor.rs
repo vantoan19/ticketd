@@ -1657,11 +1657,33 @@ impl Supervisor {
         .unwrap_or(false)
     }
 
+    /// Whether Stop finds the Chat working at rest: no turn, no input on its way, no
+    /// session opening and nothing unsent in its queue, only sub-agents running or the main
+    /// agent about to be told of one's finish.
+    fn stop_finds_it_working_at_rest(&self) -> bool {
+        let chat = self.chat_id.clone();
+        (!self.sub_agents.is_empty() || self.wake_after.is_some() || self.wake_until.is_some())
+            && self.active.is_none()
+            && self.unconfirmed_start.is_none()
+            && self.dispatching.is_none()
+            && self.opening.is_none()
+            && self.direct.is_empty()
+            && self.resend.is_none()
+            && self
+                .core(|core| Ok(core.chat_queue(&chat)?.is_empty()))
+                // Unreadable: not known to be at rest, so Stop pauses as it always did.
+                .unwrap_or(false)
+    }
+
     /// Stop pauses the queue first, so nothing unsent is dispatched whatever the
-    /// harness then does, and keeps all unsent input.
+    /// harness then does, and keeps all unsent input. Where only sub-agents work there is
+    /// nothing to hold back, and the pause would outlive the Stop: with no turn to end, no
+    /// later wake or message would be dispatched, and the Chat would read as working.
     fn request_stop(&mut self) -> Result<(), HostError> {
         let chat = self.chat_id.clone();
-        self.write(|core| core.set_chat_queue_paused(&chat, true))?;
+        if !self.stop_finds_it_working_at_rest() {
+            self.write(|core| core.set_chat_queue_paused(&chat, true))?;
+        }
         self.clear_direct();
         self.resend = None;
         // Nothing is to be told to the main agent after a Stop.
