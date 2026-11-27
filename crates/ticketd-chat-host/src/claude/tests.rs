@@ -1233,7 +1233,7 @@ fn an_agent_with_every_switch_off_may_still_run_the_ticketd_cli_and_nothing_else
             "allowed_tools": CLI_RULES,
             "disallowed_tools": [
                 "Read", "Glob", "Grep", "LSP", "Edit", "Write", "NotebookEdit", "WebFetch",
-                "WebSearch"
+                "WebSearch", "Agent"
             ],
             "max_turns": 40,
         })
@@ -1270,8 +1270,42 @@ fn an_agent_that_edits_files_may_read_the_files_it_changes() {
     assert_eq!(options["allowed_tools"], json!(expected));
     assert_eq!(
         options["disallowed_tools"],
-        json!(["Glob", "Grep", "LSP", "WebFetch", "WebSearch"])
+        json!(["Glob", "Grep", "LSP", "WebFetch", "WebSearch", "Agent"])
     );
+}
+
+/// #613: an Automation's agent cannot start sub-agents, whatever its switches say:
+/// Claude Code's `Agent` tool needs no approval, so "don't ask" alone never stops it.
+/// A deny rule removes it, and also applies inside a sub-agent.
+#[test]
+fn no_switch_lets_an_agent_start_sub_agents() {
+    for on in [false, true] {
+        let mut unattended = reader_that_tests();
+        unattended.tools = ticketd_core::AutomationAgentTools {
+            read_files: on,
+            edit_files: on,
+            run_commands: on,
+            any_command: on,
+            allowed_commands: vec!["npm test".into()],
+            use_web: on,
+        };
+        let options = super::unattended_options(&unattended);
+        assert!(
+            options["disallowed_tools"]
+                .as_array()
+                .unwrap()
+                .contains(&json!("Agent")),
+            "switches {on}"
+        );
+        assert!(
+            !options["allowed_tools"]
+                .as_array()
+                .unwrap()
+                .iter()
+                .any(|rule| rule.as_str().is_some_and(|rule| rule.starts_with("Agent"))),
+            "switches {on}"
+        );
+    }
 }
 
 /// #387 3B1: no switch allows a file tool by its bare name, which Claude Code reads

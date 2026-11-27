@@ -258,6 +258,11 @@ pub(super) fn unattended_options(unattended: &Unattended) -> Value {
     } else {
         disallowed.extend(web);
     }
+    // No agent starts sub-agents (#613): the `Agent` tool needs no approval, so "don't
+    // ask" does not stop it and an allowlist only auto-approves what it names. A deny
+    // rule removes the tool, and Claude Code applies it inside sub-agents too. Runs
+    // end at the first turn end, which would cut a background sub-agent off.
+    disallowed.push("Agent".to_owned());
     const SHELLS: [&str; 2] = ["Bash", "PowerShell"];
     // The ticketd CLI is always allowed, by its name, with or without `.exe`.
     for command in ["ticketd", "ticketd.exe"] {
