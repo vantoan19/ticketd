@@ -270,6 +270,32 @@ mod codex {
         assert_eq!(run(&h, &first).state, ChatSubAgentState::Stopped);
     }
 
+    /// Cleaning a child's terminals reaches the whole thread: it is sent only while the turn
+    /// the Stop asked about is still the child's, never after the child began another.
+    #[tokio::test(start_paused = true)]
+    async fn a_stop_does_not_clean_the_terminals_of_a_turn_the_child_began_meanwhile() {
+        let mut h = HostScript::codex()
+            .process([
+                fixture!("codex", "handshake"),
+                fixture!("codex", "sub_agent_stop_one_new_turn"),
+            ])
+            .start();
+        h.send(ASK).await;
+        h.play_to("two sub-agents run commands").await;
+        let first = h
+            .sub_agents()
+            .into_iter()
+            .map(|record| record.native_id)
+            .min()
+            .unwrap();
+
+        h.stop_sub_agent(&first).await;
+        h.play_to("the first sub-agent began another turn").await;
+        // The fixture holds no `thread/backgroundTerminals/clean`: finishing fails on any
+        // frame it does not expect.
+        h.finish().await;
+    }
+
     /// F-X5: Codex completes the command a Stop cut off as failed (exit code -1) after it
     /// reports the child's turn interrupted. The Stop did that: no Step of the stopped
     /// sub-agent is stored as failed.
