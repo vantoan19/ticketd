@@ -1,15 +1,11 @@
-import { createContext, Fragment, memo, useContext } from "react";
+import { Fragment, memo, useContext } from "react";
 import { Bot, ChevronRight, LoaderCircle } from "lucide-react";
 import { Tooltip } from "@/components/ui/tooltip";
 import type { ItemOf, SubAgent } from "@/features/chats/client";
 import { subAgentLabel, subAgentSuffix } from "@/features/chats/model";
-import { RowLine, useNow } from "@/features/chats/Transcript";
-
-/** The Chat's sub-agents, for the rows that name them. */
-export const SubAgentsContext = createContext<readonly SubAgent[]>([]);
-
-/** True inside a sub-agent's view: its failure marker says "This sub-agent failed". */
-export const InSubAgent = createContext(false);
+import { RowLine } from "@/features/chats/Transcript";
+import { SubAgentsContext } from "@/features/chats/sub-agent-context";
+import { useNow } from "@/features/chats/use-now";
 
 const STOPPERS = {
   person: "Stopped by you",

@@ -256,8 +256,10 @@ function mockStatus(chat: ChatState, items: TranscriptItem[]): ChatStatus {
     );
   const condition = problem && !problem.past && CONDITION_WORDS[problem.kind];
   if (condition) return make("idle", condition);
-  const change = firstChange(items);
-  const response = items
+  // The list row says what the main agent did, not a sub-agent.
+  const main = items.filter((item) => !item.owner);
+  const change = firstChange(main);
+  const response = main
     .filter(
       (item): item is Extract<TranscriptItem, { kind: "response" }> =>
         item.kind === "response",
@@ -622,7 +624,7 @@ export function createMockChatClient(
             : marker?.reason === "stop_unconfirmed"
               ? "unconfirmed"
               : null,
-      first_change: firstChange(items) ?? null,
+      first_change: firstChange(items.filter((item) => !item.owner)) ?? null,
       preview: last("response")?.text.slice(0, 120) ?? null,
       updated_at: entry.updated_at,
     });

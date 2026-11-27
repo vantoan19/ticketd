@@ -350,6 +350,7 @@
   padding-bottom: 40px;
 }
 .chat-part[data-kind="user"] + *,
+.chat-part[data-kind="brief"] + *,
 .chat-divider + .chat-turn-unit {
   margin-top: -24px;
 }
@@ -1757,9 +1758,11 @@
   min-width: 0;
   overflow: hidden;
 }
+.chat-subagent .chat-step-words[data-line] > .chat-subagent-title {
+  flex: 0 1 auto;
+}
 .chat-subagent-title {
   min-width: 0;
-  flex: 0 1 auto;
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
@@ -1870,4 +1873,14 @@
 .chat-subagent-foot .chat-stop-mark {
   width: 10px;
   height: 10px;
+}
+.chat-turn-unit + .chat-run-divider {
+  margin-top: -34px;
+}
+.chat-run-divider + .chat-turn-unit {
+  margin-top: -9px;
+}
+/* How a sub-agent ended sits 12px under its last words, as the end of a turn's parts do. */
+.chat-turn-unit + .chat-end {
+  margin-top: -28px;
 }

@@ -1,89 +1,22 @@
-import {
-  useLayoutEffect,
-  useRef,
-  useState,
-  type KeyboardEvent,
-  type ReactNode,
-} from "react";
+import { useLayoutEffect, useRef, useState, type ReactNode } from "react";
 import { Info, Square, Unplug } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { OverlayBoundary } from "@/components/ui/overlay-boundary";
 import type { TranscriptItem } from "@/features/chats/client";
 import { duration, turnStatus } from "@/features/chats/model";
-import { InSubAgent } from "@/features/chats/SubAgentRow";
-import type { Ending, SubAgentViewData } from "@/features/chats/sub-agents";
+import { useNow } from "@/features/chats/use-now";
+import { InSubAgent } from "@/features/chats/sub-agent-context";
+import { endingWords } from "@/features/chats/sub-agent-words";
+import type { SubAgentViewData } from "@/features/chats/sub-agents";
 import {
   JumpToLatest,
-  markerText,
   Transcript,
-  useNow,
   type TranscriptActions,
 } from "@/features/chats/Transcript";
 import {
   ReadingContext,
   useTranscriptScroll,
 } from "@/features/chats/use-transcript-scroll";
-
-/** What takes an Esc before the view does: menus, popovers, dialogs, pickers. */
-const LAYER =
-  '[role="menu"], [role="dialog"], [role="alertdialog"], [role="listbox"]';
-
-/**
- * Back from a sub-agent's view by keyboard: Cmd+[ (Ctrl+[), or Esc when no
- * menu, popover or request has the key. Never stops anything.
- */
-export function backKey(event: KeyboardEvent<HTMLElement>, onBack: () => void) {
-  if (event.nativeEvent.isComposing || event.defaultPrevented) return;
-  const back =
-    event.key === "Escape" ||
-    (event.key === "[" && (event.metaKey || event.ctrlKey));
-  if (!back) return;
-  const target = event.target as Element;
-  if (
-    event.key === "Escape" &&
-    (target.closest(LAYER) ||
-      document.querySelector(LAYER) ||
-      target.closest(".chat-tray"))
-  )
-    return;
-  event.preventDefault();
-  onBack();
-}
-
-/** The sentence a StopReason is told by in the transcript, without its edits clause. */
-function stoppedWords(reason: string, harness: string) {
-  const words = markerText(
-    {
-      id: "",
-      at: "",
-      kind: "marker",
-      reason: reason as "quit",
-    },
-    harness,
-    false,
-  );
-  const first = words?.split(/(?<=\.) /)[0];
-  return first && first.length > 0 ? first : undefined;
-}
-
-/** How a sub-agent ended, as one step-style row under its last words. */
-export function endingWords(ending: Ending, harness: string) {
-  if (ending.kind === "lost")
-    return {
-      text: `Contact lost when ticketd quit.${ending.resumable ? ` ${harness} can resume it.` : ""}`,
-      icon: "unplug" as const,
-    };
-  const text =
-    ending.by === "person"
-      ? "You stopped it."
-      : ending.by === "main_agent"
-        ? "The main agent stopped it."
-        : ending.by === "ticketd"
-          ? ((ending.reason && stoppedWords(ending.reason, harness)) ??
-            "ticketd stopped it.")
-          : "Stopped.";
-  return { text, icon: "square" as const };
-}
 
 /** The brief the main agent gave the sub-agent, where a message would be. */
 function Brief({ view }: { view: SubAgentViewData }) {
@@ -216,10 +149,7 @@ export function SubAgentView({
                           <p className="chat-line chat-note chat-subagent-note">
                             <Info size={16} aria-hidden />
                             <span>
-                              {chat.harness.name} doesn&apos;t report a
-                              sub-agent&apos;s messages or when it finishes, and
-                              can&apos;t stop one alone. ticketd shows its steps
-                              and counts it as ended when the turn ends.
+                              {`${chat.harness.name} doesn't report a sub-agent's messages or when it finishes, and can't stop one alone. ticketd shows its steps and counts it as ended when the turn ends.`}
                             </span>
                           </p>
                         </div>
@@ -228,7 +158,7 @@ export function SubAgentView({
                   }
                   trail={
                     ending && (
-                      <div data-anchor="">
+                      <div className="chat-end" data-anchor="">
                         <p className="chat-line chat-end-marker">
                           <span className="chat-row-icon" aria-hidden="true">
                             {ending.icon === "unplug" ? (

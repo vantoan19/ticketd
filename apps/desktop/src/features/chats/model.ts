@@ -1667,6 +1667,50 @@ export function subAgentLabel(
   const word = ended
     ? "ended with the turn"
     : SUB_AGENT_STATE_WORDS[run.status];
-  const clock = subAgentClock(run, now);
+  // An outcome word (failed, stopped, contact lost) says it all: no clock after it.
+  const clock =
+    run.status === "running" || run.status === "completed"
+      ? subAgentClock(run, now)
+      : undefined;
   return `Sub-agent ${title}, ${word}${clock && !ended ? `, ${clock}` : ""}`;
+}
+
+/** What a marker says: why a turn stopped or failed, or a note from ticketd. */
+export function markerText(
+  item: ItemOf<"marker">,
+  harness: string,
+  detailShown: boolean,
+) {
+  const detail = item.message ? ` ${sentence(item.message)}` : "";
+  switch (item.reason) {
+    case "stopped":
+      return `You stopped this turn. Edits already made are kept.${detail}`;
+    case "quit":
+      return `Stopped when ticketd quit. Edits already made are kept.${detail}`;
+    case "turned_off":
+      return `Stopped when Chat was turned off. Edits already made are kept.${detail}`;
+    case "restore":
+      return `Stopped when a backup was restored. Edits already made are kept.${detail}`;
+    case "taken_over":
+      return `You took this run over. Edits already made are kept.${detail}`;
+    case "time_limit":
+      return `Stopped at the run's time limit. Edits already made are kept.${detail}`;
+    case "run_ended":
+      return `Stopped when its run step ended. Edits already made are kept.${detail}`;
+    case "trashed":
+      return `Stopped when the Chat was moved to the trash. Edits already made are kept.${detail}`;
+    case "explicit_resume":
+      return `Stopped when the Chat was resumed. Edits already made are kept.${detail}`;
+    case "storage_failed":
+      return `Stopped when Chat storage failed. Edits already made are kept.${detail}`;
+    case "stop_unconfirmed":
+      return `ticketd asked ${harness} to stop but it didn't confirm. It may still be running.${detail}`;
+    case "failed": {
+      const reason = detailShown ? "" : detail || ` ${harness} gave no reason.`;
+      return `This turn failed.${reason} What it finished before that is kept.`;
+    }
+    case "note":
+    case "warning":
+      return item.message ?? "";
+  }
 }

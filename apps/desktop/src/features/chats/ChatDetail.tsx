@@ -132,7 +132,8 @@ import {
   useTranscriptScroll,
 } from "@/features/chats/use-transcript-scroll";
 import { useChat } from "@/features/chats/use-chats";
-import { SubAgentView, backKey } from "@/features/chats/SubAgentView";
+import { SubAgentView } from "@/features/chats/SubAgentView";
+import { backKey } from "@/features/chats/sub-agent-words";
 import {
   subAgentView,
   viewPath,
@@ -1327,13 +1328,10 @@ export function ChatDetail({
   const [steps, setSteps] = useState<ViewStep[]>([]);
   const path = chat ? viewPath(chat, steps) : [];
   const open = path.at(-1);
-  const view = useMemo(
-    () =>
-      chat && snapshot && open
-        ? subAgentView(chat, snapshot.items, open.agent)
-        : undefined,
-    [chat, snapshot, open],
-  );
+  const view =
+    chat && snapshot && open
+      ? subAgentView(chat, snapshot.items, open.agent)
+      : undefined;
   const returning = useRef<string | null>(null);
   const openSubAgent = useCallback(
     (item: ItemOf<"sub_agent">) =>

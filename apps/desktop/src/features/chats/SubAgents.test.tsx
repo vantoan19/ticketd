@@ -135,7 +135,10 @@ test("Enter opens a sub-agent's view: the path back, the brief, its own work and
     screen.getByRole("button", { name: /^Worked for 2m 40s/ }),
   ).toBeTruthy();
   // Not the main agent's, not a composer, no Chat actions.
-  expect(screen.queryByText(/I started three reviewers/)).toBeNull();
+  const pane = within(
+    screen.getByRole("region", { name: "Find limiter bypasses" }),
+  );
+  expect(pane.queryByText(/I started three reviewers/)).toBeNull();
   expect(screen.queryByRole("textbox")).toBeNull();
   expect(screen.queryByRole("button", { name: "Chat actions" })).toBeNull();
   expect(screen.getByRole("button", { name: "Close Chat" })).toBeTruthy();

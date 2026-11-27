@@ -183,6 +183,83 @@ export const bypassWork = (now: number, running: boolean) => [
 export const BYPASS_RESULT =
   "Found one way around the limiter:\n\n- **No API key:** a request without an `x-api-key` header skips `rateLimit()`, because the key lookup returns early (`src/api/rate-limit.ts:31`).\n\nHeader case is handled, retries are counted, and the health routes are mounted before the limiter on purpose.";
 
+export const docsWork = (now: number) => [
+  steps(
+    "sa-docs-s1",
+    [
+      {
+        kind: "read",
+        target: "docs/api.md",
+        targets: [{ text: "docs/api.md" }],
+      },
+      {
+        kind: "edit",
+        target: "docs/api.md",
+        targets: [{ text: "docs/api.md" }],
+        added_lines: 2,
+        removed_lines: 2,
+      },
+    ],
+    ago(now, 9 * MIN),
+  ),
+  text(
+    "sa-docs-r",
+    'Fixed two typos in `docs/api.md` ("recieve", "limt"). The rate limit section matches the code: 100 requests a minute per key, and a `429` with `Retry-After`.',
+    ago(now, 8 * MIN),
+  ),
+];
+
+/** What the tests sub-agent did after its edit, and what it changed in ticketd. */
+export const testsFinish = (now: number) => [
+  steps(
+    "sa-tests-s3",
+    [
+      {
+        kind: "run",
+        target: "npm test -- rate-limit",
+        command: "npm test -- rate-limit",
+        exit_code: 0,
+        duration_ms: 9000,
+        output: "Tests  15 passed",
+      },
+      {
+        kind: "run",
+        target: "ticketd activity add T-KQ29",
+        command:
+          'ticketd activity add T-KQ29 --brief "Limiter tests: added a case for a request with no key; 15 pass."',
+        exit_code: 0,
+        ticketd: [
+          {
+            verb: "post",
+            words: [{ text: "an update on" }, { text: "T-KQ29", code: true }],
+          },
+        ],
+      },
+    ],
+    ago(now, 90 * SEC),
+  ),
+  text(
+    "sa-tests-r",
+    "The limiter's tests cover header case, refills and separate keys. I added the missing case, a request with no API key, and all 15 tests pass. I posted the result on T-KQ29.",
+    ago(now, 60 * SEC),
+  ),
+  (turn: string) =>
+    ({
+      id: "sa-tests-rec",
+      at: ago(now, 60 * SEC),
+      turn_id: turn,
+      kind: "records",
+      changes: [
+        {
+          kind: "update",
+          reference: "T-KQ29",
+          excerpt:
+            "Limiter tests: added a case for a request with no key; 15 pass.",
+        },
+      ],
+    }) as Item,
+];
+
 const testsWork = (now: number) => [
   steps(
     "sa-tests-s1",
@@ -368,7 +445,7 @@ export function heroChat(
     inTurn: "t1",
     ...(options.resumedIn && { resumedIn: [options.resumedIn] }),
     runs: states[key].map((run, index) =>
-      index === 0 ? { ...run, work: [...work, ...(run.work ?? [])] } : run,
+      index === 0 ? { ...run, work: run.work ?? work } : run,
     ),
   });
   return chatWith({
@@ -379,19 +456,7 @@ export function heroChat(
     agents: [
       agent("bypass", bypassWork(now, states.bypass[0]?.status === "running")),
       agent("tests", testsWork(now)),
-      agent("docs", [
-        steps(
-          "sa-docs-s1",
-          [
-            {
-              kind: "read",
-              target: "docs/api.md",
-              targets: [{ text: "docs/api.md" }],
-            },
-          ],
-          ago(now, 9 * MIN),
-        ),
-      ]),
+      agent("docs", docsWork(now)),
     ],
     chat: {
       activity:
@@ -405,6 +470,30 @@ export function heroChat(
         options.replied === false ? null : ago(now, 150 * SEC),
         options.replied === false ? "active" : "completed",
       ),
+      steps(
+        "h-s1",
+        [
+          {
+            kind: "run",
+            target: "ticketd show T-KQ29",
+            command: "ticketd show T-KQ29",
+            exit_code: 0,
+            ticketd: [
+              { verb: "read", words: [{ text: "T-KQ29", code: true }] },
+            ],
+          },
+          {
+            kind: "read",
+            target: "src/api/rate-limit.ts",
+            targets: [
+              { text: "src/api/rate-limit.ts" },
+              { text: "src/api/server.ts" },
+              { text: "docs/api.md" },
+            ],
+          },
+        ],
+        ago(now, 4 * MIN),
+      )("t1"),
       ...(rows["t1"] ?? []),
       ...(options.replied === false
         ? []
@@ -445,10 +534,6 @@ const running = (startedAgo: number): Run => ({
 /** Every state a row and a view show, as named Chats the mock client can open. */
 export function subAgentFixtures(now = Date.now()) {
   const docs = done(9 * MIN, 9 * MIN - 64 * SEC);
-  const withReply = (run: Run, result: string, id: string): Run => ({
-    ...run,
-    work: [...(run.work ?? []), text(id, result, ago(now, run.endedAgo ?? 0))],
-  });
   return {
     /** Two running, one finished: the Main board. */
     running: heroChat(
@@ -463,17 +548,44 @@ export function subAgentFixtures(now = Date.now()) {
     finished: heroChat(
       {
         bypass: [
-          withReply(
-            done(4 * MIN, 4 * MIN - 160 * SEC),
-            BYPASS_RESULT,
-            "sa-bypass-r",
-          ),
+          {
+            ...done(4 * MIN, 4 * MIN - 160 * SEC),
+            work: [
+              ...bypassWork(now, false),
+              text("sa-bypass-r", BYPASS_RESULT, ago(now, 80 * SEC)),
+            ],
+          },
         ],
-        tests: [done(4 * MIN, 0)],
+        tests: [
+          {
+            ...done(4 * MIN, 0),
+            work: [...testsWork(now), ...testsFinish(now)],
+          },
+        ],
         docs: [docs],
       },
       { now },
     ),
+    /** The reply is in; two sub-agents still run. */
+    replied: heroChat(
+      {
+        bypass: [running(130 * SEC)],
+        tests: [running(130 * SEC)],
+        docs: [docs],
+      },
+      { now },
+    ),
+    /** One just started, with nothing of its work yet. */
+    starting: heroChat(
+      {
+        bypass: [running(130 * SEC)],
+        tests: [running(130 * SEC)],
+        docs: [{ ...running(2 * SEC), work: [] }],
+      },
+      { now, replied: false },
+    ),
+    /** Every row state in one Chat: finished, failed, stopped, a long title, resumed. */
+    states: statesChat(now),
     /** One stopped by the person, one by the main agent. */
     stopped: heroChat(
       {
@@ -483,6 +595,7 @@ export function subAgentFixtures(now = Date.now()) {
             stoppedBy: "person",
             startedAgo: 3 * MIN,
             endedAgo: 60 * SEC,
+            work: bypassWork(now, false).slice(0, 2),
           },
         ],
         tests: [
@@ -524,7 +637,14 @@ export function subAgentFixtures(now = Date.now()) {
     /** ticketd quit while they ran. */
     lost: heroChat(
       {
-        bypass: [{ status: "lost", startedAgo: 16 * MIN, endedAgo: 15 * MIN }],
+        bypass: [
+          {
+            status: "lost",
+            startedAgo: 16 * MIN,
+            endedAgo: 15 * MIN,
+            work: bypassWork(now, false).slice(0, 2),
+          },
+        ],
         tests: [{ status: "lost", startedAgo: 16 * MIN, endedAgo: 15 * MIN }],
         docs: [docs],
       },
@@ -545,6 +665,11 @@ export function subAgentFixtures(now = Date.now()) {
               steps(
                 "sa-tests-s4",
                 [
+                  {
+                    kind: "read",
+                    target: "src/api/rate-limit.test.ts",
+                    targets: [{ text: "src/api/rate-limit.test.ts" }],
+                  },
                   {
                     kind: "run",
                     target: "npm test -- rate-limit",
@@ -589,7 +714,7 @@ export function failedChat(now = Date.now()): MockChat {
           {
             status: "failed",
             startedAgo: 29 * MIN,
-            endedAgo: 28 * MIN,
+            endedAgo: 29 * MIN - 62 * SEC,
             work: [
               steps(
                 "sa-retry-s1",
@@ -636,6 +761,20 @@ export function failedChat(now = Date.now()): MockChat {
         ago(now, 30 * MIN),
       ),
       mainTurn("t1", ago(now, 30 * MIN), ago(now, 24 * MIN)),
+      steps(
+        "w-s1",
+        [
+          {
+            kind: "read",
+            target: "src/webhooks/handler.ts",
+            targets: [
+              { text: "src/webhooks/handler.ts" },
+              { text: "src/webhooks/verify.ts" },
+            ],
+          },
+        ],
+        ago(now, 30 * MIN),
+      )("t1"),
       ...(rows["t1"] ?? []),
       reply(
         "w-r1",
@@ -726,7 +865,7 @@ export function codexChat(now = Date.now()): MockChat {
       ...(rows["t1"] ?? []),
       reply(
         "p-r1",
-        "Two agents are on it: one for the refund calls, one for the webhook handler.",
+        "Two agents are on it: one for the refund calls, one for the webhook handler. I'll check their changes when they finish.",
         "t1",
         ago(now, 3 * MIN),
       ),
@@ -797,7 +936,7 @@ export function antigravityChat(now = Date.now()): MockChat {
       ...(rows["t1"] ?? []),
       reply(
         "g-r1",
-        "No session fixation: the session id is regenerated after sign-in in both routes.",
+        "No session fixation: the session id is regenerated after sign-in in both routes. One note: the remember-me cookie isn't marked `SameSite`. I'd set it to `Lax`.",
         "t1",
         ago(now, 7 * MIN),
       ),
@@ -809,3 +948,112 @@ export function antigravityChat(now = Date.now()): MockChat {
 export const LONG_TITLE =
   "Map every caller of verifySignature() in the payments, refunds and webhooks packages";
 export { testsWork };
+
+/** Every row state in the webhook Chat, with the first turn folded and a resumed run after. */
+export function statesChat(now = Date.now()): MockChat {
+  const brief = (text: string) => ({ source: "main_agent" as const, text });
+  const model = "Claude Sonnet 5.5";
+  return chatWith({
+    id: "c-webhook",
+    title: "Harden the webhook handler",
+    harness: "claude-code",
+    now,
+    chat: { activity: "working" },
+    agents: [
+      {
+        inTurn: "t1",
+        record: {
+          id: "sa-sig",
+          title: "Check signature verification",
+          model,
+          brief: brief("Check that signatures are verified in constant time."),
+        },
+        runs: [done(30 * MIN, 30 * MIN - 108 * SEC)],
+      },
+      {
+        inTurn: "t1",
+        record: {
+          id: "sa-retry",
+          title: "Review the retry backoff",
+          model,
+          brief: brief("Review the retry backoff in src/webhooks/retry.ts."),
+        },
+        resumedIn: ["t2"],
+        runs: [
+          {
+            status: "failed",
+            startedAgo: 30 * MIN,
+            endedAgo: 29 * MIN,
+          },
+          running(50 * SEC),
+        ],
+      },
+      {
+        inTurn: "t1",
+        record: {
+          id: "sa-logs",
+          title: "Audit what the handler logs",
+          model,
+          brief: brief("Audit what the webhook handler logs."),
+        },
+        runs: [
+          {
+            status: "stopped",
+            stoppedBy: "person",
+            startedAgo: 30 * MIN,
+            endedAgo: 28 * MIN,
+          },
+        ],
+      },
+      {
+        inTurn: "t1",
+        record: {
+          id: "sa-callers",
+          title: LONG_TITLE,
+          model,
+          brief: brief("Map every caller of verifySignature()."),
+        },
+        runs: [done(30 * MIN, 30 * MIN - 130 * SEC)],
+      },
+    ],
+    main: (rows) => [
+      you(
+        "w-u1",
+        "Review the webhook handler: signatures, retries and logging. Give each its own sub-agent, and map who calls verifySignature().",
+        "t1",
+        ago(now, 30 * MIN),
+      ),
+      mainTurn("t1", ago(now, 30 * MIN), ago(now, 24 * MIN)),
+      steps(
+        "w-s1",
+        [
+          {
+            kind: "read",
+            target: "src/webhooks/handler.ts",
+            targets: [
+              { text: "src/webhooks/handler.ts" },
+              { text: "src/webhooks/verify.ts" },
+            ],
+          },
+        ],
+        ago(now, 30 * MIN),
+      )("t1"),
+      ...(rows["t1"] ?? []),
+      reply(
+        "w-r1",
+        "Signatures are checked in constant time. The retry review failed and I stopped the logging audit, as you asked. verifySignature() has 9 callers; the list is in the sub-agent's result.",
+        "t1",
+        ago(now, 24 * MIN),
+      ),
+      you("w-u2", "Run the retry review again.", "t2", ago(now, MIN)),
+      mainTurn("t2", ago(now, MIN), ago(now, 50 * SEC)),
+      ...(rows["t2"] ?? []),
+      reply(
+        "w-r2",
+        "It's running in the background; I'll report when it's done.",
+        "t2",
+        ago(now, 50 * SEC),
+      ),
+    ],
+  });
+}
