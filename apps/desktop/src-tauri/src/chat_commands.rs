@@ -684,6 +684,16 @@ pub async fn chat_stop(bridge: State<'_, ChatBridge>, chat_id: String) -> Outcom
     bridge.chats.stop(&chat_id).await
 }
 
+/// Stops one sub-agent of a Chat and nothing else. Stale when it no longer runs.
+#[tauri::command]
+pub async fn chat_stop_sub_agent(
+    bridge: State<'_, ChatBridge>,
+    chat_id: String,
+    sub_agent: String,
+) -> Outcome<()> {
+    bridge.chats.stop_sub_agent(&chat_id, &sub_agent).await
+}
+
 #[tauri::command]
 pub async fn chat_answer(
     bridge: State<'_, ChatBridge>,

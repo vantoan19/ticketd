@@ -113,6 +113,8 @@ struct Agent {
     run: Option<String>,
     running: bool,
     background: bool,
+    /// ticketd asked Claude Code to stop it: how it ended is then the person's doing.
+    stop_asked: bool,
     /// The model its own messages reported last.
     model: Option<String>,
 }
@@ -568,10 +570,35 @@ impl Session {
         }
     }
 
-    fn stopper(&self) -> SubAgentStopper {
+    /// The person stops one background sub-agent: remembered, so that its end is theirs.
+    /// Refused when it does not run now, or runs in the foreground, where Claude Code ends
+    /// it with its turn.
+    pub fn stop_asked(&mut self, task: &str) -> Result<(), Refusal> {
+        match self.sub_agents.known.get_mut(task) {
+            Some(agent) if agent.running && agent.background => {
+                agent.stop_asked = true;
+                Ok(())
+            }
+            _ => Err(Refusal::UnknownSubAgent),
+        }
+    }
+
+    /// Claude Code did not take the request: nobody asked it to stop.
+    pub fn stop_not_asked(&mut self, task: &str) {
+        if let Some(agent) = self.sub_agents.known.get_mut(task) {
+            agent.stop_asked = false;
+        }
+    }
+
+    fn stopper(&self, task: &str) -> SubAgentStopper {
         if self
-            .active_turn()
-            .is_some_and(|turn| self.runtime.interrupted(turn))
+            .sub_agents
+            .known
+            .get(task)
+            .is_some_and(|agent| agent.stop_asked)
+            || self
+                .active_turn()
+                .is_some_and(|turn| self.runtime.interrupted(turn))
         {
             SubAgentStopper::Person
         } else {
@@ -593,6 +620,7 @@ impl Session {
         let run = text(event, "run_id").map(str::to_owned);
         let agent = self.sub_agents.known.entry(task.to_owned()).or_default();
         agent.running = true;
+        agent.stop_asked = false;
         agent.background = background;
         agent.run.clone_from(&run);
         agent.tool_use = tool_use.map(str::to_owned);
@@ -634,7 +662,7 @@ impl Session {
         let outcome = match text(event, "status") {
             Some("completed") => Some(SubAgentOutcome::Completed),
             Some("failed") => Some(SubAgentOutcome::Failed),
-            Some("killed") => Some(SubAgentOutcome::Stopped(self.stopper())),
+            Some("killed") => Some(SubAgentOutcome::Stopped(self.stopper(task))),
             _ => None,
         };
         let error = text(event, "error").map(str::to_owned);
@@ -677,7 +705,7 @@ impl Session {
         let outcome = match text(event, "status") {
             Some("completed") => SubAgentOutcome::Completed,
             Some("failed") => SubAgentOutcome::Failed,
-            _ => SubAgentOutcome::Stopped(self.stopper()),
+            _ => SubAgentOutcome::Stopped(self.stopper(task)),
         };
         let run = text(event, "run_id").map(str::to_owned);
         let Some(agent) = self.sub_agents.known.get_mut(task) else {

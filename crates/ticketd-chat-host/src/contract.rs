@@ -322,6 +322,14 @@ pub struct InterruptRequest {
     pub expected_turn: NativeTurnId,
 }
 
+/// Asks the harness to stop one sub-agent and what it started, leaving the main agent and
+/// every other sub-agent running.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct StopSubAgentRequest {
+    pub generation: RuntimeGeneration,
+    pub sub_agent: NativeSubAgentId,
+}
+
 // ---------------------------------------------------------------------------
 // Command outcomes
 // ---------------------------------------------------------------------------
@@ -337,6 +345,8 @@ pub enum Refusal {
     StartUnconfirmed,
     /// No live request has this identity: never issued, already answered or withdrawn.
     UnknownRequest,
+    /// No sub-agent with this identity runs now.
+    UnknownSubAgent,
     /// The effective capabilities do not include this operation.
     Unsupported,
     /// The active harness or model explicitly excludes image input.
@@ -361,6 +371,7 @@ impl Refusal {
             Self::TurnMismatch { .. } => "the turn it was meant for had ended",
             Self::StartUnconfirmed => "the harness has not confirmed the previous message",
             Self::UnknownRequest => "the request was no longer open",
+            Self::UnknownSubAgent => "the sub-agent was no longer running",
             Self::Unsupported => "the harness can't do that here",
             Self::ImageInputUnsupported => "image input is unavailable for this Chat",
             Self::ImageInputTooLarge => "an attached image is too large for the harness",
@@ -415,6 +426,22 @@ pub enum InterruptOutcome {
     Acknowledged,
     NotSent(Refusal),
     /// Written without an acknowledgment: timeout or loss of contact.
+    Unconfirmed,
+}
+
+/// What the harness did with a [`StopSubAgentRequest`]. The sub-agent's own end is reported
+/// as [`EventKind::SubAgentEnded`], by the person when the harness was asked to.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum StopSubAgentOutcome {
+    /// The harness was asked and took the request.
+    Asked,
+    /// The harness does not run it now.
+    NotRunning,
+    /// This harness cannot stop one sub-agent alone.
+    Unsupported,
+    /// The harness refused, or answered with a failure.
+    Refused { reason: String },
+    /// Written without an answer in time, or contact was lost.
     Unconfirmed,
 }
 
@@ -1210,6 +1237,14 @@ pub trait HarnessRuntime: Send + Sync + std::fmt::Debug {
     /// own end is reported as [`EventKind::SubAgentEnded`]. Nothing to do by default.
     async fn interrupt_sub_agents(&self, generation: RuntimeGeneration) {
         let _ = generation;
+    }
+
+    /// Stops one sub-agent, and the sub-agents it started, whether or not a turn is active.
+    /// The harness reports each one's end as [`EventKind::SubAgentEnded`]; ticketd asked,
+    /// so it is the person's stop. A harness that cannot stop one alone says so.
+    async fn stop_sub_agent(&self, request: StopSubAgentRequest) -> StopSubAgentOutcome {
+        let _ = request;
+        StopSubAgentOutcome::Unsupported
     }
 
     /// Changes a session setting. The supervisor calls it only between turns, so each

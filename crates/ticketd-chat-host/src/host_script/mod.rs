@@ -136,6 +136,8 @@ use ticketd_core::{
 #[cfg(test)]
 mod codex_sub_agents;
 #[cfg(test)]
+mod stop_one;
+#[cfg(test)]
 mod sub_agents;
 #[cfg(test)]
 mod tests;
@@ -586,6 +588,28 @@ impl HostScript {
         let (host, chat) = (self.host.clone(), self.chat.id.clone());
         self.call("stop", async move { host.stop(&chat).await })
             .await;
+    }
+
+    /// The person presses Stop on one sub-agent, by its native ID.
+    pub async fn stop_sub_agent(&mut self, native_id: &str) {
+        let (host, chat, native_id) = (
+            self.host.clone(),
+            self.chat.id.clone(),
+            native_id.to_owned(),
+        );
+        self.call("stop a sub-agent", async move {
+            host.stop_sub_agent(&chat, &native_id).await
+        })
+        .await;
+    }
+
+    /// The person presses Stop on one sub-agent and the host refuses it.
+    pub async fn stop_sub_agent_refused(&mut self, native_id: &str) -> HostError {
+        self.settle().await;
+        self.host
+            .stop_sub_agent(&self.chat.id, native_id)
+            .await
+            .expect_err("the host refuses it")
     }
 
     /// The harness process exits with `code`, whatever the fixture still holds.

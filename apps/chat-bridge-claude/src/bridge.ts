@@ -45,6 +45,8 @@ export interface SdkQuery extends AsyncIterable<unknown> {
     commands?: unknown[];
   }>;
   close(): void;
+  /** Stops one running task; a `task_notification` with status `stopped` follows. */
+  stopTask?(taskId: string): Promise<void>;
   // Settings and context, from SDK 0.3.322's `Query`.
   setModel?(model?: string): Promise<void>;
   setPermissionMode?(mode: PermissionMode): Promise<void>;
@@ -272,6 +274,8 @@ export function createBridge(deps: BridgeDeps) {
             return respond(current, command);
           case "interrupt":
             return interrupt(current, command);
+          case "stop_task":
+            return void stopTask(current, command);
           case "set_setting":
             return void setSetting(current, command);
           case "close":
@@ -774,6 +778,31 @@ export function createBridge(deps: BridgeDeps) {
           error: errorInfo(error),
         }),
     );
+  }
+
+  async function stopTask(
+    current: Session,
+    command: Extract<Command, { cmd: "stop_task" }>,
+  ) {
+    const { query } = current;
+    const answer = (outcome: "asked" | "refused", message: string | null) =>
+      emit({
+        event: "stop_task_result",
+        id: command.id,
+        generation: current.generation,
+        task_id: command.task_id,
+        outcome,
+        message,
+      });
+    if (!query.stopTask) {
+      return answer("refused", "this Claude Agent SDK cannot stop a task");
+    }
+    try {
+      await query.stopTask(command.task_id);
+      answer("asked", null);
+    } catch (error) {
+      answer("refused", errorInfo(error).message);
+    }
   }
 
   async function setSetting(

@@ -55,9 +55,10 @@ use crate::{
     ApprovalDecision, AutomationPromptAdmission, Capabilities, CloseOutcome, DeliveryEvidence,
     DispatchOutcome, EventKind, HarnessAdapter, HarnessRuntime, InteractionAnswer, InteractionKind,
     InteractionRequest, InteractionResolution, InteractionResponse, InterruptOutcome,
-    InterruptRequest, NativeItemId, NativeRequestId, NativeSessionId, NativeTurnId, NoticeKind,
-    OpenRequest, OpenedRuntime, Problem, ProviderDetail, Refusal, RespondOutcome, RuntimeEvent,
-    RuntimeGeneration, SessionStart, SubAgentOutcome, SubAgentStopper, Submission, SubmissionId,
+    InterruptRequest, NativeItemId, NativeRequestId, NativeSessionId, NativeSubAgentId,
+    NativeTurnId, NoticeKind, OpenRequest, OpenedRuntime, Problem, ProviderDetail, Refusal,
+    RespondOutcome, RuntimeEvent, RuntimeGeneration, SessionStart, StopSubAgentOutcome,
+    StopSubAgentRequest, SubAgentOutcome, SubAgentStopper, Submission, SubmissionId,
     SubmissionKind, Subscription, ToolStatus, TurnEvidence, TurnOrigin, TurnOutcome, TurnStarter,
 };
 
@@ -92,6 +93,11 @@ pub(crate) enum Command {
         reply: Reply<ChatMessage>,
     },
     Stop(Reply<()>),
+    /// The person's Stop for one sub-agent.
+    StopSubAgent {
+        native_id: String,
+        reply: Reply<()>,
+    },
     ResumeQueue(Reply<()>),
     /// The person asked for one queued input to go out now, ahead of the queue.
     SendQueuedNow {
@@ -866,6 +872,9 @@ impl Supervisor {
                 }
                 let _ = reply.send(stopped);
             }
+            Command::StopSubAgent { native_id, reply } => {
+                let _ = reply.send(self.stop_sub_agent(&native_id).await);
+            }
             Command::ResumeQueue(reply) => {
                 let _ = reply.send(self.resume_queue().await);
             }
@@ -1629,6 +1638,35 @@ impl Supervisor {
         }
         let batch = std::mem::take(observations);
         self.record(batch);
+    }
+
+    /// The person stops one sub-agent. Only a background one that runs now can be stopped
+    /// alone: a foreground one ends with its turn. The harness is asked, and its report of
+    /// the sub-agent's end (the person's, as ticketd asked) is what changes the record, so
+    /// the record never says stopped while the harness still runs it.
+    async fn stop_sub_agent(&mut self, native_id: &str) -> Result<(), HostError> {
+        if self.sub_agents.get(native_id) != Some(&true) {
+            return Err(HostError::SubAgentGone);
+        }
+        let Some(runtime) = &self.runtime else {
+            return Err(HostError::SubAgentGone);
+        };
+        let (handle, generation) = (runtime.handle.clone(), runtime.generation);
+        let request = StopSubAgentRequest {
+            generation,
+            sub_agent: NativeSubAgentId::new(native_id),
+        };
+        match self.drive(handle.stop_sub_agent(request)).await {
+            StopSubAgentOutcome::Asked => Ok(()),
+            StopSubAgentOutcome::NotRunning => Err(HostError::SubAgentGone),
+            StopSubAgentOutcome::Unsupported => Err(HostError::SubAgentNotStopped(
+                "this harness cannot stop one sub-agent alone".to_owned(),
+            )),
+            StopSubAgentOutcome::Refused { reason } => Err(HostError::SubAgentNotStopped(reason)),
+            StopSubAgentOutcome::Unconfirmed => Err(HostError::SubAgentNotStopped(
+                "it did not answer in time".to_owned(),
+            )),
+        }
     }
 
     /// Stop with no turn running but sub-agents running: they are stopped, the Chat says

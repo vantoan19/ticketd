@@ -117,6 +117,14 @@ export const commandSchema = z.discriminatedUnion("cmd", [
     decision,
   }),
   z.strictObject({ id, cmd: z.literal("interrupt"), generation }),
+  // Stops one task (a sub-agent running in the background) and leaves the session, its
+  // turn and every other task alone. The task's own end follows as a task notification.
+  z.strictObject({
+    id,
+    cmd: z.literal("stop_task"),
+    generation,
+    task_id: z.string().min(1),
+  }),
   // Applies from Claude Code's next request; the host sends it between turns.
   z.strictObject({
     id,
@@ -350,6 +358,15 @@ type EventBody =
       generation: number;
       request_id: string;
       reason: "aborted" | "interrupted" | "session_ended";
+    }
+  | {
+      event: "stop_task_result";
+      id: string;
+      generation: number;
+      task_id: string;
+      /** `asked`: the SDK took the request; the task's end follows as `sub_agent_ended`. */
+      outcome: "asked" | "refused";
+      message: string | null;
     }
   | {
       event: "interrupt_result";

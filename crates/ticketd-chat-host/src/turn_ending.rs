@@ -59,6 +59,8 @@ impl StopReason {
             HostError::Core(_)
             | HostError::StorageFailed(_)
             | HostError::InteractionExpired
+            | HostError::SubAgentGone
+            | HostError::SubAgentNotStopped(_)
             | HostError::ContactLost
             | HostError::PermissionRestartCleanupUnconfirmed
             | HostError::Harness(_)
