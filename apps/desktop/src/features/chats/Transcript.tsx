@@ -1255,9 +1255,7 @@ const TurnView = memo(function TurnView({
           className="chat-turnpart"
           data-fold={showRow ? "" : undefined}
           data-subagents={
-            turn.rows.some((each) => each.kind === "sub_agent")
-              ? ""
-              : undefined
+            turn.rows.some((each) => each.kind === "sub_agent") ? "" : undefined
           }
           data-anchor=""
         >
@@ -1970,13 +1968,13 @@ export function Transcript({
                     {writing ? (
                       // Words are arriving: the one live line says so, with its own clock.
                       <WorkingLine key="writing" label="Writing" fromShown />
-                    ) : chat.doing ? (
+                    ) : agentsRun ? null : chat.doing ? ( // The main agent only waits on sub-agents: their rows spin and the strip counts them, so no second line.
                       <WorkingLine
                         label={chat.doing.label}
                         since={chat.doing.since}
                         items={items}
                       />
-                    ) : agentsRun ? null : ( // A sub-agent's row spins and the strip counts it: no second line.
+                    ) : (
                       <WorkingLine label="Working…" />
                     )}
                   </BetweenSteps>

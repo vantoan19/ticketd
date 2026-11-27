@@ -420,8 +420,55 @@ test("a turn that holds sub-agent rows is never skipped by content-visibility", 
   const others = [...document.querySelectorAll(".chat-turnpart")].filter(
     (part) => part !== holding,
   );
-  for (const part of others) expect(part.hasAttribute("data-subagents")).toBe(false);
+  for (const part of others)
+    expect(part.hasAttribute("data-subagents")).toBe(false);
   expect(chatsCss).toMatch(
     /\.chat-turnpart\[data-subagents\] \{\s*content-visibility: visible/,
   );
+});
+
+const settle = () => new Promise((resolve) => setTimeout(resolve, 800));
+
+test("while the main agent only waits on running sub-agents, there is no working line", async () => {
+  // The host says it is "Working"; the spinning rows and the strip are the live signal.
+  const base = fixtures().inTurn;
+  await open({
+    ...base,
+    chat: {
+      ...base.chat,
+      doing: {
+        label: "Working",
+        since: new Date(Date.now() - 60_000).toISOString(),
+      },
+    },
+  });
+  await settle();
+  expect(
+    screen.getByRole("button", { name: "Stop the turn and 2 sub-agents" }),
+  ).toBeTruthy();
+  expect(document.querySelector(".chat-working")).toBeNull();
+});
+
+test("the working line still shows while the main agent writes, sub-agents or not", async () => {
+  const base = fixtures().inTurn;
+  const turn = base.items?.find(
+    (item) => item.kind === "turn" && item.outcome === "active",
+  );
+  await open({
+    ...base,
+    items: [
+      ...(base.items ?? []),
+      {
+        id: "r-live",
+        at: new Date().toISOString(),
+        turn_id: turn?.kind === "turn" ? turn.turn_id : "t1",
+        kind: "response",
+        state: "streaming",
+        text: "Looking at the",
+      },
+    ],
+  });
+  expect(
+    (await screen.findByText("Writing")).closest(".chat-working"),
+  ).not.toBeNull();
 });
