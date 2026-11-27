@@ -112,7 +112,8 @@ mod claude {
         h.play_to("the turn ended").await;
         h.play_to("a sub-agent works after the turn ended").await;
         h.play_to("both sub-agents work").await;
-        h.play_to("the main agent stopped the first sub-agent").await;
+        h.play_to("the main agent stopped the first sub-agent")
+            .await;
 
         let first = run(&h, "task_a");
         assert_eq!(first.state, ChatSubAgentState::Stopped);
@@ -120,5 +121,60 @@ mod claude {
         // The other one runs on and the person's queue is not paused.
         assert_eq!(run(&h, "task_b").state, ChatSubAgentState::Running);
         assert!(!h.core().chat(h.chat_id()).expect("the Chat").queue_paused);
+    }
+}
+
+mod codex {
+    use super::*;
+
+    const ASK: &str = "Start two sub-agents on the slow checks and wait for them";
+
+    #[tokio::test(start_paused = true)]
+    async fn stopping_one_child_ends_its_turn_and_commands_and_leaves_the_rest_running() {
+        let mut h = HostScript::codex()
+            .process([
+                fixture!("codex", "handshake"),
+                fixture!("codex", "sub_agent_stop_one"),
+            ])
+            .start();
+        h.send(ASK).await;
+        h.play_to("two sub-agents run commands").await;
+        let mut children: Vec<String> = h
+            .sub_agents()
+            .into_iter()
+            .map(|record| record.native_id)
+            .collect();
+        children.sort();
+        assert_eq!(children.len(), 2, "{children:?}");
+        let first = children[0].clone();
+        let second = children[1].clone();
+        assert_eq!(h.live().await.sub_agents, 2);
+
+        // The fixture's frames: the child's own interrupt, then Codex's cleaning of its
+        // terminals, which is what ends a command Codex left running.
+        h.stop_sub_agent(&first).await;
+        h.play_to("the first sub-agent was stopped").await;
+
+        let stopped = run(&h, &first);
+        assert_eq!(stopped.state, ChatSubAgentState::Stopped);
+        assert_eq!(stopped.stopped_by, Some(ChatSubAgentStopper::Person));
+        // Stop leaves no running command of that child: Codex was told to end them (the
+        // fixture holds that frame), and a Step of an ended run reads as not finished.
+        // The other child and the main agent's turn go on.
+        assert_eq!(run(&h, &second).state, ChatSubAgentState::Running);
+        assert_eq!(running_steps_of(&h, &second), 1);
+        assert_eq!(h.live().await.sub_agents, 1);
+        assert_eq!(h.turns().len(), 1);
+        assert_eq!(h.turns()[0].state, ChatTurnState::Active);
+        assert!(h.notices().is_empty(), "{:?}", h.notices());
+
+        h.play_all().await;
+        h.finish().await;
+        assert_eq!(run(&h, &second).state, ChatSubAgentState::Completed);
+        assert_eq!(h.turns()[0].state, ChatTurnState::Completed);
+        assert_eq!(
+            run(&h, &first).stopped_by,
+            Some(ChatSubAgentStopper::Person)
+        );
     }
 }

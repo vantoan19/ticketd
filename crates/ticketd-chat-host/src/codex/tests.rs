@@ -1817,11 +1817,14 @@ fn a_ticketd_tool_call_shows_as_the_command_with_its_output() {
     }
 }
 
-/// A person's Chat, taken over or not, declares no tool and opts into nothing.
+/// A person's Chat, taken over or not, declares no tool. It opts into the experimental API
+/// for one thing only: ending the commands of a sub-agent the person stops.
 #[tokio::test(start_paused = true)]
-async fn a_persons_chat_declares_no_tool_and_stays_off_the_experimental_api() {
+async fn a_persons_chat_declares_no_tool_and_opts_into_the_experimental_api_for_stopping_sub_agents()
+ {
     let (_peer, opened) = open_with(fixture!("handshake"), SessionStart::New).await;
-    // The handshake fixture asks for no capabilities, so it fails if any were sent.
+    // The handshake fixture asks for exactly the experimental API and no tool, so it fails
+    // if anything else was sent.
     assert!(opened.is_ok());
 }
 

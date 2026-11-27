@@ -357,6 +357,30 @@ impl Session {
             .collect()
     }
 
+    /// The turn of the child `thread` and of every child it started, directly or not, that
+    /// runs now: the child's own first, for stopping one sub-agent and what it started.
+    pub(crate) fn live_child_turns_under(&self, thread: &str) -> Vec<(String, String)> {
+        let mut family = vec![thread.to_owned()];
+        let mut next = 0;
+        while let Some(parent) = family.get(next).cloned() {
+            next += 1;
+            for child in &self.children {
+                if child.parent.as_deref() == Some(parent.as_str())
+                    && !family.contains(&child.thread)
+                {
+                    family.push(child.thread.clone());
+                }
+            }
+        }
+        family
+            .into_iter()
+            .filter_map(|member| {
+                let turn = self.child(&member)?.turn.clone()?;
+                Some((member, turn))
+            })
+            .collect()
+    }
+
     /// ticketd is about to ask Codex to interrupt a child's turn. Refused when that turn
     /// is over.
     pub(crate) fn child_interrupt_asked(

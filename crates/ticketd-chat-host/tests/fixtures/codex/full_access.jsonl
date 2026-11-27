@@ -1,5 +1,5 @@
 {"note":"Hand-built from the codex-cli 0.171.0 JSON schema (codex app-server generate-json-schema --experimental: ThreadStartResponse, TurnStartParams approvalPolicy and sandboxPolicy). Not captured from a live session; every value is synthetic. A new Chat started in Full access: the thread opens with the person's own settings, the first turn asks for Full access, and the turn after leaving it gives the thread its own approval policy and sandbox back."}
-{"client":{"id":1,"method":"initialize","params":{"clientInfo":{"name":"ticketd","title":"ticketd","version":"0.0.0-test"}}}}
+{"client":{"id":1,"method":"initialize","params":{"clientInfo":{"name":"ticketd","title":"ticketd","version":"0.0.0-test"},"capabilities":{"experimentalApi":true}}}}
 {"server":{"id":1,"result":{"userAgent":"ticketd/0.171.0 (Mac OS 26.5.0; arm64)","codexHome":"/home/example/.codex","platformFamily":"unix","platformOs":"macos"}}}
 {"client":{"method":"initialized"}}
 {"client":{"id":2,"method":"thread/start","params":{"cwd":"/work/chat-1"}}}

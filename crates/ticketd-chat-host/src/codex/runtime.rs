@@ -16,7 +16,7 @@ use crate::{
     EventKind, EventStream, HarnessOptions, HarnessRuntime, InteractionResponse, InterruptOutcome,
     InterruptRequest, LoginState, OpenRequest, OpenedRuntime, Problem, ProblemKind, ProviderDetail,
     Refusal, RespondOutcome, RuntimeGeneration, SessionStart, SettingChange, SettingOutcome,
-    Submission, SubmissionKind,
+    StopSubAgentOutcome, StopSubAgentRequest, Submission, SubmissionKind,
 };
 
 use crate::attachment_input::AttachmentFiles;
@@ -161,8 +161,9 @@ impl AppServer {
 
     /// `initialize`, then the `initialized` notification the protocol requires.
     /// Returns the platform Codex reports it runs on. `experimental` opts into the
-    /// experimental API, which declaring a tool on the thread needs; a person's Chat
-    /// and the probes do not use it.
+    /// experimental API, which declaring a tool on the thread needs and which ending a
+    /// sub-agent's commands needs (`thread/backgroundTerminals/clean`); the probes do not
+    /// use it.
     async fn initialize(&self, experimental: bool) -> Result<Option<String>, Problem> {
         let client = json!({
             "name": "ticketd",
@@ -209,7 +210,7 @@ impl AppServer {
     }
 
     async fn open_thread(&self, request: &OpenRequest) -> Result<Capabilities, Problem> {
-        let platform = self.initialize(request.unattended.is_some()).await?;
+        let platform = self.initialize(true).await?;
         if request.unattended.is_some()
             && platform.as_deref() == Some("windows")
             && let Some(problem) = self.windows_sandbox_problem().await
@@ -678,6 +679,41 @@ impl Drop for CodexRuntime {
     }
 }
 
+impl CodexRuntime {
+    /// Interrupts the turn a child runs, then ends the commands the child left running.
+    /// Codex leaves a child's command running when its turn is interrupted (an interrupted
+    /// turn's commands are not reported ended either); cleaning the child's background
+    /// terminals is what ends them. That request is answered only on the experimental API,
+    /// which every Chat opens with, and a refusal changes nothing the turn's own end said.
+    async fn interrupt_child(
+        &self,
+        generation: RuntimeGeneration,
+        thread: &str,
+        turn: &str,
+    ) -> InterruptOutcome {
+        let params = json!({"threadId": thread, "turnId": turn});
+        let outcome = self
+            .connection
+            .rpc
+            .interrupt(generation, "turn/interrupt", |peer| {
+                peer.session.child_interrupt_asked(thread, turn)?;
+                Ok((params, Call::Plain))
+            })
+            .await;
+        if !matches!(outcome, InterruptOutcome::NotSent(_)) {
+            let params = json!({"threadId": thread});
+            let _ = self
+                .connection
+                .rpc
+                .interrupt(generation, "thread/backgroundTerminals/clean", |_| {
+                    Ok((params, Call::Plain))
+                })
+                .await;
+        }
+        outcome
+    }
+}
+
 #[async_trait]
 impl HarnessRuntime for CodexRuntime {
     fn supports_image_input(&self) -> Option<bool> {
@@ -830,16 +866,36 @@ impl HarnessRuntime for CodexRuntime {
     async fn interrupt_sub_agents(&self, generation: RuntimeGeneration) {
         let turns = self.connection.rpc.state().peer.session.live_child_turns();
         for (thread, turn) in turns {
-            let params = json!({"threadId": thread, "turnId": turn});
-            let _ = self
-                .connection
-                .rpc
-                .interrupt(generation, "turn/interrupt", |peer| {
-                    peer.session.child_interrupt_asked(&thread, &turn)?;
-                    Ok((params, Call::Plain))
-                })
-                .await;
+            let _ = self.interrupt_child(generation, &thread, &turn).await;
         }
+    }
+
+    /// Stops one child and the children it started: each gets its own turn interrupted and
+    /// its commands ended. Codex reports each turn ended as interrupted, which is the
+    /// person's doing because ticketd asked.
+    async fn stop_sub_agent(&self, request: StopSubAgentRequest) -> StopSubAgentOutcome {
+        let thread = request.sub_agent.0;
+        let turns = self
+            .connection
+            .rpc
+            .state()
+            .peer
+            .session
+            .live_child_turns_under(&thread);
+        let mut outcome = StopSubAgentOutcome::NotRunning;
+        for (member, turn) in turns {
+            let asked = self
+                .interrupt_child(request.generation, &member, &turn)
+                .await;
+            if member == thread {
+                outcome = match asked {
+                    InterruptOutcome::Acknowledged => StopSubAgentOutcome::Asked,
+                    InterruptOutcome::NotSent(_) => StopSubAgentOutcome::NotRunning,
+                    InterruptOutcome::Unconfirmed => StopSubAgentOutcome::Unconfirmed,
+                };
+            }
+        }
+        outcome
     }
 
     /// Codex takes model and effort as overrides on `turn/start`, so a change is kept
