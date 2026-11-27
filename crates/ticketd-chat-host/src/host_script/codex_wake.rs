@@ -275,9 +275,21 @@ async fn each_finish_wakes_the_main_agent_once_while_the_other_sub_agent_still_r
         .core()
         .chat_snapshot(h.chat_id(), 5_000)
         .expect("the Chat's history");
+    // The change log's sequence counts every write, which varies with how the host's
+    // tasks interleave under load: it is not what the view is built from.
     let stored = super::sub_agents::made_stable(
         &serde_json::to_string_pretty(&snapshot).expect("it serializes"),
-    );
+    )
+    .lines()
+    .map(|line| {
+        if line.trim_start().starts_with("\"sequence\":") {
+            "  \"sequence\": 0,".to_owned()
+        } else {
+            line.to_owned()
+        }
+    })
+    .collect::<Vec<_>>()
+    .join("\n");
     if std::env::var_os("TICKETD_UPDATE_VIEW_FIXTURES").is_some() {
         std::fs::write(STORED, format!("{stored}\n")).expect("the file is written");
     }

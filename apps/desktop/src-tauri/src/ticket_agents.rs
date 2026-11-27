@@ -362,6 +362,7 @@ mod tests {
                 problem: None,
                 problem_resets_at: None,
                 ending: None,
+                origin: None,
                 started_at: String::new(),
                 ended_at: None,
             }),

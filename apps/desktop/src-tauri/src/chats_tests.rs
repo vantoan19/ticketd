@@ -4365,7 +4365,11 @@ async fn the_command_sends_what_the_desktops_label_reads() {
     let chat_id = f.chats.create(input).await.unwrap().chat_id;
     settle().await;
     // Claude Code starts its turn on its own word.
-    f.emit(EventKind::TurnStarted { turn: turn() }).await;
+    f.emit(EventKind::TurnStarted {
+        turn: turn(),
+        origin: None,
+    })
+    .await;
     let model = |current: &str, models: &[(&str, &str)]| {
         Some(ticketd_chat_host::Setting {
             current: Some(current.to_owned()),

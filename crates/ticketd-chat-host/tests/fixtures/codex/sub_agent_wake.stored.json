@@ -18,13 +18,13 @@
     "muted": false,
     "created_at": "2026-11-27T10:00:00.000Z"
   },
-  "sequence": 28,
+  "sequence": 0,
   "items": [
     {
       "kind": "message",
       "value": {
         "id": "00000000-0000-4000-8000-000000000002",
-        "position": 2,
+        "position": 1,
         "role": "user",
         "text": "Upgrade the payment client to v5. Split the refund calls and the webhook handler between two agents.",
         "attachments": [],
@@ -54,7 +54,7 @@
       "kind": "session",
       "value": {
         "id": "00000000-0000-4000-8000-000000000006",
-        "position": 4,
+        "position": 2,
         "native_session_id": "thr_1",
         "origin": "new",
         "started_at": "2026-11-27T10:00:00.000Z"
@@ -64,7 +64,7 @@
       "kind": "turn",
       "value": {
         "id": "00000000-0000-4000-8000-000000000004:00000000-0000-4000-8000-000000000005",
-        "position": 8,
+        "position": 3,
         "native_turn_id": "00000000-0000-4000-8000-000000000005",
         "state": "completed",
         "detail": null,
@@ -80,7 +80,7 @@
       "kind": "message",
       "value": {
         "id": "00000000-0000-4000-8000-000000000004:msg_01",
-        "position": 10,
+        "position": 4,
         "role": "assistant",
         "text": "I’ll start both agents now.",
         "attachments": [],
@@ -100,7 +100,7 @@
       "kind": "sub_agent_run",
       "value": {
         "id": "00000000-0000-4000-8000-000000000001:sub-agent:00000000-0000-4000-8000-000000000007:run-1",
-        "position": 12,
+        "position": 5,
         "sub_agent": "00000000-0000-4000-8000-000000000007",
         "run": 1,
         "native_run_id": null,
@@ -117,7 +117,7 @@
       "kind": "sub_agent_run",
       "value": {
         "id": "00000000-0000-4000-8000-000000000001:sub-agent:00000000-0000-4000-8000-000000000008:run-1",
-        "position": 14,
+        "position": 6,
         "sub_agent": "00000000-0000-4000-8000-000000000008",
         "run": 1,
         "native_run_id": null,
@@ -134,7 +134,7 @@
       "kind": "message",
       "value": {
         "id": "00000000-0000-4000-8000-000000000004:msg_02",
-        "position": 17,
+        "position": 7,
         "role": "assistant",
         "text": "Two agents are on it: one for the refund calls, one for the webhook handler. I'll check their changes when they finish.",
         "attachments": [],
@@ -154,7 +154,7 @@
       "kind": "message",
       "value": {
         "id": "00000000-0000-4000-8000-000000000004:00000000-0000-4000-8000-000000000007:msg_03",
-        "position": 20,
+        "position": 8,
         "role": "assistant",
         "text": "I’ll run the command and report its output when it finishes.",
         "attachments": [],
@@ -175,7 +175,7 @@
       "kind": "tool",
       "value": {
         "id": "00000000-0000-4000-8000-000000000004:exec-00000000-0000-4000-8000-000000000009",
-        "position": 21,
+        "position": 9,
         "turn_id": null,
         "owner": {
           "kind": "sub_agent",
@@ -193,7 +193,7 @@
       "kind": "message",
       "value": {
         "id": "00000000-0000-4000-8000-000000000004:00000000-0000-4000-8000-000000000007:msg_04",
-        "position": 23,
+        "position": 10,
         "role": "assistant",
         "text": "child-done",
         "attachments": [],
@@ -214,7 +214,7 @@
       "kind": "turn",
       "value": {
         "id": "00000000-0000-4000-8000-000000000004:00000000-0000-4000-8000-000000000010",
-        "position": 26,
+        "position": 11,
         "native_turn_id": "00000000-0000-4000-8000-000000000010",
         "state": "completed",
         "detail": null,
@@ -233,7 +233,7 @@
       "kind": "message",
       "value": {
         "id": "00000000-0000-4000-8000-000000000004:msg_w6",
-        "position": 27,
+        "position": 12,
         "role": "assistant",
         "text": "The refund calls use the v5 client now, and the payment tests pass. The webhook agent is still working; I'll review its change when it's done.",
         "attachments": [],
@@ -263,7 +263,7 @@
       "runs": [
         {
           "id": "00000000-0000-4000-8000-000000000001:sub-agent:00000000-0000-4000-8000-000000000007:run-1",
-          "position": 12,
+          "position": 5,
           "sub_agent": "00000000-0000-4000-8000-000000000007",
           "run": 1,
           "native_run_id": null,
@@ -288,7 +288,7 @@
       "runs": [
         {
           "id": "00000000-0000-4000-8000-000000000001:sub-agent:00000000-0000-4000-8000-000000000008:run-1",
-          "position": 14,
+          "position": 6,
           "sub_agent": "00000000-0000-4000-8000-000000000008",
           "run": 1,
           "native_run_id": null,

@@ -284,16 +284,22 @@ happens during a turn (the main agent is there to see it), or any Chat of an Aut
 A wake that cannot be delivered leaves a Chat notice and is not retried. The words are
 ticketd's own and short. For one sub-agent they are
 
-    Sub-agent "Slow check" finished. Please continue.
+```text
+Sub-agent "Slow check" finished. Please continue.
+```
 
 (`failed` in place of `finished` when it failed), and for several
 
-    Sub-agents finished: "Slow check", "Review docs" (failed). Please continue.
+```text
+Sub-agents finished: "Slow check", "Review docs" (failed). Please continue.
+```
 
 where a sub-agent is called what its row calls it. The person's message carries instead
 
-    Sub-agents finished since your last message:
-    - "Slow check" finished. Its last message: {what it said last, at most 1,500 characters}
+```text
+Sub-agents finished since your last message:
+- "Slow check" finished. Its last message: {what it said last, at most 1,500 characters}
+```
 
 ahead of their words, in the text sent to the harness; the stored message stays theirs.
 

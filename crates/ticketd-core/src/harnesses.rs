@@ -179,6 +179,9 @@ pub struct SubAgentSupport {
     pub stop: bool,
     /// A sub-agent that was lost can be resumed.
     pub resume: bool,
+    /// The harness never resumes the main agent when a sub-agent finishes, so ticketd
+    /// sends the message that does.
+    pub wake: bool,
     /// The environment variable the harness sets on each command it runs, naming that one
     /// command (Codex's `CODEX_TOOL_CALL_ID`, which is the command Step's item ID). The CLI
     /// records it with a write, so the write is credited to the exact agent that ran the
