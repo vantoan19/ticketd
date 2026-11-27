@@ -52,7 +52,7 @@
   min-width: 4ch;
   margin-right: 4px;
   color: var(--muted-foreground);
-  font-size: 12px;
+  font-size: var(--text-caption);
   font-variant-numeric: tabular-nums;
   text-align: center;
   white-space: nowrap;
