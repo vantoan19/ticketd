@@ -103,7 +103,7 @@
         "position": 5,
         "sub_agent": "00000000-0000-4000-8000-000000000007",
         "run": 1,
-        "native_run_id": null,
+        "native_run_id": "00000000-0000-4000-8000-000000000008",
         "turn_id": "00000000-0000-4000-8000-000000000004:00000000-0000-4000-8000-000000000005",
         "state": "completed",
         "stopped_by": null,
@@ -116,11 +116,11 @@
     {
       "kind": "sub_agent_run",
       "value": {
-        "id": "00000000-0000-4000-8000-000000000001:sub-agent:00000000-0000-4000-8000-000000000008:run-1",
+        "id": "00000000-0000-4000-8000-000000000001:sub-agent:00000000-0000-4000-8000-000000000009:run-1",
         "position": 6,
-        "sub_agent": "00000000-0000-4000-8000-000000000008",
+        "sub_agent": "00000000-0000-4000-8000-000000000009",
         "run": 1,
-        "native_run_id": null,
+        "native_run_id": "00000000-0000-4000-8000-000000000010",
         "turn_id": "00000000-0000-4000-8000-000000000004:00000000-0000-4000-8000-000000000005",
         "state": "running",
         "stopped_by": null,
@@ -174,7 +174,7 @@
     {
       "kind": "tool",
       "value": {
-        "id": "00000000-0000-4000-8000-000000000004:exec-00000000-0000-4000-8000-000000000009",
+        "id": "00000000-0000-4000-8000-000000000004:exec-00000000-0000-4000-8000-000000000011",
         "position": 9,
         "turn_id": null,
         "owner": {
@@ -182,7 +182,7 @@
           "native_id": "00000000-0000-4000-8000-000000000007"
         },
         "name": "/bin/zsh -lc 'sleep 45; echo child-done'",
-        "input": "{\"type\":\"commandExecution\",\"id\":\"exec-00000000-0000-4000-8000-000000000009\",\"pluginId\":null,\"scriptPath\":null,\"command\":\"/bin/zsh -lc 'sleep 45; echo child-done'\",\"cwd\":\"/work/chat-1\",\"processId\":\"74338\",\"source\":\"unifiedExecStartup\",\"status\":\"completed\",\"commandActions\":[{\"type\":\"unknown\",\"command\":\"sleep 45; echo child-done\"}],\"completedAtMs\":2,\"exitCode\":0,\"durationMs\":1,\"startedAtMs\":1}",
+        "input": "{\"type\":\"commandExecution\",\"id\":\"exec-00000000-0000-4000-8000-000000000011\",\"pluginId\":null,\"scriptPath\":null,\"command\":\"/bin/zsh -lc 'sleep 45; echo child-done'\",\"cwd\":\"/work/chat-1\",\"processId\":\"74338\",\"source\":\"unifiedExecStartup\",\"status\":\"completed\",\"commandActions\":[{\"type\":\"unknown\",\"command\":\"sleep 45; echo child-done\"}],\"completedAtMs\":2,\"exitCode\":0,\"durationMs\":1,\"startedAtMs\":1}",
         "state": "completed",
         "output": "child-done\n",
         "output_truncated": false,
@@ -213,9 +213,9 @@
     {
       "kind": "turn",
       "value": {
-        "id": "00000000-0000-4000-8000-000000000004:00000000-0000-4000-8000-000000000010",
+        "id": "00000000-0000-4000-8000-000000000004:00000000-0000-4000-8000-000000000012",
         "position": 11,
-        "native_turn_id": "00000000-0000-4000-8000-000000000010",
+        "native_turn_id": "00000000-0000-4000-8000-000000000012",
         "state": "completed",
         "detail": null,
         "problem": null,
@@ -238,7 +238,7 @@
         "text": "The refund calls use the v5 client now, and the payment tests pass. The webhook agent is still working; I'll review its change when it's done.",
         "attachments": [],
         "complete": true,
-        "turn_id": "00000000-0000-4000-8000-000000000004:00000000-0000-4000-8000-000000000010",
+        "turn_id": "00000000-0000-4000-8000-000000000004:00000000-0000-4000-8000-000000000012",
         "owner": {
           "kind": "main"
         },
@@ -266,7 +266,7 @@
           "position": 5,
           "sub_agent": "00000000-0000-4000-8000-000000000007",
           "run": 1,
-          "native_run_id": null,
+          "native_run_id": "00000000-0000-4000-8000-000000000008",
           "turn_id": "00000000-0000-4000-8000-000000000004:00000000-0000-4000-8000-000000000005",
           "state": "completed",
           "stopped_by": null,
@@ -278,8 +278,8 @@
       ]
     },
     {
-      "id": "00000000-0000-4000-8000-000000000001:sub-agent:00000000-0000-4000-8000-000000000008",
-      "native_id": "00000000-0000-4000-8000-000000000008",
+      "id": "00000000-0000-4000-8000-000000000001:sub-agent:00000000-0000-4000-8000-000000000009",
+      "native_id": "00000000-0000-4000-8000-000000000009",
       "parent": null,
       "tool_id": null,
       "background": true,
@@ -287,11 +287,11 @@
       "created_at": "2026-11-27T10:00:00.000Z",
       "runs": [
         {
-          "id": "00000000-0000-4000-8000-000000000001:sub-agent:00000000-0000-4000-8000-000000000008:run-1",
+          "id": "00000000-0000-4000-8000-000000000001:sub-agent:00000000-0000-4000-8000-000000000009:run-1",
           "position": 6,
-          "sub_agent": "00000000-0000-4000-8000-000000000008",
+          "sub_agent": "00000000-0000-4000-8000-000000000009",
           "run": 1,
-          "native_run_id": null,
+          "native_run_id": "00000000-0000-4000-8000-000000000010",
           "turn_id": "00000000-0000-4000-8000-000000000004:00000000-0000-4000-8000-000000000005",
           "state": "running",
           "stopped_by": null,
