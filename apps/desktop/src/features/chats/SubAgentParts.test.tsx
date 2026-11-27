@@ -300,3 +300,55 @@ test("a turn the person started has no such line", async () => {
   await open(subAgentPartFixtures().reply);
   expect(screen.queryByText(/^Started by/)).toBeNull();
 });
+
+test("after a restart the tray says what happens next, neutrally", async () => {
+  await open(fixtures().restart);
+  const notice = screen
+    .getByText("2 sub-agents lost contact when ticketd quit.")
+    .closest("section") as HTMLElement;
+  expect(notice.textContent).toContain(
+    "Your next message tells Claude Code, which can resume them.",
+  );
+  // Nothing waits for the person: no attention dot, no buttons.
+  expect(notice.querySelector('[data-slot="status-dot"]')).toBeNull();
+  expect(within(notice).queryByRole("button")).toBeNull();
+  expect(
+    screen.getAllByRole("button", { name: /^Sub-agent .*contact lost/ }),
+  ).toHaveLength(2);
+});
+
+test("the restart notice says Codex without resuming, and one sub-agent in the singular", async () => {
+  const base = fixtures().restart;
+  await open({
+    ...base,
+    chat: {
+      ...base.chat,
+      harness: { id: "codex", name: "Codex" },
+      restart_notice: { sub_agents: ["sa-bypass"], resume: false },
+    },
+  });
+  const notice = screen
+    .getByText("1 sub-agent lost contact when ticketd quit.")
+    .closest("section") as HTMLElement;
+  expect(notice.textContent).toContain("Your next message tells Codex.");
+  expect(notice.textContent).not.toContain("resume");
+});
+
+test("the message sent with the note shows a caption that opens to the exact note", async () => {
+  await open(fixtures().restartSent);
+  expect(screen.queryByText(/lost contact when ticketd quit/)).toBeNull();
+  const caption = screen.getByRole("button", {
+    name: "With a note on 2 lost sub-agents",
+  });
+  expect(caption.getAttribute("aria-expanded")).toBe("false");
+  expect(screen.queryByText(/^From ticketd:/)).toBeNull();
+  fireEvent.click(caption);
+  expect(caption.getAttribute("aria-expanded")).toBe("true");
+  expect(
+    screen.getByText(
+      "From ticketd: these sub-agents were running when ticketd quit and are not running now: Find limiter bypasses, Check limiter test coverage. You can resume them.",
+    ),
+  ).toBeTruthy();
+  fireEvent.click(caption);
+  expect(screen.queryByText(/^From ticketd:/)).toBeNull();
+});

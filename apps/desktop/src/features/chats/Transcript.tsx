@@ -59,6 +59,7 @@ import {
   type LinkedRecord,
   type SubAgent,
 } from "@/features/chats/client";
+import { NoteCaption } from "@/features/chats/SubAgentNotices";
 import {
   FilesSummary,
   PlanCard,
@@ -348,6 +349,7 @@ function UserMessage({
           </Button>
         )}
         {caption && <div className="chat-caption">{caption}</div>}
+        {item.note && <NoteCaption note={item.note} />}
       </Arrives>
     </div>
   );

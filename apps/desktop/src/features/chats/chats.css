@@ -1978,3 +1978,45 @@
 .chat-started-link:hover {
   color: var(--foreground);
 }
+
+/* The tray's neutral notice after a restart: nothing waits for the person. */
+.chat-restart-notice {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  padding: 12px 16px;
+}
+.chat-restart-notice p {
+  margin: 0;
+}
+.chat-restart-notice-title {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-weight: 500;
+  color: var(--foreground);
+}
+.chat-restart-notice-body {
+  margin-left: 24px;
+  color: var(--muted-foreground);
+  font-size: var(--text-caption);
+  line-height: 16px;
+}
+
+/* A sent message's caption: what ticketd added to it, and the note opened under it. */
+.chat-note-caption {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  color: var(--muted-foreground);
+}
+.chat-note-sent {
+  max-width: 82%;
+  margin-top: 6px;
+}
+.chat-note-sent .chat-brief-text {
+  color: var(--muted-foreground);
+  font-size: var(--text-caption);
+  line-height: 16px;
+  -webkit-line-clamp: unset;
+}

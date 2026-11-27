@@ -138,6 +138,7 @@ import {
 } from "@/features/chats/use-transcript-scroll";
 import { useChat } from "@/features/chats/use-chats";
 import { SubAgentView } from "@/features/chats/SubAgentView";
+import { RestartNotice } from "@/features/chats/SubAgentNotices";
 import { SubAgentTray } from "@/features/chats/SubAgentTray";
 import { STRIP_OPENER, SubAgentStrip } from "@/features/chats/SubAgentStrip";
 import { backKey } from "@/features/chats/sub-agent-words";
@@ -1099,6 +1100,14 @@ function Conversation({
                             `stop ${agent.title}`,
                           )
                         }
+                      />
+                    ),
+                  })}
+                  {...(chat.restart_notice && {
+                    lead: (
+                      <RestartNotice
+                        notice={chat.restart_notice}
+                        harness={harness}
                       />
                     ),
                   })}
