@@ -2752,12 +2752,12 @@ impl Workspace {
             }
             // The columns of `TURN`, then the Chat.
             let mut statement = connection.prepare_cached(
-                "SELECT id, position, native_turn_id, state, detail, started_at, ended_at, problem, problem_resets_at, ending, chat_id
+                "SELECT id, position, native_turn_id, state, detail, started_at, ended_at, problem, problem_resets_at, ending, origin_by, origin_sub_agent, chat_id
                    FROM chat_turns WHERE chat_id IN (SELECT value FROM json_each(?1)) AND state = 'active'",
             )?;
             let mut turns: HashMap<String, ChatTurn> = statement
                 .query_map([&ids], |row| {
-                    Ok((row.get::<_, String>(10)?, turn_from_row(row)?))
+                    Ok((row.get::<_, String>(12)?, turn_from_row(row)?))
                 })?
                 .collect::<Result<_, _>>()?;
             // The Chats outside the trash, in the order the Active and then the Archived
