@@ -726,9 +726,9 @@ pub(super) mod approvals {
                 fixture!("claude", "sub_agent_approval"),
             ])
             .start();
-        h.send(PROMPT).await;
+        h.send(super::background::PROMPT).await;
         h.play_to("the SDK took the input").await;
-        h.play_to("the main agent's turn ended").await;
+        h.play_to("the turn ended").await;
         h.play_to("the sub-agent asks for approval after the turn ended")
             .await;
 
@@ -742,7 +742,10 @@ pub(super) mod approvals {
         assert_eq!(h.live().await.interactions.len(), 1);
         let status = h.attention().await;
         assert_eq!(status.rank, Rank::Approval);
-        assert_eq!(status.line(), "Approval needed · Check limiter test coverage");
+        assert_eq!(
+            status.line(),
+            "Approval needed · Check limiter test coverage"
+        );
         // Its Step is the sub-agent's own, and it waits with the request.
         assert_eq!(h.sub_agent_transcript("task_b"), ["tool Bash running"]);
         assert!(h.notices().is_empty(), "{:?}", h.notices());

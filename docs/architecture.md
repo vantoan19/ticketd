@@ -222,8 +222,21 @@ children run on when their parent's turn ends or is interrupted, so they are bac
 sub-agents and Stop interrupts the Chat's turn and then each child's live turn through
 `HarnessRuntime::interrupt_sub_agents`, also when no turn runs. A child's messages are
 owned records named `ticketd message` (the text is the output), so nothing that reads
-the Chat's own messages takes them for the main agent's. Codex reports no brief, and a
-child's own approval is not offered yet.
+the Chat's own messages takes them for the main agent's. Codex reports no brief.
+
+A sub-agent's approval lives as long as the sub-agent that asked, not the turn it arrived
+in. Claude Code names the asker in `canUseTool`'s `agentID` (the task ID the bridge
+forwards as `agent_id`), and Codex sends it on the child's own thread and turn; the adapter
+reports the request with that owner and no turn, so it opens no turn, is not refused while
+another turn runs, and no turn's end withdraws it. It is withdrawn when the sub-agent's run
+ends (the adapter reports the withdrawal first; the supervisor covers a harness that does
+not) or when the harness process goes, and the answer is written back on the harness's own
+request. The Chat is waiting for the person while one is open, with no turn running. The
+request card is worded without the asker's name ("wants to run"): the interface writes the
+sub-agent's title before it, and the Chats list row ("Approval needed · {sub-agent}") and the
+notification (the card's title) say it too. The conformance suite holds every adapter to it
+(`a_sub_agents_approval_outlives_the_parents_turn`, `a_sub_agents_approval_goes_with_its_asker`),
+each declaring whether it models sub-agent approvals.
 
 A sub-agent in the background outlasts the turn that started it, so nothing it does opens or
 ends a turn, and what it ran before the turn ended finishes afterwards as its own. The

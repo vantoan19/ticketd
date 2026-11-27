@@ -264,7 +264,11 @@ pub fn status(facts: &Facts<'_>) -> Status {
         {
             return Status {
                 announcement: Some(asking.card.clone()),
-                ..make(Rank::Approval, "Approval needed", Some(asking.asker.clone()))
+                ..make(
+                    Rank::Approval,
+                    "Approval needed",
+                    Some(asking.asker.clone()),
+                )
             };
         }
         // A ticketd call reads without ticketd's path or the variable naming it.

@@ -1325,9 +1325,7 @@ fn request(interaction: &ChatInteraction, live: &ChatLive, harness: &str, steps:
     };
     let (title, subject) = match (approval, asked_to(steps)) {
         // Its plan's path is the harness's own; the title says what it is.
-        (true, Some((wants, asked, _))) if plan => {
-            (by(if pending { wants } else { asked }), None)
-        }
+        (true, Some((wants, asked, _))) if plan => (by(if pending { wants } else { asked }), None),
         (true, Some((wants, asked, what))) => (
             by(if pending { wants } else { asked }),
             Some(what).filter(|what| !what.is_empty()).or(prompt),
@@ -2674,11 +2672,15 @@ fn asking(chat: &Chat, live: &ChatLive, tracker: &Tracker, harness: &str) -> Vec
                 return None;
             };
             let asker = cut_title(&agent.title);
-            let card = [Some(asker.as_str()), Some(title.as_str()), subject.as_deref()]
-                .into_iter()
-                .flatten()
-                .collect::<Vec<_>>()
-                .join(" ");
+            let card = [
+                Some(asker.as_str()),
+                Some(title.as_str()),
+                subject.as_deref(),
+            ]
+            .into_iter()
+            .flatten()
+            .collect::<Vec<_>>()
+            .join(" ");
             Some(Asking {
                 interaction_id: waiting.interaction_id.clone(),
                 asker,
@@ -5285,7 +5287,9 @@ mod tests {
             .items
             .iter()
             .find_map(|item| match item {
-                ChatItem::Interaction(request) if request.state == ChatInteractionState::Pending => {
+                ChatItem::Interaction(request)
+                    if request.state == ChatInteractionState::Pending =>
+                {
                     Some(request.clone())
                 }
                 _ => None,
@@ -5294,7 +5298,15 @@ mod tests {
         let live = ChatLive {
             activity: Activity::WaitingForYou,
             running: true,
-            sub_agents: 1,
+            sub_agents: stored
+                .sub_agents
+                .iter()
+                .filter(|record| {
+                    record
+                        .latest()
+                        .is_some_and(|run| run.state == ChatSubAgentState::Running)
+                })
+                .count(),
             interactions: vec![ticketd_chat_host::LiveInteraction {
                 interaction_id: request.id.clone(),
                 kind: ticketd_chat_host::InteractionKind::Approval {

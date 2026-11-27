@@ -129,8 +129,8 @@ use crate::{
     SendMode, WorkspaceOpener,
 };
 use ticketd_core::{
-    Chat, ChatInteractionState, ChatItem, ChatMessage, ChatOwner, ChatRole, ChatSubAgent, ChatTurn, NewChat, Workspace,
-    WorkspaceSession,
+    Chat, ChatInteractionState, ChatItem, ChatMessage, ChatOwner, ChatRole, ChatSubAgent, ChatTurn,
+    NewChat, Workspace, WorkspaceSession,
 };
 
 #[cfg(test)]
@@ -867,7 +867,9 @@ impl HostScript {
             .items
             .iter()
             .filter_map(|item| match item {
-                ChatItem::Interaction(request) if request.state == ChatInteractionState::Pending => {
+                ChatItem::Interaction(request)
+                    if request.state == ChatInteractionState::Pending =>
+                {
                     let ChatOwner::SubAgent { native_id } = &request.owner else {
                         return None;
                     };

@@ -20,9 +20,10 @@ use async_trait::async_trait;
 use crate::testing::FakeAdapter;
 use crate::{
     ApprovalDecision, DeliveryEvidence, DispatchOutcome, EventKind, EventStream, HarnessAdapter,
-    HarnessRuntime, InteractionAnswer, InteractionResolution, InteractionResponse, InterruptOutcome, InterruptRequest,
-    NativeRequestId, NativeTurnId, OpenRequest, Refusal, RespondOutcome, RuntimeGeneration,
-    SessionStart, StartSettings, Submission, SubmissionId, SubmissionKind,
+    HarnessRuntime, InteractionAnswer, InteractionResolution, InteractionResponse,
+    InterruptOutcome, InterruptRequest, NativeRequestId, NativeTurnId, OpenRequest, Refusal,
+    RespondOutcome, RuntimeGeneration, SessionStart, StartSettings, Submission, SubmissionId,
+    SubmissionKind,
 };
 
 /// The generation every provider opens its runtime with.
@@ -400,8 +401,7 @@ async fn a_sub_agent_asks_in_a_turn(p: &mut dyn Provider) -> NativeRequestId {
         (declared, outcome) => panic!("declared {declared:?}, got {outcome:?}"),
     }
     drain(p.events()).await;
-    let request = p.play_sub_agent_approval("s1").await;
-    request
+    p.play_sub_agent_approval("s1").await
 }
 
 /// A sub-agent's approval is its own: it names the sub-agent, belongs to no turn, and is

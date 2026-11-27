@@ -239,7 +239,8 @@ fn a_sub_agents_approval_names_it_in_the_row_and_the_notification_says_the_card(
     let mut live = idle();
     live.activity = crate::Activity::WaitingForYou;
     live.sub_agents = 1;
-    live.interactions.push(approval("i", "npm test -- rate-limit"));
+    live.interactions
+        .push(approval("i", "npm test -- rate-limit"));
     let asking = [Asking {
         interaction_id: "i".to_owned(),
         asker: "Check limiter test coverage".to_owned(),
@@ -252,7 +253,10 @@ fn a_sub_agents_approval_names_it_in_the_row_and_the_notification_says_the_card(
     });
     // It outranks the work the sub-agent is part of, and the row says who asks.
     assert_eq!(status.rank, Rank::Approval);
-    assert_eq!(status.line(), "Approval needed · Check limiter test coverage");
+    assert_eq!(
+        status.line(),
+        "Approval needed · Check limiter test coverage"
+    );
     assert_eq!(
         status.notification(),
         "Check limiter test coverage wants to run npm test -- rate-limit"

@@ -893,7 +893,9 @@ impl Session {
         ) && !PLAN_TOOLS.contains(&name)
         {
             match (&turn, &owner) {
-                (Some(turn), _) => self.observe_tool_input(Who::Main(turn), id, name, input, events),
+                (Some(turn), _) => {
+                    self.observe_tool_input(Who::Main(turn), id, name, input, events)
+                }
                 // A sub-agent's tool is its own Step, once the sub-agent is known.
                 (None, Some(agent)) if self.sub_agents.known.contains_key(&agent.0) => {
                     self.sub_agents.owner.insert(id.to_owned(), agent.0.clone());
@@ -907,9 +909,10 @@ impl Session {
             tool_use: text(event, "tool_use_id").map(str::to_owned),
         };
         let registered = match &owner {
-            Some(owner) => self
-                .runtime
-                .register_owned_request(request.clone(), owner.clone(), payload),
+            Some(owner) => {
+                self.runtime
+                    .register_owned_request(request.clone(), owner.clone(), payload)
+            }
             None => self
                 .runtime
                 .register_request(request.clone(), turn.as_ref(), payload),

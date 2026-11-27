@@ -3756,7 +3756,8 @@ impl Supervisor {
                 let native_turn = request
                     .turn
                     .or_else(|| self.active.as_ref().map(|active| active.native.clone()));
-                let Some(turn_id) = native_turn.and_then(|turn| self.turn(&turn, &mut observations))
+                let Some(turn_id) =
+                    native_turn.and_then(|turn| self.turn(&turn, &mut observations))
                 else {
                     // It cannot be recorded, so it cannot be offered; it stays unanswered.
                     self.notice(

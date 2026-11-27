@@ -737,24 +737,23 @@ impl Session {
         };
         // A sub-agent asks on its own turn, which is not the Chat's: the request is the
         // child's, lives as long as the child's turn, and opens no turn of the Chat.
-        let (turn, owner, mut events) = match text(params, &["threadId"])
-            .filter(|_| self.is_other_thread(params))
-        {
-            Some(thread) => {
-                let child_turn = text(params, &["turnId"]);
-                let events = self.known(thread, child_turn, json!({}));
-                let owner = NativeSubAgentId::new(thread);
-                self.runtime
-                    .register_owned_request(request.clone(), owner.clone(), payload);
-                (None, Some(owner), events)
-            }
-            None => {
-                let turn = text(params, &["turnId"]).map(NativeTurnId::new);
-                self.runtime
-                    .register_request(request.clone(), turn.as_ref(), payload);
-                (turn, None, Vec::new())
-            }
-        };
+        let (turn, owner, mut events) =
+            match text(params, &["threadId"]).filter(|_| self.is_other_thread(params)) {
+                Some(thread) => {
+                    let child_turn = text(params, &["turnId"]);
+                    let events = self.known(thread, child_turn, json!({}));
+                    let owner = NativeSubAgentId::new(thread);
+                    self.runtime
+                        .register_owned_request(request.clone(), owner.clone(), payload);
+                    (None, Some(owner), events)
+                }
+                None => {
+                    let turn = text(params, &["turnId"]).map(NativeTurnId::new);
+                    self.runtime
+                        .register_request(request.clone(), turn.as_ref(), payload);
+                    (turn, None, Vec::new())
+                }
+            };
         events.push(EventKind::InteractionRequested(InteractionRequest {
             request,
             turn,

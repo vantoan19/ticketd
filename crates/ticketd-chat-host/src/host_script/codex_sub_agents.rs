@@ -6,8 +6,8 @@
 use super::{HostScript, fixture};
 use crate::attention::Rank;
 use ticketd_core::{
-    ChatInteractionState, ChatItem, ChatOwner, ChatSubAgent, ChatSubAgentRun, ChatSubAgentState, ChatSubAgentStopper,
-    ChatTurnState,
+    ChatInteractionState, ChatItem, ChatOwner, ChatSubAgent, ChatSubAgentRun, ChatSubAgentState,
+    ChatSubAgentStopper, ChatTurnState,
 };
 
 /// The child thread of the first fixture, as the fixtures name it.
@@ -413,7 +413,7 @@ fn asked_by_the_child() -> ChatOwner {
 
 #[tokio::test(start_paused = true)]
 async fn a_child_s_approval_is_shown_while_the_main_agent_works_and_is_answered_on_its_own_request()
- {
+{
     let mut h = HostScript::codex()
         .process([
             fixture!("codex", "handshake"),

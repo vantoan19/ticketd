@@ -8,8 +8,8 @@ use serde_json::Value;
 use crate::json_rpc::{CallOutcome, Connection, Peer, RpcError, WriteFailure};
 use crate::{
     AutomationPromptAdmission, DeliveryEvidence, DispatchOutcome, EventKind, InteractionResolution,
-    InterruptOutcome, NativeRequestId, NativeSubAgentId, NativeTurnId, Refusal, RespondOutcome, RuntimeGeneration,
-    SubmissionId, SubmissionKind, TurnEvidence, TurnOutcome,
+    InterruptOutcome, NativeRequestId, NativeSubAgentId, NativeTurnId, Refusal, RespondOutcome,
+    RuntimeGeneration, SubmissionId, SubmissionKind, TurnEvidence, TurnOutcome,
 };
 
 // Checked commands for a runtime over JSON-RPC. The codec prepares frames and
