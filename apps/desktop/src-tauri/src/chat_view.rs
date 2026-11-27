@@ -16,7 +16,7 @@ use ticketd_chat_host::{
 use ticketd_core::harnesses::{ResumePolicy, descriptor};
 use ticketd_core::{
     Chat, ChatAgentChange, ChatAttachment, ChatDelivery, ChatInputStanding, ChatInteraction,
-    ChatInteractionKind, ChatInteractionState, ChatItem, ChatMessage, ChatOwner, ChatRole,
+    ChatInteractionKind, ChatInteractionState, ChatItem, ChatMessage, ChatMessageNote, ChatOwner, ChatRole,
     ChatSessionOrigin, ChatSubAgent, ChatSubAgentRun, ChatSubAgentState, ChatSubAgentStopper,
     ChatSubmissionIntent, ChatSuggestion, ChatTool, ChatToolState, ChatTurn, ChatTurnStarter,
     ChatTurnState, SuggestedTicket,
@@ -258,6 +258,9 @@ pub enum Item {
         turn_id: Option<String>,
         /// Sent to steer a turn in progress: what follows is a new segment of it.
         steer: bool,
+        /// What ticketd added for the harness, when it did.
+        #[serde(skip_serializing_if = "Option::is_none")]
+        note: Option<ChatMessageNote>,
     },
     Response {
         id: String,
@@ -524,6 +527,9 @@ pub struct ChatState {
     /// nothing does).
     #[serde(skip_serializing_if = "Option::is_none")]
     pub turn_running: Option<bool>,
+    /// Set while ticketd holds a note on lost sub-agents for the next message.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub restart_notice: Option<RestartNotice>,
     pub problem: Option<Problem>,
     pub doing: Option<Doing>,
     /// Working while the harness session opens: "resume" or "start".
@@ -555,6 +561,14 @@ pub struct ChatState {
     /// Every sub-agent of the Chat, oldest first: the one place a sub-agent's title, type,
     /// model, brief and latest status live. Rows and items name one by its `id`.
     pub sub_agents: Vec<SubAgentView>,
+}
+
+/// The sub-agents that lost contact when ticketd quit, until the person's next message
+/// tells the harness. `resume`: the harness can resume them.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+pub struct RestartNotice {
+    pub sub_agents: Vec<String>,
+    pub resume: bool,
 }
 
 /// One sub-agent of a Chat, as the screens read it. Title, type and model are worded from
@@ -1732,6 +1746,7 @@ pub fn item(
                 .attempts
                 .last()
                 .is_some_and(|attempt| attempt.intent == ChatSubmissionIntent::Steer),
+            note: message.note.clone(),
         },
         ChatItem::Message(message) => {
             let active = chat.active_turn.as_ref().map(|turn| &turn.id);
@@ -2539,6 +2554,10 @@ pub fn chat_state(
             && live.sending.is_empty()
             && (live.sub_agents > 0 || live.waking))
             .then_some(false),
+        restart_notice: (!chat.restart_notice.is_empty()).then(|| RestartNotice {
+            sub_agents: chat.restart_notice.clone(),
+            resume: descriptor(&chat.harness).is_some_and(|descriptor| descriptor.sub_agents.resume),
+        }),
         problem,
         doing: chat
             .active_turn
@@ -4589,6 +4608,81 @@ mod tests {
         }
         tracker.note(&later);
         assert_eq!(tracker.stopped_sub_agents(), None);
+    }
+
+    #[test]
+    fn a_restart_notice_names_the_lost_sub_agents_and_whether_the_harness_can_resume_them() {
+        let tracker = Tracker::default();
+        let around = Surroundings::default();
+        let live = ChatLive::idle();
+        // Nothing held: the field is absent.
+        let none = chat_state(&claude_chat(None), &live, &tracker, &around);
+        assert!(none.restart_notice.is_none());
+        let json = serde_json::to_value(&none).unwrap();
+        assert!(json.get("restart_notice").is_none());
+
+        let mut held = claude_chat(None);
+        held.restart_notice = vec!["task_a".to_owned(), "task_b".to_owned()];
+        let state = chat_state(&held, &live, &tracker, &around);
+        assert_eq!(
+            serde_json::to_value(&state).unwrap()["restart_notice"],
+            json!({"sub_agents": ["task_a", "task_b"], "resume": true})
+        );
+        // Codex cannot resume one.
+        let mut codex = chat(None);
+        codex.restart_notice = vec!["thr_2".to_owned()];
+        assert_eq!(
+            serde_json::to_value(chat_state(&codex, &live, &tracker, &around)).unwrap()
+                ["restart_notice"],
+            json!({"sub_agents": ["thr_2"], "resume": false})
+        );
+    }
+
+    #[test]
+    fn a_message_that_carried_a_note_shows_exactly_what_ticketd_added() {
+        let chat = claude_chat(None);
+        let note = ticketd_core::ChatMessageNote {
+            kind: ticketd_core::ChatMessageNoteKind::LostSubAgents,
+            sub_agents: vec!["task_a".to_owned()],
+            text: "From ticketd: this sub-agent was running when ticketd quit and is not running now: Find limiter bypasses. You can resume it.".to_owned(),
+        };
+        let mut message = ticketd_core::ChatMessage {
+            id: "m".to_owned(),
+            position: 2,
+            role: ticketd_core::ChatRole::User,
+            text: "Pick the review back up.".to_owned(),
+            attachments: Vec::new(),
+            complete: true,
+            turn_id: None,
+            queued: false,
+            editing: false,
+            requires_link_context: false,
+            note: None,
+            attempts: vec![ticketd_core::ChatSubmissionAttempt {
+                id: "a".to_owned(),
+                intent: ticketd_core::ChatSubmissionIntent::NewTurn,
+                delivery: ticketd_core::ChatDelivery::Acknowledged,
+                turn_id: None,
+                detail: None,
+                decision: None,
+                recorded_at: "2026-11-27T10:00:00Z".to_owned(),
+            }],
+            created_at: "2026-11-27T10:00:00Z".to_owned(),
+        };
+        let record = ChatItem::Message(message.clone());
+        let plain = view_of(&record, &Tracker::default(), &chat);
+        assert!(plain[0].get("note").is_none());
+        message.note = Some(note);
+        let record = ChatItem::Message(message);
+        let shown = view_of(&record, &Tracker::default(), &chat);
+        assert_eq!(
+            shown[0]["note"],
+            json!({
+                "kind": "lost_sub_agents",
+                "sub_agents": ["task_a"],
+                "text": "From ticketd: this sub-agent was running when ticketd quit and is not running now: Find limiter bypasses. You can resume it."
+            })
+        );
     }
 
     #[test]
