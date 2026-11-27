@@ -134,6 +134,8 @@ use ticketd_core::{
 };
 
 #[cfg(test)]
+mod codex_sub_agents;
+#[cfg(test)]
 mod sub_agents;
 #[cfg(test)]
 mod tests;
@@ -889,6 +891,9 @@ fn line(item: &ChatItem, sub_agents: &[ChatSubAgent]) -> String {
             format!("{who}: {}{cut}", message.text)
         }
         ChatItem::Turn(turn) => format!("turn {}", format!("{:?}", turn.state).to_lowercase()),
+        ChatItem::Tool(tool) if tool.name == crate::records::MESSAGE_RECORD_NAME => {
+            format!("agent: {}", tool.output.as_deref().unwrap_or_default())
+        }
         ChatItem::Tool(tool) => format!(
             "tool {} {}",
             tool.name,
