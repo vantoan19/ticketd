@@ -479,7 +479,7 @@ impl Connector for GithubConnector {
                     Some(variable) => format!("Sign in as the GitHub CLI account selected for this connection, or set {variable} to a token for that account."),
                     None => "From a script, set TICKETD_GITHUB_TOKEN to a token that can read and create issues instead.".into(),
                 }),
-                desktop_hint: Some("Then choose Check connection in Settings.".into()),
+                desktop_hint: Some("Then choose Check connection in Settings › Ticket sources.".into()),
                 desktop_instruction: Some("Run “gh auth login” in a terminal, then choose Check connection.".into()),
             },
             fields: [

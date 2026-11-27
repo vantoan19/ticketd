@@ -95,7 +95,7 @@ export function publicationReason(preview: PublicationPreview): string {
     case "status":
       return "Only Todo, In progress and In review tickets can be published.";
     case "source_not_connected":
-      return `Connect ${preview.provider_name} in Settings to publish.`;
+      return `Connect ${preview.provider_name} in Settings › Ticket sources to publish.`;
     case "trashed":
       return "Restore this ticket from the trash to publish it.";
     case "externally_owned":

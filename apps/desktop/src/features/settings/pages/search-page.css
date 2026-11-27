@@ -4,31 +4,12 @@
   line-height: var(--text-caption-line);
   color: var(--muted-foreground);
 }
-.settings-search-group {
-  margin-top: 28px;
-}
-.settings-search-group-label {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  margin-bottom: 10px;
-  font-size: var(--text-caption);
-  line-height: var(--text-caption-line);
-  color: var(--muted-foreground);
-}
-.settings-search-group-label h2 {
-  margin: 0;
-  font-size: var(--text-ui);
-  line-height: var(--text-ui-line);
-  font-weight: 500;
-  color: var(--foreground);
-}
 .settings-search-result {
   display: flex;
   align-items: center;
   gap: 16px;
   min-height: 60px;
-  padding: 12px 20px;
+  padding: 12px 16px;
   color: var(--foreground);
   text-decoration: none;
 }
@@ -37,6 +18,10 @@
 }
 .settings-search-result:hover {
   background: var(--hover);
+}
+/* The result Enter opens: the nav's selected fill. */
+.settings-search-result[aria-current="true"] {
+  background: var(--accent);
 }
 .settings-search-result:focus-visible {
   outline: 2px solid var(--ring);

@@ -40,7 +40,7 @@ Open ticketd and [create your first ticket](first-ticket.md).
 ## Command-line tool
 
 The bundled CLI updates with the desktop. On macOS and Windows, open
-**Settings → Command line** and choose **Install command-line tool** to make
+**Settings › Command line** and choose **Install command-line tool** to make
 `ticketd` available on your PATH.
 
 - **On macOS**, approve the administrator prompt to create a link in
@@ -53,7 +53,7 @@ The bundled CLI updates with the desktop. On macOS and Windows, open
   and agent harnesses so they inherit the change.
 
 If an older, newer or different standalone `ticketd` comes first on PATH,
-**Settings → Command line** shows its version and path. Choose **Use this app's
+**Settings › Command line** shows its version and path. Choose **Use this app's
 ticketd**: one administrator prompt removes that copy and links this app's
 copy. Use **Check again** (or return to the window) to confirm which copy is found.
 
@@ -83,13 +83,13 @@ By default, the desktop checks for updates about ten seconds after launch and
 every 24 hours while it is open. It downloads and verifies a newer stable release
 in the background. Choose **What's new** to open the release notes, or
 **Restart to update** and then **Restart now** to install it. You can return to
-**Settings → About** to restart after dismissing the status-line notice. On
+**Settings › About** to restart after dismissing the status-line notice. On
 macOS and Windows, quitting with a verified update ready installs it for the
 next launch. On Linux, choose **Restart to update** to install it.
 
 The restart prompt shows any running Chats and Automation runs that will stop.
 Interrupted Automation runs are marked as needing attention when ticketd reopens.
-If the release raises the Workspace format version, **Settings → About** says so
+If the release raises the Workspace format version, **Settings › About** says so
 on the update ("It upgrades your Workspace, and older versions can't open it
 after"), and with Workspace sync on it asks you to update your other computers
 too. The prompt warns you again before installing, and quitting doesn't install
@@ -105,7 +105,7 @@ the package manually. If a download or signature check fails, About offers
 **Try again** and a link to the release.
 
 To stop scheduled checks, turn off **Check for updates automatically** in
-**Settings → About**. Turning it off also cancels any check or download in
+**Settings › About**. Turning it off also cancels any check or download in
 progress. Use **Check for updates** in About to check once. Builds without
 an updater public key skip checks and show this in About.
 
@@ -150,7 +150,7 @@ sources, workspace operations, and working from a ticketd Chat (`chat`). Command
 reference. All `skills` commands work without opening, creating, or migrating the
 ticket workspace.
 
-Install the small discovery skill for your user from Settings → Agent skills in
+Install the small discovery skill for your user from Settings › Agent skills in
 the desktop app, or with the CLI:
 
 ```sh
@@ -191,7 +191,7 @@ organize it. Installing this skill does not change those choices.
 Distribution builds include ticketd's Google app registration. In the attachment
 picker, choose **Google Drive > Choose in Google Drive**, sign in in your default
 browser, and select the files to authorize. To upload new copies, choose Google Drive in
-**Settings > Files**: with Workspace sync on Google Drive they go to an Uploads folder
+**Settings › Files**: with Workspace sync on Google Drive they go to an Uploads folder
 inside the sync folder and use the same sign-in; otherwise choose a writable Drive folder. Users do not need a Google Cloud project,
 a configuration file, or environment variables. Local attachments also work
 without signing in. A source build without a registration keeps Drive disabled
@@ -233,7 +233,7 @@ What you need:
   buckets or change their settings. Use a general purpose bucket: S3 directory buckets
   have no Versioning.
 
-In **Settings > Workspace sync**, choose **S3**, pick the profile, and choose **Sign
+In **Settings › Workspace sync**, choose **S3**, pick the profile, and choose **Sign
 in** if the profile needs it. Then choose the bucket (a list when the profile may list
 buckets, otherwise type its name) and a prefix (`ticketd/` by default). Before the
 first sync, ticketd checks the bucket and refuses one that cannot sync safely, saying
@@ -253,7 +253,7 @@ confirmed. Cloudflare R2 (no Versioning) and the Google Cloud Storage XML API (i
 ignores the conditional headers) do not work. The bucket check, not this list, decides
 for any other service. A Workspace stays with the service its bucket was connected
 through: if you edit the profile to reach another endpoint, sync stops with a message.
-To move the bucket on purpose, Disconnect in Settings > Workspace sync, then connect again.
+To move the bucket on purpose, Disconnect in Settings › Workspace sync, then connect again.
 
 ### IAM permissions
 

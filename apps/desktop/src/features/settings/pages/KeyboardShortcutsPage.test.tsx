@@ -11,6 +11,7 @@ import { ChatFeatureContext } from "@/features/chats/use-chats";
 import {
   SHORTCUTS,
   requiresChat,
+  shortcut,
   shortcutLabel,
   type Shortcut,
 } from "@/lib/shortcuts";
@@ -25,14 +26,7 @@ const groupNames = () =>
   screen
     .getAllByRole("heading", { level: 2 })
     .map((heading) => heading.textContent);
-const ALL = [
-  "Everywhere",
-  "Lists",
-  "Ticket",
-  "Plans",
-  "Dialogs and menus",
-  "First run",
-];
+const ALL = ["Everywhere", "Lists", "Ticket", "Plans", "Dialogs and menus"];
 const WITH_CHAT = [...ALL.slice(0, 4), "Chat", ...ALL.slice(4)];
 
 function renderWithChat() {
@@ -56,11 +50,68 @@ function renderWithChat() {
 test("every real shortcut is listed under its scope", () => {
   render(<KeyboardShortcutsPage />);
   expect(groupNames()).toEqual(ALL);
-  for (const shortcut of SHORTCUTS.filter((item) => !requiresChat(item))) {
+  for (const shortcut of SHORTCUTS.filter(
+    (item) => !requiresChat(item) && item.scope !== "Not listed",
+  )) {
     const scope = screen.getByRole("region", { name: shortcut.scope });
     expect(within(scope).getByText(shortcut.label)).toBeTruthy();
   }
   expect(screen.getByText("Focus the divider first.")).toBeTruthy();
+});
+
+test("a shared condition is said once, in its group's caption", () => {
+  render(<KeyboardShortcutsPage />);
+  const everywhere = screen.getByRole("region", { name: "Everywhere" });
+  expect(
+    within(everywhere).getByText(
+      "Letter keys pause while you type or while a dialog or menu is open.",
+    ),
+  ).toBeTruthy();
+  expect(
+    screen.getByText(
+      "On the open ticket, or the focused one in a list or board.",
+    ),
+  ).toBeTruthy();
+  // The sentence each row used to repeat is gone from the rows.
+  expect(screen.queryByText(/Not while typing or with a dialog/)).toBeNull();
+  expect(
+    screen.queryByText(/On the focused ticket in a list or board/),
+  ).toBeNull();
+  // A note that adds something stays.
+  expect(
+    screen.getByText("In the rich editor, this inserts a link."),
+  ).toBeTruthy();
+  expect(screen.getByText("While Settings is open.")).toBeTruthy();
+  expect(screen.getByText("In the update composer.")).toBeTruthy();
+});
+
+test("the First run group is gone, and so are its two guide keys", () => {
+  render(<KeyboardShortcutsPage />);
+  expect(screen.queryByRole("region", { name: "First run" })).toBeNull();
+  expect(screen.queryByText("Open Agent skills")).toBeNull();
+  expect(screen.queryByText("Open Workspace sync")).toBeNull();
+  expect(
+    screen.queryByText(/While the guide button or its palette command/),
+  ).toBeNull();
+  // The guide's tooltip and the palette's chip still read them.
+  expect(shortcutLabel("go-sync")).not.toBe("");
+  expect(shortcutLabel("go-agent-skills")).not.toBe("");
+});
+
+test("Zoom in shows one binding and speaks all three", () => {
+  render(<KeyboardShortcutsPage />);
+  const mac = isMacPlatform();
+  const modifier = mac ? "Command" : "Control";
+  const row = screen.getByText("Zoom in").closest("li") ?? document.body;
+  const keys = within(row as HTMLElement).getByRole("img", {
+    name:
+      `${modifier} plus =` +
+      ` or ${modifier} plus + or ${modifier} plus Shift plus +`,
+  });
+  expect(
+    Array.from(keys.querySelectorAll("kbd")).map((key) => key.textContent),
+  ).toEqual(mac ? ["⌘", "+"] : ["Ctrl", "+"]);
+  expect(shortcut("page-zoom-in").keys).toHaveLength(3);
 });
 
 test("keys use platform glyphs and are read as words", () => {

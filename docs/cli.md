@@ -184,7 +184,7 @@ also covers keychain storage, environment overrides and password commands.
 
 Use `ticketd source extension list` to inspect extension registrations. Each
 shows its `command` (the program and arguments as the manifest names them) and,
-for an installed copy, the `origin` folder it was added from. Settings → Ticket
+for an installed copy, the `origin` folder it was added from. Settings › Ticket
 sources adds a custom source with the same approval as `add`.
 `ticketd source extension add PATH` asks for approval before running and
 installing a local package. `ticketd source extension link PATH` runs the

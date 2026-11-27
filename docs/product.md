@@ -36,7 +36,7 @@ does not schedule agents or summarize, prioritize, or decompose tickets by itsel
 
 The desktop checks GitHub for newer stable releases and verifies downloads before
 offering to install them on a restart you confirm. On macOS and Windows, a verified
-update also installs when you quit ticketd, unless it changes the workspace format. In **Settings → About**, you
+update also installs when you quit ticketd, unless it changes the workspace format. In **Settings › About**, you
 can turn off scheduled checks or check on demand. The CLI bundled with the
 desktop updates with it. Standalone CLI copies are updated by hand.
 See [in-app updates](install.md#in-app-updates).
@@ -423,7 +423,7 @@ system's secure store.
   Last-known metadata survives offline and provider failures, and each access failure
   has its own recovery. Removing a reference never deletes the Drive file or changes
   sharing. CLI: `attachment drive-add`, `drive-resolve`, `drive-authorize`.
-- **Uploads.** Settings > Files says where new files go: this computer (works offline,
+- **Uploads.** Settings › Files says where new files go: this computer (works offline,
   included in backups) or Google Drive (not in backups). Files already attached stay
   where they are. Each upload keeps its destination through retry and restart, and a
   provider failure never silently falls back to local storage. Uploads are durable
@@ -457,7 +457,7 @@ source extension. Extensions use the same ticket authority and refresh
 workflows as GitHub. [External ticket authority](adr/0006-external-ticket-authority.md)
 
 Install another extension from a local folder with `ticketd source extension add PATH`,
-or from Settings → Ticket sources with **Add a custom source**. Both show the
+or from Settings › Ticket sources with **Add a custom source**. Both show the
 program, its arguments and its declared hosts, ask once, and leave the same
 registration. A folder that cannot be added (no `ticketd-source.json`, or a
 manifest that needs a newer ticketd) says why before anything is shown. The
@@ -470,7 +470,7 @@ the TypeScript example and conformance. [Write a ticket source extension](ticket
   a personal API key that can read them. Filter discovery by assignee, labels, or
   project. ticketd syncs the issue's current state and its comments and
   timeline.
-- Settings → Ticket sources is one table of every source with its status, what it
+- Settings › Ticket sources is one table of every source with its status, what it
   signs in with and what it brings in; selecting a row opens that source's page, where
   you connect it, rename it or remove it. Several accounts can connect to the same
   provider. Connections stay on this device and are excluded
@@ -488,7 +488,7 @@ the TypeScript example and conformance. [Write a ticket source extension](ticket
   imported and refreshed through one connection. When no local connection covers
   a ticket, it shows its last synced content and says the provider isn’t connected
   on this desktop. The ticket carries the provider’s display name and icon.
-  During a manually started refresh, **Cancel sync** is available in Settings → Ticket sources.
+  During a manually started refresh, **Cancel sync** is available in Settings › Ticket sources.
 - An **externally owned** ticket receives its title, description, confirmed closures
   and reopenings from the tracker. Progress on open issues, Plan membership,
   relationships, tags, Activities, and Documents stay in ticketd.
@@ -526,7 +526,7 @@ the TypeScript example and conformance. [Write a ticket source extension](ticket
   [Recover a legacy GitHub issue link](cli.md#recover-a-legacy-github-issue-link)
 - A saved connection remains in Sources when its extension is uninstalled.
   You can rename or remove it while the extension is unavailable.
-- Remove a connection in Settings → Ticket sources or with
+- Remove a connection in Settings › Ticket sources or with
   `ticketd source CONNECTION remove`. Its tickets keep their external identity,
   last synced content, status and local work, and show **Connection removed** on
   this desktop. Discovery of the same issue through a covering connection resumes
@@ -586,7 +586,7 @@ below applies to both unless it names one.
   Attachments are ordinary files. Content is stored unencrypted, and the live SQLite
   database is never synchronized. Inbox read state, checkout paths, credentials, source
   settings, window layout, drafts, and upload queues stay local.
-- **Setup.** Settings > Workspace sync takes four steps. First the person says whether
+- **Setup.** Settings › Workspace sync takes four steps. First the person says whether
   this computer starts a Workspace or joins one; Start is the default when this computer
   holds tickets or Documents, Join when it is empty, and Join says what it would replace.
   Then Google Drive or S3, and signing in. Then ticketd reads the storage before it writes
@@ -602,7 +602,7 @@ below applies to both unless it names one.
   the same account (or, for S3, the same bucket and prefix) can reconnect to its folder.
   Restoring a backup disconnects the Workspace from its storage, and says so first; afterwards setup offers Reconnect to the folder it used. To move from Drive to S3,
   disconnect Drive and upload the Workspace to a bucket; there is no migration.
-- **While syncing.** Settings > Workspace sync shows one status row: the state in a
+- **While syncing.** Settings › Workspace sync shows one status row: the state in a
   word, when sync last checked, and which sign-in it uses. When sync stops (the sign-in
   ended, the folder is missing, storage is full, offline, slowed down, a changed S3
   service, a missing AWS CLI, or any other failure) the same row carries the cause, says
@@ -651,7 +651,7 @@ Setup, IAM permissions and the lifecycle rule are in
   CLI. When the CLI is missing or too old, or the machine has no profile, setup says
   what to install or create (`aws configure sso` or `aws configure`), and the person
   can choose the `aws` program when it is not found.
-- **Setup.** In Settings > Workspace sync the person chooses S3, picks a profile,
+- **Setup.** In Settings › Workspace sync the person chooses S3, picks a profile,
   chooses Sign in when the profile needs it (it runs `aws sso login`, or `aws login`
   for a profile set up that way, and opens the browser), then chooses the bucket and a
   key prefix (`ticketd/` by default). The bucket is picked from a list when the
@@ -731,10 +731,10 @@ file bytes.
 
 ### Native Chats
 
-Native Chat is experimental and off by default (Settings > Agents). A Chat hosts the
+Native Chat is experimental and off by default (Settings › Agents). A Chat hosts the
 person's own installed Claude Code, Codex or Antigravity harness with its own sign-in. ticketd
 detects the installation and guides the person to the harness's login; it does not
-collect OAuth tokens, proxy model requests, or change billing. Settings > Agents lists
+collect OAuth tokens, proxy model requests, or change billing. Settings › Agents lists
 the agents found on this computer even while Chats are off (it asks each program only
 its version, never its sign-in); with Chats on it shows each one's readiness and the
 one fix a missing sign-in needs, and opening one shows its sign-in, its program and
@@ -836,5 +836,5 @@ and a flow of steps that can branch.
 - **Runs.** A run records its event, steps, outcome, and each agent step's Chat. Runs
   are local to the device that ran them, and an Automation is switched on or off per
   device. Runs go two at once; there is no setting for it. Scheduled Automations run
-  only while ticketd is running, so Settings > Automations offers "Start ticketd when
+  only while ticketd is running, so Settings › Automations offers "Start ticketd when
   you sign in" and says how many scheduled Automations depend on it.

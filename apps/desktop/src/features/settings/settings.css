@@ -164,3 +164,26 @@
     opacity var(--dur-exit) var(--ease-in),
     filter var(--dur-exit) var(--ease-in);
 }
+
+/* The setting a Search result opened. The page holds the attribute for 3
+   seconds: the fill stays, then fades out over the last of them. Reduced motion
+   keeps the fill still until the attribute goes. */
+[data-found] {
+  background-color: var(--hover);
+  border-radius: var(--radius);
+  animation: settings-found calc(var(--dur-arrival) * 2.5) linear forwards;
+}
+@keyframes settings-found {
+  0%,
+  70% {
+    background-color: var(--hover);
+  }
+  100% {
+    background-color: transparent;
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  [data-found] {
+    animation: none;
+  }
+}

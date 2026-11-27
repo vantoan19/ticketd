@@ -289,7 +289,7 @@ fn invalid(field: &str, message: &str) -> SourceError {
 
 fn needs_sign_in(id: &str, field: &str, message: &str) -> SourceError {
     SourceError::Unauthenticated(format!(
-        "{field} {message}. Enter it in Settings → Ticket sources, or set {} before running ticketd",
+        "{field} {message}. Enter it in Settings › Ticket sources, or set {} before running ticketd",
         env_key(id, field),
     ))
 }

@@ -530,6 +530,7 @@ fn cli_explains_and_changes_the_shared_workspace_upload_limit() {
     let error = String::from_utf8_lossy(&output.stderr);
     assert!(error.contains("4 bytes"), "{error}");
     assert!(error.contains("attachment limit --bytes"), "{error}");
+    assert!(error.contains("Settings › Files"), "{error}");
     assert_eq!(
         run(dir.path(), &["attachment", "list"]),
         serde_json::json!([])

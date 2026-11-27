@@ -307,7 +307,7 @@ numeric version (`0.1.1`), because Windows Installer versions are numeric.
 Test the draft's own files, not a local build:
 
 1. Install the desktop app from the draft on each advertised platform. Verify
-   that its bundled CLI is available through **Settings → Command line** on macOS
+   that its bundled CLI is available through **Settings › Command line** on macOS
    and Windows and installed in `/usr/bin` by the Debian package. Check separately
    that the standalone CLI archives run. Use a separate OS user for release-desktop
    tests. The workspace override is available in debug builds only.
@@ -359,7 +359,7 @@ by PR label, plus a short hand-written section covering the following.
 
 After publishing, verify the download links and hashes. Once a previous release
 has the updater enabled, use it to confirm the new release appears in
-**Settings → About**. Point users to GitHub Releases for stable downloads.
+**Settings › About**. Point users to GitHub Releases for stable downloads.
 
 ## Compatibility and maintenance
 

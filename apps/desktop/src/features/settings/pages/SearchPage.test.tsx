@@ -9,7 +9,10 @@ import {
 import { afterEach, expect, test, vi } from "vitest";
 import { SearchPage } from "@/features/settings/pages/SearchPage";
 import { SettingsStateContext } from "@/features/settings/use-settings-state";
-import type { SettingsPageId } from "@/features/settings/settings-sections";
+import {
+  SEARCH_INPUT_ID,
+  type SettingsPageId,
+} from "@/features/settings/settings-sections";
 import type { SourceEntry } from "@/lib/api/sources";
 import { githubSource } from "@/test/source-fixtures";
 
@@ -24,86 +27,172 @@ afterEach(() => {
   sourceList = [];
 });
 
-/** The page as the app mounts it: the query is typed in the nav's field, so the test sets it. */
+/** The page as the app mounts it: the query is typed in the nav's field, so the test brings one. */
 function Harness({
-  openPage,
-  query: initial = "",
+  openSetting,
+  query = "",
 }: {
-  openPage: (page: SettingsPageId) => void;
+  openSetting: (page: SettingsPageId, title: string) => void;
   query?: string;
 }) {
   return (
     <SettingsStateContext.Provider
       value={{
-        query: initial,
+        query,
         setQuery: () => {},
-        openPage,
+        openPage: () => {},
+        openSetting,
         needsSetup: {},
         refreshIndicators: () => {},
       }}
     >
+      <input id={SEARCH_INPUT_ID} type="search" aria-label="Search settings" />
       <SearchPage />
     </SettingsStateContext.Provider>
   );
 }
 
+const field = () => screen.getByRole("searchbox", { name: "Search settings" });
+const results = () => screen.getAllByRole("link");
+const titles = () =>
+  results().map(
+    (link) => link.querySelector(".settings-list-row-title")?.textContent,
+  );
+const selected = () =>
+  results().filter((link) => link.getAttribute("aria-current") === "true");
+
 test("an empty query asks for a word and lists nothing", () => {
-  render(<Harness openPage={() => {}} />);
+  render(<Harness openSetting={() => {}} />);
   expect(screen.getByRole("status").textContent).toBe(
     "Type to search every setting by name, description or related word.",
   );
   expect(screen.queryByRole("link")).toBeNull();
   // The one field is in the nav; the page has none of its own.
-  expect(screen.queryByRole("searchbox")).toBeNull();
+  expect(screen.getAllByRole("searchbox")).toHaveLength(1);
 });
 
-test("results are grouped by page with a count and open the page on choosing", () => {
-  const openPage = vi.fn();
-  render(<Harness openPage={openPage} query="backup" />);
-  const status = screen.getByRole("status").textContent ?? "";
-  expect(status).toMatch(
-    /^\d+ settings? in \d+ sections?\. Choose one to open its page\.$/,
+test("results are one flat list under a count, with the page of each as Group › Page", () => {
+  render(<Harness openSetting={() => {}} query="report" />);
+  expect(screen.getByRole("heading", { level: 2 }).textContent).toMatch(
+    /^\d+ settings match “report”$/,
   );
-  const group = screen.getByRole("region", { name: "Backups & export" });
-  expect(group.textContent).toMatch(/Workspace · \d+ settings?/);
-  fireEvent.click(within(group).getByRole("link", { name: /Restore points/ }));
-  expect(openPage).toHaveBeenCalledWith("backups-export");
+  expect(screen.getByText("Enter opens the first one.")).toBeTruthy();
+  const star = results().find((link) =>
+    link.textContent?.includes("Report an issue"),
+  );
+  expect(
+    star?.querySelector(".settings-list-row-description")?.textContent,
+  ).toBe("Help › About");
+  // The page's icon, then the name, the page and a chevron.
+  expect(star?.querySelectorAll("svg")).toHaveLength(2);
+  // No box per page, and no description of the setting.
+  expect(screen.queryAllByRole("region")).toHaveLength(1);
 });
 
-test("the match is highlighted in the title", () => {
-  render(<Harness openPage={() => {}} query="theme" />);
-  const marks = Array.from(document.querySelectorAll("mark"));
-  expect(marks.length).toBeGreaterThan(0);
-  expect(marks[0]?.textContent).toBe("Theme");
+test("one match reads in the singular", () => {
+  render(<Harness openSetting={() => {}} query="onboarding" />);
+  expect(screen.getByRole("heading", { level: 2 }).textContent).toBe(
+    "1 setting matches “onboarding”",
+  );
 });
 
-test("a query with no match says so and offers shortcuts to Appearance, Backups & export and the first source", () => {
+test("the page's own title ranks first: files and attachments list the Files page before rows that mention it", () => {
+  for (const query of ["files", "attachments"]) {
+    const { unmount } = render(
+      <Harness openSetting={() => {}} query={query} />,
+    );
+    const where = results().map(
+      (link) =>
+        link.querySelector(".settings-list-row-description")?.textContent,
+    );
+    expect(where[0], query).toBe("Workspace › Files");
+    const lastFiles = where.lastIndexOf("Workspace › Files");
+    expect(where.slice(0, lastFiles + 1), query).toEqual(
+      Array(lastFiles + 1).fill("Workspace › Files"),
+    );
+    unmount();
+  }
+});
+
+test("the first result is selected, and the match is marked in its title", () => {
+  render(<Harness openSetting={() => {}} query="theme" />);
+  expect(selected()).toEqual([results()[0]]);
+  expect(results()[0]?.querySelector("mark")?.textContent).toBe("Theme");
+});
+
+test("Enter in the field opens the first result", () => {
+  const openSetting = vi.fn();
+  render(<Harness openSetting={openSetting} query="theme" />);
+  fireEvent.keyDown(field(), { key: "Enter" });
+  expect(openSetting).toHaveBeenCalledTimes(1);
+  expect(openSetting).toHaveBeenCalledWith("appearance", "Theme");
+});
+
+test("the arrows move the selection and stop at both ends; Enter opens the selected result", () => {
+  const openSetting = vi.fn();
+  render(<Harness openSetting={openSetting} query="backup" />);
+  const count = results().length;
+  expect(count).toBeGreaterThan(2);
+  fireEvent.keyDown(field(), { key: "ArrowUp" });
+  expect(selected()).toEqual([results()[0]]);
+  fireEvent.keyDown(field(), { key: "ArrowDown" });
+  fireEvent.keyDown(field(), { key: "ArrowDown" });
+  expect(selected()).toEqual([results()[2]]);
+  expect(field().getAttribute("aria-activedescendant")).toBe(results()[2]?.id);
+  fireEvent.keyDown(field(), { key: "Enter" });
+  expect(openSetting).toHaveBeenCalledWith(
+    "backups-export",
+    titles()[2] as string,
+  );
+  for (let press = 0; press < count; press += 1)
+    fireEvent.keyDown(field(), { key: "ArrowDown" });
+  expect(selected()).toEqual([results()[count - 1]]);
+  fireEvent.keyDown(field(), { key: "ArrowUp" });
+  expect(selected()).toEqual([results()[count - 2]]);
+});
+
+test("a new query selects the first result again", () => {
+  const { rerender } = render(
+    <Harness openSetting={() => {}} query="backup" />,
+  );
+  fireEvent.keyDown(field(), { key: "ArrowDown" });
+  expect(selected()).toEqual([results()[1]]);
+  rerender(<Harness openSetting={() => {}} query="backups" />);
+  expect(selected()).toEqual([results()[0]]);
+});
+
+test("choosing a result opens its page and names the setting to show", () => {
+  const openSetting = vi.fn();
+  render(<Harness openSetting={openSetting} query="backup" />);
+  fireEvent.click(screen.getByRole("link", { name: /Restore points/ }));
+  expect(openSetting).toHaveBeenCalledWith("backups-export", "Restore points");
+});
+
+test("a query with no match says so, offers other words and no shortcuts", () => {
   sourceList = [githubSource];
-  const openPage = vi.fn();
-  render(<Harness openPage={openPage} query="zzzzqqq" />);
-  expect(screen.getByRole("status").textContent).toBe("No matches.");
-  expect(screen.getByText("No settings match “zzzzqqq”")).toBeTruthy();
-  fireEvent.click(screen.getByRole("button", { name: "Backups & export" }));
-  expect(openPage).toHaveBeenLastCalledWith("backups-export");
-  fireEvent.click(screen.getByRole("button", { name: "GitHub" }));
-  expect(openPage).toHaveBeenLastCalledWith("source-github");
-  fireEvent.click(screen.getByRole("button", { name: "Appearance" }));
-  expect(openPage).toHaveBeenLastCalledWith("appearance");
+  const openSetting = vi.fn();
+  render(<Harness openSetting={openSetting} query="proxy" />);
+  expect(screen.getByText("No settings match “proxy”")).toBeTruthy();
+  expect(
+    screen.getByText("Try another word, such as theme, sync or backup."),
+  ).toBeTruthy();
+  expect(screen.queryByRole("button")).toBeNull();
+  expect(screen.queryByRole("link")).toBeNull();
+  expect(screen.queryByRole("heading", { level: 2 })).toBeNull();
+  // Enter has nothing to open.
+  fireEvent.keyDown(field(), { key: "Enter" });
+  expect(openSetting).not.toHaveBeenCalled();
 });
 
-test("an available source's settings are searchable and land on its page", () => {
+test("a connection is a result on Ticket sources, and its own rows open its page", () => {
   sourceList = [githubSource];
-  const openPage = vi.fn();
-  render(<Harness openPage={openPage} query="discovery" />);
-  const group = screen.getByRole("region", { name: "GitHub" });
-  fireEvent.click(within(group).getByRole("link", { name: /^Discovery/ }));
-  expect(openPage).toHaveBeenCalledWith("source-github");
-});
-
-test("with no source the empty state has only the two shortcuts", () => {
-  render(<Harness openPage={() => {}} query="zzzzqqq" />);
-  expect(screen.getAllByRole("button").map((b) => b.textContent)).toEqual([
-    "Appearance",
-    "Backups & export",
-  ]);
+  const openSetting = vi.fn();
+  render(<Harness openSetting={openSetting} query="github" />);
+  const first = results()[0] as HTMLElement;
+  expect(within(first).getByText("GitHub", { selector: "mark" })).toBeTruthy();
+  expect(first.textContent).toContain("Connections › Ticket sources");
+  fireEvent.click(first);
+  expect(openSetting).toHaveBeenLastCalledWith("ticket-sources", "GitHub");
+  fireEvent.click(screen.getByRole("link", { name: /^Discovery/ }));
+  expect(openSetting).toHaveBeenLastCalledWith("source-github", "Discovery");
 });
