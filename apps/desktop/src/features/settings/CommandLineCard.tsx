@@ -1,5 +1,11 @@
 import { SettingsLink } from "@/features/settings/layout/SettingsLink";
-import { useEffect, useEffectEvent, useState, type ReactNode } from "react";
+import {
+  useEffect,
+  useEffectEvent,
+  useRef,
+  useState,
+  type ReactNode,
+} from "react";
 import { CircleCheck, ExternalLink, RefreshCw, Terminal } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { CommandBlock } from "@/components/ui/command-block";
@@ -270,10 +276,15 @@ export function CommandLineCard({
   // Which install failed, so Retry repeats it: a failure in the folder that
   // needs no password must not send the person back to the password route.
   const [failedInUserBin, setFailedInUserBin] = useState(false);
+  // The newest check started: an older one that finishes after it is out of date and
+  // must neither show its result nor end the busy state of the newer one.
+  const latestCheck = useRef(0);
   /** `quiet` re-reads when the window comes back: no flicker, no failure. */
   const load = (refreshPath = false, quiet = false) => {
+    const mine = ++latestCheck.current;
     void cliClient.check(refreshPath).then(
       (status) => {
+        if (mine !== latestCheck.current) return;
         setCheck({ phase: "done", status });
         // A check that now succeeds outdates an earlier failed one, whichever path ran it.
         setFailure(null);
@@ -281,7 +292,7 @@ export function CommandLineCard({
         onChecked?.();
       },
       (reason: unknown) => {
-        if (quiet) return;
+        if (quiet || mine !== latestCheck.current) return;
         setCheck((previous) =>
           previous.phase === "done" ? previous : { phase: "failed" },
         );
@@ -300,7 +311,11 @@ export function CommandLineCard({
   useEffect(() => {
     firstCheck();
   }, []);
-  const recheckOnReturn = useEffectEvent(() => load(true, true));
+  // A check the person asked for is under way: it will report, and a quiet one must not
+  // take its place.
+  const recheckOnReturn = useEffectEvent(() => {
+    if (!checking) load(true, true);
+  });
   useEffect(() => {
     const onFocus = () => recheckOnReturn();
     window.addEventListener("focus", onFocus);

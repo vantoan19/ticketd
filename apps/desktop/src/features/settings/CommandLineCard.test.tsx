@@ -450,6 +450,76 @@ test("the status is read again when the window comes back", async () => {
   expect(invoke).toHaveBeenLastCalledWith("check_cli", { refreshPath: true });
 });
 
+/** A `check_cli` that answers when the test says so, so two checks can finish in either order. */
+function pendingChecks() {
+  const answers: {
+    resolve: (status: unknown) => void;
+    reject: (reason: Error) => void;
+  }[] = [];
+  invoke.mockImplementation(
+    (command: string) =>
+      new Promise((resolve, reject) => {
+        if (command === "check_cli") answers.push({ resolve, reject });
+      }),
+  );
+  return answers;
+}
+
+test("a check from the window coming back, finishing after the one asked for, changes nothing", async () => {
+  const checks = pendingChecks();
+  render(<CommandLineCard />);
+  await act(async () => checks[0]?.resolve(matching));
+  await screen.findByText("Installed");
+
+  // The window comes back; before it answers, the person asks again.
+  await act(async () => {
+    window.dispatchEvent(new Event("focus"));
+  });
+  fireEvent.click(screen.getByRole("button", { name: "Check again" }));
+  expect(checks).toHaveLength(3);
+
+  // The older answer arrives first: it neither shows nor ends the busy state.
+  await act(async () => checks[1]?.resolve(missing));
+  expect(screen.getByRole("button", { name: "Checking…" })).toBeTruthy();
+  expect(screen.queryByText("Not installed")).toBeNull();
+
+  // The newer one fails; the older success, arriving last, must not hide that.
+  await act(async () => checks[2]?.reject(new Error("shell failed")));
+  expect(await screen.findByRole("alert")).toBeTruthy();
+  expect(screen.getByRole("button", { name: "Check again" })).toBeTruthy();
+});
+
+test("an older success arriving after the newer failure does not hide the failure", async () => {
+  const checks = pendingChecks();
+  render(<CommandLineCard />);
+  await act(async () => checks[0]?.resolve(matching));
+  await screen.findByText("Installed");
+  await act(async () => {
+    window.dispatchEvent(new Event("focus"));
+  });
+  fireEvent.click(screen.getByRole("button", { name: "Check again" }));
+
+  await act(async () => checks[2]?.reject(new Error("shell failed")));
+  await screen.findByRole("alert");
+  await act(async () => checks[1]?.resolve(missing));
+
+  expect(screen.getByRole("alert")).toBeTruthy();
+  expect(screen.queryByText("Not installed")).toBeNull();
+});
+
+test("the window coming back while a check is under way does not start another", async () => {
+  const checks = pendingChecks();
+  render(<CommandLineCard />);
+
+  await act(async () => {
+    window.dispatchEvent(new Event("focus"));
+  });
+
+  expect(checks).toHaveLength(1);
+  await act(async () => checks[0]?.resolve(matching));
+  expect(await screen.findByText("Installed")).toBeTruthy();
+});
+
 test("Check again is disabled while checking", async () => {
   bridge([matching]);
   render(<CommandLineCard />);
