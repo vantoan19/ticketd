@@ -321,39 +321,78 @@ fn a_save_that_was_interrupted_leaves_nothing_in_the_list_and_is_cleared_next_ti
     assert_eq!(names.len(), 3, "{names:?}"); // point, record, lock
 }
 
+/// A point whose record is damaged, and the only one that needs an attachment file: the
+/// attachment is purged from the Workspace after it, so no newer point names its file.
+fn damaged_record_point_alone_needs_a_file(dir: &Path) -> (Workspace, std::path::PathBuf) {
+    let mut workspace = open(dir);
+    let file = dir.join("first.txt");
+    fs::write(&file, b"the first file").unwrap();
+    let attachment = workspace.import_attachment("one", &file, None).unwrap();
+    let point = workspace
+        .save_daily_restore_point_at(day(10))
+        .unwrap()
+        .unwrap();
+    workspace.quarantine_attachment(&attachment.id).unwrap();
+    workspace.purge_attachment(&attachment.id).unwrap();
+    let database = std::path::PathBuf::from(&point.path);
+    fs::write(database.with_extension("json"), b"{ not json").unwrap();
+    (workspace, database)
+}
+
+fn save_more_than_seven_points(workspace: &Workspace) {
+    for number in 11..20 {
+        workspace.save_daily_restore_point_at(day(number)).unwrap();
+    }
+}
+
 /// A record that cannot be read is not the same as no record: the point it belongs to was
 /// finished, so the next save neither deletes it nor the attachment files it needs.
 #[test]
 fn a_point_whose_record_cannot_be_read_is_kept_with_its_attachment_files() {
     let dir = tempfile::tempdir().unwrap();
-    let mut workspace = open(dir.path());
-    let file = dir.path().join("first.txt");
-    fs::write(&file, b"the first file").unwrap();
-    workspace.import_attachment("one", &file, None).unwrap();
-    let point = workspace
-        .save_daily_restore_point_at(day(10))
-        .unwrap()
-        .unwrap();
+    let (workspace, database) = damaged_record_point_alone_needs_a_file(dir.path());
     let files_before = shared_files(&workspace);
     assert_eq!(files_before, 2);
-    let database = std::path::PathBuf::from(&point.path);
-    let record = database.with_extension("json");
-    fs::write(&record, b"{ not json").unwrap();
 
     // The next saves are where unfinished points are cleared and old files pruned.
-    workspace.save_daily_restore_point_at(day(11)).unwrap();
-    for number in 12..20 {
-        workspace.save_daily_restore_point_at(day(number)).unwrap();
-    }
+    save_more_than_seven_points(&workspace);
 
     assert!(database.is_file(), "the point was deleted");
-    assert_eq!(fs::read(&record).unwrap(), b"{ not json");
-    // Its attachment files outlive the seven newer points that do not need them.
+    assert_eq!(
+        fs::read(database.with_extension("json")).unwrap(),
+        b"{ not json"
+    );
+    // Its attachment files outlive the seven newer points, none of which needs them.
     assert_eq!(shared_files(&workspace), files_before);
     assert_eq!(
         workspace.restore_points().unwrap().points.len(),
         RESTORE_POINTS_KEPT
     );
+}
+
+/// The inventory of a point without a record is believed only when its container vouches for
+/// it: one that lost the attachment's row names fewer files than the point needs, so no
+/// shared file goes.
+#[test]
+fn a_point_without_a_record_whose_inventory_lost_a_row_deletes_no_shared_file() {
+    let dir = tempfile::tempdir().unwrap();
+    let (workspace, database) = damaged_record_point_alone_needs_a_file(dir.path());
+    let files_before = shared_files(&workspace);
+    {
+        let point = Connection::open(&database).unwrap();
+        let lost = point
+            .execute(
+                "DELETE FROM ticketd_backup_files WHERE path LIKE '%first.txt'",
+                [],
+            )
+            .unwrap();
+        assert_eq!(lost, 1);
+    }
+
+    save_more_than_seven_points(&workspace);
+
+    assert!(database.is_file());
+    assert_eq!(shared_files(&workspace), files_before);
 }
 
 /// When neither the record nor the point can say which attachment files it needs, no shared
