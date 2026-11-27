@@ -21,6 +21,7 @@ import {
 } from "@/features/chats/mock-client";
 import { rememberPick } from "@/features/chats/harness-pick";
 import { ChatProvider } from "@/features/chats/ChatProvider";
+import { useChatFeature } from "@/features/chats/use-chats";
 import { SettingsNav } from "@/features/settings/SettingsNav";
 import { SettingsView } from "@/features/settings/SettingsView";
 import { SettingsStateProvider } from "@/features/settings/settings-state";
@@ -113,6 +114,16 @@ function spied(enabled: boolean, harnesses: unknown[] = [...BOARD]) {
 }
 
 /** Settings as the app mounts it: one state, the sidebar, and the page it selects. */
+/** Shows the request the page sent to open Chats, which the app's Chats view reads. */
+function ChatRequestProbe() {
+  const { chatRequest } = useChatFeature();
+  return (
+    <output data-testid="chat-request">
+      {chatRequest ? JSON.stringify(chatRequest.request) : ""}
+    </output>
+  );
+}
+
 function Settings({
   client,
   initial = "agents",
@@ -138,6 +149,7 @@ function Settings({
             onOpenAutomations={onOpenAutomations}
             onRestore={async () => {}}
           />
+          <ChatRequestProbe />
         </SettingsStateProvider>
       </ChatProvider>
     </ChatClientContext>
@@ -476,6 +488,10 @@ test("Open New Chat leaves Settings for New Chat, starting with this agent", asy
   render(<Settings client={client} initial="agent:claude-code" />);
   fireEvent.click(await screen.findByRole("button", { name: "Open New Chat" }));
   expect(localStorage.getItem("ticketd.chat-harness")).toBe("claude-code");
+  // And it asks the app for New Chat, which is what leaves Settings.
+  expect(JSON.parse(screen.getByTestId("chat-request").textContent ?? "")).toEqual(
+    { kind: "new" },
+  );
 });
 
 test("the Agents page has no notifications row; they live on Attention", async () => {
