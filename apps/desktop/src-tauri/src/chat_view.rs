@@ -3373,7 +3373,14 @@ mod tests {
             .flat_map(|line| line.split('"').skip(1).step_by(2))
             .collect();
         // Said by the harness or by the turn's ending, not by a reason ticketd stopped it.
-        let others = ["stopped", "stop_unconfirmed", "failed", "note", "warning"];
+        let others = [
+            "stopped",
+            "stop_unconfirmed",
+            "failed",
+            "note",
+            "warning",
+            "sub_agents_stopped",
+        ];
         let ticketd: std::collections::BTreeSet<&str> = StopReason::ALL
             .iter()
             .map(|reason| reason.marker())
