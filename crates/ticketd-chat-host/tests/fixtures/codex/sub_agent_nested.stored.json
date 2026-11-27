@@ -13,7 +13,7 @@
     "links": [],
     "active_turn": {
       "id": "00000000-0000-4000-8000-000000000002:turn_1",
-      "position": 8,
+      "position": 3,
       "native_turn_id": "turn_1",
       "state": "active",
       "detail": null,
@@ -36,7 +36,7 @@
       "kind": "message",
       "value": {
         "id": "00000000-0000-4000-8000-000000000003",
-        "position": 2,
+        "position": 1,
         "role": "user",
         "text": "Review the refund calls with sub-agents",
         "attachments": [],
@@ -66,7 +66,7 @@
       "kind": "session",
       "value": {
         "id": "00000000-0000-4000-8000-000000000005",
-        "position": 4,
+        "position": 2,
         "native_session_id": "thr_1",
         "origin": "new",
         "started_at": "2026-11-27T10:00:00.000Z"
@@ -76,7 +76,7 @@
       "kind": "turn",
       "value": {
         "id": "00000000-0000-4000-8000-000000000002:turn_1",
-        "position": 8,
+        "position": 3,
         "native_turn_id": "turn_1",
         "state": "active",
         "detail": null,
@@ -92,7 +92,7 @@
       "kind": "sub_agent_run",
       "value": {
         "id": "00000000-0000-4000-8000-000000000001:sub-agent:thr_a:run-1",
-        "position": 11,
+        "position": 4,
         "sub_agent": "thr_a",
         "run": 1,
         "native_run_id": null,
@@ -109,7 +109,7 @@
       "kind": "sub_agent_run",
       "value": {
         "id": "00000000-0000-4000-8000-000000000001:sub-agent:thr_b:run-1",
-        "position": 14,
+        "position": 5,
         "sub_agent": "thr_b",
         "run": 1,
         "native_run_id": null,
@@ -126,7 +126,7 @@
       "kind": "tool",
       "value": {
         "id": "00000000-0000-4000-8000-000000000002:exec_1",
-        "position": 16,
+        "position": 6,
         "turn_id": "00000000-0000-4000-8000-000000000002:turn_1",
         "owner": {
           "kind": "sub_agent",
@@ -154,7 +154,7 @@
       "runs": [
         {
           "id": "00000000-0000-4000-8000-000000000001:sub-agent:thr_a:run-1",
-          "position": 11,
+          "position": 4,
           "sub_agent": "thr_a",
           "run": 1,
           "native_run_id": null,
@@ -179,7 +179,7 @@
       "runs": [
         {
           "id": "00000000-0000-4000-8000-000000000001:sub-agent:thr_b:run-1",
-          "position": 14,
+          "position": 5,
           "sub_agent": "thr_b",
           "run": 1,
           "native_run_id": null,
