@@ -82,7 +82,7 @@
         "id": "00000000-0000-4000-8000-000000000004:msg_01",
         "position": 10,
         "role": "assistant",
-        "text": "I’ll start the sub-agent now.",
+        "text": "I’ll start both agents now.",
         "attachments": [],
         "complete": true,
         "turn_id": "00000000-0000-4000-8000-000000000004:00000000-0000-4000-8000-000000000005",
