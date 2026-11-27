@@ -33,11 +33,12 @@ use crate::chat_view::{
     Tracker, harness_name,
 };
 use crate::folder_probe;
+use crate::ticket_agents::{self, TicketAgentView};
 use ticketd_chat_host::attention::Rank;
 use ticketd_chat_host::conditions::{ChatProblemKind, HarnessState, HarnessWord};
 
 /// History read to build a list row. A Chat's latest outcome is near its end.
-const SUMMARY_ITEMS: usize = 50;
+pub(crate) const SUMMARY_ITEMS: usize = 50;
 // ponytail: "the whole conversation" and lookups by message id read at most this many
 // items; page through `chat_history` when a Chat outgrows it.
 const HISTORY_ITEMS: usize = 10_000;
@@ -90,7 +91,7 @@ impl From<HostError> for ChatFailure {
     }
 }
 
-type Outcome<T> = Result<T, ChatFailure>;
+pub(crate) type Outcome<T> = Result<T, ChatFailure>;
 
 #[derive(Clone, PartialEq, Eq, Deserialize, Serialize)]
 #[serde(rename_all = "camelCase")]
@@ -1470,6 +1471,40 @@ impl Chats {
             rows: kept,
         };
         Ok((overview_of(&rows), rows, trashed))
+    }
+
+    /// The agents at work on one ticket (the ticket's label), in the order it reads them.
+    pub fn ticket_agents(&self, ticket_id: &str) -> Outcome<Vec<TicketAgentView>> {
+        self.host()?;
+        let workspace = self.workspace()?;
+        let Some(reference) = workspace.ticket_reference_of(ticket_id)? else {
+            return Ok(Vec::new());
+        };
+        self.with_ticket_agents(&workspace, |reader| reader.agents(ticket_id, &reference))
+    }
+
+    /// Every ticket with agents at work and who they are: moves with the set and with any
+    /// field the label shows, so the interface is told when a label appears, changes or
+    /// goes.
+    pub fn ticket_agents_digest(&self) -> Outcome<Vec<(String, Vec<TicketAgentView>)>> {
+        let workspace = self.workspace()?;
+        self.with_ticket_agents(&workspace, |reader| reader.all())
+    }
+
+    fn with_ticket_agents<T>(
+        &self,
+        workspace: &Workspace,
+        read: impl FnOnce(&mut ticket_agents::Reader<'_>) -> Outcome<T>,
+    ) -> Outcome<T> {
+        let live = self
+            .started_host()
+            .map(|host| host.live())
+            .unwrap_or_default();
+        let chats = folder_users(workspace)?;
+        let summarize = |chat: &Chat, live: &ChatLive| self.summary(workspace, chat, &chats, live);
+        read(&mut ticket_agents::Reader::new(
+            workspace, &chats, &live, &summarize,
+        ))
     }
 
     pub fn list(&self, scope: ChatListFilter) -> Outcome<Vec<Summary>> {

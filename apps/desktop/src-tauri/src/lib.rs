@@ -21,6 +21,7 @@ mod s3_commands;
 mod s3_storage;
 mod sync_commands;
 mod sync_scheduler;
+mod ticket_agents;
 mod ticket_credit;
 mod updates;
 mod wake;
@@ -2631,6 +2632,7 @@ pub fn run() -> Result<(), tauri::Error> {
             chat_commands::chat_capture_attachment,
             chat_commands::chat_export_attachment,
             chat_commands::chat_linked_to,
+            chat_commands::chat_ticket_agents,
             chat_commands::chat_files,
             chat_commands::chat_step_output,
             chat_commands::chat_remove_queued,

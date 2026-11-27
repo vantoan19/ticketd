@@ -27,6 +27,7 @@ use crate::chats::{
     QueuedDraft, QuitAction, Restored, Retention, Stopping, UncertainDecision, close_action,
     quit_action, tray_tooltip,
 };
+use crate::ticket_agents::TicketAgentView;
 use ticketd_chat_host::attention::{Alert, Notifier, Row, badge_text};
 
 /// Fired when any Chat's list row or the counts may have changed. Payload: `Overview`.
@@ -222,6 +223,9 @@ fn watch_overview(app: &AppHandle) {
     let (app, chats) = (app.clone(), bridge.chats.clone());
     tauri::async_runtime::spawn(async move {
         let (mut seen, mut shown) = (None, None);
+        // The ticket labels as last announced: a label appears, changes and goes with
+        // the overview event, which lists and labels fetch again on.
+        let mut labels = chats.ticket_agents_digest().ok();
         let mut notifier = Notifier::default();
         let mut workspace_changed = crate::wake::CHANGED.subscribe();
         let mut project_retry = chats
@@ -260,6 +264,13 @@ fn watch_overview(app: &AppHandle) {
                     }
                 };
             if refresh_projects && !projects_changed {
+                // A credited write on a ticket can bring an agent onto its label with no
+                // Chat record changing.
+                if labels_changed(&chats, &mut labels) {
+                    if let Ok(overview) = chats.overview() {
+                        let _ = app.emit(OVERVIEW_EVENT, overview);
+                    }
+                }
                 continue;
             }
             if quiet.is_none_or(|at| at > Instant::now()) {
@@ -278,10 +289,11 @@ fn watch_overview(app: &AppHandle) {
                 continue;
             };
             notify(&app, &chats, &mut notifier, &rows);
+            let announced = labels_changed(&chats, &mut labels);
             let digest = (rows, trashed);
             // Lists are fetched again on this event, so it fires only when a row or the
             // counts would read differently; a text checkpoint alone changes neither.
-            if shown.as_ref() != Some(&digest) {
+            if shown.as_ref() != Some(&digest) || announced {
                 shown = Some(digest);
                 update_tray(&app, &overview);
                 set_badge(&app, overview.app_icon);
@@ -289,6 +301,21 @@ fn watch_overview(app: &AppHandle) {
             }
         }
     });
+}
+
+/// Reads the ticket labels again: whether any differs from the last announced.
+fn labels_changed(
+    chats: &Chats,
+    announced: &mut Option<Vec<(String, Vec<TicketAgentView>)>>,
+) -> bool {
+    let Ok(labels) = chats.ticket_agents_digest() else {
+        return false;
+    };
+    if announced.as_ref() == Some(&labels) {
+        return false;
+    }
+    *announced = Some(labels);
+    true
 }
 
 async fn sleep_until(at: Option<Instant>) {
@@ -538,6 +565,15 @@ pub async fn chat_files(
 #[tauri::command]
 pub async fn chat_linked_to(bridge: State<'_, ChatBridge>, link: LinkRef) -> Outcome<Vec<Summary>> {
     bridge.chats.linked_to(&link)
+}
+
+/// The agents at work on one ticket, for its label; refetched when the overview changes.
+#[tauri::command]
+pub async fn chat_ticket_agents(
+    bridge: State<'_, ChatBridge>,
+    ticket_id: String,
+) -> Outcome<Vec<TicketAgentView>> {
+    bridge.chats.ticket_agents(&ticket_id)
 }
 
 /// The whole output of one step, which views carry only the last lines of until its
