@@ -256,7 +256,7 @@ async fn after_a_restart_a_codex_chat_is_told_which_sub_agents_were_lost_without
 
     h.send("What is left?").await;
     let note = note_of(&h, "What is left?").expect("the message holds the note");
-    assert_eq!(note.sub_agents, [record.native_id.clone()]);
+    assert_eq!(note.sub_agents, std::slice::from_ref(&record.native_id));
     assert_eq!(
         note.text,
         format!(

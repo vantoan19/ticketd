@@ -3541,7 +3541,7 @@ fn contact_lost_in_a_chat_where_no_turn_ran_loses_its_running_sub_agents_and_hol
     let lost = workspace
         .mark_chat_contact_lost(None, "ticketd was restarted", "contact_lost")
         .unwrap();
-    assert_eq!(lost, [chat.id.clone()]);
+    assert_eq!(lost, std::slice::from_ref(&chat.id));
 
     let states: Vec<_> = sub_agents(&workspace, &chat)
         .iter()
