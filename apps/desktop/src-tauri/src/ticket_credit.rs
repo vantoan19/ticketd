@@ -44,7 +44,15 @@ pub fn credited_feed(
     reference: &str,
     feed: Vec<ActivityFeedEntry>,
 ) -> Result<Vec<Value>, Error> {
-    let credits = workspace.ticket_write_credits(reference)?;
+    // Only what this page shows is attributed, however many tagged writes the ticket has.
+    let (mut activities, mut statuses) = (Vec::new(), Vec::new());
+    for entry in &feed {
+        match entry {
+            ActivityFeedEntry::Authored { activity } => activities.push(activity.id.clone()),
+            ActivityFeedEntry::Automatic { id, .. } => statuses.push(*id),
+        }
+    }
+    let credits = workspace.ticket_write_credits_for(reference, &activities, &statuses)?;
     feed.into_iter()
         .map(|entry| {
             let credit = match &entry {

@@ -2667,6 +2667,25 @@ impl Workspace {
             .optional()?)
     }
 
+    /// The requests of the Chat that wait for an answer, whatever the history window of a
+    /// snapshot reached: a request an older burst of history has pushed out of it is still
+    /// answerable, and its asker is read from here.
+    pub fn chat_pending_interactions(&self, chat_id: &str) -> Result<Vec<ChatItem>, Error> {
+        self.read(|_| {
+            let mut statement = self.connection.prepare(
+                "SELECT id FROM chat_interactions WHERE chat_id = ?1 AND state = 'pending' ORDER BY position",
+            )?;
+            let ids = statement
+                .query_map([chat_id], |row| row.get::<_, String>(0))?
+                .collect::<Result<Vec<_>, _>>()?;
+            let mut pending = Vec::with_capacity(ids.len());
+            for id in ids {
+                pending.extend(read_item(&self.connection, "interaction", &id)?);
+            }
+            Ok(pending)
+        })
+    }
+
     /// The Chat's linked records as they are now, in link order.
     pub fn chat_linked_records(&self, id: &str) -> Result<Vec<ChatLinkedRecord>, Error> {
         let heading = crate::documents::HEADING;
@@ -3845,6 +3864,26 @@ impl Workspace {
         self.read(|_| {
             let ticket = self.show_ticket(reference)?;
             credit::ticket_credits(&self.connection, &ticket.id, &ticket.reference)
+        })
+    }
+
+    /// [`Self::ticket_write_credits`] for only the Activities `activity_ids` and the status
+    /// moves `status_numbers` (their numbers in the history feed): what a page of the
+    /// ticket's feed shows, without attributing every other write on the ticket.
+    pub fn ticket_write_credits_for(
+        &self,
+        reference: &str,
+        activity_ids: &[String],
+        status_numbers: &[i64],
+    ) -> Result<TicketWriteCredits, Error> {
+        self.read(|_| {
+            let ticket = self.show_ticket(reference)?;
+            credit::ticket_credits_scoped(
+                &self.connection,
+                &ticket.id,
+                &ticket.reference,
+                Some((activity_ids, status_numbers)),
+            )
         })
     }
 
