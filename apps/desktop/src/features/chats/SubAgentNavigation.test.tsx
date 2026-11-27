@@ -154,9 +154,7 @@ test("a notification for the Chat leaves a sub-agent's view for the Chat", async
   });
   await ask(chat.chat.title);
   await screen.findByRole("heading", { name: "Check limiter test coverage" });
-  act(() =>
-    client.requestOpen({ chat_id: chat.chat.id, retention: "active" }),
-  );
+  act(() => client.requestOpen({ chat_id: chat.chat.id, retention: "active" }));
   expect(
     await screen.findByRole("heading", { name: chat.chat.title }),
   ).toBeTruthy();

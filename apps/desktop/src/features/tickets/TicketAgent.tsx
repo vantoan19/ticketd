@@ -123,8 +123,7 @@ export function TicketAgentSession({
         // icon alone does not say who asks for what. So do working agents that came
         // later: the label names them.
         reserved:
-          opened &&
-          (Boolean(opening.reserved) || (agents?.length ?? 0) > 0),
+          opened && (Boolean(opening.reserved) || (agents?.length ?? 0) > 0),
         chat,
         agents: agents ?? [],
         update: ready ? update : (ticket?.progress_summary ?? null),
