@@ -109,8 +109,10 @@ pub(crate) fn files_google_connection(connection: &Connection) -> Result<Option<
 /// folder uses. A restored Files folder in another account than that one would leave Files
 /// and sync on two accounts. When sync holds the sign-in, Files goes back to this
 /// computer, as when the account is switched. When only the replaced Files folder holds
-/// it, that folder is written into the restored Workspace, so the account is not
-/// forgotten. Without a sign-in kept, the restored folder is the only one there is.
+/// it, that folder is written into the restored Workspace unless the restored folder is in
+/// the same account (then the backup's folder stays), so the account is not forgotten even
+/// when the backup keeps Files on this computer. Without a sign-in kept, the restored
+/// destination is the only one there is.
 pub(crate) fn follow_kept_google_sign_in(
     restored: &Connection,
     replaced: &Connection,
@@ -120,18 +122,21 @@ pub(crate) fn follow_kept_google_sign_in(
     if !crate::backup::table_exists(restored, "attachment_upload_destination")? {
         return Ok(());
     }
-    let AttachmentUploadDestination::GoogleDrive { destination, .. } = files_destination(restored)?
-    else {
-        return Ok(());
+    let restored_account = match files_destination(restored)? {
+        AttachmentUploadDestination::GoogleDrive { destination, .. } => {
+            Some(destination.connection_id)
+        }
+        AttachmentUploadDestination::Local => None,
     };
     if let Some(kept) = sync_sign_in {
-        if destination.connection_id != kept {
+        if restored_account.is_some_and(|account| account != kept) {
             write_destination(restored, &AttachmentUploadDestination::Local)?;
         }
         return Ok(());
     }
     // A replaced Workspace of a format before Files had destinations has none.
-    if files_google_connection(replaced)?.is_some_and(|own| own != destination.connection_id) {
+    if files_google_connection(replaced)?.is_some_and(|own| restored_account.as_ref() != Some(&own))
+    {
         write_destination(restored, &files_destination(replaced)?)?;
     }
     Ok(())

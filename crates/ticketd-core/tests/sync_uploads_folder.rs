@@ -520,6 +520,37 @@ fn a_restore_keeps_the_one_google_account_of_a_computer_that_only_keeps_files_in
     ));
 }
 
+/// The same, when the backup keeps Files on the computer it was made on: the computer's own
+/// Google account is not forgotten either.
+#[test]
+fn a_restore_of_a_backup_with_files_on_this_computer_keeps_the_files_only_google_account() {
+    let sim = DriveSim::default();
+    let directory = tempfile::tempdir().unwrap();
+    let path = directory.path().join("Desk");
+    let mut files_only = Workspace::open(&path).unwrap();
+    chosen_folder(&sim, &mut files_only);
+    drop(files_only);
+
+    let backups = tempfile::tempdir().unwrap();
+    let backup = backups.path().join("backup.sqlite3");
+    Workspace::open(backups.path().join("Elsewhere"))
+        .unwrap()
+        .backup(&backup)
+        .unwrap();
+    Workspace::restore(&path, &backup).unwrap();
+
+    let a = Workspace::open(&path).unwrap();
+    assert!(matches!(
+        a.attachment_upload_destination().unwrap(),
+        AttachmentUploadDestination::GoogleDrive { destination, .. }
+            if destination.connection_id == CONNECTION && destination.folder_id == "team-files"
+    ));
+    assert_eq!(
+        a.google_sign_in().unwrap().unwrap().connection_id,
+        CONNECTION
+    );
+}
+
 /// Another handle on the same Workspace file signing in to Google while a Files folder is
 /// being checked with Drive: the folder is refused when it is saved, not accepted on the
 /// strength of a check made before.
