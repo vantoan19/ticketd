@@ -1,0 +1,216 @@
+{
+  "chat": {
+    "id": "00000000-0000-4000-8000-000000000001",
+    "title": null,
+    "harness": "antigravity",
+    "execution_folder": "/work/chat-1",
+    "folder_managed": false,
+    "archived": false,
+    "trashed": false,
+    "queue_paused": false,
+    "effective_settings": "{\"permission\":\"own\"}",
+    "native_session_id": "session-1",
+    "links": [],
+    "active_turn": null,
+    "seen_through": 0,
+    "read_through": null,
+    "marked_unread": false,
+    "muted": false,
+    "created_at": "2026-11-27T10:00:00.000Z"
+  },
+  "sequence": 25,
+  "items": [
+    {
+      "kind": "message",
+      "value": {
+        "id": "00000000-0000-4000-8000-000000000002",
+        "position": 2,
+        "role": "user",
+        "text": "Audit the session routes with a sub-agent",
+        "attachments": [],
+        "complete": true,
+        "turn_id": null,
+        "owner": {
+          "kind": "main"
+        },
+        "queued": false,
+        "editing": false,
+        "requires_link_context": false,
+        "attempts": [
+          {
+            "id": "00000000-0000-4000-8000-000000000003",
+            "intent": "new_turn",
+            "delivery": "possible",
+            "turn_id": "00000000-0000-4000-8000-000000000004:00000000-0000-4000-8000-000000000005",
+            "detail": null,
+            "decision": null,
+            "recorded_at": "2026-11-27T10:00:00.000Z"
+          }
+        ],
+        "created_at": "2026-11-27T10:00:00.000Z"
+      }
+    },
+    {
+      "kind": "session",
+      "value": {
+        "id": "00000000-0000-4000-8000-000000000006",
+        "position": 4,
+        "native_session_id": "session-1",
+        "origin": "new",
+        "started_at": "2026-11-27T10:00:00.000Z"
+      }
+    },
+    {
+      "kind": "turn",
+      "value": {
+        "id": "00000000-0000-4000-8000-000000000004:00000000-0000-4000-8000-000000000005",
+        "position": 7,
+        "native_turn_id": "00000000-0000-4000-8000-000000000005",
+        "state": "completed",
+        "detail": null,
+        "problem": null,
+        "problem_resets_at": null,
+        "ending": "completed",
+        "started_at": "2026-11-27T10:00:00.000Z",
+        "ended_at": "2026-11-27T10:00:00.000Z"
+      }
+    },
+    {
+      "kind": "tool",
+      "value": {
+        "id": "00000000-0000-4000-8000-000000000004:reasoning:00000000-0000-4000-8000-000000000005:thought",
+        "position": 9,
+        "turn_id": "00000000-0000-4000-8000-000000000004:00000000-0000-4000-8000-000000000005",
+        "owner": {
+          "kind": "main"
+        },
+        "name": "ticketd reasoning",
+        "input": "{\"running\":false,\"started_at\":null,\"ended_at\":null,\"text\":\"The scan is independent of the rest of the work, so a sub-agent can do it.\\n\\n\",\"heading\":null}",
+        "state": "completed",
+        "output": null,
+        "output_truncated": false,
+        "started_at": "2026-11-27T10:00:00.000Z"
+      }
+    },
+    {
+      "kind": "tool",
+      "value": {
+        "id": "00000000-0000-4000-8000-000000000004:call_1",
+        "position": 10,
+        "turn_id": "00000000-0000-4000-8000-000000000004:00000000-0000-4000-8000-000000000005",
+        "owner": {
+          "kind": "main"
+        },
+        "name": "Run invoke_subagent",
+        "input": "{\"toolCallId\":\"call_1\",\"title\":\"Run invoke_subagent\",\"name\":\"invoke_subagent\",\"status\":\"completed\",\"rawInput\":{}}",
+        "state": "completed",
+        "output": null,
+        "output_truncated": false,
+        "started_at": "2026-11-27T10:00:00.000Z"
+      }
+    },
+    {
+      "kind": "message",
+      "value": {
+        "id": "00000000-0000-4000-8000-000000000004:00000000-0000-4000-8000-000000000005:message:0",
+        "position": 12,
+        "role": "assistant",
+        "text": "I've launched the sub-agent and am waiting for its findings.\n\nThe sub-agent found one call: src/auth/session.ts:41 regenerates the session id after sign-in. Nothing regenerates it after a privilege change.",
+        "attachments": [],
+        "complete": true,
+        "turn_id": "00000000-0000-4000-8000-000000000004:00000000-0000-4000-8000-000000000005",
+        "owner": {
+          "kind": "main"
+        },
+        "queued": false,
+        "editing": false,
+        "requires_link_context": false,
+        "attempts": [],
+        "created_at": "2026-11-27T10:00:00.000Z"
+      }
+    },
+    {
+      "kind": "sub_agent_run",
+      "value": {
+        "id": "00000000-0000-4000-8000-000000000001:sub-agent:00000000-0000-4000-8000-000000000007:run-1",
+        "position": 14,
+        "sub_agent": "00000000-0000-4000-8000-000000000007",
+        "run": 1,
+        "native_run_id": "00000000-0000-4000-8000-000000000005",
+        "turn_id": "00000000-0000-4000-8000-000000000004:00000000-0000-4000-8000-000000000005",
+        "state": "completed",
+        "stopped_by": null,
+        "stop_reason": null,
+        "detail": null,
+        "started_at": "2026-11-27T10:00:00.000Z",
+        "ended_at": "2026-11-27T10:00:00.000Z"
+      }
+    },
+    {
+      "kind": "tool",
+      "value": {
+        "id": "00000000-0000-4000-8000-000000000004:00000000-0000-4000-8000-000000000007:call_2",
+        "position": 15,
+        "turn_id": "00000000-0000-4000-8000-000000000004:00000000-0000-4000-8000-000000000005",
+        "owner": {
+          "kind": "sub_agent",
+          "native_id": "00000000-0000-4000-8000-000000000007"
+        },
+        "name": "rg -n \"session.regenerate\" src/auth",
+        "input": "{\"toolCallId\":\"00000000-0000-4000-8000-000000000007:call_2\",\"title\":\"rg -n \\\"session.regenerate\\\" src/auth\",\"name\":\"run_command\",\"kind\":\"execute\",\"status\":\"completed\",\"rawInput\":{\"CommandLine\":\"rg -n \\\"session.regenerate\\\" src/auth\"},\"rawOutput\":{\"exit_code\":0}}",
+        "state": "completed",
+        "output": "Command exited with code 0.\n\nCommand output:\nsrc/auth/session.ts:41:  session.regenerate();\n",
+        "output_truncated": false,
+        "started_at": "2026-11-27T10:00:00.000Z"
+      }
+    },
+    {
+      "kind": "interaction",
+      "value": {
+        "id": "00000000-0000-4000-8000-000000000004:request:00000000-0000-4000-8000-000000000005:\"1\"",
+        "position": 17,
+        "turn_id": "00000000-0000-4000-8000-000000000004:00000000-0000-4000-8000-000000000005",
+        "owner": {
+          "kind": "main"
+        },
+        "kind": "approval",
+        "native_request_id": "00000000-0000-4000-8000-000000000005:\"1\"",
+        "prompt": "rg -n \"session.regenerate\" src/auth",
+        "reason": "Search the session routes",
+        "state": "answered",
+        "response": "choice:Allow",
+        "tool_id": "00000000-0000-4000-8000-000000000004:00000000-0000-4000-8000-000000000007:call_2",
+        "asked_at": "2026-11-27T10:00:00.000Z",
+        "resolved_at": "2026-11-27T10:00:00.000Z"
+      }
+    }
+  ],
+  "earlier": false,
+  "sub_agents": [
+    {
+      "id": "00000000-0000-4000-8000-000000000001:sub-agent:00000000-0000-4000-8000-000000000007",
+      "native_id": "00000000-0000-4000-8000-000000000007",
+      "parent": null,
+      "tool_id": "00000000-0000-4000-8000-000000000004:call_1",
+      "background": false,
+      "payload": "{\"model\":\"gemini-3.1-pro\",\"description\":\"Session Auditor\",\"prompt\":\"Scan the session routes in src/auth for session fixation: is the session id regenerated after sign-in and after a privilege change? Change nothing.\"}",
+      "created_at": "2026-11-27T10:00:00.000Z",
+      "runs": [
+        {
+          "id": "00000000-0000-4000-8000-000000000001:sub-agent:00000000-0000-4000-8000-000000000007:run-1",
+          "position": 14,
+          "sub_agent": "00000000-0000-4000-8000-000000000007",
+          "run": 1,
+          "native_run_id": "00000000-0000-4000-8000-000000000005",
+          "turn_id": "00000000-0000-4000-8000-000000000004:00000000-0000-4000-8000-000000000005",
+          "state": "completed",
+          "stopped_by": null,
+          "stop_reason": null,
+          "detail": null,
+          "started_at": "2026-11-27T10:00:00.000Z",
+          "ended_at": "2026-11-27T10:00:00.000Z"
+        }
+      ]
+    }
+  ]
+}
