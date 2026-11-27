@@ -39,9 +39,14 @@ describe("the host's view of background sub-agents", () => {
     expect(turns).toHaveLength(1);
     expect(turns[0]).toMatchObject({ outcome: "completed" });
     expect(items.filter((item) => item.kind === "user")).toHaveLength(1);
+    // The main agent's one command, and none of the sub-agents' reads.
     expect(
-      items.filter((item) => item.kind === "steps" && !item.owner),
-    ).toEqual([]);
+      items.flatMap((item) =>
+        item.kind === "steps" && !item.owner
+          ? item.steps.map((step) => step.kind)
+          : [],
+      ),
+    ).toEqual(["run"]);
     expect(
       items.filter((item) => item.kind === "steps" && item.owner),
     ).not.toHaveLength(0);
