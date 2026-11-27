@@ -49,6 +49,7 @@ pub(super) async fn listed(executable: &Path) -> Result<Vec<ModelChoice>, String
 
 fn option(id: &str, label: &str) -> SettingOption {
     SettingOption {
+        resolved: None,
         id: id.to_owned(),
         label: label.to_owned(),
         description: None,

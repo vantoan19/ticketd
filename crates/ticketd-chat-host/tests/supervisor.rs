@@ -4200,6 +4200,7 @@ async fn reasoning_plan_and_files_are_kept_with_their_turn_each_replacing_the_la
 
 fn settings(permission: &str) -> HarnessSettings {
     let option = |id: &str, kind| SettingOption {
+        resolved: None,
         id: id.to_owned(),
         label: id.to_owned(),
         description: None,

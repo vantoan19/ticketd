@@ -1680,6 +1680,26 @@ impl Supervisor {
     /// Whether a frame of a sub-agent names a run that sorts before the one it is in: the
     /// harness orders a task's run IDs by when they opened, and the Chat's history already
     /// drops such a frame.
+    /// Adds the name the harness gives the model a sub-agent reported (`model_name`), from
+    /// the models this session lists: once ticketd restarted nothing lists them, and the
+    /// screens still name the model by it.
+    fn name_the_model(&self, native: &mut serde_json::Value) {
+        let Some(model) = native.get("model").and_then(serde_json::Value::as_str) else {
+            return;
+        };
+        let Some(model_setting) = self
+            .runtime
+            .as_ref()
+            .and_then(|runtime| runtime.settings.as_ref())
+            .and_then(|settings| settings.model.as_ref())
+        else {
+            return;
+        };
+        if let Some(name) = crate::model_display_name(model, &model_setting.options) {
+            native["model_name"] = serde_json::Value::String(name);
+        }
+    }
+
     fn late_sub_agent_run(&self, native: &str, run: &Option<String>) -> bool {
         matches!(
             (self.sub_agent_runs.get(native), run),
@@ -3894,7 +3914,8 @@ impl Supervisor {
                     ChatToolState::Completed,
                 );
             }
-            EventKind::SubAgentStarted(start) => {
+            EventKind::SubAgentStarted(mut start) => {
+                self.name_the_model(&mut start.native);
                 self.sub_agents
                     .insert(start.sub_agent.0.clone(), start.background);
                 if let Some(run) = &start.run {
@@ -3936,8 +3957,11 @@ impl Supervisor {
                 sub_agent,
                 run: native_run_id,
                 background,
-                native,
+                mut native,
             } => {
+                if let Some(native) = &mut native {
+                    self.name_the_model(native);
+                }
                 if let (Some(background), Some(running)) = (
                     background.filter(|_| !self.late_sub_agent_run(&sub_agent.0, &native_run_id)),
                     self.sub_agents.get_mut(&sub_agent.0),

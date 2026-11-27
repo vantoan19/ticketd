@@ -856,10 +856,38 @@ pub struct SettingOption {
     pub label: String,
     pub description: Option<String>,
     pub is_default: bool,
+    /// For a model option, the model id the harness says this row runs ("haiku" runs
+    /// "claude-haiku-5-5"), when it names one other than its own `id`.
+    pub resolved: Option<String>,
     /// For a permission option, what it allows, when known.
     pub permission: Option<PermissionKind>,
     /// The harness's own policy allows choosing it.
     pub allowed: bool,
+}
+
+/// The harness's own name for the model an agent reported, from the models it lists:
+/// the row with that id, else the row that runs it ("haiku" runs "claude-haiku-5-5";
+/// never the harness's `default` row, which names no model), each also when the
+/// reported id carries a date the listing leaves off. `None` when none lists it. The one
+/// rule behind every place a model is named (the ticket's label, a sub-agent's brief
+/// and tooltip).
+pub fn model_display_name(reported: &str, options: &[SettingOption]) -> Option<String> {
+    let dated = |id: &str| id.len() > 3 && reported.starts_with(id);
+    let by = |matches: &dyn Fn(&SettingOption) -> bool| {
+        options
+            .iter()
+            .filter(|option| matches(option))
+            .max_by_key(|option| option.id.len())
+    };
+    by(&|option| option.id == reported)
+        .or_else(|| {
+            by(&|option| !option.is_default && option.resolved.as_deref() == Some(reported))
+        })
+        .or_else(|| by(&|option| dated(&option.id)))
+        .or_else(|| {
+            by(&|option| !option.is_default && option.resolved.as_deref().is_some_and(dated))
+        })
+        .map(|option| option.label.clone())
 }
 
 impl SettingOption {
@@ -873,6 +901,7 @@ impl SettingOption {
             label: choice.label.to_owned(),
             description: choice.description.map(str::to_owned),
             is_default: choice.is_default,
+            resolved: None,
             permission: match choice.semantics {
                 PermissionSemantics::OwnSettings => None,
                 PermissionSemantics::Ask => Some(PermissionKind::Ask),

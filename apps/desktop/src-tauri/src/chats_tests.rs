@@ -222,6 +222,7 @@ async fn chat_does_nothing_while_the_switch_is_off_and_turning_it_off_stops_runn
 
 fn offered(id: &str, is_default: bool) -> ticketd_chat_host::SettingOption {
     ticketd_chat_host::SettingOption {
+        resolved: None,
         id: id.to_owned(),
         label: id.to_uppercase(),
         description: None,
@@ -2413,10 +2414,12 @@ async fn an_attachment_only_first_message_is_saved_and_replayed_once() {
         current: Some("ask".into()),
         options: vec![
             ticketd_chat_host::SettingOption {
+                resolved: None,
                 permission: Some(PermissionKind::Ask),
                 ..offered("ask", true)
             },
             ticketd_chat_host::SettingOption {
+                resolved: None,
                 permission: Some(PermissionKind::FullAccess),
                 ..offered("full", false)
             },
@@ -4395,6 +4398,7 @@ async fn the_command_sends_what_the_desktops_label_reads() {
             options: models
                 .iter()
                 .map(|(id, label)| ticketd_chat_host::SettingOption {
+                    resolved: None,
                     label: (*label).to_owned(),
                     ..offered(id, false)
                 })

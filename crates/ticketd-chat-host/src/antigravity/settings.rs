@@ -134,6 +134,7 @@ pub(super) fn reported(
             options(select)
                 .into_iter()
                 .map(|option| SettingOption {
+                    resolved: None,
                     id: option.value.0.to_string(),
                     label: option.name.clone(),
                     description: option.description.clone(),

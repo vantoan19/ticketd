@@ -641,6 +641,7 @@ fn model_option(entry: &Value) -> Option<SettingOption> {
     }
     let id = owned(entry, "model").or_else(|| owned(entry, "id"))?;
     Some(SettingOption {
+        resolved: None,
         label: owned(entry, "displayName").unwrap_or(id.clone()),
         description: owned(entry, "description").filter(|text| !text.is_empty()),
         is_default: entry["isDefault"] == true,
@@ -661,6 +662,7 @@ fn effort_options(entry: &Value) -> Vec<SettingOption> {
         .filter_map(|option| {
             let id = owned(option, "reasoningEffort")?;
             Some(SettingOption {
+                resolved: None,
                 label: capitalized(&id),
                 description: owned(option, "description").filter(|text| !text.is_empty()),
                 is_default: Some(id.as_str()) == default,

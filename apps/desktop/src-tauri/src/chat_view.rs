@@ -2201,15 +2201,22 @@ fn sub_agent_run_items(run: &ChatSubAgentRun, chat: &Chat, tracker: &Tracker) ->
     items
 }
 
-/// How the model a sub-agent reported reads: the harness's own name for it when the live
-/// session lists it, else the id as reported, else the harness.
-fn model_name(reported: Option<&str>, live: &ChatLive, harness: &str) -> String {
-    model_label(reported, live).unwrap_or_else(|| harness.to_owned())
+/// How the model an agent reported reads, everywhere a model is named (the ticket's label,
+/// a sub-agent's brief and tooltip): the harness's own name for it, else the id as
+/// reported, else the harness.
+fn model_name(
+    reported: Option<&str>,
+    name: Option<&str>,
+    live: &ChatLive,
+    harness: &str,
+) -> String {
+    model_label(reported, name, live).unwrap_or_else(|| harness.to_owned())
 }
 
-/// The model as the live session names it, else the id as reported; `None` when none
-/// was reported.
-fn model_label(reported: Option<&str>, live: &ChatLive) -> Option<String> {
+/// The name the harness gives the model: the live session's list of models, else the
+/// name the host recorded for a sub-agent when it started (a list is gone once ticketd
+/// restarted), else the id as reported; `None` when none was reported.
+fn model_label(reported: Option<&str>, recorded: Option<&str>, live: &ChatLive) -> Option<String> {
     let reported = reported.filter(|model| !model.is_empty())?;
     let options = live
         .settings
@@ -2217,17 +2224,11 @@ fn model_label(reported: Option<&str>, live: &ChatLive) -> Option<String> {
         .and_then(|settings| settings.reported.model.as_ref())
         .map(|setting| setting.options.as_slice())
         .unwrap_or_default();
-    // A reported id can carry a date its listed id leaves off.
-    let listed = options
-        .iter()
-        .find(|option| option.id == reported)
-        .or_else(|| {
-            options
-                .iter()
-                .filter(|option| option.id.len() > 3 && reported.starts_with(option.id.as_str()))
-                .max_by_key(|option| option.id.len())
-        });
-    Some(listed.map_or_else(|| reported.to_owned(), |option| option.label.clone()))
+    Some(
+        ticketd_chat_host::model_display_name(reported, options)
+            .or_else(|| recorded.filter(|name| !name.is_empty()).map(str::to_owned))
+            .unwrap_or_else(|| reported.to_owned()),
+    )
 }
 
 /// The model a sub-agent's own frames reported, as the ticket's label names it.
@@ -2239,6 +2240,7 @@ pub(crate) fn sub_agent_model(
     let reports_model = descriptor(harness).is_none_or(|descriptor| descriptor.sub_agents.model);
     model_label(
         record.said("model").filter(|_| reports_model).as_deref(),
+        record.said("model_name").as_deref(),
         live,
     )
 }
@@ -2247,7 +2249,7 @@ pub(crate) fn sub_agent_model(
 pub(crate) fn main_agent_model(live: &ChatLive) -> Option<String> {
     let model = live.settings.as_deref()?.reported.model.as_ref()?;
     let id = model.answered_by.as_deref().or(model.current.as_deref());
-    model_label(id, live)
+    model_label(id, None, live)
 }
 
 /// What a running Step is doing in a few words ("Running npm test -- rate-limit"), for a
@@ -2321,6 +2323,7 @@ fn sub_agent_view(record: &ChatSubAgent, chat: &Chat, live: &ChatLive) -> Option
         kind: said("subagent_type"),
         model: model_name(
             said("model").filter(|_| capabilities.model).as_deref(),
+            said("model_name").as_deref(),
             live,
             harness,
         ),
@@ -5235,6 +5238,7 @@ mod tests {
                 model: Some(ticketd_chat_host::Setting {
                     current: None,
                     options: vec![ticketd_chat_host::SettingOption {
+                        resolved: None,
                         id: "claude-haiku-5-5".to_owned(),
                         label: "Claude Haiku 5.5".to_owned(),
                         description: None,
@@ -5254,6 +5258,73 @@ mod tests {
         assert_eq!(
             tracker.sub_agent_views(&chat, &live)[0].model,
             "Claude Haiku 5.5"
+        );
+
+        // Claude Code lists a model by its alias ("haiku") and says which model that runs;
+        // a sub-agent reports the model's own id. The alias row's name is the model's name,
+        // and the "default" row, which names no model, is never used for it (LC-18).
+        let listed = |id: &str, label: &str, resolved: Option<&str>, is_default: bool| {
+            ticketd_chat_host::SettingOption {
+                id: id.to_owned(),
+                label: label.to_owned(),
+                description: None,
+                is_default,
+                resolved: resolved.map(str::to_owned),
+                permission: None,
+                allowed: true,
+            }
+        };
+        let mut live = ChatLive::idle();
+        live.settings = Some(Box::new(ticketd_chat_host::LiveSettings {
+            reported: ticketd_chat_host::HarnessSettings {
+                model: Some(ticketd_chat_host::Setting {
+                    current: Some("haiku".to_owned()),
+                    options: vec![
+                        listed("default", "Default", Some("claude-haiku-5-5"), true),
+                        listed("haiku", "Haiku 5.5", Some("claude-haiku-5-5"), false),
+                    ],
+                    unchangeable: None,
+                    applies_from: ticketd_chat_host::AppliesFrom::NextTurn,
+                    answered_by: None,
+                }),
+                effort: None,
+                permission: None,
+            },
+            changes: Vec::new(),
+        }));
+        assert_eq!(
+            tracker.sub_agent_views(&chat, &live)[0].model,
+            "Haiku 5.5",
+            "the model's id, with the date its listing leaves off, reads as the listed name"
+        );
+        // The main agent reads the same way, from the model in effect.
+        assert_eq!(super::main_agent_model(&live).as_deref(), Some("Haiku 5.5"));
+
+        // After ticketd restarted nothing lists models: what was recorded when the
+        // sub-agent started is its name, else the id as reported.
+        let named = sub_agent_record(
+            "n",
+            None,
+            json!({"model": "claude-haiku-5-5", "model_name": "Haiku 5.5"}),
+            vec![sub_agent_run("n", 1, 11, ChatSubAgentState::Completed)],
+        );
+        let after_restart = Tracker::from_snapshot(&[], &[named]);
+        let view = &after_restart.sub_agent_views(&chat, &ChatLive::idle())[0];
+        assert_eq!(view.model, "Haiku 5.5");
+        assert_eq!(
+            super::sub_agent_model(
+                &sub_agent_record(
+                    "n",
+                    None,
+                    json!({"model": "claude-haiku-5-5", "model_name": "Haiku 5.5"}),
+                    vec![sub_agent_run("n", 1, 11, ChatSubAgentState::Completed)]
+                ),
+                "claude-code",
+                &ChatLive::idle()
+            )
+            .as_deref(),
+            Some("Haiku 5.5"),
+            "the ticket's label says it too"
         );
 
         // Nothing reported: the harness.
