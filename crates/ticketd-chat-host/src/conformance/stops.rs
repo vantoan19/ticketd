@@ -348,6 +348,10 @@ async fn stop_with_no_turn_leaves_nothing_running(declared: Declared) {
     h.stop().await;
     h.play_all().await;
     // The Chat ends the harness process too: nothing runs in it any more.
+    assert!(
+        h.harness_input_closed().await,
+        "Stop did not close the harness's input"
+    );
     h.lose_process(0).await;
     h.finish().await;
 

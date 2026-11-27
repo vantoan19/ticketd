@@ -1710,6 +1710,10 @@ impl Supervisor {
         self.resend = None;
         // Nothing is to be told to the main agent after a Stop.
         self.unreported.clear();
+        // Nor what an input on its way carries: it is not told if that input is rejected.
+        if let Some(dispatch) = self.dispatching.as_mut() {
+            dispatch.finished.clear();
+        }
         self.wake_after = None;
         if self.active.is_some() {
             self.interrupt();
@@ -1813,6 +1817,8 @@ impl Supervisor {
                 (ChatOwner::SubAgent { .. }, None) => true,
                 (ChatOwner::SubAgent { native_id }, Some(native)) => native_id == native,
             })
+            // An answer on its way settles the request as answered, whichever ends first.
+            .filter(|(_, live)| live.answering.is_none())
             .map(|(id, _)| id.clone())
             .collect();
         gone.into_iter()
@@ -5549,5 +5555,81 @@ mod tests {
         assert_eq!(windows(), 1);
         update(command);
         assert_eq!(windows(), 1);
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn stop_does_not_leave_finished_results_on_an_input_that_is_then_rejected() {
+        let dir = tempfile::tempdir().unwrap();
+        let (mut supervisor, _chat) = supervisor(dir.path().join("workspace.sqlite3"));
+        supervisor.dispatching = Some(Dispatch {
+            attempt: "attempt".to_owned(),
+            generation: RuntimeGeneration(1),
+            starts_turn: false,
+            early_rejection: None,
+            preamble: None,
+            finished: vec![Finished {
+                native: "a".to_owned(),
+                failed: false,
+            }],
+        });
+
+        supervisor.request_stop().unwrap();
+        let dispatch = supervisor.dispatching.take().unwrap();
+        supervisor.not_accepted(dispatch, false, "rejected".to_owned());
+
+        // Nothing is told to the main agent after a Stop, not even by the next message.
+        assert!(supervisor.unreported.is_empty());
+        assert!(supervisor.wake_after.is_none());
+    }
+
+    #[tokio::test]
+    async fn an_answer_on_its_way_is_not_expired_when_its_sub_agent_ends_first() {
+        let dir = tempfile::tempdir().unwrap();
+        let (mut supervisor, chat) = supervisor(dir.path().join("workspace.sqlite3"));
+        let generation = open(&mut supervisor, &chat).await;
+        start_child(&mut supervisor, generation, "child", None);
+        for (id, answering) in [("answered", Some("allow".to_owned())), ("waiting", None)] {
+            supervisor.interactions.insert(
+                id.to_owned(),
+                LiveRequest {
+                    generation,
+                    request: NativeRequestId::new(id),
+                    turn_id: None,
+                    owner: ChatOwner::SubAgent {
+                        native_id: "child".to_owned(),
+                    },
+                    kind: InteractionKind::Approval {
+                        description: "cargo test".to_owned(),
+                        reason: None,
+                        decisions: vec![ApprovalDecision::Allow],
+                    },
+                    answering,
+                },
+            );
+        }
+        supervisor.on_event(Some(RuntimeEvent {
+            generation,
+            kind: EventKind::SubAgentEnded {
+                sub_agent: NativeSubAgentId::new("child"),
+                run: None,
+                outcome: SubAgentOutcome::Completed,
+                detail: None,
+            },
+        }));
+        // The unanswered request goes with its asker; the answer on its way stays, so
+        // the reply that settles it still finds it.
+        assert_eq!(
+            supervisor.interactions.keys().collect::<Vec<_>>(),
+            ["answered"]
+        );
+        let (reply, answered) = oneshot::channel();
+        supervisor.on_done(Done::Responded {
+            interaction_id: "answered".to_owned(),
+            response: "allow".to_owned(),
+            outcome: RespondOutcome::Sent,
+            reply,
+        });
+        assert!(answered.await.unwrap().is_ok());
+        assert!(supervisor.interactions.is_empty());
     }
 }
