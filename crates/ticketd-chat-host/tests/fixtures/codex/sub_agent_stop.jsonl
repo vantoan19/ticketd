@@ -27,5 +27,7 @@
 {"server":{"method":"turn/completed","params":{"threadId":"thr_1","turn":{"id":"00000000-0000-4000-8000-000000000001","rootTurnId":"00000000-0000-4000-8000-000000000001","items":[],"itemsView":"notLoaded","status":"interrupted","error":null,"startedAt":1,"completedAt":2,"durationMs":1}}}}
 {"client":{"id":5,"method":"turn/interrupt","params":{"threadId":"00000000-0000-4000-8000-000000000003","turnId":"00000000-0000-4000-8000-000000000004"}}}
 {"server":{"id":5,"result":{}}}
+{"client":{"id":6,"method":"thread/backgroundTerminals/clean","params":{"threadId":"00000000-0000-4000-8000-000000000003"}}}
+{"server":{"id":6,"result":{}}}
 {"server":{"method":"thread/status/changed","params":{"threadId":"00000000-0000-4000-8000-000000000003","status":{"type":"idle"}}}}
 {"server":{"method":"turn/completed","params":{"threadId":"00000000-0000-4000-8000-000000000003","turn":{"id":"00000000-0000-4000-8000-000000000004","rootTurnId":"00000000-0000-4000-8000-000000000001","items":[],"itemsView":"notLoaded","status":"interrupted","error":null,"startedAt":1,"completedAt":2,"durationMs":1}}}}

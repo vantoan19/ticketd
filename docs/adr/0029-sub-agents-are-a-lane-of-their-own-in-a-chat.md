@@ -77,7 +77,16 @@ the sub-agents the harness starts; it does not start them.
   the harness process. For Codex it also interrupts every child Turn.
 - (12) **Stop one** is a declared capability. Claude uses `stopTask`, for
   background sub-agents only. Codex interrupts the child's Turn and ends its
-  terminals. Antigravity does not support it.
+  terminals. Antigravity does not support it. The view offers Stop only for a
+  sub-agent that runs now, in the background. Live Codex 0.172.0 sessions showed
+  that interrupting a child's Turn leaves its command running, and that
+  `thread/backgroundTerminals/clean` ends it but is answered only on the
+  experimental app-server API, so every Codex Chat opens with that API (it
+  already declares no tool for a person's Chat). Stop all ends the children's
+  commands the same way. The stopped status records who stopped it: the person
+  (Stop one or Stop), ticketd with its `StopReason` (the Chat turned off, a backup
+  restored, the Chat trashed...; quitting leaves "contact lost" instead), or the
+  main agent (Claude's own `TaskStop`, a Codex interrupt ticketd did not ask for).
 
 ### Turns ticketd or the harness starts
 

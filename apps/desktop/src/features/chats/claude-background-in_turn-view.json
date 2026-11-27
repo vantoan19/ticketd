@@ -60,7 +60,7 @@
           "brief": true,
           "text": true,
           "end": true,
-          "stop": false,
+          "stop": true,
           "resume": true
         }
       },
@@ -81,7 +81,7 @@
           "brief": true,
           "text": true,
           "end": true,
-          "stop": false,
+          "stop": true,
           "resume": true
         }
       },

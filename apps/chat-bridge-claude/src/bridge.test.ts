@@ -85,6 +85,14 @@ class FakeQuery {
     return this.interruptReply;
   }
 
+  stopped: string[] = [];
+  /** `stopTask`'s answer: undefined, or an error it throws. */
+  stopTaskError: Error | undefined;
+  stopTask = async (taskId: string) => {
+    if (this.stopTaskError) throw this.stopTaskError;
+    this.stopped.push(taskId);
+  };
+
   async initializationResult() {
     return {
       claude_code_version: "2.1.322",
@@ -1008,6 +1016,97 @@ describe("permissions and questions", () => {
         error: { message: "transport closed" },
       },
     ]);
+  });
+});
+
+describe("stop_task", () => {
+  it("asks the SDK to stop one task and says it asked, leaving the session and its requests alone", async () => {
+    const h = harness();
+    const fake = await h.open();
+    await h.send(submit("s1"));
+    await fake.readInput();
+    const ask = fake.askPermission("Bash", { command: "ls" });
+    await settle();
+
+    await h.send({
+      id: "one",
+      cmd: "stop_task",
+      generation: 1,
+      task_id: "task_a",
+    });
+
+    expect(fake.stopped).toEqual(["task_a"]);
+    expect(fake.interrupts).toBe(0);
+    expect(h.named("stop_task_result")).toMatchObject([
+      {
+        id: "one",
+        generation: 1,
+        task_id: "task_a",
+        outcome: "asked",
+        message: null,
+      },
+    ]);
+    // The turn and its request are untouched: only the task was asked to stop.
+    expect(h.named("request_cancelled")).toHaveLength(0);
+    expect(ask.settled()).toBeUndefined();
+  });
+
+  it("reports a stop the SDK failed as refused, with its words", async () => {
+    const h = harness();
+    const fake = await h.open();
+    fake.stopTaskError = new Error("no such task");
+    await h.send({
+      id: "one",
+      cmd: "stop_task",
+      generation: 1,
+      task_id: "task_a",
+    });
+    expect(h.named("stop_task_result")).toMatchObject([
+      {
+        id: "one",
+        task_id: "task_a",
+        outcome: "refused",
+        message: "no such task",
+      },
+    ]);
+  });
+
+  it("says so when this SDK cannot stop a task", async () => {
+    const h = harness();
+    const fake = await h.open();
+    // An SDK older than the one the bridge is built against has no `stopTask`.
+    delete (fake as { stopTask?: unknown }).stopTask;
+    await h.send({
+      id: "one",
+      cmd: "stop_task",
+      generation: 1,
+      task_id: "task_a",
+    });
+    expect(h.named("stop_task_result")).toMatchObject([
+      { id: "one", outcome: "refused" },
+    ]);
+  });
+
+  it("is strict: no task, an empty task and unknown keys are rejected, and so is another generation", async () => {
+    const h = harness();
+    await h.open();
+    await h.send({ id: "a", cmd: "stop_task", generation: 1 });
+    await h.send({ id: "b", cmd: "stop_task", generation: 1, task_id: "" });
+    await h.send({
+      id: "c",
+      cmd: "stop_task",
+      generation: 1,
+      task_id: "t",
+      all: true,
+    });
+    await h.send({ id: "d", cmd: "stop_task", generation: 2, task_id: "t" });
+    expect(h.named("command_rejected")).toMatchObject([
+      { id: "a", code: "invalid_command" },
+      { id: "b", code: "invalid_command" },
+      { id: "c", code: "invalid_command" },
+      { id: "d", code: "stale_generation" },
+    ]);
+    expect(h.named("stop_task_result")).toHaveLength(0);
   });
 });
 

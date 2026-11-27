@@ -767,7 +767,7 @@ mod background {
 
 // --- Background sub-agents: the stored history, pinned for the desktop ---------------------
 
-mod background_stored {
+pub(super) mod background_stored {
     use super::*;
 
     fn path(name: &str) -> String {
@@ -779,7 +779,7 @@ mod background_stored {
 
     /// The Chat's stored history now must equal the file (made stable), which the desktop
     /// builds the view of a Chat at that moment from.
-    fn pinned(h: &HostScript, name: &str) {
+    pub(in crate::host_script) fn pinned(h: &HostScript, name: &str) {
         let snapshot = h
             .core()
             .chat_snapshot(h.chat_id(), 5_000)

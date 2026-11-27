@@ -1,5 +1,5 @@
 {"note":"Hand-built from the codex-cli 0.171.0 JSON schema. Not captured from a live session; every value is synthetic. A Chat whose record kept Full access, resumed after a restart: the thread itself reports asking (its Full access turn never ran), and the first turn says Full access again, as the Chat showed."}
-{"client":{"id":1,"method":"initialize","params":{"clientInfo":{"name":"ticketd","title":"ticketd","version":"0.0.0-test"}}}}
+{"client":{"id":1,"method":"initialize","params":{"clientInfo":{"name":"ticketd","title":"ticketd","version":"0.0.0-test"},"capabilities":{"experimentalApi":true}}}}
 {"server":{"id":1,"result":{"userAgent":"ticketd/0.171.0 (Mac OS 26.5.0; arm64)","codexHome":"/home/example/.codex","platformFamily":"unix","platformOs":"macos"}}}
 {"client":{"method":"initialized"}}
 {"client":{"id":2,"method":"thread/resume","params":{"threadId":"thr_1","cwd":"/work/chat-1","excludeTurns":true}}}

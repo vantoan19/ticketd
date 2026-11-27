@@ -58,9 +58,9 @@ use crate::{
     InteractionRequest, InteractionResolution, InteractionResponse, InterruptOutcome,
     InterruptRequest, NativeItemId, NativeRequestId, NativeSessionId, NativeSubAgentId,
     NativeTurnId, NoticeKind, OpenRequest, OpenedRuntime, Problem, ProviderDetail, Refusal,
-    RespondOutcome, RuntimeEvent, RuntimeGeneration, SessionStart, SubAgentOutcome,
-    SubAgentStopper, Submission, SubmissionId, SubmissionKind, Subscription, ToolStatus,
-    TurnEvidence, TurnOrigin, TurnOutcome, TurnStarter,
+    RespondOutcome, RuntimeEvent, RuntimeGeneration, SessionStart, StopSubAgentOutcome,
+    StopSubAgentRequest, SubAgentOutcome, SubAgentStopper, Submission, SubmissionId,
+    SubmissionKind, Subscription, ToolStatus, TurnEvidence, TurnOrigin, TurnOutcome, TurnStarter,
 };
 
 /// How long a Chat whose last sub-agent just finished with no turn running stays working,
@@ -102,6 +102,11 @@ pub(crate) enum Command {
         reply: Reply<ChatMessage>,
     },
     Stop(Reply<()>),
+    /// The person's Stop for one sub-agent.
+    StopSubAgent {
+        native_id: String,
+        reply: Reply<()>,
+    },
     ResumeQueue(Reply<()>),
     /// The person asked for one queued input to go out now, ahead of the queue.
     SendQueuedNow {
@@ -963,6 +968,9 @@ impl Supervisor {
                     self.stop_sub_agents_at_rest().await;
                 }
                 let _ = reply.send(stopped);
+            }
+            Command::StopSubAgent { native_id, reply } => {
+                let _ = reply.send(self.stop_sub_agent(&native_id).await);
             }
             Command::ResumeQueue(reply) => {
                 let _ = reply.send(self.resume_queue().await);
@@ -1939,6 +1947,32 @@ impl Supervisor {
         observations: &mut Vec<ChatObservation>,
         note: Option<usize>,
     ) {
+        self.end_sub_agents(observations, note, ChatSubAgentStopper::Person, None);
+    }
+
+    /// ticketd is stopping the harness for `why`: every sub-agent still running ends as
+    /// stopped by ticketd, with the reason. Quitting is not that: it leaves the sub-agents
+    /// as contact lost, which is all anyone knows when ticketd goes away. Nor is a storage
+    /// failure, after which nothing more can be written.
+    fn end_sub_agents_by_ticketd(&mut self, why: StopReason) {
+        if matches!(why, StopReason::Quit | StopReason::StorageFailed) {
+            return;
+        }
+        self.end_sub_agents(
+            &mut Vec::new(),
+            None,
+            ChatSubAgentStopper::Ticketd,
+            Some(why.marker().to_owned()),
+        );
+    }
+
+    fn end_sub_agents(
+        &mut self,
+        observations: &mut Vec<ChatObservation>,
+        note: Option<usize>,
+        stopped_by: ChatSubAgentStopper,
+        stop_reason: Option<String>,
+    ) {
         let mut running: Vec<String> = self.sub_agents.keys().cloned().collect();
         running.sort();
         self.sub_agents.clear();
@@ -1950,8 +1984,8 @@ impl Supervisor {
                     native_id,
                     native_run_id: None,
                     state: ChatSubAgentState::Stopped,
-                    stopped_by: Some(ChatSubAgentStopper::Person),
-                    stop_reason: None,
+                    stopped_by: Some(stopped_by),
+                    stop_reason: stop_reason.clone(),
                     detail: None,
                 }),
         );
@@ -1963,6 +1997,35 @@ impl Supervisor {
         }
         let batch = std::mem::take(observations);
         self.record(batch);
+    }
+
+    /// The person stops one sub-agent. Only a background one that runs now can be stopped
+    /// alone: a foreground one ends with its turn. The harness is asked, and its report of
+    /// the sub-agent's end (the person's, as ticketd asked) is what changes the record, so
+    /// the record never says stopped while the harness still runs it.
+    async fn stop_sub_agent(&mut self, native_id: &str) -> Result<(), HostError> {
+        if self.sub_agents.get(native_id) != Some(&true) {
+            return Err(HostError::SubAgentGone);
+        }
+        let Some(runtime) = &self.runtime else {
+            return Err(HostError::SubAgentGone);
+        };
+        let (handle, generation) = (runtime.handle.clone(), runtime.generation);
+        let request = StopSubAgentRequest {
+            generation,
+            sub_agent: NativeSubAgentId::new(native_id),
+        };
+        match self.drive(handle.stop_sub_agent(request)).await {
+            StopSubAgentOutcome::Asked => Ok(()),
+            StopSubAgentOutcome::NotRunning => Err(HostError::SubAgentGone),
+            StopSubAgentOutcome::Unsupported => Err(HostError::SubAgentNotStopped(
+                "this harness cannot stop one sub-agent alone".to_owned(),
+            )),
+            StopSubAgentOutcome::Refused { reason } => Err(HostError::SubAgentNotStopped(reason)),
+            StopSubAgentOutcome::Unconfirmed => Err(HostError::SubAgentNotStopped(
+                "it did not answer in time".to_owned(),
+            )),
+        }
     }
 
     /// Stop with no turn running but sub-agents running: they are stopped, the Chat says
@@ -2551,6 +2614,7 @@ impl Supervisor {
             };
         self.keep_unanswered_permission();
         self.runtime = None;
+        self.end_sub_agents_by_ticketd(why);
         self.runtime_gone(TurnEnding::StoppedByTicketd(why), false);
         if let Some(reason) = &unconfirmed {
             if permission_restart || self.unattended.is_some() {

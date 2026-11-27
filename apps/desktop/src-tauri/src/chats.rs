@@ -84,7 +84,7 @@ impl From<ticketd_core::Error> for ChatFailure {
 impl From<HostError> for ChatFailure {
     fn from(error: HostError) -> Self {
         match error {
-            HostError::InteractionExpired => stale(error.to_string()),
+            HostError::InteractionExpired | HostError::SubAgentGone => stale(error.to_string()),
             HostError::Core(error) => error.into(),
             other => failed(other.to_string()),
         }
@@ -2427,6 +2427,12 @@ impl Chats {
 
     pub async fn stop(&self, chat_id: &str) -> Outcome<()> {
         Ok(self.host()?.stop(chat_id).await?)
+    }
+
+    /// The person stops one sub-agent of the Chat, named as the view names it. It no longer
+    /// running is a stale view, not a failure.
+    pub async fn stop_sub_agent(&self, chat_id: &str, sub_agent: &str) -> Outcome<()> {
+        Ok(self.host()?.stop_sub_agent(chat_id, sub_agent).await?)
     }
 
     /// Answers a request only while the host holds it as live.

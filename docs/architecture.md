@@ -316,6 +316,21 @@ Sub-agents finished since your last message:
 
 ahead of their words, in the text sent to the harness; the stored message stays theirs.
 
+Stop one sub-agent is `HarnessRuntime::stop_sub_agent` (the person's, through
+`ChatHost::stop_sub_agent` and the `chat_stop_sub_agent` command). The supervisor offers it
+only for a sub-agent it tracks as running in the background and answers a stale view with
+`HostError::SubAgentGone`; the record never says stopped until the harness reports the
+sub-agent's end. Claude sends the bridge's `stop_task` command (the SDK's `stopTask`, which
+makes Claude Code report a task notification of status stopped); the session remembers that
+ticketd asked, so that end is the person's, and one it did not ask for (the main agent's
+`TaskStop`) is the main agent's. Codex interrupts the child's turn and the turns of the
+children it started, then asks `thread/backgroundTerminals/clean` for each, because Codex
+leaves a child's command running when its turn is interrupted (every Chat therefore opens on
+the experimental app-server API). When ticketd itself stops the harness for a `StopReason`
+other than quitting, the sub-agents still running end as stopped by ticketd with that reason.
+The view sets a sub-agent's `capabilities.stop` only where the descriptor declares Stop one
+and the sub-agent runs now in the background in a live session.
+
 The storage half of this design exists: the core's Chat workflows
 (`crates/ticketd-core/src/chats.rs`) own these records and the change log. Chat
 tables do not move the workspace change token, so streaming a turn does not make

@@ -142,6 +142,8 @@ mod codex_wake;
 #[cfg(test)]
 mod resume;
 #[cfg(test)]
+mod stop_one;
+#[cfg(test)]
 mod sub_agents;
 #[cfg(test)]
 mod tests;
@@ -648,6 +650,38 @@ impl HostScript {
         self.path = path;
         self.shared = shared;
         self.settle().await;
+    }
+
+    /// ticketd itself stops every running Chat, for `why`.
+    pub async fn stop_all(&mut self, why: crate::StopReason) {
+        let host = self.host.clone();
+        self.call("stop all", async move {
+            host.stop_all(why).await;
+            Ok(())
+        })
+        .await;
+    }
+
+    /// The person presses Stop on one sub-agent, by its native ID.
+    pub async fn stop_sub_agent(&mut self, native_id: &str) {
+        let (host, chat, native_id) = (
+            self.host.clone(),
+            self.chat.id.clone(),
+            native_id.to_owned(),
+        );
+        self.call("stop a sub-agent", async move {
+            host.stop_sub_agent(&chat, &native_id).await
+        })
+        .await;
+    }
+
+    /// The person presses Stop on one sub-agent and the host refuses it.
+    pub async fn stop_sub_agent_refused(&mut self, native_id: &str) -> HostError {
+        self.settle().await;
+        self.host
+            .stop_sub_agent(&self.chat.id, native_id)
+            .await
+            .expect_err("the host refuses it")
     }
 
     /// The harness process exits with `code`, whatever the fixture still holds.
