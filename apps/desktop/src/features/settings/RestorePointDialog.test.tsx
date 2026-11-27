@@ -291,3 +291,42 @@ test("Restore from a file… keeps the file review", async () => {
     within(dialog).getByRole("button", { name: "Replace workspace" }),
   ).toBeTruthy();
 });
+
+test("a point that cannot be restored hands over to the file review when another file is chosen", async () => {
+  vi.mocked(workspaceClient.inspectBackup).mockResolvedValueOnce({
+    ...INSPECTION,
+    check: { status: "not_ticketd" },
+  });
+  renderPage(notConnected());
+  fireEvent.click(await screen.findByRole("button", { name: /^Restore…/ }));
+  const dialog = await screen.findByRole("dialog", { name: "Review backup" });
+
+  // Cancelling the picker keeps the point.
+  vi.mocked(workspaceClient.chooseBackupFile).mockResolvedValueOnce(null);
+  fireEvent.click(
+    within(dialog).getByRole("button", { name: "Choose another file…" }),
+  );
+  await waitFor(() =>
+    expect(workspaceClient.chooseBackupFile).toHaveBeenCalledTimes(1),
+  );
+
+  vi.mocked(workspaceClient.chooseBackupFile).mockResolvedValueOnce(
+    "/b/other.db",
+  );
+  vi.mocked(workspaceClient.inspectBackup).mockResolvedValueOnce({
+    ...INSPECTION,
+    path: "/b/other.db",
+  });
+  fireEvent.click(
+    within(dialog).getByRole("button", { name: "Choose another file…" }),
+  );
+
+  const file = await screen.findByRole("dialog", {
+    name: "Replace this workspace?",
+  });
+  await within(file).findByText(/Integrity checked/);
+  expect(within(file).getByLabelText("Chosen backup file").textContent).toContain(
+    "other.db",
+  );
+  expect(file.textContent).not.toContain("With the restore point from");
+});

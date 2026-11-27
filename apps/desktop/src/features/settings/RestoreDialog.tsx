@@ -278,7 +278,7 @@ function PointComparison({
  */
 export function RestoreDialog({
   path,
-  point,
+  point: openedWith,
   onClose,
   onRestored,
   onWorkspaceReplaced,
@@ -301,6 +301,8 @@ export function RestoreDialog({
   const sync = useSyncStatus();
   const syncing = sync.status?.connection === "connected";
   const [file, setFile] = useState(path);
+  // A different file is no longer the restore point: the review turns into the file review.
+  const [point, setPoint] = useState(openedWith);
   const [phase, setPhase] = useState<Phase>({ name: "checking" });
   const [failure, setFailure] = useState<FailureDescription | null>(null);
   const [revealFailure, setRevealFailure] = useState<FailureDescription | null>(
@@ -328,6 +330,7 @@ export function RestoreDialog({
   }, []);
   function inspect(next: string) {
     setFile(next);
+    setPoint(undefined);
     setFailure(null);
     setPhase({ name: "checking" });
     return check(next);
