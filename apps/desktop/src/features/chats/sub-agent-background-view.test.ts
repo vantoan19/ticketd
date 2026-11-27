@@ -26,14 +26,14 @@ describe("the host's view of background sub-agents", () => {
     expect(chat.activity).toBe("working");
     expect(chat.turn_running).toBe(false);
     expect(chat.doing).toBeNull();
-    expect(
-      chat.sub_agents.map((agent) => [agent.title, agent.status]),
-    ).toEqual([
-      ["Find limiter bypasses", "running"],
-      ["Check limiter test coverage", "running"],
-      // It finished in the turn that started it.
-      ["Proofread the API docs", "completed"],
-    ]);
+    expect(chat.sub_agents.map((agent) => [agent.title, agent.status])).toEqual(
+      [
+        ["Find limiter bypasses", "running"],
+        ["Check limiter test coverage", "running"],
+        // It finished in the turn that started it.
+        ["Proofread the API docs", "completed"],
+      ],
+    );
     // The turn that started them ended, and their own steps stay theirs.
     const turns = items.filter((item) => item.kind === "turn" && !item.owner);
     expect(turns).toHaveLength(1);
@@ -108,7 +108,8 @@ describe("the host's view of background sub-agents", () => {
     ]);
     expect(
       items.filter(
-        (item) => item.kind === "marker" && item.reason === "sub_agents_stopped",
+        (item) =>
+          item.kind === "marker" && item.reason === "sub_agents_stopped",
       ),
     ).toMatchObject([{ count: 2 }]);
   });
