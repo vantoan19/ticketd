@@ -1,0 +1,296 @@
+{
+  "chat": {
+    "id": "00000000-0000-4000-8000-000000000001",
+    "title": "Untitled Chat",
+    "harness": {
+      "id": "claude-code",
+      "name": "Claude Code",
+      "permissions": "Uses your own Claude Code settings and permissions. ticketd changes none of them. Claude Code reported: claude code version 2.1.322, cwd /work/chat-1, model claude-haiku-5-5, permission mode default."
+    },
+    "folder": {
+      "path": "/work/chat-1",
+      "name": "chat-1",
+      "managed": false,
+      "missing": false,
+      "shared_with": [],
+      "branch": null,
+      "project": null
+    },
+    "retention": "active",
+    "activity": "idle",
+    "problem": null,
+    "doing": null,
+    "opening": null,
+    "catching_up": false,
+    "steering": {
+      "available": false,
+      "images_refused": false,
+      "effect": null
+    },
+    "stopping": false,
+    "links": [],
+    "queue": [],
+    "queue_paused": false,
+    "context": null,
+    "settings": null,
+    "unseen": true,
+    "muted": false,
+    "has_composer": true,
+    "read_through": null,
+    "trashed_links": [],
+    "commands": [],
+    "sub_agents": [
+      {
+        "id": "task_a1",
+        "native_id": "task_a1",
+        "title": "Check the limit",
+        "type": "general-purpose",
+        "model": "claude-haiku-5-5",
+        "status": "completed",
+        "started_at": "2026-11-27T10:00:00.000Z",
+        "ended_at": "2026-11-27T10:00:00.000Z",
+        "runs": 1,
+        "brief": {
+          "text": "Say what you will check, read README.txt, write a note file with the limit, then report the limit.",
+          "source": "main_agent"
+        },
+        "capabilities": {
+          "brief": true,
+          "text": true,
+          "end": true,
+          "stop": false,
+          "resume": true
+        }
+      }
+    ]
+  },
+  "items": [
+    {
+      "kind": "user",
+      "id": "00000000-0000-4000-8000-000000000002",
+      "at": "2026-11-27T10:00:00.000Z",
+      "text": "Ask a sub-agent to check the limit in README.txt, to add a note file, and report. Then answer in one short sentence.",
+      "delivery": "delivered",
+      "turn_id": "00000000-0000-4000-8000-000000000004:local-turn-1",
+      "steer": false
+    },
+    {
+      "kind": "turn",
+      "id": "turn:00000000-0000-4000-8000-000000000004:local-turn-1",
+      "at": "2026-11-27T10:00:00.000Z",
+      "turn_id": "00000000-0000-4000-8000-000000000004:local-turn-1",
+      "started_at": "2026-11-27T10:00:00.000Z",
+      "ended_at": "2026-11-27T10:00:00.000Z",
+      "outcome": "completed"
+    },
+    {
+      "kind": "sub_agent",
+      "id": "task_a1:row-1",
+      "at": "2026-11-27T10:00:00.000Z",
+      "turn_id": "00000000-0000-4000-8000-000000000004:local-turn-1",
+      "sub_agent": "task_a1",
+      "run": 1,
+      "status": "completed",
+      "stopped_by": null,
+      "stop_reason": null,
+      "started_at": "2026-11-27T10:00:00.000Z",
+      "ended_at": "2026-11-27T10:00:00.000Z"
+    },
+    {
+      "kind": "turn",
+      "id": "turn:task_a1:run-1",
+      "at": "2026-11-27T10:00:00.000Z",
+      "turn_id": "task_a1:run-1",
+      "started_at": "2026-11-27T10:00:00.000Z",
+      "ended_at": "2026-11-27T10:00:00.000Z",
+      "outcome": "completed",
+      "owner": "task_a1"
+    },
+    {
+      "kind": "reasoning",
+      "id": "00000000-0000-4000-8000-000000000004:reasoning:task_a1:run_a1_1:thinking-1",
+      "at": "",
+      "turn_id": "task_a1:run-1",
+      "state": "done",
+      "started_at": 1730910001000,
+      "ended_at": 1730910003000,
+      "text": "README.txt probably states the limit on its first line.",
+      "heading": null,
+      "owner": "task_a1"
+    },
+    {
+      "kind": "response",
+      "id": "00000000-0000-4000-8000-000000000004:task_a1:text-1",
+      "at": "2026-11-27T10:00:00.000Z",
+      "text": "I will read README.txt for the limit.",
+      "state": "complete",
+      "turn_id": "task_a1:run-1",
+      "owner": "task_a1"
+    },
+    {
+      "kind": "steps",
+      "id": "00000000-0000-4000-8000-000000000004:toolu_read",
+      "at": "",
+      "steps": [
+        {
+          "kind": "read",
+          "variant": null,
+          "target": "Read",
+          "targets": [
+            {
+              "text": "README.txt",
+              "lines": null,
+              "scope": null
+            }
+          ],
+          "command": null,
+          "exit_code": null,
+          "folder": null,
+          "timed_out": false,
+          "duration_ms": null,
+          "no_matches": false,
+          "state": "done",
+          "result": null,
+          "output": "1\tThe rate limiter allows 5 requests per second.\n",
+          "full_output": null,
+          "started_at": "2026-11-27T10:00:00.000Z",
+          "added_lines": null,
+          "removed_lines": null,
+          "decision": null,
+          "ticketd": null,
+          "awaiting": false
+        }
+      ],
+      "turn_id": "task_a1:run-1",
+      "owner": "task_a1"
+    },
+    {
+      "kind": "steps",
+      "id": "00000000-0000-4000-8000-000000000004:toolu_note",
+      "at": "",
+      "steps": [
+        {
+          "kind": "edit",
+          "variant": null,
+          "target": "Write",
+          "targets": [
+            {
+              "text": "limit-note.txt",
+              "lines": null,
+              "scope": null
+            }
+          ],
+          "command": null,
+          "exit_code": null,
+          "folder": null,
+          "timed_out": false,
+          "duration_ms": null,
+          "no_matches": false,
+          "state": "done",
+          "result": null,
+          "output": "created",
+          "full_output": null,
+          "started_at": "2026-11-27T10:00:00.000Z",
+          "added_lines": 1,
+          "removed_lines": 0,
+          "decision": null,
+          "ticketd": null,
+          "awaiting": false
+        }
+      ],
+      "turn_id": "task_a1:run-1",
+      "owner": "task_a1"
+    },
+    {
+      "kind": "files",
+      "id": "00000000-0000-4000-8000-000000000004:files:task_a1:run_a1_1",
+      "at": "",
+      "turn_id": "task_a1:run-1",
+      "state": "ended",
+      "files": [
+        {
+          "path": "limit-note.txt",
+          "open_path": "/work/chat-1/limit-note.txt",
+          "kind": "added",
+          "from": null,
+          "added_lines": 1,
+          "removed_lines": 0,
+          "confirmed": true
+        }
+      ],
+      "owner": "task_a1"
+    },
+    {
+      "kind": "response",
+      "id": "00000000-0000-4000-8000-000000000004:task_a1:text-2",
+      "at": "2026-11-27T10:00:00.000Z",
+      "text": "The limit is 5 requests per second. I wrote it to limit-note.txt.",
+      "state": "complete",
+      "turn_id": "task_a1:run-1",
+      "owner": "task_a1"
+    },
+    {
+      "kind": "steps",
+      "id": "00000000-0000-4000-8000-000000000004:toolu_main_write",
+      "at": "",
+      "steps": [
+        {
+          "kind": "edit",
+          "variant": null,
+          "target": "Write",
+          "targets": [
+            {
+              "text": "summary.txt",
+              "lines": null,
+              "scope": null
+            }
+          ],
+          "command": null,
+          "exit_code": null,
+          "folder": null,
+          "timed_out": false,
+          "duration_ms": null,
+          "no_matches": false,
+          "state": "done",
+          "result": null,
+          "output": "created",
+          "full_output": null,
+          "started_at": "2026-11-27T10:00:00.000Z",
+          "added_lines": 1,
+          "removed_lines": 0,
+          "decision": null,
+          "ticketd": null,
+          "awaiting": false
+        }
+      ],
+      "turn_id": "00000000-0000-4000-8000-000000000004:local-turn-1"
+    },
+    {
+      "kind": "files",
+      "id": "00000000-0000-4000-8000-000000000004:files:local-turn-1",
+      "at": "",
+      "turn_id": "00000000-0000-4000-8000-000000000004:local-turn-1",
+      "state": "ended",
+      "files": [
+        {
+          "path": "summary.txt",
+          "open_path": "/work/chat-1/summary.txt",
+          "kind": "added",
+          "from": null,
+          "added_lines": 1,
+          "removed_lines": 0,
+          "confirmed": true
+        }
+      ]
+    },
+    {
+      "kind": "response",
+      "id": "00000000-0000-4000-8000-000000000004:text-3",
+      "at": "2026-11-27T10:00:00.000Z",
+      "text": "The sub-agent found a limit of 5 requests per second.",
+      "state": "complete",
+      "turn_id": "00000000-0000-4000-8000-000000000004:local-turn-1"
+    }
+  ],
+  "cursor": 0
+}

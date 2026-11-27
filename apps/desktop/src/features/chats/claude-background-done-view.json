@@ -296,7 +296,16 @@
     },
     {
       "kind": "response",
-      "id": "00000000-0000-4000-8000-000000000004:text-1",
+      "id": "00000000-0000-4000-8000-000000000004:task_c:text-1",
+      "at": "2026-11-27T10:00:00.000Z",
+      "text": "Two typos fixed in docs/api.md.",
+      "state": "complete",
+      "turn_id": "task_c:run-1",
+      "owner": "task_c"
+    },
+    {
+      "kind": "response",
+      "id": "00000000-0000-4000-8000-000000000004:text-2",
       "at": "2026-11-27T10:00:00.000Z",
       "text": "I started three reviewers. They run in the background, and I'll put their findings together when they finish.",
       "state": "complete",
@@ -377,6 +386,24 @@
       "owner": "task_b"
     },
     {
+      "kind": "response",
+      "id": "00000000-0000-4000-8000-000000000004:task_b:text-3",
+      "at": "2026-11-27T10:00:00.000Z",
+      "text": "The tests cover the limiter; I added a case for a missing key.",
+      "state": "complete",
+      "turn_id": "task_b:run-1",
+      "owner": "task_b"
+    },
+    {
+      "kind": "response",
+      "id": "00000000-0000-4000-8000-000000000004:task_a:text-4",
+      "at": "2026-11-27T10:00:00.000Z",
+      "text": "A request with no x-api-key header skipped the limiter.",
+      "state": "complete",
+      "turn_id": "task_a:run-1",
+      "owner": "task_a"
+    },
+    {
       "kind": "turn",
       "id": "turn:00000000-0000-4000-8000-000000000004:local-turn-2",
       "at": "2026-11-27T10:00:00.000Z",
@@ -391,7 +418,7 @@
     },
     {
       "kind": "response",
-      "id": "00000000-0000-4000-8000-000000000004:text-2",
+      "id": "00000000-0000-4000-8000-000000000004:text-5",
       "at": "2026-11-27T10:00:00.000Z",
       "text": "All three reviews are in.\n\n- **Bypass:** a request with no `x-api-key` header skipped the limiter. It now counts against the caller's IP (`src/api/rate-limit.ts`).\n- **Tests:** 14 cases passed; the tests reviewer added one for a missing key.\n- **Docs:** two typos fixed in `docs/api.md`.",
       "state": "complete",

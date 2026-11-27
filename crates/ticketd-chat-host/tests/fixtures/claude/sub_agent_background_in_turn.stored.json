@@ -30,7 +30,7 @@
     "muted": false,
     "created_at": "2026-11-27T10:00:00.000Z"
   },
-  "sequence": 29,
+  "sequence": 30,
   "items": [
     {
       "kind": "message",
@@ -42,6 +42,9 @@
         "attachments": [],
         "complete": true,
         "turn_id": null,
+        "owner": {
+          "kind": "main"
+        },
         "queued": false,
         "editing": false,
         "requires_link_context": false,
@@ -237,6 +240,27 @@
         "output": "1\t# Rate limits",
         "output_truncated": false,
         "started_at": "2026-11-27T10:00:00.000Z"
+      }
+    },
+    {
+      "kind": "message",
+      "value": {
+        "id": "00000000-0000-4000-8000-000000000002:task_c:text-1",
+        "position": 29,
+        "role": "assistant",
+        "text": "Two typos fixed in docs/api.md.",
+        "attachments": [],
+        "complete": true,
+        "turn_id": "00000000-0000-4000-8000-000000000002:local-turn-1",
+        "owner": {
+          "kind": "sub_agent",
+          "native_id": "task_c"
+        },
+        "queued": false,
+        "editing": false,
+        "requires_link_context": false,
+        "attempts": [],
+        "created_at": "2026-11-27T10:00:00.000Z"
       }
     }
   ],

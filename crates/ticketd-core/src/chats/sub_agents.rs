@@ -132,6 +132,15 @@ pub(super) enum Change {
 /// Format 105, with the sub-agent tables: they are part of the same step because format 105
 /// has not been released. Like every migration step it may run again.
 pub(crate) fn migrate(connection: &Connection) -> Result<(), Error> {
+    // A sub-agent's messages: the column the Steps and approvals have, on the transcript.
+    let owned: bool = connection.query_row(
+        "SELECT EXISTS(SELECT 1 FROM pragma_table_info('chat_messages') WHERE name = 'sub_agent_id')",
+        [],
+        |row| row.get(0),
+    )?;
+    if !owned {
+        connection.execute_batch("ALTER TABLE chat_messages ADD COLUMN sub_agent_id TEXT;")?;
+    }
     connection.execute_batch(&format!(
         "CREATE TABLE IF NOT EXISTS chat_sub_agents (id TEXT PRIMARY KEY, chat_id TEXT NOT NULL REFERENCES chats(id), native_id TEXT NOT NULL, parent_native_id TEXT, tool_id TEXT, background INTEGER NOT NULL DEFAULT 0, payload TEXT NOT NULL, created_at TEXT NOT NULL DEFAULT ({NOW}), UNIQUE(chat_id, native_id));
          CREATE TABLE IF NOT EXISTS chat_sub_agent_runs (id TEXT PRIMARY KEY, chat_id TEXT NOT NULL REFERENCES chats(id), sub_agent_id TEXT NOT NULL REFERENCES chat_sub_agents(id), position INTEGER NOT NULL UNIQUE, run INTEGER NOT NULL, native_run_id TEXT, turn_id TEXT REFERENCES chat_turns(id), state TEXT NOT NULL, stopped_by TEXT, stop_reason TEXT, detail TEXT, started_at TEXT NOT NULL DEFAULT ({NOW}), ended_at TEXT, UNIQUE(sub_agent_id, run));
