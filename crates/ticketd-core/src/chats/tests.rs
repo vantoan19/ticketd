@@ -282,3 +282,65 @@ fn deleting_a_chat_deletes_the_shell_windows_that_credit_its_writes() {
 
     assert_eq!(windows(&workspace), 0);
 }
+
+fn sub_agent_saying(payload: &str) -> ChatSubAgent {
+    ChatSubAgent {
+        id: "chat:sub-agent:a".into(),
+        native_id: "a".into(),
+        parent: None,
+        tool_id: None,
+        background: false,
+        payload: payload.into(),
+        created_at: String::new(),
+        runs: Vec::new(),
+    }
+}
+
+#[test]
+fn a_sub_agent_is_titled_by_one_rule_everywhere() {
+    let titled = |payload: &str| {
+        let record = sub_agent_saying(payload);
+        let native: serde_json::Value = serde_json::from_str(payload).unwrap();
+        // The host names a sub-agent in what it says to the main agent with the same rule
+        // the row uses.
+        assert_eq!(
+            sub_agents::sub_agent_title(&native).unwrap_or_else(|| "Sub-agent".to_owned()),
+            record.title(),
+            "{payload}"
+        );
+        record.title()
+    };
+    assert_eq!(
+        titled(r#"{"description":"  Check the tests  \nand report","subagent_type":"general"}"#),
+        "Check the tests"
+    );
+    assert_eq!(titled(r#"{"subagent_type":"  Explore \n"}"#), "Explore");
+    assert_eq!(
+        titled(r#"{"description":"  \n ","subagent_type":" Plan "}"#),
+        "Plan"
+    );
+    assert_eq!(titled(r#"{}"#), "Sub-agent");
+}
+
+#[test]
+fn the_sub_agent_step_may_run_again_on_a_workspace_that_has_it() {
+    let dir = tempfile::tempdir().unwrap();
+    let workspace = Workspace::open(dir.path().join("workspace.sqlite3")).unwrap();
+    sub_agents::migrate(&workspace.connection).unwrap();
+    sub_agents::migrate(&workspace.connection).unwrap();
+    for (table, column) in [
+        ("chat_messages", "sub_agent_id"),
+        ("chat_turns", "origin_sub_agent"),
+        ("chat_sub_agent_runs", "tool_id"),
+    ] {
+        let columns: i64 = workspace
+            .connection
+            .query_row(
+                "SELECT COUNT(*) FROM pragma_table_info(?1) WHERE name = ?2",
+                [table, column],
+                |row| row.get(0),
+            )
+            .unwrap();
+        assert_eq!(columns, 1, "{table}.{column}");
+    }
+}

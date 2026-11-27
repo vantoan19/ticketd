@@ -406,8 +406,12 @@ export const subAgentStopperSchema = z.enum([
 export const subAgentCapabilitiesSchema = z.object({
   /** The harness reports the prompt the sub-agent was given (Codex does not). */
   brief: z.boolean().default(true),
-  /** It reports the sub-agent's own messages and reasoning (Antigravity does not). */
+  /** It reports the sub-agent's own messages (Antigravity does not). */
   text: z.boolean().default(true),
+  /** It reports the sub-agent's own reasoning (Codex and Antigravity do not). */
+  reasoning: z.boolean().default(true),
+  /** It reports the model the sub-agent runs on. */
+  model: z.boolean().default(true),
   /** It reports when the sub-agent finishes (Antigravity does not: it ends with the turn). */
   end: z.boolean().default(true),
   /** One sub-agent can be stopped alone (Stop one). */
@@ -459,6 +463,8 @@ export const subAgentSchema = z.object({
   capabilities: subAgentCapabilitiesSchema.default({
     brief: true,
     text: true,
+    reasoning: true,
+    model: true,
     end: true,
     stop: false,
     resume: false,

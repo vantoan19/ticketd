@@ -1493,15 +1493,19 @@ const Item = memo(function Item({
 
 /**
  * Where a message would be, when the person did not start the turn: "Started by
- * Claude Code: sub-agent finished · Title". The title opens that sub-agent.
+ * Claude Code: sub-agent finished · Title". The title opens that sub-agent. A turn the
+ * harness started with no sub-agent finished (it resumed after a background command) only
+ * says who started it; ticketd's wake always follows a sub-agent that finished.
  */
 function StartedLine({
   by,
+  finished,
   agent,
   opener,
   onOpen,
 }: {
   by: string;
+  finished: boolean;
   agent: SubAgent | undefined;
   opener: string;
   onOpen: ShowSubAgent | undefined;
@@ -1512,7 +1516,11 @@ function StartedLine({
         <span className="chat-row-icon" aria-hidden="true">
           <CornerDownRight size={16} />
         </span>
-        <span>{`Started by ${by}: sub-agent finished`}</span>
+        <span>
+          {finished
+            ? `Started by ${by}: sub-agent finished`
+            : `Started by ${by}`}
+        </span>
         {agent && (
           <>
             <span aria-hidden="true">·</span>
@@ -1867,6 +1875,9 @@ export function Transcript({
                       <StartedLine
                         key={part.key}
                         by={part.by === "ticketd" ? "ticketd" : harness}
+                        finished={
+                          part.by === "ticketd" || part.subAgent !== undefined
+                        }
                         agent={chat.sub_agents.find(
                           (one) => one.id === part.subAgent,
                         )}

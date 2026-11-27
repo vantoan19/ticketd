@@ -56,6 +56,8 @@
         "capabilities": {
           "brief": true,
           "text": false,
+          "reasoning": false,
+          "model": true,
           "end": false,
           "stop": false,
           "resume": false

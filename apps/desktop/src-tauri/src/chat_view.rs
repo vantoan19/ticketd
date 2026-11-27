@@ -628,6 +628,8 @@ pub struct BriefView {
 pub struct SubAgentCapabilities {
     pub brief: bool,
     pub text: bool,
+    pub reasoning: bool,
+    pub model: bool,
     pub end: bool,
     pub stop: bool,
     pub resume: bool,
@@ -2229,8 +2231,16 @@ fn model_label(reported: Option<&str>, live: &ChatLive) -> Option<String> {
 }
 
 /// The model a sub-agent's own frames reported, as the ticket's label names it.
-pub(crate) fn sub_agent_model(record: &ChatSubAgent, live: &ChatLive) -> Option<String> {
-    model_label(record.said("model").as_deref(), live)
+pub(crate) fn sub_agent_model(
+    record: &ChatSubAgent,
+    harness: &str,
+    live: &ChatLive,
+) -> Option<String> {
+    let reports_model = descriptor(harness).is_none_or(|descriptor| descriptor.sub_agents.model);
+    model_label(
+        record.said("model").filter(|_| reports_model).as_deref(),
+        live,
+    )
 }
 
 /// The model the Chat's live session reports for the main agent, as the session names it.
@@ -2270,11 +2280,6 @@ pub(crate) fn running_words(tool: &ChatTool, chat: &Chat) -> Option<String> {
     })
 }
 
-/// What the harness called a sub-agent's work; failing that, the kind of sub-agent it is.
-pub(crate) fn sub_agent_title(record: &ChatSubAgent) -> String {
-    record.title()
-}
-
 /// A sub-agent as the screens read it, or `None` when it has no run yet.
 fn sub_agent_view(record: &ChatSubAgent, chat: &Chat, live: &ChatLive) -> Option<SubAgentView> {
     let latest = record.latest()?;
@@ -2284,24 +2289,29 @@ fn sub_agent_view(record: &ChatSubAgent, chat: &Chat, live: &ChatLive) -> Option
         SubAgentCapabilities {
             brief: true,
             text: true,
+            reasoning: true,
+            model: true,
             end: true,
             stop: false,
             resume: false,
         },
         |support| SubAgentCapabilities {
-            brief: support.brief,
-            text: support.text,
-            end: support.end,
+            brief: support.supported && support.brief,
+            text: support.supported && support.text,
+            reasoning: support.supported && support.reasoning,
+            model: support.supported && support.model,
+            end: support.supported && support.end,
             // Only while it runs: in the background, in a session that is live.
-            stop: support.stop
+            stop: support.supported
+                && support.stop
                 && latest.state == ChatSubAgentState::Running
                 && record.background
                 && live.sub_agents > 0,
-            resume: support.resume,
+            resume: support.supported && support.resume,
         },
     );
     let said = |key: &str| record.said(key).filter(|said| !said.trim().is_empty());
-    let title = sub_agent_title(record);
+    let title = record.title();
     let prompt = said("prompt");
     Some(SubAgentView {
         id: record.native_id.clone(),
@@ -2309,7 +2319,11 @@ fn sub_agent_view(record: &ChatSubAgent, chat: &Chat, live: &ChatLive) -> Option
         parent: record.parent.clone(),
         title,
         kind: said("subagent_type"),
-        model: model_name(said("model").as_deref(), live, harness),
+        model: model_name(
+            said("model").filter(|_| capabilities.model).as_deref(),
+            live,
+            harness,
+        ),
         status: status_word(latest.state),
         stopped_by: latest.stopped_by.map(stopper_word),
         stop_reason: latest.stop_reason.clone(),
@@ -5393,6 +5407,39 @@ mod tests {
         );
         assert_eq!(shown[0]["net"].as_array().map(Vec::len), Some(1));
         assert!(tracker.first_change().is_none(), "not the turn's records");
+    }
+
+    /// Each harness declares what it reports of a sub-agent, and the view offers exactly
+    /// that: messages, reasoning and the model are three separate things (ADR 0022).
+    #[test]
+    fn a_sub_agent_view_offers_what_its_harness_declares_of_messages_reasoning_and_model() {
+        let said = json!({"description": "Find limiter bypasses", "model": "model-a"});
+        let seen = |harness: &str| {
+            let chat = Chat {
+                harness: harness.to_owned(),
+                ..chat(None)
+            };
+            let record = sub_agent_record(
+                "a",
+                None,
+                said.clone(),
+                vec![sub_agent_run("a", 1, 10, ChatSubAgentState::Running)],
+            );
+            let tracker = Tracker::from_snapshot(&[], std::slice::from_ref(&record));
+            let view = tracker.sub_agent_views(&chat, &ChatLive::idle()).remove(0);
+            (
+                view.capabilities.text,
+                view.capabilities.reasoning,
+                view.capabilities.model,
+                view.model,
+            )
+        };
+        // Claude Code reports all three; Codex reports a child's messages and model but not
+        // its reasoning; Antigravity reports no text and no reasoning, and the model its
+        // sub-agent runs with is the Chat's, which ticketd records.
+        assert_eq!(seen("claude-code"), (true, true, true, "model-a".into()));
+        assert_eq!(seen("codex"), (true, false, true, "model-a".into()));
+        assert_eq!(seen("antigravity"), (false, false, true, "model-a".into()));
     }
 
     #[test]

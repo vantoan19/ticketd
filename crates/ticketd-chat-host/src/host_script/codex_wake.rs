@@ -205,6 +205,33 @@ async fn the_persons_message_goes_first_and_carries_what_finished() {
 }
 
 #[tokio::test(start_paused = true)]
+async fn a_sub_agent_that_finishes_while_the_persons_message_is_on_its_way_wakes_nothing() {
+    let mut h = HostScript::codex()
+        .process([
+            fixture!("codex", "handshake"),
+            fixture!("codex", "sub_agent_wake_while_sending"),
+        ])
+        .start();
+    h.send(PROMPT).await;
+    h.play_to("the parent's turn ended while the sub-agent runs")
+        .await;
+    h.play_to("the sub-agent runs its command").await;
+    // The person's message is written while the sub-agent still runs, then the sub-agent
+    // finishes before Codex has answered it: no turn runs yet.
+    h.send("What did it find?").await;
+    h.play_to("the sub-agent finished").await;
+    assert_eq!(h.live().await.sub_agents, 0);
+    h.play_to("the person's turn ended").await;
+    // That message's turn is the one that covers the finish: ticketd sends nothing of its
+    // own afterwards, however long it stays quiet.
+    h.pass(Duration::from_secs(30)).await;
+    h.finish().await;
+    let turns = h.turns();
+    assert_eq!(turns.len(), 2, "{:?}", h.transcript());
+    assert_eq!(turns[1].origin, None, "the person started it");
+}
+
+#[tokio::test(start_paused = true)]
 async fn a_wake_turn_that_fails_shows_failed_and_notifies_but_leaves_the_queue_alone() {
     let mut h = HostScript::codex()
         .process([

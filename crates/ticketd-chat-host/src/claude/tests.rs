@@ -1535,6 +1535,43 @@ mod sub_agents {
     }
 
     #[test]
+    fn output_at_rest_with_no_sub_agent_finished_names_none() {
+        // Claude Code also resumes by itself after a background shell or monitor, which are
+        // Steps, not sub-agents: the turn is the harness's and no sub-agent finished.
+        let mut session = Session::default();
+        let (events, _) = session
+            .event(
+                "assistant_content",
+                &json!({"parent_tool_use_id": null, "model": "claude-haiku-5-5",
+                        "blocks": [{"type": "text", "text": "The build finished."}]}),
+            )
+            .expect("modeled");
+        let origin = turn_origin(&events)
+            .expect("a turn opened")
+            .expect("and it says the harness started it");
+        assert_eq!(origin.by, crate::TurnStarter::Harness);
+        assert_eq!(origin.sub_agent, None);
+
+        // A sub-agent that was stopped, or that finished before the turn that ended,
+        // is not the one this turn follows.
+        let mut session = Session::default();
+        session.event("sub_agent_started", &started("t1", "toolu_a", true));
+        session.event(
+            "sub_agent_ended",
+            &json!({"task_id": "t1", "run_id": "r1", "tool_use_id": "toolu_a", "status": "stopped"}),
+        );
+        let (events, _) = session
+            .event(
+                "assistant_content",
+                &json!({"parent_tool_use_id": null, "model": "claude-haiku-5-5",
+                        "blocks": [{"type": "text", "text": "Stopped."}]}),
+            )
+            .expect("modeled");
+        let origin = turn_origin(&events).flatten().expect("labelled");
+        assert_eq!(origin.sub_agent, None);
+    }
+
+    #[test]
     fn a_turn_the_persons_input_started_is_not_labelled_even_when_its_output_comes_first() {
         let mut session = Session::default();
         session.input_written("sub-1");

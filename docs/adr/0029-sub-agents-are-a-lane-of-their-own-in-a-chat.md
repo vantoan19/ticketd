@@ -129,7 +129,11 @@ the sub-agents the harness starts; it does not start them.
   and has no Stop one. ticketd says so in the sub-agent's view. It reads no
   Antigravity files and does not use `session/load` of a child.
 - (19) **Descriptors** (ADR 0022) declare sub-agent support, Stop one, sub-agent
-  text, reasoning, model availability and the per-call credit variable.
+  text, reasoning, model availability and the per-call credit variable, each as
+  its own flag, and a Chat's sub-agent view offers exactly what they declare.
+  Codex reports a child's messages and model but not its reasoning; Antigravity
+  reports neither text nor reasoning and no model of its own (the sub-agent
+  runs with the Chat's).
 - (20) **Automations** get no Sub-agents switch for now. A run ends at its first
   Turn end, which would cut off background sub-agents, so the switch needs
   its own design. Meanwhile an unattended agent cannot start sub-agents:

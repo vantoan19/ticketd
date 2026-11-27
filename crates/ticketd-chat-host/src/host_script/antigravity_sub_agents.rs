@@ -198,6 +198,61 @@ async fn stopping_the_chat_stops_its_sub_agent_and_a_late_update_opens_nothing()
     assert!(h.notices().is_empty(), "{:?}", h.notices());
 }
 
+/// The sub-agent's Prompt is interrupted by someone other than the person: the child ends
+/// as that stopper says, as in the other harnesses.
+async fn interrupted_by_ticketd(why: crate::StopReason, reported: bool) -> ChatSubAgent {
+    let mut h = HostScript::antigravity()
+        .process([fixture!("antigravity", "sub_agent_stop")])
+        .start();
+    h.send("Run the slow check in a sub-agent").await;
+    h.play_to("the prompt was written").await;
+    h.play_to("the sub-agent's command asks to run").await;
+    allow(&mut h).await;
+    h.play_to("the sub-agent's command runs").await;
+    h.stop_all(why).await;
+    if reported {
+        h.play_all().await;
+    }
+    h.lose_process(0).await;
+    if reported {
+        h.finish().await;
+    }
+    h.sub_agents().remove(0)
+}
+
+#[tokio::test(start_paused = true)]
+async fn ticketd_interrupting_the_prompt_stops_the_sub_agent_as_ticketd_with_its_reason() {
+    for (why, key) in [
+        (crate::StopReason::TurnedOff, "turned_off"),
+        (crate::StopReason::Restore, "restore"),
+    ] {
+        let record = interrupted_by_ticketd(why, true).await;
+        let run = record.latest().expect("a run");
+        assert_eq!(run.state, ChatSubAgentState::Stopped, "{key}");
+        assert_eq!(run.stopped_by, Some(ChatSubAgentStopper::Ticketd), "{key}");
+        assert_eq!(run.stop_reason.as_deref(), Some(key));
+    }
+}
+
+#[tokio::test(start_paused = true)]
+async fn quitting_stops_the_sub_agent_as_ticketd_when_the_harness_reports_the_cancel_and_loses_contact_when_it_does_not()
+ {
+    let record = interrupted_by_ticketd(crate::StopReason::Quit, true).await;
+    let run = record.latest().expect("a run");
+    assert_eq!(
+        (run.state, run.stopped_by, run.stop_reason.as_deref()),
+        (
+            ChatSubAgentState::Stopped,
+            Some(ChatSubAgentStopper::Ticketd),
+            Some("quit")
+        )
+    );
+
+    let record = interrupted_by_ticketd(crate::StopReason::Quit, false).await;
+    let run = record.latest().expect("a run");
+    assert_eq!((run.state, run.stopped_by), (ChatSubAgentState::Lost, None));
+}
+
 #[tokio::test(start_paused = true)]
 async fn parallel_sub_agents_are_told_apart_by_their_ids_and_named_only_when_that_is_sure() {
     let mut h = HostScript::antigravity()

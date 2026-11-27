@@ -152,7 +152,7 @@ export function subAgentPartFixtures(now = Date.now()) {
   const fx = subAgentFixtures(now);
   const quiet = { activity: "working", turn_running: false } as const;
   const agentOf = (key: keyof typeof DEMO) => DEMO[key].id;
-  return {
+  const parts = {
     /** The reply is in, two sub-agents run, no turn: the strip is the live signal. */
     reply: vary(fx.replied, { chat: quiet }),
     /** One sub-agent runs: the pill names it. */
@@ -316,6 +316,16 @@ export function subAgentPartFixtures(now = Date.now()) {
                 text: "From ticketd: these sub-agents were running when ticketd quit and are not running now: Find limiter bypasses, Check limiter test coverage. You can resume them.",
               },
             }
+          : item,
+    }),
+  };
+  return {
+    ...parts,
+    /** Claude Code resumed by itself after a background command: no sub-agent finished. */
+    startedAlone: vary(parts.done, {
+      map: (item) =>
+        item.kind === "turn" && item.origin
+          ? { ...item, origin: { by: "harness" as const } }
           : item,
     }),
   };

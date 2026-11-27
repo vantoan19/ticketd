@@ -22,6 +22,7 @@ use serde::{Deserialize, Serialize};
 use serde_json::{Map, Value};
 
 use super::{Error, NOW, invalid, log, name, named};
+use crate::format::add_column_if_missing;
 
 /// How one run of a sub-agent stands.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
@@ -137,14 +138,7 @@ pub(super) enum Change {
 /// has not been released. Like every migration step it may run again.
 pub(crate) fn migrate(connection: &Connection) -> Result<(), Error> {
     // A sub-agent's messages: the column the Steps and approvals have, on the transcript.
-    let owned: bool = connection.query_row(
-        "SELECT EXISTS(SELECT 1 FROM pragma_table_info('chat_messages') WHERE name = 'sub_agent_id')",
-        [],
-        |row| row.get(0),
-    )?;
-    if !owned {
-        connection.execute_batch("ALTER TABLE chat_messages ADD COLUMN sub_agent_id TEXT;")?;
-    }
+    add_column_if_missing(connection, "chat_messages", "sub_agent_id", "TEXT")?;
     connection.execute_batch(&format!(
         "CREATE TABLE IF NOT EXISTS chat_sub_agents (id TEXT PRIMARY KEY, chat_id TEXT NOT NULL REFERENCES chats(id), native_id TEXT NOT NULL, parent_native_id TEXT, tool_id TEXT, background INTEGER NOT NULL DEFAULT 0, payload TEXT NOT NULL, created_at TEXT NOT NULL DEFAULT ({NOW}), UNIQUE(chat_id, native_id));
          CREATE TABLE IF NOT EXISTS chat_sub_agent_runs (id TEXT PRIMARY KEY, chat_id TEXT NOT NULL REFERENCES chats(id), sub_agent_id TEXT NOT NULL REFERENCES chat_sub_agents(id), position INTEGER NOT NULL UNIQUE, run INTEGER NOT NULL, native_run_id TEXT, turn_id TEXT REFERENCES chat_turns(id), state TEXT NOT NULL, stopped_by TEXT, stop_reason TEXT, detail TEXT, started_at TEXT NOT NULL DEFAULT ({NOW}), ended_at TEXT, UNIQUE(sub_agent_id, run));
@@ -164,16 +158,7 @@ pub(crate) fn migrate(connection: &Connection) -> Result<(), Error> {
         // The Step that resumed a run after the first.
         ("chat_sub_agent_runs", "tool_id", "TEXT"),
     ] {
-        let has: bool = connection.query_row(
-            "SELECT EXISTS(SELECT 1 FROM pragma_table_info(?1) WHERE name = ?2)",
-            [table, column],
-            |row| row.get(0),
-        )?;
-        if !has {
-            connection.execute_batch(&format!(
-                "ALTER TABLE {table} ADD COLUMN {column} {definition};"
-            ))?;
-        }
+        add_column_if_missing(connection, table, column, definition)?;
     }
     Ok(())
 }
@@ -658,21 +643,31 @@ fn forget(connection: &Connection, chat_id: &str, native_id: &str) -> Result<(),
     Ok(())
 }
 
+/// What a sub-agent is called, from what the harness said about it: the first line of its
+/// description, failing that the kind of sub-agent it is, each trimmed. The one rule the
+/// row, the view, a ticket's label and what ticketd tells the main agent all follow.
+pub fn sub_agent_title(native: &Value) -> Option<String> {
+    let said = |key: &str| {
+        native
+            .get(key)
+            .and_then(Value::as_str)
+            .map(str::trim)
+            .filter(|said| !said.is_empty())
+    };
+    said("description")
+        .and_then(|description| description.lines().next())
+        .or_else(|| said("subagent_type"))
+        .map(|title| title.trim().to_owned())
+}
+
 impl ChatSubAgent {
-    /// What the harness called the work (the first line of its description); failing that
-    /// the kind of sub-agent it is.
+    /// What the harness called the work; see [`sub_agent_title`]. "Sub-agent" when it said
+    /// nothing.
     pub fn title(&self) -> String {
-        let said = |key: &str| self.said(key).filter(|said| !said.trim().is_empty());
-        said("description")
-            .map(|description| {
-                description
-                    .trim()
-                    .lines()
-                    .next()
-                    .unwrap_or_default()
-                    .to_owned()
-            })
-            .or_else(|| said("subagent_type"))
+        serde_json::from_str(&self.payload)
+            .ok()
+            .as_ref()
+            .and_then(sub_agent_title)
             .unwrap_or_else(|| "Sub-agent".to_owned())
     }
 }

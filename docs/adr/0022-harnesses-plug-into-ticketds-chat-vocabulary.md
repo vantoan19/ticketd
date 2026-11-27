@@ -29,8 +29,9 @@ vocabulary people see in Chats.
 - **Sub-agent capabilities.** A descriptor also declares what the harness can
   do with [sub-agents](0029-sub-agents-are-a-lane-of-their-own-in-a-chat.md):
   whether it has them, whether one can be stopped on its own, whether it
-  reports a sub-agent's text, whether it reports reasoning, whether it
-  reports a model, and the environment variable that names the tool call a
+  reports a sub-agent's text, whether it reports its reasoning, whether it
+  reports a model (each its own flag, so a harness can report a child's
+  messages but not its reasoning), and the environment variable that names the tool call a
   command runs in, if any. The desktop offers only what a harness declares.
   The conformance suite checks the shared properties and each adapter
   declares its differences.

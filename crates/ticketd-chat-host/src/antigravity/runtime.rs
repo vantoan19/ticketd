@@ -26,8 +26,8 @@ use crate::{
     InterruptRequest, NativeItemId, NativeRequestId, NativeSessionId, NativeSubAgentId,
     NativeTurnId, NoticeKind, OpenRequest, OpenedRuntime, Plan, PlanStep, PlanStepStatus, Problem,
     ProblemKind, ProviderDetail, Refusal, RespondOutcome, RuntimeEvent, SessionStart,
-    SettingChange, SettingKey, SettingOutcome, SubAgentOutcome, SubAgentStart, SubAgentStopper,
-    Submission, SubmissionId, TurnOutcome,
+    SettingChange, SettingKey, SettingOutcome, SubAgentOutcome, SubAgentStart, Submission,
+    SubmissionId, TurnOutcome,
 };
 
 use super::{capabilities, problem, settings, steps};
@@ -686,23 +686,22 @@ impl Session {
             events.push(prompt.take_thought(false));
         }
         // Antigravity says nothing of when a sub-agent finishes, and holds the Prompt open
-        // until they all have: they end with it. A Stop cancels them with it.
-        let ended = if matches!(prompt_outcome(reply), TurnOutcome::Interrupted) {
-            SubAgentOutcome::Stopped(SubAgentStopper::Person)
-        } else {
-            SubAgentOutcome::Completed
-        };
-        events.extend(
-            prompt
-                .children
-                .iter()
-                .map(|child| EventKind::SubAgentEnded {
-                    sub_agent: NativeSubAgentId::new(&child.id),
-                    run: Some(turn.0.clone()),
-                    outcome: ended,
-                    detail: None,
-                }),
-        );
+        // until they all have: they end with it. A Stop cancels them with it, and who
+        // stopped it is the supervisor's to say (the person, or ticketd and why), so the
+        // children of an interrupted Prompt end with the turn, as they do in every harness.
+        if !matches!(prompt_outcome(reply), TurnOutcome::Interrupted) {
+            events.extend(
+                prompt
+                    .children
+                    .iter()
+                    .map(|child| EventKind::SubAgentEnded {
+                        sub_agent: NativeSubAgentId::new(&child.id),
+                        run: Some(turn.0.clone()),
+                        outcome: SubAgentOutcome::Completed,
+                        detail: None,
+                    }),
+            );
+        }
         let outcome = match (prompt_outcome(reply), prompt.quota_diagnostic) {
             (TurnOutcome::Completed, Some(diagnostic)) => {
                 TurnOutcome::Failed(problem(ProblemKind::QuotaExhausted, diagnostic))

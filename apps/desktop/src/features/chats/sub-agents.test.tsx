@@ -28,6 +28,8 @@ const full = {
   capabilities: {
     brief: true,
     text: true,
+    reasoning: true,
+    model: true,
     end: true,
     stop: true,
     resume: true,

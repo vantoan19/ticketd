@@ -26,7 +26,9 @@ pub use credit::{
 mod receipt;
 pub(crate) mod sub_agents;
 pub use receipt::ChatTurnReceipt;
-pub use sub_agents::{ChatSubAgent, ChatSubAgentRun, ChatSubAgentState, ChatSubAgentStopper};
+pub use sub_agents::{
+    ChatSubAgent, ChatSubAgentRun, ChatSubAgentState, ChatSubAgentStopper, sub_agent_title,
+};
 #[cfg(test)]
 mod tests;
 

@@ -10,7 +10,7 @@ use serde::Serialize;
 use serde_json::{Value, json};
 use ticketd_core::{ActivityFeedEntry, ChatWriteCredit, Error, HistoryEntry, Workspace};
 
-use crate::chat_view::{retention, sub_agent_title};
+use crate::chat_view::retention;
 
 #[derive(Serialize)]
 struct CreditedSubAgent {
@@ -34,7 +34,7 @@ fn credited_to(workspace: &Workspace, credit: &ChatWriteCredit) -> Result<Option
         chat_id: chat.id.clone(),
         retention: retention(&chat),
         sub_agent: record.native_id.clone(),
-        title: sub_agent_title(&record),
+        title: record.title(),
     })))
 }
 
