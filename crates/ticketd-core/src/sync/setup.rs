@@ -689,6 +689,28 @@ pub(super) fn remember_replaced_folder(
         (Ok(replaced), Ok(restored)) => replaced == restored,
         _ => false,
     };
+    // The backup may be of a format before these columns.
+    migrate_last_folder(restored)?;
+    migrate_provider(restored)?;
+    migrate_endpoint(restored)?;
+    // The sign-in and the settings belong to this computer, not to the Workspace's content:
+    // they stay whatever the backup is of and wherever it was made.
+    restored.execute(
+        "UPDATE sync_state SET connection = ?1, account = ?2, provider = ?3, s3_bucket = ?4, s3_prefix = ?5, aws_profile = ?6, aws_cli_path = ?7, s3_endpoint = ?8, device_name = ?9, poll_interval_secs = ?10, attachment_download = ?11",
+        params![
+            was.connection,
+            was.account,
+            label(was.provider)?,
+            was.s3_bucket,
+            was.s3_prefix,
+            was.aws_profile,
+            was.aws_cli_path,
+            was.s3_endpoint,
+            was.device_name,
+            was.poll_interval_secs,
+            label(was.attachment_download)?,
+        ],
+    )?;
     if !same_workspace {
         return Ok(());
     }
@@ -711,31 +733,9 @@ pub(super) fn remember_replaced_folder(
             was.last_prefix.clone(),
         )
     };
-    // The backup may be of a format before these columns.
-    migrate_last_folder(restored)?;
-    migrate_provider(restored)?;
-    migrate_endpoint(restored)?;
-    // The sign-in and the settings belong to this computer, not to the Workspace's content.
     restored.execute(
-        "UPDATE sync_state SET last_folder = ?1, last_account = ?2, last_provider = ?3, last_bucket = ?4, last_prefix = ?5, connection = ?6, account = ?7, provider = ?8, s3_bucket = ?9, s3_prefix = ?10, aws_profile = ?11, aws_cli_path = ?12, s3_endpoint = ?13, device_name = ?14, poll_interval_secs = ?15, attachment_download = ?16",
-        params![
-            folder,
-            account,
-            label(provider)?,
-            bucket,
-            prefix,
-            was.connection,
-            was.account,
-            label(was.provider)?,
-            was.s3_bucket,
-            was.s3_prefix,
-            was.aws_profile,
-            was.aws_cli_path,
-            was.s3_endpoint,
-            was.device_name,
-            was.poll_interval_secs,
-            label(was.attachment_download)?,
-        ],
+        "UPDATE sync_state SET last_folder = ?1, last_account = ?2, last_provider = ?3, last_bucket = ?4, last_prefix = ?5",
+        params![folder, account, label(provider)?, bucket, prefix],
     )?;
     Ok(())
 }

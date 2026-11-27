@@ -1137,6 +1137,48 @@ fn a_backup_of_another_workspace_is_not_offered_the_folder_of_the_replaced_one()
     assert_eq!(a.sync_binding().unwrap(), None);
 }
 
+/// ADR 0011: the sign-in and sync settings are this computer's, whatever the backup is of.
+/// A backup of another Workspace (or from another computer) names a sign-in that is not here.
+#[test]
+fn restoring_a_backup_of_another_workspace_keeps_this_computers_sign_in_and_settings() {
+    let desks = desks();
+    let path = desks.directory.path().join("Desk A");
+    let mut a = desks.desk("Desk A");
+    a.set_sync_settings("Desk A", 300, AttachmentDownload::OnOpen)
+        .unwrap();
+    a.sync_connect("connection-1", "person@example.com")
+        .unwrap();
+    let mut other = Workspace::open(desks.directory.path().join("Other Mac")).unwrap();
+    other
+        .set_sync_settings("Other Mac", 45, AttachmentDownload::Automatic)
+        .unwrap();
+    other
+        .sync_connect("connection-2", "someone-else@example.com")
+        .unwrap();
+    let backup = desks.directory.path().join("other.sqlite3");
+    other.backup(&backup).unwrap();
+    drop((a, other));
+
+    Workspace::restore(&path, &backup).unwrap();
+    let a = Workspace::open(&path).unwrap();
+
+    let status = a.sync_status().unwrap();
+    assert_eq!(status.connection_id.as_deref(), Some("connection-1"));
+    assert_eq!(status.account.as_deref(), Some("person@example.com"));
+    let settings = a.sync_settings().unwrap();
+    assert_eq!(
+        (
+            settings.desktop_name.as_str(),
+            settings.poll_interval_secs,
+            settings.attachment_download
+        ),
+        ("Desk A", 300, AttachmentDownload::OnOpen)
+    );
+    // It is still not offered a folder that belongs to another Workspace.
+    assert_eq!(a.sync_binding().unwrap(), None);
+    assert_eq!(a.sync_setup_options(&desks.remote).unwrap().reconnect, None);
+}
+
 #[test]
 fn a_run_that_changes_nothing_leaves_the_change_token_and_a_long_queue_is_paged() {
     let desks = desks();
