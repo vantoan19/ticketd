@@ -47,6 +47,12 @@ test("unmeasured, a cut name still ends at a whole word", () => {
   expect(fitted.text.endsWith("…(signed).pdf")).toBe(true);
 });
 
+test("unmeasured, a cut never ends the prefix inside an emoji", () => {
+  const fitted = fitName(`${"🎉".repeat(30)}.png`, null);
+  expect(fitted.cut).toBe(true);
+  expect(fitted.text).not.toMatch(/[\uD800-\uDBFF](?![\uDC00-\uDFFF])/);
+});
+
 test("a wide script keeps its end inside the second line, taken from that line", () => {
   // Every character is 14 wide, so 14 of them overflow a 154px line.
   const wide = (text: string) => [...text].length * 14;
@@ -81,6 +87,13 @@ test("a longer name gives way in the middle and keeps its end and extension", ()
   expect(fitted.text.startsWith("refund-flow")).toBe(true);
   expect(fitted.text.endsWith(name.slice(-14))).toBe(true);
   expect(fitted.text).toContain("…");
+});
+
+test("a header narrower than its kept end shortens that end too", () => {
+  const name = "refund-flow-recording-before-the-fix-and-after-the-fix.mov";
+  const fitted = fitTitle(name, 10, unit);
+  expect(fitted.text.length).toBeLessThanOrEqual(10);
+  expect(fitted.text.endsWith(".mov")).toBe(true);
 });
 
 test("an unmeasured header (no width yet) is left alone", () => {

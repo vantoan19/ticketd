@@ -38,6 +38,15 @@ function lastUnits(text: string, units: number): string {
   }
   return out;
 }
+/** The first whole letters of `text` that fit in `units` UTF-16 units. */
+function firstUnits(text: string, units: number): string {
+  let out = "";
+  for (const piece of pieces(text)) {
+    if (out.length + piece.length > units) break;
+    out += piece;
+  }
+  return out;
+}
 export type FittedName = {
   /** The name to show, cut in the middle when it is too long. */
   text: string;
@@ -126,7 +135,7 @@ export function fitName(name: string, measure = measurer()): FittedName {
     return name.length <= LIMIT
       ? { text: name, cut: false }
       : {
-          text: `${name.slice(0, LIMIT - tail.length - 1).trimEnd()}…${tail}`,
+          text: `${firstUnits(name, LIMIT - tail.length - 1).trimEnd()}…${tail}`,
           cut: true,
         };
   }
@@ -172,7 +181,9 @@ export function fitTitle(
   measure: Measure,
 ): FittedName {
   if (width <= 0 || measure(name) <= width) return { text: name, cut: false };
-  const tail = lastUnits(name, KEEP);
+  let tail = lastUnits(name, KEEP);
+  // A title narrower than its kept end gives up letters from that end too.
+  while (tail.length > 1 && measure(`…${tail}`) > width) tail = dropFirst(tail);
   let head = name.slice(0, Math.max(0, name.length - tail.length));
   while (head && measure(`${head}…${tail}`) > width) head = dropLast(head);
   return { text: `${head}…${tail}`, cut: true };
