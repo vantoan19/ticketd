@@ -140,6 +140,16 @@ node scripts/scrub-harness-recording.mjs \
   --capture-root /private/tmp/synthetic-capture capture.wire fixture.jsonl
 ```
 
+### Test a Chat against scripted Harness traffic
+
+`crates/ticketd-chat-host/src/host_script/` replays a JSON-lines fixture
+(`crates/ticketd-chat-host/tests/fixtures/<harness>/`) through the real Claude Code,
+Codex or Antigravity adapter, the real Chat host and the real core into a temporary
+Workspace. A test sends messages, plays to the fixture's marks, answers or refuses
+approvals, stops the Chat, and asserts the stored history, the attention status and the
+notices. The module documentation says how to write a fixture and a test:
+`cargo test -p ticketd-chat-host --lib host_script`.
+
 ## Optional integrations
 
 Core local workflows and ordinary tests do not require GitHub or Google credentials.

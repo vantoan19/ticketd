@@ -64,6 +64,18 @@ fn capabilities() -> Capabilities {
     }
 }
 
+/// The permission a session opens with: the pick, else what the Chat's record kept,
+/// else Antigravity's own.
+fn opening_permission(request: &OpenRequest) -> String {
+    let recorded = settings::Record::read(request.recorded_settings.as_deref());
+    request
+        .settings
+        .permission
+        .clone()
+        .or(recorded.permission)
+        .unwrap_or_else(|| settings::OWN.to_owned())
+}
+
 fn problem(kind: ProblemKind, message: impl Into<String>) -> Problem {
     Problem {
         kind,
@@ -173,13 +185,7 @@ impl HarnessAdapter for Antigravity {
             Inspection::ProbeFailed { reason } => return Err(problem(ProblemKind::Other, reason)),
         };
         let folder = &request.working_directory;
-        let recorded = settings::Record::read(request.recorded_settings.as_deref());
-        let permission = request
-            .settings
-            .permission
-            .clone()
-            .or(recorded.permission)
-            .unwrap_or_else(|| settings::OWN.to_owned());
+        let permission = opening_permission(&request);
         let args: &[&str] = if permission == settings::FULL {
             &["acp", "--dangerously-skip-permissions"]
         } else {
@@ -204,5 +210,20 @@ impl HarnessAdapter for Antigravity {
             )
         })?;
         runtime::open(io, request, permission).await
+    }
+}
+
+/// The real Antigravity runtime over scripted pipes, for `crate::host_script`.
+#[cfg(test)]
+pub(crate) fn scripted() -> crate::host_script::Runtime {
+    crate::host_script::Runtime {
+        real: Arc::new(Antigravity),
+        capabilities: capabilities(),
+        open: |io, request| {
+            Box::pin(async move {
+                let permission = opening_permission(&request);
+                runtime::open(io, request, permission).await
+            })
+        },
     }
 }
