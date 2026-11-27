@@ -30,41 +30,44 @@ const sent = (harness: string) =>
 describe.each([
   ["claude", "task_b", "Check limiter test coverage", "npm test -- rate-limit"],
   ["codex", "thr_a", "Editor", "touch notes.txt"],
-])("the host's view of a %s sub-agent's approval", (harness, id, title, command) => {
-  const { chat, items } = sent(harness);
-  const request = items.find(
-    (item): item is PendingRequest => item.kind === "request",
-  );
-
-  it("is the sub-agent's request, pending, with no turn running", () => {
-    expect(request).toMatchObject({
-      owner: id,
-      state: "pending",
-      title: "wants to run",
-      subject: command,
-    });
-    expect(chat.activity).toBe("waiting");
-    expect(turnRuns(chat)).toBe(false);
-    expect(composerPlaceholder(chat, false)).toMatch(/^Message /);
-  });
-
-  it("names the sub-agent where the card names the harness", () => {
-    if (!request) throw new Error("no request");
-    const asker = askerOf(request, chat.sub_agents);
-    expect(asker?.title).toBe(title);
-    expect(requestLabel(request, undefined, asker?.title)).toBe(
-      `${title} ${request.title} ${command}`,
+])(
+  "the host's view of a %s sub-agent's approval",
+  (harness, id, title, command) => {
+    const { chat, items } = sent(harness);
+    const request = items.find(
+      (item): item is PendingRequest => item.kind === "request",
     );
-  });
 
-  it("is in the sub-agent's view with its Step, and in no other", () => {
-    const view = subAgentView(chat, items, id, Date.now());
-    expect(view?.items.map((item) => item.kind)).toEqual([
-      "turn",
-      "steps",
-      "request",
-    ]);
-    const main = items.filter((item) => !item.owner);
-    expect(main.some((item) => item.kind === "request")).toBe(false);
-  });
-});
+    it("is the sub-agent's request, pending, with no turn running", () => {
+      expect(request).toMatchObject({
+        owner: id,
+        state: "pending",
+        title: "wants to run",
+        subject: command,
+      });
+      expect(chat.activity).toBe("waiting");
+      expect(turnRuns(chat)).toBe(false);
+      expect(composerPlaceholder(chat, false)).toMatch(/^Message /);
+    });
+
+    it("names the sub-agent where the card names the harness", () => {
+      if (!request) throw new Error("no request");
+      const asker = askerOf(request, chat.sub_agents);
+      expect(asker?.title).toBe(title);
+      expect(requestLabel(request, undefined, asker?.title)).toBe(
+        `${title} ${request.title} ${command}`,
+      );
+    });
+
+    it("is in the sub-agent's view with its Step, and in no other", () => {
+      const view = subAgentView(chat, items, id, Date.now());
+      expect(view?.items.map((item) => item.kind)).toEqual([
+        "turn",
+        "steps",
+        "request",
+      ]);
+      const main = items.filter((item) => !item.owner);
+      expect(main.some((item) => item.kind === "request")).toBe(false);
+    });
+  },
+);
