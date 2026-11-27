@@ -917,6 +917,91 @@ async fn the_view_reopens_with_what_the_person_read_through() {
 }
 
 #[tokio::test(start_paused = true)]
+async fn a_sub_agent_row_is_a_reading_position_the_chat_keeps_and_reopens_with() {
+    let f = Fixture::new().await;
+    let id = f.chat().await;
+    f.start_sub_agent(
+        "sa-tests",
+        json!({ "description": "Check limiter test coverage" }),
+    )
+    .await;
+    let (opened, _) = f.open(&id).await;
+    let row = opened
+        .snapshot
+        .items
+        .iter()
+        .find_map(|item| match item {
+            Item::SubAgent { id, .. } => Some(id.clone()),
+            _ => None,
+        })
+        .expect("the sub-agent's row");
+
+    f.chats.read_through(&id, &row).unwrap();
+
+    let (opened, _) = f.open(&id).await;
+    assert_eq!(
+        opened.snapshot.chat.read_through.as_deref(),
+        Some(row.as_str()),
+        "kept by the row it names, so the New marker finds it again"
+    );
+}
+
+#[tokio::test(start_paused = true)]
+async fn a_launch_step_already_shown_is_taken_away_when_its_sub_agent_row_replaces_it() {
+    let f = Fixture::new().await;
+    let id = f.chat().await;
+    let (_, seen) = f.open(&id).await;
+    // The harness shows the launch call before it says what it started.
+    f.emit(command_tool("spawn-1", "spawn", ToolStatus::Running))
+        .await;
+    assert!(
+        seen.lock()
+            .unwrap()
+            .iter()
+            .any(|change| change["item"]["id"]
+                .as_str()
+                .is_some_and(|item| item.ends_with(":spawn-1"))),
+        "the launch Step was sent: {:?}",
+        seen.lock().unwrap()
+    );
+    f.emit(EventKind::SubAgentStarted(SubAgentStart {
+        sub_agent: NativeSubAgentId::new("sa-tests"),
+        run: None,
+        parent: None,
+        tool: Some(NativeItemId::new("spawn-1")),
+        background: true,
+        native: json!({ "description": "Check limiter test coverage" }),
+    }))
+    .await;
+    f.emit(command_tool("spawn-1", "spawn", ToolStatus::Succeeded))
+        .await;
+
+    assert_eq!(
+        seen.lock().unwrap().last().unwrap()["kind"],
+        "resync",
+        "the view cannot remove a Step, so it reads the history again"
+    );
+}
+
+#[tokio::test(start_paused = true)]
+async fn a_launch_that_started_no_sub_agent_stays_a_step_without_a_resync() {
+    let f = Fixture::new().await;
+    let id = f.chat().await;
+    let (_, seen) = f.open(&id).await;
+    f.emit(command_tool("spawn-1", "spawn", ToolStatus::Running))
+        .await;
+    f.emit(command_tool("spawn-1", "spawn", ToolStatus::Failed))
+        .await;
+
+    assert!(
+        seen.lock()
+            .unwrap()
+            .iter()
+            .all(|change| change["kind"] != "resync")
+    );
+}
+
+#[tokio::test(start_paused = true)]
 async fn reopening_attaches_to_the_running_chat_and_closing_a_view_stops_nothing() {
     let f = Fixture::new().await;
     let id = f.chat().await;
