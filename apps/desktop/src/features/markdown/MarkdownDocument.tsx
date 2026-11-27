@@ -32,6 +32,10 @@ import { boldOnly } from "./bold-only";
 import { chunkFade } from "./chunk-fade";
 import { MermaidDiagram } from "./MermaidDiagram";
 import { AttachmentLink } from "@/features/attachments/AttachmentLink";
+import { AttachmentCardLink } from "./AttachmentCardLink";
+import { cardGaps, cardLinks } from "./attachment-cards";
+import { attachmentOrder, type PlaceMentions } from "./attachment-order";
+import { AttachmentPlace } from "@/features/attachments/attachment-place";
 import { CopyButton } from "@/components/ui/copy-button";
 import { Check, ChevronDown, ChevronRight } from "lucide-react";
 import { AttachmentImage as InlineAttachmentImage } from "./InlineImage";
@@ -50,6 +54,8 @@ import {
 } from "@/features/tickets/mention-passage";
 
 const MarkdownSource = createContext("");
+/** Saved updates show an attachment link alone on its line as a card. */
+const AttachmentCards = createContext(false);
 const AttachmentReplacement = createContext<
   (node: ExtraProps["node"], uri: string) => ReferenceReplacement | undefined
 >(() => undefined);
@@ -138,9 +144,14 @@ function DocumentLink({
   const openDocument = useContext(DocumentNavigation);
   const openPlan = useContext(PlanNavigation);
   const replacement = useContext(AttachmentReplacement);
+  const glyph = useContext(AttachmentCards);
   if (href?.startsWith("ticketd://attachment/"))
     return (
-      <AttachmentLink uri={href} onReplace={replacement(node, href)}>
+      <AttachmentLink
+        uri={href}
+        onReplace={replacement(node, href)}
+        glyph={glyph}
+      >
         {children}
       </AttachmentLink>
     );
@@ -295,6 +306,8 @@ function mentionBlock(tag: string) {
     ...props
   }: Record<string, unknown> & ExtraProps) {
     const mark = useContext(MentionTarget);
+    const replacement = useContext(AttachmentReplacement);
+    const cards = useContext(AttachmentCards);
     const anchors = useContext(HeadingAnchors);
     const folding = useContext(Folding);
     const labelId = useId();
@@ -348,32 +361,48 @@ function mentionBlock(tag: string) {
         ),
       );
     }
+    const alone =
+      cards && (tag === "p" || tag === "li") ? cardLinks(node) : null;
+    // A card is a block: it cannot sit inside a paragraph, so its row is a div.
     return createElement(
-      tag,
-      marked
-        ? {
-            ...attributes,
-            "data-mention-target": "",
-            tabIndex: -1,
-            "aria-describedby": mark.describedBy,
-          }
-        : attributes,
-      tag === "li" && String(props.className ?? "").includes("task-list-item")
-        ? Children.map(children as React.ReactNode, (child) => {
-            const name = isValidElement<{ node?: ExtraProps["node"] }>(child)
-              ? typeof child.type === "string"
-                ? child.type
-                : child.props.node?.tagName
-              : undefined;
-            // A child list has its own checked state; loose paragraphs already
-            // provide a block to decorate without striking the child list.
-            return name && ["ul", "ol", "p", "input"].includes(name) ? (
-              child
-            ) : (
-              <span className="markdown-task-text">{child}</span>
-            );
-          })
-        : (children as React.ReactNode),
+      alone && tag === "p" ? "div" : tag,
+      {
+        ...(marked
+          ? {
+              ...attributes,
+              "data-mention-target": "",
+              tabIndex: -1,
+              "aria-describedby": mark.describedBy,
+            }
+          : attributes),
+        ...(alone && { "data-cards": "" }),
+      },
+      alone
+        ? alone.map((link, index) => (
+            <AttachmentCardLink
+              key={index}
+              uri={link.uri}
+              label={link.label}
+              onReplace={replacement(link.node as ExtraProps["node"], link.uri)}
+            />
+          ))
+        : tag === "li" &&
+            String(props.className ?? "").includes("task-list-item")
+          ? Children.map(children as React.ReactNode, (child) => {
+              const name = isValidElement<{ node?: ExtraProps["node"] }>(child)
+                ? typeof child.type === "string"
+                  ? child.type
+                  : child.props.node?.tagName
+                : undefined;
+              // A child list has its own checked state; loose paragraphs already
+              // provide a block to decorate without striking the child list.
+              return name && ["ul", "ol", "p", "input"].includes(name) ? (
+                child
+              ) : (
+                <span className="markdown-task-text">{child}</span>
+              );
+            })
+          : (children as React.ReactNode),
     );
   };
 }
@@ -537,6 +566,7 @@ export function MarkdownDocument({
   mention,
   onChange,
   chunkStarts,
+  attachmentCards = false,
   headings,
   folding,
 }: {
@@ -549,6 +579,8 @@ export function MarkdownDocument({
     ((source: string, signal: AbortSignal) => void | Promise<void>) | undefined;
   /** Streamed text: source offsets where each newly arrived chunk began; each fades in. */
   chunkStarts?: readonly number[] | undefined;
+  /** Show an attachment link that stands alone on its line as a card. */
+  attachmentCards?: boolean | undefined;
   /** The Document's outline: each of these headings is rendered with its anchor as its `id`. */
   headings?: readonly OutlineHeading[] | undefined;
   /** Folds hide the sections named here and give each foldable heading its chevron. */
@@ -598,6 +630,13 @@ export function MarkdownDocument({
       );
     };
   }
+  // The files this text links or shows, in reading order, noted while it parses.
+  const [mentions] = useState<PlaceMentions>(() => ({ current: [] }));
+  const place = () =>
+    mentions.current.map(({ uri, node }) => ({
+      uri,
+      replace: replacement(node, uri),
+    }));
   // Parsing is the cost (about 70 ms at 50 kB): cache the text and fade marks.
   // What a block needs besides its text reaches it through the providers below.
   const rendered = useMemo(
@@ -608,13 +647,18 @@ export function MarkdownDocument({
             ? [...remarkPlugins, [chunkFade, chunkStarts]]
             : remarkPlugins
         }
+        rehypePlugins={
+          attachmentCards
+            ? [[attachmentOrder, mentions], cardGaps]
+            : [[attachmentOrder, mentions]]
+        }
         urlTransform={urlTransform}
         components={components}
       >
         {source}
       </ReactMarkdown>
     ),
-    [source, chunkStarts],
+    [source, chunkStarts, mentions, attachmentCards],
   );
   const anchors = useMemo(
     () => headings && new Map(headings.map((h) => [h.offset, h])),
@@ -633,7 +677,11 @@ export function MarkdownDocument({
             <Folding.Provider value={folding ?? null}>
               <MarkdownSource.Provider value={source}>
                 <AttachmentReplacement.Provider value={replacement}>
-                  {rendered}
+                  <AttachmentCards.Provider value={attachmentCards}>
+                    <AttachmentPlace.Provider value={place}>
+                      {rendered}
+                    </AttachmentPlace.Provider>
+                  </AttachmentCards.Provider>
                 </AttachmentReplacement.Provider>
               </MarkdownSource.Provider>
             </Folding.Provider>

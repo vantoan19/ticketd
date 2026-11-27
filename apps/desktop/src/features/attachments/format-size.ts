@@ -16,3 +16,18 @@ export function formatSize(bytes: number | null) {
   const rounded = value < 10 ? Math.round(value * 10) / 10 : Math.round(value);
   return `${rounded} ${UNITS[unit]}`;
 }
+
+/**
+ * "1.2 of 3.4 MB": both numbers in the unit of the total, so a download reads
+ * as one measure. Byte counts are whole numbers, never fractions of a byte.
+ */
+export function formatProgress(received: number, total: number) {
+  const all = formatSize(Math.round(total));
+  const [, unit = "B"] = all.split(" ");
+  const bytes = Math.max(0, Math.min(Math.round(received), Math.round(total)));
+  if (unit === "B") return `${bytes} of ${all}`;
+  const scale = 1024 ** (UNITS.indexOf(unit as (typeof UNITS)[number]) + 1);
+  const value = bytes / scale;
+  const rounded = value < 10 ? Math.round(value * 10) / 10 : Math.round(value);
+  return `${rounded} of ${all}`;
+}

@@ -1192,3 +1192,47 @@ describe("an update this window edited", () => {
     ).toHaveLength(1);
   });
 });
+
+test("a saved update shows an attachment link alone on its line as a card", async () => {
+  const uri = "ticketd://attachment/workspace/log-1";
+  const log = {
+    id: "log-1",
+    display_name: "e2e-run.log",
+    original_filename: "e2e-run.log",
+    size_bytes: 2516582,
+    kind: "local_snapshot",
+    locator: "log-1/bytes/e2e-run.log",
+  };
+  const note = {
+    id: "with-file",
+    ticket_id: "ticket-1",
+    brief: `The run log is below.\n\n<${uri}>\n\nSee [the log](${uri}) too.`,
+    reported_at: "2026-01-01T00:00:00Z",
+    updated_at: "2026-01-01T00:00:00Z",
+    editing_agent: null,
+  };
+  bridge.invoke.mockImplementation(async (command: string) => {
+    if (command === "get_activity") return note;
+    if (command === "activity_feed")
+      return [{ type: "authored", activity: note }];
+    if (command === "ticket_history") return [];
+    if (command === "resolve_attachment_uri") return log;
+    if (command === "attachment_availability") return [];
+    throw new Error(`Unexpected command: ${command}`);
+  });
+  render(
+    <Activity
+      reference="T-KQ1"
+      projects={[]}
+      active
+      trashed={false}
+      latestNoteId="with-file"
+    />,
+  );
+  const card = await screen.findByRole("button", { name: "e2e-run.log" });
+  expect(card.closest(".file-card")).not.toBeNull();
+  expect(card.textContent).toContain("Log · 2.4 MB");
+  // The link inside the sentence stays a link.
+  const link = screen.getByRole("button", { name: "the log" });
+  expect(link.closest(".file-card")).toBeNull();
+});

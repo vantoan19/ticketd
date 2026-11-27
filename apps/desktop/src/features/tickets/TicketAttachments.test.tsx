@@ -9,6 +9,7 @@ import {
   waitFor,
 } from "@testing-library/react";
 import { beforeEach, afterEach, expect, test, vi } from "vitest";
+import userEvent from "@testing-library/user-event";
 import { invoke } from "@tauri-apps/api/core";
 import { open, save } from "@tauri-apps/plugin-dialog";
 import { TicketFiles as TicketAttachments } from "./TicketFiles";
@@ -20,6 +21,8 @@ vi.mock("@tauri-apps/api/core", () => ({
   Channel: class {
     onmessage = () => {};
   },
+  convertFileSrc: (value: string) =>
+    `http://attachment-media.localhost/${value}`,
 }));
 vi.mock("@tauri-apps/plugin-dialog", () => ({ open: vi.fn(), save: vi.fn() }));
 beforeEach(() => {
@@ -153,7 +156,7 @@ test("a direct preview replaces only its selected ticket association through the
     </TestOpenTicket>,
   );
   fireEvent.click(await screen.findByRole("button", { name: "Trace" }));
-  await screen.findByText("This file is missing from this computer");
+  await screen.findByText("Missing from this computer");
   fireEvent.click(screen.getByRole("button", { name: "Replace file…" }));
   fireEvent.click(screen.getByRole("radio", { name: "Existing files" }));
   fireEvent.click(
@@ -268,7 +271,6 @@ test("metadata offers explicit native open, byte export and reference-only detac
     </TestOpenTicket>,
   );
   fireEvent.click(await screen.findByRole("button", { name: "Trace" }));
-  expect(screen.getByText("trace.log")).toBeTruthy();
   fireEvent.click(screen.getByRole("button", { name: "Open file" }));
   await waitFor(() =>
     expect(invoke).toHaveBeenCalledWith("open_attachment", { id: "f1" }),
@@ -280,11 +282,291 @@ test("metadata offers explicit native open, byte export and reference-only detac
       destination: "C:/export.log",
     }),
   );
-  fireEvent.click(screen.getByRole("button", { name: "Detach from ticket" }));
+  fireEvent.pointerDown(screen.getByRole("button", { name: "More actions" }), {
+    button: 0,
+    ctrlKey: false,
+  });
+  fireEvent.click(
+    await screen.findByRole("menuitem", { name: "Detach from ticket" }),
+  );
   await waitFor(() =>
     expect(invoke).toHaveBeenCalledWith(
       "set_ticket_attachment",
       expect.objectContaining({ attachmentId: "f1", present: false }),
     ),
   );
+});
+
+test("closing the viewer returns focus to the file that opened it", async () => {
+  vi.mocked(invoke).mockImplementation(async (command) =>
+    command === "ticket_attachments" ? [file] : null,
+  );
+  render(
+    <TestOpenTicket ticket={ticket}>
+      <TicketAttachments />
+    </TestOpenTicket>,
+  );
+  const row = await screen.findByRole("button", { name: "Trace" });
+  row.focus();
+  fireEvent.click(row);
+  const viewer = await screen.findByRole("dialog");
+  // The stage takes focus when the viewer opens, so the reading keys work at once.
+  await waitFor(() =>
+    expect(document.activeElement).toBe(
+      screen.getByRole("group", { name: /^Trace, / }),
+    ),
+  );
+  fireEvent.keyDown(viewer, { key: "Escape" });
+  await waitFor(() => expect(screen.queryByRole("dialog")).toBeNull());
+  expect(document.activeElement).toBe(row);
+});
+
+test("detaching the open file lands focus on the Files heading", async () => {
+  let attached = [file];
+  vi.mocked(invoke).mockImplementation(async (command, args) => {
+    if (command === "ticket_attachments") return attached;
+    if (command === "document_context_links") return [[], []];
+    if (command === "set_ticket_attachment") {
+      attached = (args as { present: boolean }).present ? [file] : [];
+      return ticket;
+    }
+    return null;
+  });
+  render(
+    <TestOpenTicket ticket={ticket}>
+      <TicketAttachments />
+    </TestOpenTicket>,
+  );
+  const row = await screen.findByRole("button", { name: "Trace" });
+  row.focus();
+  fireEvent.click(row);
+  await screen.findByRole("dialog");
+  fireEvent.pointerDown(screen.getByRole("button", { name: "More actions" }), {
+    button: 0,
+    ctrlKey: false,
+  });
+  fireEvent.click(
+    await screen.findByRole("menuitem", { name: "Detach from ticket" }),
+  );
+  await waitFor(() => expect(screen.queryByRole("dialog")).toBeNull());
+  await waitFor(() =>
+    expect(document.activeElement).toBe(
+      screen.getByRole("heading", { name: "Files" }),
+    ),
+  );
+});
+
+test("detaching the last file lands focus on the File button when the empty section is hidden", async () => {
+  let attached = [file];
+  vi.mocked(invoke).mockImplementation(async (command, args) => {
+    if (command === "ticket_attachments") return attached;
+    if (command === "document_context_links") return [[], []];
+    if (command === "set_ticket_attachment") {
+      attached = (args as { present: boolean }).present ? [file] : [];
+      return ticket;
+    }
+    return null;
+  });
+  // The ticket page gives an empty section's File button a place in its header.
+  const header = document.body.appendChild(document.createElement("span"));
+  render(
+    <TestOpenTicket ticket={ticket}>
+      <TicketAttachments emptyTarget={header} />
+    </TestOpenTicket>,
+  );
+  const row = await screen.findByRole("button", { name: "Trace" });
+  row.focus();
+  fireEvent.click(row);
+  await screen.findByRole("dialog");
+  fireEvent.pointerDown(screen.getByRole("button", { name: "More actions" }), {
+    button: 0,
+    ctrlKey: false,
+  });
+  fireEvent.click(
+    await screen.findByRole("menuitem", { name: "Detach from ticket" }),
+  );
+  await waitFor(() => expect(screen.queryByRole("dialog")).toBeNull());
+  await waitFor(() =>
+    expect(document.activeElement).toBe(header.querySelector("button")),
+  );
+  header.remove();
+});
+
+test("detaching the open file lands focus on the Files heading even when the files are read again slowly", async () => {
+  let attached = [file];
+  let release: () => void = () => {};
+  let slow = false;
+  vi.mocked(invoke).mockImplementation(async (command, args) => {
+    if (command === "ticket_attachments") {
+      const now = attached;
+      // After the detach the read is slow: the card outlives the viewer.
+      if (slow) await new Promise<void>((resolve) => (release = resolve));
+      return now;
+    }
+    if (command === "set_ticket_attachment") {
+      attached = (args as { present: boolean }).present ? [file] : [];
+      slow = true;
+      return ticket;
+    }
+    return null;
+  });
+  render(
+    <TestOpenTicket ticket={ticket}>
+      <TicketAttachments />
+    </TestOpenTicket>,
+  );
+  const row = await screen.findByRole("button", { name: "Trace" });
+  row.focus();
+  fireEvent.click(row);
+  await screen.findByRole("dialog");
+  fireEvent.pointerDown(screen.getByRole("button", { name: "More actions" }), {
+    button: 0,
+    ctrlKey: false,
+  });
+  fireEvent.click(
+    await screen.findByRole("menuitem", { name: "Detach from ticket" }),
+  );
+  await waitFor(() => expect(screen.queryByRole("dialog")).toBeNull());
+  // The card is still there, so focus went back to it...
+  await waitFor(() => expect(document.activeElement).toBe(row));
+  // ...and when the card goes, focus does not fall to the body.
+  await act(async () => release());
+  await waitFor(() =>
+    expect(document.activeElement).toBe(
+      screen.getByRole("heading", { name: "Files" }),
+    ),
+  );
+});
+
+test("Files shows cards for a mixed set, with a tile for the file that has no still, and the keyboard opens the viewer", async () => {
+  const user = userEvent.setup();
+  const shot = {
+    ...file,
+    id: "shot",
+    display_name: "refund-after-fix.png",
+    original_filename: "refund-after-fix.png",
+    size_bytes: 99328,
+  };
+  const away = {
+    ...file,
+    id: "away",
+    display_name: "load-test.html",
+    original_filename: "load-test.html",
+    size_bytes: 3563110,
+  };
+  vi.mocked(invoke).mockImplementation(async (command, args) => {
+    if (command === "ticket_attachments") return [shot, file, away];
+    if (command === "attachment_workspace_id") return "workspace-test";
+    if (command === "attachment_availability")
+      return [{ id: "away", state: "not_downloaded", progress: null }];
+    if (command === "attachment_preview") {
+      const picture = (args as { id?: string }).id === "shot";
+      return {
+        attachment: picture ? shot : file,
+        status: picture ? "available" : "unsupported",
+        media_type: picture ? "image/png" : null,
+        message: null,
+        can_open: true,
+        usage: { total: 0, entries: [], legacy_drafts_pending: false },
+      };
+    }
+    return null;
+  });
+  render(
+    <TestOpenTicket ticket={ticket}>
+      <TicketAttachments />
+    </TestOpenTicket>,
+  );
+  const cards = await screen.findAllByRole("button", { name: /\.|Trace/ });
+  expect(cards.map((card) => card.getAttribute("aria-label"))).toEqual([
+    "refund-after-fix.png",
+    "Trace",
+    "load-test.html",
+  ]);
+  expect(screen.getByText("PNG image · 97 KB")).toBeTruthy();
+  expect(screen.getByText("Log · 7 B")).toBeTruthy();
+  // A file that isn't here keeps its labeled tile and says why.
+  await screen.findByText("Not downloaded · 3.4 MB");
+  expect(invoke).not.toHaveBeenCalledWith("attachment_html", expect.anything());
+  // Tab reaches a card and Enter opens the viewer; Esc returns focus to it.
+  await user.tab();
+  await user.tab();
+  const log = screen.getByRole("button", { name: "Trace" });
+  while (document.activeElement !== log) await user.tab();
+  await user.keyboard("{Enter}");
+  await screen.findByRole("dialog");
+  await user.keyboard("{Escape}");
+  await waitFor(() => expect(screen.queryByRole("dialog")).toBeNull());
+  expect(document.activeElement).toBe(log);
+});
+
+test("eight files and no Documents fold after six cards", async () => {
+  const many = Array.from({ length: 8 }, (_, index) => ({
+    ...file,
+    id: `f${index}`,
+    display_name: `file-${index}.zip`,
+    original_filename: `file-${index}.zip`,
+  }));
+  vi.mocked(invoke).mockImplementation(async (command) => {
+    if (command === "ticket_attachments") return many;
+    if (command === "attachment_workspace_id") return "workspace-test";
+    if (command === "attachment_availability") return [];
+    return null;
+  });
+  render(
+    <TestOpenTicket ticket={ticket}>
+      <TicketAttachments />
+    </TestOpenTicket>,
+  );
+  const more = await screen.findByRole("button", { name: /Show all 8 files/ });
+  expect(screen.queryByRole("button", { name: "file-6.zip" })).toBeNull();
+  fireEvent.click(more);
+  expect(screen.getByRole("button", { name: "file-7.zip" })).toBeTruthy();
+});
+
+test("opening the middle file steps both ways, and Esc returns to the card that opened it", async () => {
+  const user = userEvent.setup();
+  const first = { ...file, id: "a", display_name: "alpha.log" };
+  const middle = { ...file, id: "b", display_name: "beta.log" };
+  const last = { ...file, id: "c", display_name: "gamma.log" };
+  const all = [first, middle, last];
+  vi.mocked(invoke).mockImplementation(async (command, args) => {
+    if (command === "ticket_attachments") return all;
+    if (command === "attachment_workspace_id") return "workspace-test";
+    if (command === "attachment_preview")
+      return {
+        attachment: all.find((item) => item.id === (args as { id: string }).id),
+        status: "unsupported",
+        media_type: null,
+        message: null,
+        can_open: true,
+        usage: { total: 0, entries: [], legacy_drafts_pending: false },
+      };
+    return null;
+  });
+  render(
+    <TestOpenTicket ticket={ticket}>
+      <TicketAttachments />
+    </TestOpenTicket>,
+  );
+  const card = await screen.findByRole("button", { name: "beta.log" });
+  card.focus();
+  await user.click(card);
+  await screen.findByRole("dialog");
+  expect(screen.getByText("2 of 3")).toBeTruthy();
+  await user.click(screen.getByRole("button", { name: "Next file" }));
+  expect(
+    await screen.findByRole("heading", { name: "gamma.log" }),
+  ).toBeTruthy();
+  expect(screen.getByText("3 of 3")).toBeTruthy();
+  await user.keyboard("k");
+  await user.keyboard("k");
+  expect(
+    await screen.findByRole("heading", { name: "alpha.log" }),
+  ).toBeTruthy();
+  expect(screen.getByText("1 of 3")).toBeTruthy();
+  // The card of the file the viewer was opened from, not the one shown last.
+  await user.keyboard("{Escape}");
+  await waitFor(() => expect(screen.queryByRole("dialog")).toBeNull());
+  expect(document.activeElement).toBe(card);
 });

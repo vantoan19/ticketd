@@ -31,6 +31,8 @@ test("choices persist and unknown stored values fall back to defaults", () => {
     notifyReminders: false,
     chat: false,
     notifyChats: true,
+    attachmentDetails: false,
+    attachmentWrap: true,
     documentsView: "current",
     documentsSort: "opened",
     documentGroups: {},

@@ -1,3 +1,4 @@
+import { useState } from "react";
 import { revealFailureDetails } from "@/test/failure-details";
 // @vitest-environment jsdom
 
@@ -21,7 +22,12 @@ import { fakeChangeSignal } from "@/lib/workspace-reads/fake-signal";
 import { SyncStatusContext } from "@/features/sync/sync-status";
 import { syncStatus } from "@/features/sync/sync-fixtures";
 
-vi.mock("@tauri-apps/api/core", () => ({ invoke: vi.fn(), Channel: class {} }));
+vi.mock("@tauri-apps/api/core", () => ({
+  invoke: vi.fn(),
+  Channel: class {},
+  convertFileSrc: (path: string, protocol: string) =>
+    `${protocol}://localhost/${path}`,
+}));
 vi.mock("@tauri-apps/plugin-dialog", () => ({ open: vi.fn(), save: vi.fn() }));
 vi.mock("@/lib/sync-review-api", () => ({
   syncReview: { availability: vi.fn(), download: vi.fn() },
@@ -91,8 +97,11 @@ beforeEach(() => {
     throw new Error(`Unexpected ${command}`);
   });
 });
-afterEach(() => {
+afterEach(async () => {
   cleanup();
+  // A read batched in the test's last turn is sent one microtask later: let it
+  // answer before the mocks are reset, or it reads an unmocked call.
+  await Promise.resolve();
   vi.resetAllMocks();
 });
 
@@ -132,30 +141,30 @@ test("a ticket's attached files say whether they are downloaded", async () => {
       <TicketFiles />
     </TestOpenTicket>,
   );
-  expect(await screen.findByText("193 B · Not downloaded")).toBeTruthy();
-  expect(screen.getByText("193 B · Downloading…")).toBeTruthy();
-  expect(screen.getByText("193 B · On this computer")).toBeTruthy();
+  expect(await screen.findByText("Not downloaded · 193 B")).toBeTruthy();
+  expect(screen.getByText("Downloading… · 193 B")).toBeTruthy();
+  expect(screen.getByText("Markdown · 193 B")).toBeTruthy();
 });
 
 test("the preview of a file that is not downloaded offers Download in place of the file", async () => {
   render(<AttachmentPreview target={{ id: "a" }} onClose={() => {}} />);
-  expect((await screen.findAllByText("Not downloaded")).length).toBe(2);
+  expect(await screen.findByText("Not downloaded")).toBeTruthy();
   expect(
     screen
-      .getByText("This file is in your Google Drive.")
+      .getByText("It’s in Google Drive. Download it to preview it here.")
       .closest('[role="status"]'),
   ).toBeTruthy();
-  expect(screen.getByText("193 B")).toBeTruthy();
+  expect(screen.getByRole("button", { name: "Download · 193 B" })).toBeTruthy();
   expect(
     screen.getByRole<HTMLButtonElement>("button", { name: "Open file" })
       .disabled,
   ).toBe(true);
-  fireEvent.click(screen.getByRole("button", { name: "Download" }));
+  fireEvent.click(screen.getByRole("button", { name: /^Download/ }));
   await waitFor(() => expect(syncReview.download).toHaveBeenCalledWith("a"));
   expect((await screen.findAllByText("Downloading…")).length).toBeGreaterThan(
     0,
   );
-  expect(screen.queryByRole("button", { name: "Download" })).toBeNull();
+  expect(screen.queryByRole("button", { name: /^Download/ })).toBeNull();
 });
 
 test("the preview of a file waiting in S3 names S3, not Google Drive", async () => {
@@ -173,7 +182,9 @@ test("the preview of a file waiting in S3 names S3, not Google Drive", async () 
     </SyncStatusContext>,
   );
   expect(
-    await screen.findByText("This file is in your S3 bucket."),
+    await screen.findByText(
+      "It’s in your S3 bucket. Download it to preview it here.",
+    ),
   ).toBeTruthy();
   expect(screen.queryByText(/Google Drive/)).toBeNull();
 });
@@ -187,13 +198,13 @@ test("with Attachments downloaded when opened, opening one that is not here down
   expect((await screen.findAllByText("Downloading…")).length).toBeGreaterThan(
     0,
   );
-  expect(screen.queryByRole("button", { name: "Download" })).toBeNull();
+  expect(screen.queryByRole("button", { name: /^Download/ })).toBeNull();
   expect(syncReview.download).toHaveBeenCalledTimes(1);
 });
 
 test("with automatic downloads, a file that did not arrive waits for Download", async () => {
   render(<AttachmentPreview target={{ id: "a" }} onClose={() => {}} />);
-  await screen.findByRole("button", { name: "Download" });
+  await screen.findByRole("button", { name: /^Download/ });
   await waitFor(() => expect(invoke).toHaveBeenCalledWith("sync_settings"));
   expect(syncReview.download).not.toHaveBeenCalled();
 });
@@ -204,8 +215,103 @@ test("a download on open that fails says why and leaves Download", async () => {
   render(<AttachmentPreview target={{ id: "a" }} onClose={() => {}} />);
   await revealFailureDetails();
   expect(screen.getByText("offline")).toBeTruthy();
-  expect(screen.getByRole("button", { name: "Download" })).toBeTruthy();
+  expect(screen.getByRole("button", { name: "Retry" })).toBeTruthy();
   expect(syncReview.download).toHaveBeenCalledTimes(1);
+});
+
+test("a download that finishes after the file's state was read again frees the viewer's controls", async () => {
+  let done: () => void = () => {};
+  vi.mocked(syncReview.download).mockImplementation(
+    () => new Promise<void>((resolve) => (done = resolve)),
+  );
+  const served = vi.mocked(invoke).getMockImplementation()!;
+  vi.mocked(invoke).mockImplementation(async (command, args) =>
+    command === "attachment_preview" && states[0]?.state === "downloaded"
+      ? {
+          attachment: files[0],
+          status: "available",
+          media_type: "video/mp4",
+          message: null,
+          can_open: true,
+          usage: { total: 0, entries: [], legacy_drafts_pending: false },
+        }
+      : served(command, args),
+  );
+  render(<AttachmentPreview target={{ id: "a" }} onClose={() => {}} />);
+  fireEvent.click(await screen.findByRole("button", { name: /^Download/ }));
+  await waitFor(() => expect(syncReview.download).toHaveBeenCalledWith("a"));
+  const reads = () =>
+    vi
+      .mocked(invoke)
+      .mock.calls.filter(([command]) => command === "attachment_preview")
+      .length;
+  const before = reads();
+  // The poll sees the file arrive before the download call answers.
+  states = [{ id: "a", state: "downloaded", progress: null }];
+  await waitFor(() => expect(reads()).toBeGreaterThan(before), {
+    timeout: 4000,
+  });
+  await act(async () => done());
+  await waitFor(
+    () =>
+      expect(
+        screen.getByRole<HTMLButtonElement>("button", { name: "Open file" })
+          .disabled,
+      ).toBe(false),
+    { timeout: 4000 },
+  );
+});
+
+test("a download on open is tried once per file, and its failure stays with the file that started it", async () => {
+  mode = "on_open";
+  states = [
+    { id: "a", state: "not_downloaded", progress: null },
+    { id: "b", state: "not_downloaded", progress: null },
+  ];
+  let failA: (reason: Error) => void = () => {};
+  vi.mocked(syncReview.download).mockImplementation((id) =>
+    id === "a"
+      ? new Promise<void>((_, reject) => (failA = reject))
+      : new Promise<void>(() => {}),
+  );
+  const served = vi.mocked(invoke).getMockImplementation()!;
+  vi.mocked(invoke).mockImplementation(async (command, args) =>
+    command === "attachment_preview"
+      ? {
+          attachment: files.find(
+            (item) => item.id === (args as { id: string }).id,
+          ),
+          status: "missing",
+          media_type: null,
+          message: null,
+          can_open: false,
+          usage: { total: 0, entries: [], legacy_drafts_pending: false },
+        }
+      : served(command, args),
+  );
+  function Switch() {
+    const [id, setId] = useState("a");
+    return (
+      <>
+        <button onClick={() => setId((now) => (now === "a" ? "b" : "a"))}>
+          Switch
+        </button>
+        <AttachmentPreview target={{ id }} onClose={() => {}} />
+      </>
+    );
+  }
+  render(<Switch />);
+  await waitFor(() => expect(syncReview.download).toHaveBeenCalledWith("a"));
+  fireEvent.click(screen.getByText("Switch"));
+  await waitFor(() => expect(syncReview.download).toHaveBeenCalledWith("b"));
+  // A's download fails after the viewer moved on: B shows nothing of it.
+  await act(async () => failA(new Error("offline")));
+  expect(screen.queryByText("Couldn’t download")).toBeNull();
+  expect(screen.queryByText("offline")).toBeNull();
+  // Back on A: it was tried, so it waits for the Download button.
+  fireEvent.click(screen.getByText("Switch"));
+  await screen.findByRole("button", { name: /^Download/ });
+  expect(syncReview.download).toHaveBeenCalledTimes(2);
 });
 
 test("availability that cannot be read again keeps what was last known", async () => {
@@ -222,7 +328,7 @@ test("availability that cannot be read again keeps what was last known", async (
       <TicketFiles />
     </TestOpenTicket>,
   );
-  await screen.findAllByText("193 B · Not downloaded");
+  await screen.findAllByText("Not downloaded · 193 B");
   expect(syncReview.availability).toHaveBeenCalledTimes(1);
 
   vi.mocked(syncReview.availability).mockRejectedValue(new Error("busy"));
@@ -235,5 +341,91 @@ test("availability that cannot be read again keeps what was last known", async (
     },
   );
   await act(async () => {});
-  expect(screen.getAllByText("193 B · Not downloaded")).toHaveLength(2);
+  expect(screen.getAllByText("Not downloaded · 193 B")).toHaveLength(2);
+});
+
+const withSync = (status: ReturnType<typeof syncStatus>, apply = () => {}) => (
+  <SyncStatusContext
+    value={{
+      status,
+      apply,
+      refresh: () => Promise.reject(new Error("unused")),
+      openSettings: () => {},
+      openReview: () => {},
+    }}
+  >
+    <AttachmentPreview target={{ id: "a" }} onClose={() => {}} />
+  </SyncStatusContext>
+);
+
+test("a download the runs gave up on shows Couldn’t download with Retry and Details", async () => {
+  states = [
+    {
+      id: "a",
+      state: "not_downloaded",
+      progress: null,
+      failure: "the storage did not answer",
+    },
+  ];
+  render(<AttachmentPreview target={{ id: "a" }} onClose={() => {}} />);
+  expect(await screen.findByText("Couldn’t download")).toBeTruthy();
+  expect(
+    screen.getByText(
+      "Google Drive didn’t answer. Nothing changed on this computer.",
+    ),
+  ).toBeTruthy();
+  expect(screen.queryByRole("button", { name: /^Download/ })).toBeNull();
+  // Open and Export wait for the bytes, so they stay in place, disabled.
+  for (const name of ["Open file", "Export file"])
+    expect(
+      screen.getByRole<HTMLButtonElement>("button", { name }).disabled,
+    ).toBe(true);
+  await revealFailureDetails();
+  expect(screen.getByText("the storage did not answer")).toBeTruthy();
+  fireEvent.click(screen.getByRole("button", { name: "Retry" }));
+  await waitFor(() => expect(syncReview.download).toHaveBeenCalledWith("a"));
+});
+
+test("a file whose storage needs sign-in offers Sign in through the sync recovery", async () => {
+  const apply = vi.fn();
+  const signedIn = syncStatus();
+  vi.mocked(invoke).mockImplementation(async (command) => {
+    if (command === "sync_recover") return signedIn;
+    if (command === "attachment_workspace_id") return "workspace";
+    if (command === "sync_settings")
+      return {
+        desktop_name: "Laptop",
+        device_code: "KQ",
+        poll_interval_secs: 60,
+        attachment_download: mode,
+      };
+    return {
+      attachment: files[0],
+      status: "missing",
+      media_type: "video/mp4",
+      message: null,
+      can_open: false,
+      usage: { total: 0, entries: [], legacy_drafts_pending: false },
+    };
+  });
+  render(withSync(syncStatus({ recovery: "authorization_expired" }), apply));
+  expect(await screen.findByText("Needs sign-in")).toBeTruthy();
+  expect(
+    screen.getByText("Sign in to Google to download this file."),
+  ).toBeTruthy();
+  expect(
+    screen.getByRole<HTMLButtonElement>("button", { name: "Open file" })
+      .disabled,
+  ).toBe(true);
+  fireEvent.click(screen.getByRole("button", { name: "Sign in" }));
+  await waitFor(() => expect(apply).toHaveBeenCalledWith(signedIn));
+});
+
+test("a download in progress reads as one measure and never as fractions of a byte", async () => {
+  states = [{ id: "a", state: "downloading", progress: 18 }];
+  render(<AttachmentPreview target={{ id: "a" }} onClose={() => {}} />);
+  // 18% of 193 B is 34.74 bytes.
+  expect(await screen.findByText("35 of 193 B")).toBeTruthy();
+  expect(screen.getByText("Downloading…", { selector: "h3" })).toBeTruthy();
+  expect(screen.queryByText(/\.\d+ B/)).toBeNull();
 });

@@ -472,6 +472,10 @@
   overflow: hidden;
   -webkit-box-orient: vertical;
   -webkit-line-clamp: var(--clamp-lines, 8);
+}
+/* The fade only where text is actually cut: a short update, or a card row that
+   fits, is never faded. */
+.ui-clamp-body[data-overflows] {
   mask-image: linear-gradient(to bottom, black 70%, transparent);
 }
 .ui-clamp-toggle {
