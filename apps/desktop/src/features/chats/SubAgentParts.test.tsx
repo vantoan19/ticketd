@@ -302,6 +302,13 @@ test("a turn ticketd started names ticketd, not the harness", async () => {
   expect(screen.queryByText(/Started by Codex/)).toBeNull();
 });
 
+test("a turn ticketd just started shows why before any of its work", async () => {
+  await open(fixtures().wakeStarting);
+  expect(
+    screen.getByText("Started by ticketd: sub-agent finished"),
+  ).toBeTruthy();
+});
+
 test("a turn the person started has no such line", async () => {
   await open(subAgentPartFixtures().reply);
   expect(screen.queryByText(/^Started by/)).toBeNull();

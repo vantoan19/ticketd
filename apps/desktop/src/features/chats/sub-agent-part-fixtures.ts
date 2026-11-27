@@ -92,6 +92,62 @@ const plan = (now: number): Item => ({
   ],
 });
 
+/** Codex: ticketd woke the main agent after the refund sub-agent finished. */
+function wakeChat(now: number, starting: boolean): MockChat {
+  const done = ago(now, 20 * SEC);
+  const finish = (item: Item): Item =>
+    item.kind === "sub_agent" &&
+    (item.sub_agent === "sa-refunds" || item.sub_agent === "sa-pay-tests")
+      ? { ...item, status: "completed", ended_at: done }
+      : item;
+  return vary(codexChat(now), {
+    chat: { activity: "working", turn_running: starting ? null : false },
+    early: [codexWork(now)],
+    agents: {
+      "sa-refunds": { status: "completed", ended_at: done },
+      "sa-pay-tests": { status: "completed", ended_at: done },
+    },
+    map: finish,
+    items: [
+      {
+        id: "turn:t2",
+        at: ago(now, 40 * SEC),
+        kind: "turn",
+        turn_id: "t2",
+        started_at: ago(now, 40 * SEC),
+        ...(starting ? {} : { ended_at: ago(now, 5 * SEC) }),
+        outcome: starting ? "active" : "completed",
+        origin: { by: "ticketd", sub_agent: "sa-refunds" },
+      },
+      ...(starting
+        ? []
+        : ([
+            {
+              id: "w-s2",
+              at: ago(now, 30 * SEC),
+              turn_id: "t2",
+              kind: "steps",
+              steps: [
+                {
+                  kind: "read",
+                  target: "src/pay/refunds.ts",
+                  targets: [{ text: "src/pay/refunds.ts" }],
+                },
+              ],
+            },
+            {
+              id: "w-r2",
+              at: ago(now, 5 * SEC),
+              turn_id: "t2",
+              kind: "response",
+              text: "The refund calls use the v5 client now, and the payment tests pass. The webhook agent is still working; I'll review its change when it's done.",
+              state: "complete",
+            },
+          ] as Item[])),
+    ],
+  });
+}
+
 export function subAgentPartFixtures(now = Date.now()) {
   const fx = subAgentFixtures(now);
   const quiet = { activity: "working", turn_running: false } as const;
@@ -216,37 +272,10 @@ export function subAgentPartFixtures(now = Date.now()) {
         ],
       });
     })(),
-    /** Codex: ticketd woke the main agent after a sub-agent finished. */
-    wake: (() => {
-      const base = codexChat(now);
-      return vary(base, {
-        chat: quiet,
-        early: [codexWork(now)],
-        agents: {
-          "sa-refunds": { status: "completed", ended_at: ago(now, 20 * SEC) },
-          "sa-pay-tests": {
-            status: "completed",
-            ended_at: ago(now, 20 * SEC),
-          },
-        },
-        map: (item) =>
-          item.kind === "sub_agent" &&
-          (item.sub_agent === "sa-refunds" || item.sub_agent === "sa-pay-tests")
-            ? { ...item, status: "completed", ended_at: ago(now, 20 * SEC) }
-            : item,
-        items: [
-          {
-            id: "turn:t2",
-            at: ago(now, 15 * SEC),
-            kind: "turn",
-            turn_id: "t2",
-            started_at: ago(now, 15 * SEC),
-            outcome: "active",
-            origin: { by: "ticketd", sub_agent: "sa-refunds" },
-          },
-        ],
-      });
-    })(),
+    /** Codex: ticketd woke the main agent after a sub-agent finished, and it has answered. */
+    wake: wakeChat(now, false),
+    /** The same wake, just started: nothing of its work yet. */
+    wakeStarting: wakeChat(now, true),
     /** Codex: three sub-agents, one nested, no turn. */
     codexNested: vary(codexChat(now), {
       chat: quiet,
