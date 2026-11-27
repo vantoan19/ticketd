@@ -201,6 +201,8 @@ struct Runtime {
     origin: ChatSessionOrigin,
     turns: HashSet<String>,
     tools: HashSet<String>,
+    /// The shell Steps whose write window is open, by tool id.
+    shell_windows: HashSet<String>,
     /// Harness notices already kept for this session.
     said: HashSet<String>,
     context: Option<ContextReport>,
@@ -426,6 +428,18 @@ pub(crate) struct Supervisor {
     /// From when ticketd may wake the main agent for them: a moment after the first
     /// finished, so those finishing together are covered by one message.
     wake_after: Option<Instant>,
+    /// When `pump` last looked at whether to wake the main agent. A deadline that fell
+    /// due after that look still gets its timer, so the wake is never lost to the gap
+    /// between the look and the next wait; one that fell due before it is not polled
+    /// again, so a wake that is blocked does not spin.
+    wake_polled: Instant,
+    /// Whether the Chat's queue was paused when `pump` last read it. A paused queue keeps
+    /// the wake from being sent, so the results waiting for it are not work in progress.
+    queue_paused: bool,
+    /// Sub-agents the person's Stop at rest is ending: how many ran when it began. The
+    /// Chat records them as stopped by the person once the harness is confirmed closed,
+    /// and not before.
+    stopping_at_rest: Option<usize>,
     /// The message that wakes the main agent is on its way; the turn it starts is the
     /// first turn seen next. Names the sub-agent whose finish it follows.
     wake_sent: Option<Option<NativeSubAgentId>>,
@@ -611,6 +625,9 @@ impl Supervisor {
             sub_agent_notes: HashMap::new(),
             unreported: Vec::new(),
             wake_after: None,
+            wake_polled: Instant::now(),
+            queue_paused: false,
+            stopping_at_rest: None,
             wake_sent: None,
             wakes: 0,
             shutting_down: false,
@@ -632,19 +649,7 @@ impl Supervisor {
 
     async fn run(mut self) {
         loop {
-            let timer = [
-                self.show_text_at,
-                self.checkpoint_at,
-                self.stop_deadline,
-                self.unconfirmed_deadline,
-                self.queue_read_retry_at,
-                self.wake_until,
-                self.wake_after.filter(|at| *at > Instant::now()),
-                self.context_retry_at(),
-            ]
-            .into_iter()
-            .flatten()
-            .min();
+            let timer = self.next_timer();
             tokio::select! {
                 command = self.commands.recv() => match command {
                     Some(Command::Shutdown(why, reply)) => {
@@ -721,6 +726,23 @@ impl Supervisor {
             self.pump();
             self.publish();
         }
+    }
+
+    /// The earliest moment a timer needs the supervisor.
+    fn next_timer(&self) -> Option<Instant> {
+        [
+            self.show_text_at,
+            self.checkpoint_at,
+            self.stop_deadline,
+            self.unconfirmed_deadline,
+            self.queue_read_retry_at,
+            self.wake_until,
+            self.wake_after.filter(|at| *at > self.wake_polled),
+            self.context_retry_at(),
+        ]
+        .into_iter()
+        .flatten()
+        .min()
     }
 
     // ------------------------------------------------------------------
@@ -951,10 +973,10 @@ impl Supervisor {
                 let _ = reply.send(Ok(()));
             }
             Command::Stop(reply) => {
-                let stopped = self.request_stop();
-                if stopped.is_ok() {
-                    self.stop_sub_agents_at_rest().await;
-                }
+                let stopped = match self.request_stop() {
+                    Ok(()) => self.stop_sub_agents_at_rest().await,
+                    Err(error) => Err(error),
+                };
                 let _ = reply.send(stopped);
             }
             Command::StopSubAgent { native_id, reply } => {
@@ -1989,6 +2011,11 @@ impl Supervisor {
     /// as contact lost, which is all anyone knows when ticketd goes away. Nor is a storage
     /// failure, after which nothing more can be written.
     fn end_sub_agents_by_ticketd(&mut self, why: StopReason) {
+        if let Some(running) = self.stopping_at_rest.take() {
+            // The person's Stop at rest, with the harness now confirmed gone.
+            self.end_sub_agents_stopped(&mut Vec::new(), Some(running));
+            return;
+        }
         if matches!(why, StopReason::Quit | StopReason::StorageFailed) {
             return;
         }
@@ -2064,32 +2091,43 @@ impl Supervisor {
 
     /// Stop with no turn running but sub-agents running: they are stopped, the Chat says
     /// how many, and the harness process ends, which ends every one of them for certain.
-    async fn stop_sub_agents_at_rest(&mut self) {
+    async fn stop_sub_agents_at_rest(&mut self) -> Result<(), HostError> {
         if self.active.is_some()
             || self.unconfirmed_start.is_some()
             || self.dispatching.is_some()
             || self.opening.is_some()
         {
-            return;
+            return Ok(());
         }
         self.wake_until = None;
         self.unreported.clear();
         self.wake_after = None;
         if self.sub_agents.is_empty() {
-            return;
+            return Ok(());
         }
         // A harness that keeps sub-agents running by itself (Codex's child threads) is told
         // to stop each, then every one still running is stopped by the person and the Chat
         // says how many, and the process ends: nothing runs in it any more.
         let running = self.sub_agents.len();
-        if let Some(runtime) = &self.runtime {
-            let (handle, generation) = (runtime.handle.clone(), runtime.generation);
-            self.drive(handle.interrupt_sub_agents(generation)).await;
-        }
-        self.end_sub_agents_stopped(&mut Vec::new(), Some(running));
-        // The next message opens the session again.
-        if let Some(reason) = self.stop_runtime(StopReason::Quit).await {
-            self.notice(format!("Stopping the harness was not confirmed: {reason}"));
+        let Some(runtime) = &self.runtime else {
+            self.end_sub_agents_stopped(&mut Vec::new(), Some(running));
+            return Ok(());
+        };
+        let (handle, generation) = (runtime.handle.clone(), runtime.generation);
+        self.drive(handle.interrupt_sub_agents(generation)).await;
+        // The harness process ends, which ends every one of them for certain, and only
+        // then are the ones it did not report recorded as stopped. The next message opens
+        // the session again. Where the exit is not confirmed, what ran is not known to
+        // have stopped: those stay as they were, and are lost contact with.
+        self.stopping_at_rest = Some(running);
+        let unconfirmed = self.stop_runtime(StopReason::Quit).await;
+        self.stopping_at_rest = None;
+        match unconfirmed {
+            Some(reason) => {
+                self.notice(format!("Stopping the harness was not confirmed: {reason}"));
+                Err(HostError::SubAgentNotStopped(reason))
+            }
+            None => Ok(()),
         }
     }
 
@@ -2648,7 +2686,12 @@ impl Supervisor {
             };
         self.keep_unanswered_permission();
         self.runtime = None;
-        self.end_sub_agents_by_ticketd(why);
+        // Recorded as stopped only when the harness is known to have exited. Otherwise
+        // what still ran is left for the loss below to record as lost contact: nothing
+        // says whether it runs.
+        if unconfirmed.is_none() {
+            self.end_sub_agents_by_ticketd(why);
+        }
         self.runtime_gone(TurnEnding::StoppedByTicketd(why), false);
         if let Some(reason) = &unconfirmed {
             if permission_restart || self.unattended.is_some() {
@@ -2802,6 +2845,7 @@ impl Supervisor {
     /// sent goes first; queued input follows only while a runtime is live and the queue
     /// is not paused, so viewing or restoring a Chat never starts work.
     fn pump(&mut self) {
+        self.wake_polled = Instant::now();
         if let Some(ContextRefresh::RetryAt { armed, .. }) = &mut self.refreshing {
             *armed = false;
         }
@@ -2866,6 +2910,7 @@ impl Supervisor {
                 return;
             }
         };
+        self.queue_paused = chat.queue_paused;
         if chat.trashed {
             self.direct.clear();
             self.prepared_queue_edits.clear();
@@ -3068,6 +3113,24 @@ impl Supervisor {
                 return DispatchProgress::Finished;
             }
         };
+        // Before anything is taken for this input: if the note cannot be kept, the input
+        // is not sent, and what it would have used stays for the next one.
+        let note = match self.lost_sub_agents_note(&message) {
+            Ok(note) => note,
+            Err(error) => {
+                let detail = format!("ticketd could not record what it tells the harness: {error}");
+                // Nothing went out: say so, so the input is not left as possibly sent.
+                self.record(vec![ChatObservation::SubmissionNotDelivered {
+                    attempt_id: attempt,
+                    detail: Some(detail.clone()),
+                }]);
+                if is_refusal(&error) {
+                    self.notice(format!("A message was not sent: {detail}"));
+                    let _ = self.write(|core| core.set_chat_queue_paused(&chat, true));
+                }
+                return DispatchProgress::Finished;
+            }
+        };
         if starts_turn {
             // An earlier Stop was about an earlier submission.
             self.stop_when_turn_known = false;
@@ -3087,7 +3150,6 @@ impl Supervisor {
         } else {
             None
         };
-        let note = self.lost_sub_agents_note(&message);
         // What finished since their last message goes ahead of this one, in place of the
         // message ticketd would have sent.
         let finished = if self.unattended.is_none() {
@@ -3183,17 +3245,22 @@ impl Supervisor {
     /// The note the person's message carries after sub-agents lost contact: what ticketd
     /// says to the harness about them, kept on the message so the person sees exactly it,
     /// and told once. A message that was sent before keeps the note it carried.
-    fn lost_sub_agents_note(&mut self, message: &ChatMessage) -> Option<ChatMessageNote> {
+    fn lost_sub_agents_note(
+        &mut self,
+        message: &ChatMessage,
+    ) -> Result<Option<ChatMessageNote>, Error> {
         if let Some(note) = &message.note {
-            return Some(note.clone());
+            return Ok(Some(note.clone()));
         }
         if self.unattended.is_some() || message.role != ChatRole::User {
-            return None;
+            return Ok(None);
         }
         let chat = self.chat_id.clone();
-        let lost = self.core(|core| core.chat_restart_notice(&chat)).ok()?;
+        let Ok(lost) = self.core(|core| core.chat_restart_notice(&chat)) else {
+            return Ok(None);
+        };
         if lost.is_empty() {
-            return None;
+            return Ok(None);
         }
         let resume = self
             .adapter
@@ -3207,9 +3274,8 @@ impl Supervisor {
         };
         // Told with this message, whether or not it gets through: a resend carries the
         // stored note again.
-        self.write(|core| core.record_chat_message_note(&chat, &message.id, &note))
-            .ok()?;
-        Some(note)
+        self.write(|core| core.record_chat_message_note(&chat, &message.id, &note))?;
+        Ok(Some(note))
     }
 
     // ------------------------------------------------------------------
@@ -3367,6 +3433,7 @@ impl Supervisor {
                     origin: opening.origin,
                     turns: HashSet::new(),
                     tools: HashSet::new(),
+                    shell_windows: HashSet::new(),
                     said: HashSet::new(),
                     context: None,
                     link_context: None,
@@ -3555,8 +3622,17 @@ impl Supervisor {
         if dispatch.preamble.is_some() {
             self.preamble = dispatch.preamble;
         }
-        if !dispatch.finished.is_empty() && self.unreported.is_empty() {
-            self.unreported = dispatch.finished;
+        if !dispatch.finished.is_empty() {
+            // Not told after all, whatever finished meanwhile: for a sub-agent in both,
+            // the newer result is the one that stands.
+            let newer = std::mem::take(&mut self.unreported);
+            let mut merged: Vec<Finished> = dispatch
+                .finished
+                .into_iter()
+                .filter(|old| newer.iter().all(|new| new.native != old.native))
+                .collect();
+            merged.extend(newer);
+            self.unreported = merged;
             self.wake_after
                 .get_or_insert_with(|| Instant::now() + WAKE_SETTLE);
         }
@@ -4006,7 +4082,8 @@ impl Supervisor {
                 outcome,
                 detail,
             } => {
-                if !self.late_sub_agent_run(&sub_agent.0, &native_run_id) {
+                let late = self.late_sub_agent_run(&sub_agent.0, &native_run_id);
+                if !late {
                     self.sub_agent_ended(&sub_agent.0, &outcome);
                 }
                 let (state, stopped_by) = match outcome {
@@ -4020,7 +4097,12 @@ impl Supervisor {
                         }),
                     ),
                 };
-                let mut observations = self.withdraw_asked_by(Some(&sub_agent.0));
+                // An earlier run's late end says nothing of what a resumed run asked.
+                let mut observations = if late {
+                    Vec::new()
+                } else {
+                    self.withdraw_asked_by(Some(&sub_agent.0))
+                };
                 observations.push(ChatObservation::SubAgentEnded {
                     native_id: sub_agent.0,
                     native_run_id,
@@ -4293,12 +4375,22 @@ impl Supervisor {
             .as_mut()
             .is_some_and(|runtime| runtime.tools.insert(tool_id.clone()));
         // A shell Step's window opens when it is first seen, so a write made while it runs
-        // can be credited to the agent that ran it.
-        let window = if first {
+        // can be credited to the agent that ran it. A Step reported before its command is
+        // known opens it with the update that first has the command.
+        let has_window = self
+            .runtime
+            .as_ref()
+            .is_some_and(|runtime| runtime.shell_windows.contains(&tool_id));
+        let window = if first || (state == ChatToolState::Running && !has_window) {
             self.shell_window(&title, &input, state)
         } else {
             None
         };
+        if window.is_some()
+            && let Some(runtime) = &mut self.runtime
+        {
+            runtime.shell_windows.insert(tool_id.clone());
+        }
         let tool = ChatObservation::Tool {
             tool_id: tool_id.clone(),
             turn_id,
@@ -4319,7 +4411,14 @@ impl Supervisor {
             }
             self.record(observations);
         } else {
-            // Progress of a running tool is saved with the next checkpoint.
+            // Progress of a running tool is saved with the next checkpoint; its window,
+            // when this update opens one, goes now (the Step itself was saved when first seen).
+            if let Some(writes) = window {
+                observations.push(ChatObservation::ShellStep {
+                    tool_id: tool_id.clone(),
+                    writes,
+                });
+            }
             self.record_if_any(observations);
             self.pending_tools.push((tool_id, tool));
             self.checkpoint_at
@@ -4562,11 +4661,17 @@ impl Supervisor {
         let _ = self.write(|core| core.record_chat_observations(&chat, vec![notice]));
     }
 
+    /// Results are waiting to be told to the main agent and nothing blocks the wake. A
+    /// paused queue does: they stay kept for the next input that can go, and are not work.
+    fn wake_waiting(&self) -> bool {
+        !self.unreported.is_empty() && !self.queue_paused
+    }
+
     fn live(&self) -> ChatLive {
         let working = self.active.is_some()
             || !self.sub_agents.is_empty()
             || self.wake_until.is_some()
-            || !self.unreported.is_empty()
+            || self.wake_waiting()
             || self.wake_sent.is_some()
             || self.dispatching.is_some()
             || self.opening.is_some()
@@ -4581,9 +4686,7 @@ impl Supervisor {
             },
             running: self.runtime.is_some(),
             sub_agents: self.sub_agents.len(),
-            waking: self.wake_until.is_some()
-                || !self.unreported.is_empty()
-                || self.wake_sent.is_some(),
+            waking: self.wake_until.is_some() || self.wake_waiting() || self.wake_sent.is_some(),
             // Until the session's first turn starts, whatever the process is doing.
             opening: match (&self.opening, &self.runtime) {
                 _ if !working => None,
@@ -4716,10 +4819,14 @@ mod tests {
 
     use super::*;
     use crate::testing::FakeAdapter;
+    use std::path::Path;
     use ticketd_core::{NewChat, WorkspaceSession};
 
     fn supervisor(path: PathBuf) -> (Supervisor, Chat) {
-        let fake = FakeAdapter::codex();
+        supervisor_with(path, FakeAdapter::codex())
+    }
+
+    fn supervisor_with(path: PathBuf, fake: FakeAdapter) -> (Supervisor, Chat) {
         let chat = Workspace::open(&path)
             .unwrap()
             .create_chat(
@@ -4743,6 +4850,44 @@ mod tests {
             Arc::new(HostLifecycle::default()),
         );
         (supervisor, chat)
+    }
+
+    fn start_child(
+        supervisor: &mut Supervisor,
+        generation: RuntimeGeneration,
+        native: &str,
+        run: Option<&str>,
+    ) {
+        supervisor.on_event(Some(RuntimeEvent {
+            generation,
+            kind: EventKind::SubAgentStarted(crate::SubAgentStart {
+                sub_agent: NativeSubAgentId::new(native),
+                run: run.map(str::to_owned),
+                parent: None,
+                tool: None,
+                background: true,
+                native: serde_json::json!({"description": "Slow check"}),
+            }),
+        }));
+    }
+
+    /// How the Chat's history ends the sub-agent's latest run: its state and who stopped it.
+    fn latest_run(
+        path: &Path,
+        chat: &Chat,
+        native: &str,
+    ) -> (ChatSubAgentState, Option<ChatSubAgentStopper>) {
+        let snapshot = Workspace::open(path)
+            .unwrap()
+            .chat_snapshot(&chat.id, 500)
+            .unwrap();
+        let record = snapshot
+            .sub_agents
+            .iter()
+            .find(|record| record.native_id == native)
+            .unwrap();
+        let run = record.latest().unwrap();
+        (run.state, run.stopped_by)
     }
 
     async fn open(supervisor: &mut Supervisor, chat: &Chat) -> RuntimeGeneration {
@@ -5172,5 +5317,237 @@ mod tests {
             Ok(Err(HostError::PermissionRestartCleanupUnconfirmed))
         ));
         assert!(supervisor.opening.is_none());
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn a_wake_deadline_that_falls_due_after_the_pump_still_gets_its_timer() {
+        let dir = tempfile::tempdir().unwrap();
+        let (mut supervisor, _chat) = supervisor(dir.path().join("workspace.sqlite3"));
+        supervisor.wake_after = Some(Instant::now() + WAKE_SETTLE);
+        supervisor.pump();
+        // The deadline passes between the pump's look and the next wait.
+        tokio::time::advance(WAKE_SETTLE).await;
+        assert_eq!(supervisor.next_timer(), supervisor.wake_after);
+        // Once looked at again and still blocked, it does not keep waking the loop.
+        supervisor.pump();
+        assert_ne!(supervisor.next_timer(), supervisor.wake_after);
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn stop_at_rest_records_the_sub_agents_stopped_only_once_the_exit_is_confirmed() {
+        for confirmed in [true, false] {
+            let dir = tempfile::tempdir().unwrap();
+            let path = dir.path().join("workspace.sqlite3");
+            let fake = FakeAdapter::codex();
+            if !confirmed {
+                fake.set_close_outcome(CloseOutcome::Unconfirmed {
+                    reason: "the process did not exit".to_owned(),
+                });
+            }
+            let (mut supervisor, chat) = supervisor_with(path.clone(), fake);
+            let generation = open(&mut supervisor, &chat).await;
+            start_child(&mut supervisor, generation, "child", None);
+
+            let result = supervisor.stop_sub_agents_at_rest().await;
+
+            if confirmed {
+                assert!(result.is_ok());
+                assert_eq!(
+                    latest_run(&path, &chat, "child"),
+                    (
+                        ChatSubAgentState::Stopped,
+                        Some(ChatSubAgentStopper::Person)
+                    )
+                );
+            } else {
+                // Stop cannot say it worked, and nothing claims the child stopped.
+                assert!(matches!(result, Err(HostError::SubAgentNotStopped(_))));
+                assert_eq!(
+                    latest_run(&path, &chat, "child"),
+                    (ChatSubAgentState::Lost, None)
+                );
+            }
+            // Either way the queue is not paused by a Stop at rest.
+            assert!(
+                !supervisor
+                    .core(|core| core.chat(&chat.id))
+                    .unwrap()
+                    .queue_paused
+            );
+        }
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn turning_chat_off_does_not_record_ticketd_stopping_what_it_could_not_confirm() {
+        for confirmed in [true, false] {
+            let dir = tempfile::tempdir().unwrap();
+            let path = dir.path().join("workspace.sqlite3");
+            let fake = FakeAdapter::codex();
+            if !confirmed {
+                fake.set_close_outcome(CloseOutcome::Unconfirmed {
+                    reason: "the process did not exit".to_owned(),
+                });
+            }
+            let (mut supervisor, chat) = supervisor_with(path.clone(), fake);
+            let generation = open(&mut supervisor, &chat).await;
+            start_child(&mut supervisor, generation, "child", None);
+
+            let unconfirmed = supervisor.stop_runtime(StopReason::TurnedOff).await;
+
+            assert_eq!(unconfirmed.is_none(), confirmed);
+            assert_eq!(
+                latest_run(&path, &chat, "child"),
+                if confirmed {
+                    (
+                        ChatSubAgentState::Stopped,
+                        Some(ChatSubAgentStopper::Ticketd),
+                    )
+                } else {
+                    (ChatSubAgentState::Lost, None)
+                }
+            );
+        }
+    }
+
+    #[tokio::test]
+    async fn a_rejected_input_gives_back_its_results_beside_newer_ones() {
+        let dir = tempfile::tempdir().unwrap();
+        let (mut supervisor, _chat) = supervisor(dir.path().join("workspace.sqlite3"));
+        let finished = |native: &str, failed| Finished {
+            native: native.to_owned(),
+            failed,
+        };
+        supervisor.unreported = vec![finished("b", false), finished("a", true)];
+        let dispatch = Dispatch {
+            attempt: "attempt".to_owned(),
+            generation: RuntimeGeneration(1),
+            starts_turn: false,
+            early_rejection: None,
+            preamble: None,
+            finished: vec![finished("a", false), finished("c", false)],
+        };
+
+        supervisor.not_accepted(dispatch, false, "rejected".to_owned());
+
+        // Not told after all: all three wait, and `a` is the newer, failed result.
+        let mut kept = supervisor.unreported.clone();
+        kept.sort_by(|one, other| one.native.cmp(&other.native));
+        assert_eq!(
+            kept,
+            [
+                finished("a", true),
+                finished("b", false),
+                finished("c", false)
+            ]
+        );
+        assert!(supervisor.wake_after.is_some());
+    }
+
+    #[tokio::test]
+    async fn an_earlier_runs_late_end_does_not_expire_a_resumed_runs_approval() {
+        let dir = tempfile::tempdir().unwrap();
+        let (mut supervisor, chat) = supervisor(dir.path().join("workspace.sqlite3"));
+        let generation = open(&mut supervisor, &chat).await;
+        start_child(&mut supervisor, generation, "child", Some("r1"));
+        start_child(&mut supervisor, generation, "child", Some("r2"));
+        supervisor.interactions.insert(
+            "ask".to_owned(),
+            LiveRequest {
+                generation,
+                request: NativeRequestId::new("ask"),
+                turn_id: None,
+                owner: ChatOwner::SubAgent {
+                    native_id: "child".to_owned(),
+                },
+                kind: InteractionKind::Approval {
+                    description: "cargo test".to_owned(),
+                    reason: None,
+                    decisions: vec![ApprovalDecision::Allow],
+                },
+                answering: None,
+            },
+        );
+        let ended = |run: &str| {
+            Some(RuntimeEvent {
+                generation,
+                kind: EventKind::SubAgentEnded {
+                    sub_agent: NativeSubAgentId::new("child"),
+                    run: Some(run.to_owned()),
+                    outcome: SubAgentOutcome::Completed,
+                    detail: None,
+                },
+            })
+        };
+
+        supervisor.on_event(ended("r1"));
+        assert!(supervisor.interactions.contains_key("ask"));
+        supervisor.on_event(ended("r2"));
+        assert!(supervisor.interactions.is_empty());
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn a_wake_the_paused_queue_blocks_is_not_work_in_progress() {
+        let dir = tempfile::tempdir().unwrap();
+        let (mut supervisor, chat) = supervisor(dir.path().join("workspace.sqlite3"));
+        let generation = open(&mut supervisor, &chat).await;
+        supervisor
+            .write(|core| core.set_chat_queue_paused(&chat.id, true))
+            .unwrap();
+
+        sub_agent_finishes_at_rest(&mut supervisor, generation).await;
+
+        // The result is kept for the next input that can go, and the Chat is quiet.
+        assert!(!supervisor.unreported.is_empty());
+        assert!(supervisor.dispatching.is_none());
+        let live = supervisor.live();
+        assert_eq!(live.activity, Activity::Idle);
+        assert!(!live.waking);
+
+        supervisor.resume_queue().await.unwrap();
+        supervisor.pump();
+        assert!(supervisor.dispatching.is_some());
+        assert_eq!(supervisor.live().activity, Activity::Working);
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn a_shell_step_opens_its_write_window_when_its_command_first_arrives() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("workspace.sqlite3");
+        let (mut supervisor, chat) = supervisor_with(path.clone(), FakeAdapter::claude());
+        let generation = open(&mut supervisor, &chat).await;
+        start_child(&mut supervisor, generation, "child", None);
+        let windows = || -> i64 {
+            rusqlite::Connection::open(&path)
+                .unwrap()
+                .query_row(
+                    "SELECT COUNT(*) FROM chat_step_windows WHERE chat_id = ?1",
+                    [&chat.id],
+                    |row| row.get(0),
+                )
+                .unwrap()
+        };
+        let mut update = |input: serde_json::Value| {
+            supervisor.on_event(Some(RuntimeEvent {
+                generation,
+                kind: EventKind::SubAgentToolUpdated {
+                    sub_agent: NativeSubAgentId::new("child"),
+                    item: NativeItemId::new("tool-1"),
+                    title: "Bash".to_owned(),
+                    status: ToolStatus::Running,
+                    output: None,
+                    detail: Some(ProviderDetail::new("tool_use", &input.to_string())),
+                },
+            }));
+        };
+
+        // First seen with no command yet: no window.
+        update(serde_json::json!({}));
+        assert_eq!(windows(), 0);
+        // The update that supplies the command opens it, once.
+        let command = serde_json::json!({"command": "ticketd activity add T-KQ1 --brief x"});
+        update(command.clone());
+        assert_eq!(windows(), 1);
+        update(command);
+        assert_eq!(windows(), 1);
     }
 }

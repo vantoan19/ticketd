@@ -280,7 +280,10 @@ harness has not shown it processing, and a failure of such a turn shows and noti
 does not pause the person's queue. Stop with no turn running ends the running sub-agents as
 stopped by the person, notes how many (a Chat notice carrying `sub_agents_stopped`) and ends
 the harness process, which is not lost contact (a frame the process still sends while it ends
-opens nothing). It leaves the queue unpaused, so the next message and any later wake still go
+opens nothing). The sub-agents the harness did not report ended are recorded as stopped only
+once the process is confirmed gone; when its exit cannot be confirmed they are recorded as lost
+contact (the same goes for ticketd turning Chat off) and Stop answers that it did not stop them.
+It leaves the queue unpaused, so the next message and any later wake still go
 out; Stop during a turn interrupts it and stops every sub-agent with it.
 
 Codex never resumes the main agent when a sub-agent finishes, so ticketd does (the
