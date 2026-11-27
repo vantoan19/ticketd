@@ -39,6 +39,39 @@ use ticketd_chat_host::conditions::{ChatProblemKind, HarnessState, HarnessWord};
 
 /// History read to build a list row. A Chat's latest outcome is near its end.
 pub(crate) const SUMMARY_ITEMS: usize = 50;
+
+/// The requests the host still holds that a history window of `SUMMARY_ITEMS` left out: an
+/// older request stays answerable while other agents add history, so its asker is read
+/// apart from the window. Nothing is read when the host holds no request.
+pub(crate) fn live_requests_outside(
+    workspace: &Workspace,
+    chat_id: &str,
+    live: &ChatLive,
+    items: &[ChatItem],
+) -> Outcome<Vec<ChatItem>> {
+    if live.interactions.is_empty() {
+        return Ok(Vec::new());
+    }
+    let read = |id: &str| {
+        items
+            .iter()
+            .any(|item| matches!(item, ChatItem::Interaction(kept) if kept.id == id))
+    };
+    Ok(workspace
+        .chat_pending_interactions(chat_id)?
+        .into_iter()
+        .filter(|item| match item {
+            ChatItem::Interaction(request) => {
+                !read(&request.id)
+                    && live
+                        .interactions
+                        .iter()
+                        .any(|asked| asked.interaction_id == request.id)
+            }
+            _ => false,
+        })
+        .collect())
+}
 // ponytail: "the whole conversation" and lookups by message id read at most this many
 // items; page through `chat_history` when a Chat outgrows it.
 const HISTORY_ITEMS: usize = 10_000;
@@ -1423,6 +1456,10 @@ impl Chats {
         let snapshot = workspace.chat_snapshot(&chat.id, SUMMARY_ITEMS)?;
         // The sub-agents too: a row names the one that asks for approval.
         let mut tracker = Tracker::from_snapshot(&snapshot.items, &snapshot.sub_agents);
+        // A request still waiting keeps its asker, however much history came after it.
+        for request in live_requests_outside(workspace, &chat.id, live, &snapshot.items)? {
+            tracker.note(&request);
+        }
         // A long turn's own record can lie outside the window; the row still says it.
         if let Some(turn) = workspace.chat_latest_turn(&chat.id)? {
             tracker.note(&ChatItem::Turn(turn));

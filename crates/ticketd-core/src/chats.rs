@@ -2667,6 +2667,25 @@ impl Workspace {
             .optional()?)
     }
 
+    /// The requests of the Chat that wait for an answer, whatever the history window of a
+    /// snapshot reached: a request an older burst of history has pushed out of it is still
+    /// answerable, and its asker is read from here.
+    pub fn chat_pending_interactions(&self, chat_id: &str) -> Result<Vec<ChatItem>, Error> {
+        self.read(|_| {
+            let mut statement = self.connection.prepare(
+                "SELECT id FROM chat_interactions WHERE chat_id = ?1 AND state = 'pending' ORDER BY position",
+            )?;
+            let ids = statement
+                .query_map([chat_id], |row| row.get::<_, String>(0))?
+                .collect::<Result<Vec<_>, _>>()?;
+            let mut pending = Vec::with_capacity(ids.len());
+            for id in ids {
+                pending.extend(read_item(&self.connection, "interaction", &id)?);
+            }
+            Ok(pending)
+        })
+    }
+
     /// The Chat's linked records as they are now, in link order.
     pub fn chat_linked_records(&self, id: &str) -> Result<Vec<ChatLinkedRecord>, Error> {
         let heading = crate::documents::HEADING;
@@ -3848,25 +3867,6 @@ impl Workspace {
         })
     }
 
-    /// A ticket's history with the agent each status move is credited to: see
-    /// [`Self::ticket_write_credits`]. Other entries carry none.
-    pub fn ticket_history_credits(
-        &self,
-        reference: &str,
-    ) -> Result<Vec<(crate::HistoryEntry, Option<ChatWriteCredit>)>, Error> {
-        self.read(|_| {
-            let ticket = self.show_ticket(reference)?;
-            let entries = crate::history::read(&self.connection, &ticket.id)?;
-            let numbers = crate::history::numbers(&self.connection, &ticket.id)?;
-            let mut credits =
-                credit::ticket_credits(&self.connection, &ticket.id, &ticket.reference)?;
-            Ok(entries
-                .into_iter()
-                .zip(numbers)
-                .map(|(entry, number)| (entry, credits.statuses.remove(&number)))
-                .collect())
-        })
-    }
     /// [`Self::ticket_write_credits`] for only the Activities `activity_ids` and the status
     /// moves `status_numbers` (their numbers in the history feed): what a page of the
     /// ticket's feed shows, without attributing every other write on the ticket.
@@ -3887,6 +3887,25 @@ impl Workspace {
         })
     }
 
+    /// A ticket's history with the agent each status move is credited to: see
+    /// [`Self::ticket_write_credits`]. Other entries carry none.
+    pub fn ticket_history_credits(
+        &self,
+        reference: &str,
+    ) -> Result<Vec<(crate::HistoryEntry, Option<ChatWriteCredit>)>, Error> {
+        self.read(|_| {
+            let ticket = self.show_ticket(reference)?;
+            let entries = crate::history::read(&self.connection, &ticket.id)?;
+            let numbers = crate::history::numbers(&self.connection, &ticket.id)?;
+            let mut credits =
+                credit::ticket_credits(&self.connection, &ticket.id, &ticket.reference)?;
+            Ok(entries
+                .into_iter()
+                .zip(numbers)
+                .map(|(entry, number)| (entry, credits.statuses.remove(&number)))
+                .collect())
+        })
+    }
 
     /// One sub-agent of a Chat, by the harness's own ID for it, with its runs.
     pub fn chat_sub_agent(

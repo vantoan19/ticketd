@@ -4398,6 +4398,130 @@ async fn the_chats_list_row_names_the_sub_agent_that_asks_for_approval() {
     );
 }
 
+impl Fixture {
+    /// A sub-agent asks for approval; its request belongs to no turn.
+    async fn sub_agent_asks(&self, sub_agent: &str, request: &str) {
+        self.emit(EventKind::InteractionRequested(InteractionRequest {
+            request: NativeRequestId::new(request),
+            turn: None,
+            owner: Some(NativeSubAgentId::new(sub_agent)),
+            item: None,
+            kind: InteractionKind::Approval {
+                description: "npm test -- rate-limit".to_owned(),
+                reason: None,
+                decisions: vec![ApprovalDecision::Allow, ApprovalDecision::Deny],
+            },
+            detail: None,
+        }))
+        .await;
+    }
+}
+
+#[tokio::test(start_paused = true)]
+async fn a_sub_agent_asking_after_the_main_turn_ended_still_puts_its_ticket_in_the_digest() {
+    let f = Fixture::new().await;
+    let ticket = f.core().create_ticket("Rate limiter").unwrap();
+    f.linked_chat(&ticket.id).await;
+    f.start_sub_agent(
+        "sa-tests",
+        json!({ "description": "Check limiter test coverage" }),
+    )
+    .await;
+    f.sub_agent_asks("sa-tests", "approval-1").await;
+    f.end_turn().await;
+
+    let agents = f.agents(&ticket.id);
+    assert_eq!(
+        agents
+            .iter()
+            .map(|agent| agent.sub_agent.as_deref())
+            .collect::<Vec<_>>(),
+        [Some("sa-tests")],
+        "the direct read shows the asking sub-agent: {agents:?}"
+    );
+    let digest = f.chats.ticket_agents_digest().unwrap();
+    assert_eq!(
+        digest
+            .iter()
+            .map(|(id, _)| id.as_str())
+            .collect::<Vec<_>>(),
+        [ticket.id.as_str()],
+        "the watcher can track what the direct read shows"
+    );
+}
+
+#[tokio::test(start_paused = true)]
+async fn an_unrelated_sub_agents_approval_is_not_added_to_a_ticket_another_one_wrote_to() {
+    let f = Fixture::new().await;
+    let ticket = f.core().create_ticket("Rate limiter").unwrap();
+    // A Chat the ticket is not linked to: only sa-tests wrote to the ticket.
+    let chat_id = f.chat().await;
+    f.start_sub_agent(
+        "sa-tests",
+        json!({ "description": "Check limiter test coverage" }),
+    )
+    .await;
+    f.start_sub_agent(
+        "sa-bypass",
+        json!({ "description": "Find limiter bypasses" }),
+    )
+    .await;
+    f.sub_agent_writes(&chat_id, "sa-tests", &ticket.reference);
+    f.sub_agent_asks("sa-bypass", "approval-1").await;
+
+    let agents = f.agents(&ticket.id);
+    assert_eq!(
+        agents
+            .iter()
+            .map(|agent| agent.sub_agent.as_deref())
+            .collect::<Vec<_>>(),
+        [Some("sa-tests")],
+        "sa-bypass never wrote to the ticket and its Chat is not linked: {agents:?}"
+    );
+}
+
+#[tokio::test(start_paused = true)]
+async fn a_request_still_waiting_keeps_its_asker_after_the_history_window_moved_past_it() {
+    let f = Fixture::new().await;
+    let ticket = f.core().create_ticket("Rate limiter").unwrap();
+    f.linked_chat(&ticket.id).await;
+    f.start_sub_agent(
+        "sa-tests",
+        json!({ "description": "Check limiter test coverage" }),
+    )
+    .await;
+    f.sub_agent_asks("sa-tests", "approval-1").await;
+    // More Steps than the list reads, after the request.
+    for step in 0..crate::chats::SUMMARY_ITEMS + 5 {
+        f.emit(command_tool(
+            &format!("cmd-{step}"),
+            "npm test",
+            ToolStatus::Succeeded,
+        ))
+        .await;
+    }
+
+    let row = f.chats.list(ChatListFilter::Active).unwrap().remove(0);
+    assert_eq!(row.status.word, "Approval needed");
+    assert_eq!(
+        row.status.detail.as_deref(),
+        Some("Check limiter test coverage"),
+        "the row names the sub-agent that asks, not the command"
+    );
+    let agents = f.agents(&ticket.id);
+    let asking = agents
+        .iter()
+        .find(|agent| agent.sub_agent.as_deref() == Some("sa-tests"))
+        .unwrap_or_else(|| panic!("the asking sub-agent keeps its own entry: {agents:?}"));
+    assert_eq!(
+        asking
+            .approval
+            .as_ref()
+            .map(|approval| approval.summary.as_str()),
+        Some("npm test -- rate-limit")
+    );
+}
+
 #[tokio::test(start_paused = true)]
 async fn the_overview_digest_moves_with_the_set_and_with_a_field() {
     let f = Fixture::new().await;

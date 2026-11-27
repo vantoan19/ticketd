@@ -27,7 +27,7 @@ use crate::chat_view::{
     Item, Summary, Tracker, harness_name, items, main_agent_model, retention, running_words,
     sub_agent_model,
 };
-use crate::chats::{Outcome, SUMMARY_ITEMS};
+use crate::chats::{Outcome, SUMMARY_ITEMS, live_requests_outside};
 
 /// A request waiting for the person, as the label words it.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
@@ -190,9 +190,19 @@ impl<'a> Reader<'a> {
             .cloned()
             .unwrap_or_else(ChatLive::idle);
         let snapshot = self.workspace.chat_snapshot(&chat.id, SUMMARY_ITEMS)?;
-        let tracker = Tracker::from_snapshot(&snapshot.items, &snapshot.sub_agents);
+        let mut tracker = Tracker::from_snapshot(&snapshot.items, &snapshot.sub_agents);
+        // A request still waiting keeps its asker, however much history came after it.
+        let outside = live_requests_outside(self.workspace, &chat.id, &live, &snapshot.items)?;
+        for request in &outside {
+            tracker.note(request);
+        }
         let facts = Rc::new(Facts {
-            approvals: approvals(&snapshot.chat, &live, &snapshot.items, &tracker),
+            approvals: approvals(
+                &snapshot.chat,
+                &live,
+                snapshot.items.iter().chain(&outside),
+                &tracker,
+            ),
             summary: (self.summarize)(chat, &live)?,
             sub_agents: snapshot.sub_agents,
             items: snapshot.items,
@@ -215,12 +225,14 @@ impl<'a> Reader<'a> {
             })
             .map(|chat| (chat.id.clone(), None))
             .collect();
+        // A sub-agent that asks for approval is at work on the ticket its Chat is linked
+        // to, before it has written anything: the label names it, not the main agent. A
+        // Chat that only a writer's credit brings in is not linked, and its other
+        // sub-agents' requests say nothing about this ticket.
+        let linked: Vec<String> = wanted.iter().map(|(chat_id, _)| chat_id.clone()).collect();
         for agent in self.workspace.ticket_writing_agents(reference)? {
             wanted.push((agent.chat_id, agent.sub_agent));
         }
-        // A sub-agent that asks for approval is at work on the ticket its Chat is linked
-        // to, before it has written anything: the label names it, not the main agent.
-        let linked: Vec<String> = wanted.iter().map(|(chat_id, _)| chat_id.clone()).collect();
         for chat_id in linked {
             let Some(chat) = self.chats.iter().find(|chat| chat.id == chat_id) else {
                 continue;
@@ -262,7 +274,18 @@ impl<'a> Reader<'a> {
     /// anywhere is read from.
     pub fn all(&mut self) -> Outcome<Vec<(String, Vec<TicketAgentView>)>> {
         let mut tickets: BTreeMap<String, String> = BTreeMap::new();
-        for chat in self.chats.iter().filter(|chat| chat.active_turn.is_some()) {
+        // A Chat whose main turn ended can still hold a sub-agent's request: its tickets
+        // are candidates too, and `agents` leaves out the ones with no one at work.
+        let asked = |chat: &Chat| {
+            self.live
+                .get(&chat.id)
+                .is_some_and(|live| !live.interactions.is_empty())
+        };
+        for chat in self
+            .chats
+            .iter()
+            .filter(|chat| chat.active_turn.is_some() || asked(chat))
+        {
             for link in &chat.links {
                 if link.kind != ChatLinkKind::Ticket {
                     continue;
@@ -303,10 +326,10 @@ pub fn order(rows: &mut [(TicketAgentView, String)]) {
 
 /// The approvals waiting for the person in a Chat, by the agent that asked, each as the
 /// command or subject it asks to run. Only a request the host still holds can be answered.
-fn approvals(
+fn approvals<'a>(
     chat: &Chat,
     live: &ChatLive,
-    records: &[ChatItem],
+    records: impl IntoIterator<Item = &'a ChatItem>,
     tracker: &Tracker,
 ) -> HashMap<Option<String>, String> {
     let mut found = HashMap::new();
