@@ -14,7 +14,7 @@ use tokio::time::{sleep, timeout};
 
 use super::runtime::{Options, open_over, probe, probe_options};
 use super::{BRIDGE_SIDECAR_NAME, ClaudeAdapter, candidates, locate, verdict};
-use crate::conformance::{NewTurn, Provider};
+use crate::conformance::{NewTurn, Provider, SubAgentFrames};
 use crate::install::{LaunchEnvironment, Os};
 use crate::outcome::read_end;
 use crate::scripted::{Peer, brief, pipes};
@@ -1501,6 +1501,60 @@ mod sub_agents {
 
     use crate::claude::session::Session;
 
+    fn turn_origin(events: &[EventKind]) -> Option<Option<crate::TurnOrigin>> {
+        events.iter().find_map(|event| match event {
+            EventKind::TurnStarted { origin, .. } => Some(origin.clone()),
+            _ => None,
+        })
+    }
+
+    #[test]
+    fn output_with_no_input_behind_it_is_a_turn_the_harness_started_and_names_the_last_sub_agent_to_finish()
+     {
+        let mut session = Session::default();
+        session.event("sub_agent_started", &started("t1", "toolu_a", true));
+        let (events, _) = session
+            .event(
+                "sub_agent_ended",
+                &json!({"task_id": "t1", "run_id": "r1", "tool_use_id": "toolu_a", "status": "completed"}),
+            )
+            .expect("modeled");
+        assert!(turn_origin(&events).is_none(), "ending opens no turn");
+        let (events, _) = session
+            .event(
+                "assistant_content",
+                &json!({"parent_tool_use_id": null, "model": "claude-haiku-5-5",
+                        "blocks": [{"type": "text", "text": "Done."}]}),
+            )
+            .expect("modeled");
+        let origin = turn_origin(&events)
+            .expect("a turn opened")
+            .expect("and it says who started it");
+        assert_eq!(origin.by, crate::TurnStarter::Harness);
+        assert_eq!(origin.sub_agent, Some(NativeSubAgentId::new("t1")));
+    }
+
+    #[test]
+    fn a_turn_the_persons_input_started_is_not_labelled_even_when_its_output_comes_first() {
+        let mut session = Session::default();
+        session.input_written("sub-1");
+        let (events, _) = session
+            .event(
+                "assistant_content",
+                &json!({"parent_tool_use_id": null, "model": "claude-haiku-5-5",
+                        "blocks": [{"type": "text", "text": "Here"}]}),
+            )
+            .expect("modeled");
+        assert_eq!(turn_origin(&events), Some(None));
+        // Nor one whose input the harness shows processing first.
+        let mut session = Session::default();
+        session.input_written("sub-2");
+        let (events, _) = session
+            .event("input_processing", &json!({"submission_ids": ["sub-2"]}))
+            .expect("modeled");
+        assert_eq!(turn_origin(&events), Some(None));
+    }
+
     fn started(task: &str, tool_use: &str, background: bool) -> Value {
         json!({"task_id": task, "run_id": "r1", "tool_use_id": tool_use, "parent_task_id": null,
                "description": "Look", "subagent_type": "Explore", "background": background,
@@ -2332,6 +2386,21 @@ impl Provider for Bridge {
 
     fn events(&mut self) -> &mut EventStream {
         &mut self.events
+    }
+
+    fn sub_agent_frames(&self) -> SubAgentFrames {
+        SubAgentFrames::Separate
+    }
+
+    async fn play_sub_agent_at_rest(&mut self) {
+        self.peer.load(
+            r#"{"server":{"v":1,"event":"sub_agent_started","generation":7,"task_id":"task_bg","run_id":"run_bg_1","tool_use_id":"toolu_bg","parent_task_id":null,"description":"Find limiter bypasses","subagent_type":"Explore","background":true,"prompt":"Look for ways around the rate limiter.","prompt_truncated":false,"spawn_depth":1}}
+{"server":{"v":1,"event":"assistant_content","generation":7,"uuid":"uuid-bg1","message_id":"msg-bg1","parent_tool_use_id":"toolu_bg","model":"claude-haiku-5-5","blocks":[{"type":"tool_use","id":"toolu_bg_read","name":"Read","input":{"file_path":"/work/chat-1/src/api/rate-limit.ts"}}],"error":null,"aborted":false}}
+{"server":{"v":1,"event":"tool_result","generation":7,"tool_use_id":"toolu_bg_read","parent_tool_use_id":"toolu_bg","is_error":false,"text":"1\texport const LIMIT = 5;","truncated":false,"outcome":null}}
+{"server":{"v":1,"event":"sub_agent_ended","generation":7,"task_id":"task_bg","run_id":"run_bg_1","tool_use_id":"toolu_bg","status":"completed","reason":null,"summary":"Done."}}
+"#,
+        );
+        self.peer.play().await;
     }
 
     async fn start_turn(&mut self, id: &str) -> DispatchOutcome {

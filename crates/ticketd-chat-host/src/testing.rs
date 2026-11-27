@@ -363,7 +363,7 @@ impl FakeAdapter {
                 return false;
             };
             match &kind {
-                EventKind::TurnStarted { turn } => live.runtime.turn_started(turn),
+                EventKind::TurnStarted { turn, .. } => live.runtime.turn_started(turn),
                 EventKind::TurnEnded { turn, outcome, .. } => {
                     // The script provides the actual events. Update only the
                     // lifecycle checked when the next command arrives.

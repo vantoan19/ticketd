@@ -269,7 +269,7 @@ impl Session {
                 let turn = NativeTurnId::new(turn);
                 self.runtime.turn_started(&turn);
                 self.reports.turn_started();
-                vec![EventKind::TurnStarted { turn }]
+                vec![EventKind::TurnStarted { turn, origin: None }]
             }),
             "turn/completed" => params
                 .get("turn")

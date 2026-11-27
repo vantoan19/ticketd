@@ -603,6 +603,27 @@ pub struct ChatTurn {
     pub ending: Option<String>,
     pub started_at: String,
     pub ended_at: Option<String>,
+    /// Who started the turn when the person did not (format 105): the harness resuming
+    /// the main agent by itself, or ticketd waking it. `None`: the person's message did.
+    #[serde(default)]
+    pub origin: Option<ChatTurnOrigin>,
+}
+
+/// Who started a turn the person did not.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ChatTurnOrigin {
+    pub by: ChatTurnStarter,
+    /// The native ID of the sub-agent whose finish it follows, when that is known.
+    pub sub_agent: Option<String>,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum ChatTurnStarter {
+    /// The harness resumed the main agent by itself.
+    Harness,
+    /// ticketd sent the message that woke it.
+    Ticketd,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
@@ -755,6 +776,9 @@ pub struct ChatNotice {
     /// Said by the harness (a warning, a retry), not by ticketd.
     #[serde(default)]
     pub from_harness: bool,
+    /// For the note that the person stopped sub-agents while no turn ran: how many.
+    #[serde(default)]
+    pub sub_agents_stopped: Option<i64>,
 }
 
 /// One entry of a Chat's history, ordered by `position`.
@@ -801,6 +825,9 @@ pub enum ChatObservation {
     TurnStarted {
         turn_id: String,
         native_turn_id: Option<String>,
+        /// Who started it when the person did not.
+        #[serde(default)]
+        origin: Option<ChatTurnOrigin>,
     },
     /// `state` is the terminal outcome; `Active` is refused.
     TurnEnded {
@@ -922,6 +949,12 @@ pub enum ChatObservation {
         /// Said by the harness rather than by ticketd.
         #[serde(default)]
         from_harness: bool,
+    },
+    /// The person stopped `count` sub-agents while no turn ran. A note of its own so the
+    /// Chat says so where the turn's stop would have been.
+    SubAgentsStopped {
+        notice_id: String,
+        count: i64,
     },
 }
 
@@ -1054,10 +1087,25 @@ fn turn_from_row(row: &Row<'_>) -> rusqlite::Result<ChatTurn> {
         problem: row.get(7)?,
         problem_resets_at: row.get(8)?,
         ending: row.get(9)?,
+        origin: row
+            .get::<_, Option<String>>(10)?
+            .map(|by| {
+                Ok::<_, rusqlite::Error>(ChatTurnOrigin {
+                    by: serde_json::from_value(serde_json::Value::String(by)).map_err(|error| {
+                        rusqlite::Error::FromSqlConversionFailure(
+                            10,
+                            rusqlite::types::Type::Text,
+                            Box::new(error),
+                        )
+                    })?,
+                    sub_agent: row.get(11)?,
+                })
+            })
+            .transpose()?,
     })
 }
 
-const TURN: &str = "SELECT id, position, native_turn_id, state, detail, started_at, ended_at, problem, problem_resets_at, ending FROM chat_turns";
+const TURN: &str = "SELECT id, position, native_turn_id, state, detail, started_at, ended_at, problem, problem_resets_at, ending, origin_by, origin_sub_agent FROM chat_turns";
 
 /// A Chat's own columns, for `FROM chats`, in the order [`chat_from_row`] reads them.
 const CHAT_COLUMNS: &str = "id, title, harness, execution_folder, folder_managed, archived, trashed, queue_paused, created_at, effective_settings,
@@ -1259,7 +1307,7 @@ fn read_item(connection: &Connection, kind: &str, id: &str) -> Result<Option<Cha
             .map(ChatItem::Interaction),
         "notice" => connection
             .query_row(
-                "SELECT id, position, text, created_at, from_harness FROM chat_notices WHERE id = ?1",
+                "SELECT id, position, text, created_at, from_harness, sub_agents_stopped FROM chat_notices WHERE id = ?1",
                 [id],
                 |row| {
                     Ok(ChatNotice {
@@ -1268,6 +1316,7 @@ fn read_item(connection: &Connection, kind: &str, id: &str) -> Result<Option<Cha
                         text: row.get(2)?,
                         created_at: row.get(3)?,
                         from_harness: row.get(4)?,
+                        sub_agents_stopped: row.get(5)?,
                     })
                 },
             )
@@ -1924,6 +1973,7 @@ fn observe(
         ChatObservation::TurnStarted {
             turn_id,
             native_turn_id,
+            origin,
         } => {
             if owned(connection, "chat_turns", chat_id, &turn_id)? {
                 return Ok(());
@@ -1949,10 +1999,18 @@ fn observe(
             )?;
             connection.execute(
                 &format!(
-                    "INSERT INTO chat_turns (id, chat_id, position, native_turn_id, state, started_at)
-                     VALUES (?1, ?2, ?3, ?4, 'active', COALESCE(?5, {NOW}))"
+                    "INSERT INTO chat_turns (id, chat_id, position, native_turn_id, state, started_at, origin_by, origin_sub_agent)
+                     VALUES (?1, ?2, ?3, ?4, 'active', COALESCE(?5, {NOW}), ?6, ?7)"
                 ),
-                params![turn_id, chat_id, position, native_turn_id, started_at],
+                params![
+                    turn_id,
+                    chat_id,
+                    position,
+                    native_turn_id,
+                    started_at,
+                    origin.as_ref().map(|origin| name(origin.by)).transpose()?,
+                    origin.and_then(|origin| origin.sub_agent),
+                ],
             )?;
             Ok(())
         }
@@ -2224,6 +2282,22 @@ fn observe(
             connection.execute(
                 "INSERT INTO chat_notices (id, chat_id, position, text, from_harness) VALUES (?1, ?2, ?3, ?4, ?5)",
                 params![notice_id, chat_id, position, text, from_harness],
+            )?;
+            Ok(())
+        }
+        ChatObservation::SubAgentsStopped { notice_id, count } => {
+            if owned(connection, "chat_notices", chat_id, &notice_id)? {
+                return Ok(());
+            }
+            let noun = if count == 1 {
+                "sub-agent"
+            } else {
+                "sub-agents"
+            };
+            let position = log(connection, chat_id, "notice", &notice_id)?;
+            connection.execute(
+                "INSERT INTO chat_notices (id, chat_id, position, text, from_harness, sub_agents_stopped) VALUES (?1, ?2, ?3, ?4, 0, ?5)",
+                params![notice_id, chat_id, position, format!("You stopped {count} {noun}."), count],
             )?;
             Ok(())
         }

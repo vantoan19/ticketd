@@ -211,6 +211,7 @@ fn an_assistant_response_is_saved_with_the_ordinary_document_workflow() {
                 ChatObservation::TurnStarted {
                     turn_id: "turn-1".into(),
                     native_turn_id: None,
+                    origin: None,
                 },
                 ChatObservation::AssistantText {
                     message_id: "reply-1".into(),

@@ -13,7 +13,7 @@ use crate::{
     InteractionKind, InteractionRequest, InteractionResolution, NativeItemId, NativeRequestId,
     NativeSessionId, NativeSubAgentId, NativeTurnId, NoticeKind, Problem, ProblemKind,
     ProviderDetail, Question, Refusal, SettingKey, SubAgentOutcome, SubAgentStart, SubAgentStopper,
-    SubmissionId, ToolStatus, TurnEvidence, TurnOutcome, reset_time,
+    SubmissionId, ToolStatus, TurnEvidence, TurnOrigin, TurnOutcome, TurnStarter, reset_time,
 };
 
 use super::report::{PLAN_TOOLS, Reports};
@@ -55,6 +55,10 @@ pub(super) struct Session {
     reports: Reports,
     /// The sub-agents of this session, by task ID, and the tool uses frames name them by.
     sub_agents: SubAgents,
+    /// Inputs of the person's written to the harness whose processing was not shown yet.
+    /// Output can come before the harness says it is processing them, and a turn they
+    /// start is not one the harness started by itself.
+    pending_inputs: HashSet<String>,
 }
 
 /// How many frames of a sub-agent that has not been announced yet are held for it, and
@@ -75,6 +79,9 @@ struct SubAgents {
     owner: HashMap<String, String>,
     /// Frames of a tool use not announced as a sub-agent yet: (event name, event).
     held: HashMap<String, Vec<(String, Value)>>,
+    /// The sub-agent that finished last while no turn ran, until a turn opens: the one
+    /// the turn Claude Code starts by itself follows.
+    finished_at_rest: Option<String>,
 }
 
 impl SubAgents {
@@ -82,10 +89,18 @@ impl SubAgents {
     /// a foreground sub-agent ran in the turn is over with it.
     fn turn_ended(&mut self) {
         self.held.clear();
-        self.owner.clear();
+        self.finished_at_rest = None;
         for agent in self.known.values_mut().filter(|agent| !agent.background) {
             agent.running = false;
         }
+        // A sub-agent in the background goes on past the turn, and so do its tool calls.
+        let running: HashSet<&str> = self
+            .known
+            .iter()
+            .filter(|(_, agent)| agent.running)
+            .map(|(task, _)| task.as_str())
+            .collect();
+        self.owner.retain(|_, task| running.contains(task.as_str()));
     }
 }
 
@@ -174,6 +189,11 @@ impl Session {
         self.runtime.active_turn_id()
     }
 
+    /// An input of the person's is being written to the harness.
+    pub fn input_written(&mut self, submission: &str) {
+        self.pending_inputs.insert(submission.to_owned());
+    }
+
     pub fn interrupt_written(&mut self) {
         if let Some(turn) = self.active_turn().cloned() {
             let _ = self.runtime.mark_interrupt(&turn);
@@ -189,6 +209,7 @@ impl Session {
     /// The runtime is gone: nothing is live any more.
     pub fn clear_live(&mut self) {
         self.runtime.disconnected();
+        self.pending_inputs.clear();
         self.turn_error = None;
         self.tools.clear();
         self.declined.clear();
@@ -199,13 +220,34 @@ impl Session {
     /// The open turn, opening one when Claude Code shows activity outside a turn.
     /// Claude Code has no turn identity, so the id is local to this runtime.
     fn turn(&mut self, events: &mut Vec<EventKind>) -> NativeTurnId {
+        self.open_turn(events, true)
+    }
+
+    /// The turn the person's input started, opened as soon as the harness says it took the
+    /// input. Not labelled: the person started it.
+    fn turn_for_input(&mut self, events: &mut Vec<EventKind>) -> NativeTurnId {
+        self.open_turn(events, false)
+    }
+
+    fn open_turn(&mut self, events: &mut Vec<EventKind>, by_itself: bool) -> NativeTurnId {
         if let Some(turn) = self.active_turn() {
             return turn.clone();
         }
         self.turns_started += 1;
         let id = NativeTurnId(format!("local-turn-{}", self.turns_started));
         self.runtime.turn_started(&id);
-        events.push(EventKind::TurnStarted { turn: id.clone() });
+        // Output of the main agent with no input of the person's behind it: Claude Code
+        // resumed by itself, which it does when a sub-agent in the background finishes.
+        // What that sub-agent was is the last one that finished since the last turn.
+        let finished = self.sub_agents.finished_at_rest.take();
+        let origin = (by_itself && self.pending_inputs.is_empty()).then(|| TurnOrigin {
+            by: TurnStarter::Harness,
+            sub_agent: finished.map(NativeSubAgentId),
+        });
+        events.push(EventKind::TurnStarted {
+            turn: id.clone(),
+            origin,
+        });
         id
     }
 
@@ -229,7 +271,10 @@ impl Session {
         match name {
             "session_info" => self.session_info(event, &mut events),
             "input_processing" => {
-                let turn = self.turn(&mut events);
+                for submission in strings(event, "submission_ids") {
+                    self.pending_inputs.remove(&submission);
+                }
+                let turn = self.turn_for_input(&mut events);
                 for submission in strings(event, "submission_ids") {
                     events.push(EventKind::SubmissionEvidence {
                         submission: SubmissionId(submission),
@@ -658,6 +703,11 @@ impl Session {
             && agent.running
         {
             agent.running = false;
+            if !matches!(outcome, SubAgentOutcome::Stopped(_))
+                && self.runtime.active_turn_id().is_none()
+            {
+                self.sub_agents.finished_at_rest = Some(task.to_owned());
+            }
             events.push(EventKind::SubAgentEnded {
                 sub_agent: NativeSubAgentId::new(task),
                 run: text(event, "run_id").map(str::to_owned),
@@ -682,6 +732,12 @@ impl Session {
         };
         let current = run.is_none() || agent.run.is_none() || agent.run == run;
         if current {
+            if agent.running
+                && !matches!(outcome, SubAgentOutcome::Stopped(_))
+                && self.runtime.active_turn_id().is_none()
+            {
+                self.sub_agents.finished_at_rest = Some(task.to_owned());
+            }
             agent.running = false;
         }
         // Its final report is its last message; the notification repeats it, and says it
@@ -1076,10 +1132,16 @@ impl Session {
         self.identify(text(event, "session_id"), events);
         let id = self.turn(events);
         let last_error = self.turn_error.take();
-        self.tools.clear();
         self.declined.clear();
         self.streams.clear();
         self.sub_agents.turn_ended();
+        self.pending_inputs = strings(event, "pending_submission_ids")
+            .into_iter()
+            .collect();
+        // The tool calls of a sub-agent still running in the background go on.
+        let sub_agents = &self.sub_agents;
+        self.tools
+            .retain(|tool, _| sub_agents.owner.contains_key(tool));
         self.reports.turn_ended();
         let subtype = text(event, "subtype").unwrap_or("unknown");
         let failed = event["is_error"] == true || subtype.starts_with("error");

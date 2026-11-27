@@ -54,6 +54,7 @@ fn facts<'a>(chat: &'a Chat, live: &'a ChatLive, last_turn: Option<&'a ChatTurn>
         first_change: None,
         files_changed: None,
         last_response: Some("All **done**. See `x`."),
+        stopped_sub_agents: None,
     }
 }
 

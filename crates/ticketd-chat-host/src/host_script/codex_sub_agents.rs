@@ -251,6 +251,8 @@ async fn stop_with_no_turn_running_still_interrupts_the_children() {
 
     h.stop().await;
     h.play_all().await;
+    // With no turn running Stop also ends the harness process, once the children were told.
+    h.lose_process(0).await;
     h.finish().await;
 
     assert_eq!(
@@ -260,6 +262,7 @@ async fn stop_with_no_turn_running_still_interrupts_the_children() {
             Some(ChatSubAgentStopper::Person)
         )]
     );
+    assert_eq!(h.notices(), ["You stopped 1 sub-agent."]);
     // The parent's turn was over: it stays as it ended.
     assert_eq!(h.turns()[0].state, ChatTurnState::Completed);
 }

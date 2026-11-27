@@ -159,6 +159,7 @@ fn capturing_a_short_turn_skips_unrelated_tickets_and_feed_rows() {
             vec![ChatObservation::TurnStarted {
                 turn_id: "turn".into(),
                 native_turn_id: None,
+                origin: None,
             }],
         )
         .unwrap();

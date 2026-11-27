@@ -305,7 +305,10 @@ pub(crate) fn brief(kind: &EventKind) -> String {
             submission,
             evidence,
         } => format!("evidence {} {evidence:?}", submission.0),
-        EventKind::TurnStarted { turn } => format!("turn-started {}", turn.0),
+        EventKind::TurnStarted { turn, origin } => match origin {
+            None => format!("turn-started {}", turn.0),
+            Some(origin) => format!("turn-started {} by {origin:?}", turn.0),
+        },
         EventKind::TextDelta { item, text, .. } => format!("delta {} {text:?}", item.0),
         EventKind::MessageCompleted { item, text, .. } => format!("message {} {text:?}", item.0),
         EventKind::ToolUpdated {

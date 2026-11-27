@@ -112,7 +112,7 @@ const EXPORTED: &[(&str, &str)] = &[
     ),
     (
         "chat_turns",
-        "id, chat_id, position, native_turn_id, state, detail, problem, problem_resets_at, ending, started_at, ended_at",
+        "id, chat_id, position, native_turn_id, state, detail, problem, problem_resets_at, ending, started_at, ended_at, origin_by, origin_sub_agent",
     ),
     (
         "chat_messages",
@@ -132,7 +132,7 @@ const EXPORTED: &[(&str, &str)] = &[
     ),
     (
         "chat_notices",
-        "id, chat_id, position, text, from_harness, created_at",
+        "id, chat_id, position, text, from_harness, created_at, sub_agents_stopped",
     ),
     (
         "chat_sub_agents",

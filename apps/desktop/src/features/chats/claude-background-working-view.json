@@ -1,0 +1,380 @@
+{
+  "chat": {
+    "id": "00000000-0000-4000-8000-000000000001",
+    "title": "Untitled Chat",
+    "harness": {
+      "id": "claude-code",
+      "name": "Claude Code",
+      "permissions": "Uses your own Claude Code settings and permissions. ticketd changes none of them. Claude Code reported: claude code version 2.1.322, cwd /work/chat-1, model claude-opus-5-5, permission mode default."
+    },
+    "folder": {
+      "path": "/work/chat-1",
+      "name": "chat-1",
+      "managed": false,
+      "missing": false,
+      "shared_with": [],
+      "branch": null,
+      "project": null
+    },
+    "retention": "active",
+    "activity": "working",
+    "turn_running": false,
+    "problem": null,
+    "doing": null,
+    "opening": null,
+    "catching_up": false,
+    "steering": {
+      "available": false,
+      "images_refused": false,
+      "effect": null
+    },
+    "stopping": false,
+    "links": [],
+    "queue": [],
+    "queue_paused": false,
+    "context": null,
+    "settings": null,
+    "unseen": true,
+    "muted": false,
+    "has_composer": true,
+    "read_through": null,
+    "trashed_links": [],
+    "commands": [],
+    "sub_agents": [
+      {
+        "id": "task_a",
+        "native_id": "task_a",
+        "title": "Find limiter bypasses",
+        "type": "Explore",
+        "model": "claude-haiku-5-5",
+        "status": "running",
+        "started_at": "2026-11-27T10:00:00.000Z",
+        "runs": 1,
+        "brief": {
+          "text": "Find every way a request could get past the rate limiter in src/api: a missing or spoofed API key, header case, retries, and routes mounted before the limiter. Report each one with its file and line.",
+          "source": "main_agent"
+        },
+        "capabilities": {
+          "brief": true,
+          "text": true,
+          "end": true,
+          "stop": false,
+          "resume": true
+        }
+      },
+      {
+        "id": "task_b",
+        "native_id": "task_b",
+        "title": "Check limiter test coverage",
+        "type": "general-purpose",
+        "model": "claude-sonnet-5-5",
+        "status": "running",
+        "started_at": "2026-11-27T10:00:00.000Z",
+        "runs": 1,
+        "brief": {
+          "text": "Check that the tests in src/api/rate-limit.test.ts cover the limiter's edge cases: a missing key, header case, refills and separate keys. Add the cases that are missing, run them, and post the result on T-KQ29.",
+          "source": "main_agent"
+        },
+        "capabilities": {
+          "brief": true,
+          "text": true,
+          "end": true,
+          "stop": false,
+          "resume": true
+        }
+      },
+      {
+        "id": "task_c",
+        "native_id": "task_c",
+        "title": "Proofread the API docs",
+        "type": "general-purpose",
+        "model": "claude-haiku-5-5",
+        "status": "completed",
+        "started_at": "2026-11-27T10:00:00.000Z",
+        "ended_at": "2026-11-27T10:00:00.000Z",
+        "runs": 1,
+        "brief": {
+          "text": "Proofread the rate limit section of docs/api.md against src/api/rate-limit.ts. Fix typos and anything that no longer matches the code.",
+          "source": "main_agent"
+        },
+        "capabilities": {
+          "brief": true,
+          "text": true,
+          "end": true,
+          "stop": false,
+          "resume": true
+        }
+      }
+    ]
+  },
+  "items": [
+    {
+      "kind": "user",
+      "id": "00000000-0000-4000-8000-000000000002",
+      "at": "2026-11-27T10:00:00.000Z",
+      "text": "Before I merge, review the rate limiter on this branch. In parallel: look for ways around it, check that the tests cover the edge cases, and proofread the API docs.",
+      "delivery": "delivered",
+      "turn_id": "00000000-0000-4000-8000-000000000004:local-turn-1",
+      "steer": false
+    },
+    {
+      "kind": "turn",
+      "id": "turn:00000000-0000-4000-8000-000000000004:local-turn-1",
+      "at": "2026-11-27T10:00:00.000Z",
+      "turn_id": "00000000-0000-4000-8000-000000000004:local-turn-1",
+      "started_at": "2026-11-27T10:00:00.000Z",
+      "ended_at": "2026-11-27T10:00:00.000Z",
+      "outcome": "completed"
+    },
+    {
+      "kind": "steps",
+      "id": "00000000-0000-4000-8000-000000000004:toolu_diff",
+      "at": "",
+      "steps": [
+        {
+          "kind": "run",
+          "variant": null,
+          "target": "git diff main...HEAD --stat",
+          "targets": [],
+          "command": "git diff main...HEAD --stat",
+          "description": "List what the branch changes",
+          "exit_code": null,
+          "folder": null,
+          "timed_out": false,
+          "duration_ms": null,
+          "no_matches": false,
+          "state": "done",
+          "result": null,
+          "output": " src/api/rate-limit.ts      | 14 ++++++++++----\n docs/api.md                  |  6 ++++++\n 2 files changed, 16 insertions(+), 4 deletions(-)",
+          "full_output": null,
+          "started_at": "2026-11-27T10:00:00.000Z",
+          "added_lines": null,
+          "removed_lines": null,
+          "decision": null,
+          "ticketd": null,
+          "awaiting": false
+        }
+      ],
+      "turn_id": "00000000-0000-4000-8000-000000000004:local-turn-1"
+    },
+    {
+      "kind": "plan",
+      "id": "00000000-0000-4000-8000-000000000004:plan:local-turn-1",
+      "at": "",
+      "turn_id": "00000000-0000-4000-8000-000000000004:local-turn-1",
+      "state": "ended",
+      "steps": [
+        {
+          "text": "Read the diff",
+          "status": "completed",
+          "active_label": "Reading the diff"
+        },
+        {
+          "text": "Start the three reviews",
+          "status": "completed",
+          "active_label": "Starting the reviews"
+        },
+        {
+          "text": "Wait for the reviewers",
+          "status": "in_progress",
+          "active_label": "Waiting for the reviewers"
+        },
+        {
+          "text": "Put the findings together",
+          "status": "pending",
+          "active_label": "Putting the findings together"
+        }
+      ],
+      "explanation": null
+    },
+    {
+      "kind": "sub_agent",
+      "id": "task_a:row-1",
+      "at": "2026-11-27T10:00:00.000Z",
+      "turn_id": "00000000-0000-4000-8000-000000000004:local-turn-1",
+      "sub_agent": "task_a",
+      "run": 1,
+      "status": "running",
+      "stopped_by": null,
+      "stop_reason": null,
+      "started_at": "2026-11-27T10:00:00.000Z",
+      "ended_at": null
+    },
+    {
+      "kind": "turn",
+      "id": "turn:task_a:run-1",
+      "at": "2026-11-27T10:00:00.000Z",
+      "turn_id": "task_a:run-1",
+      "started_at": "2026-11-27T10:00:00.000Z",
+      "ended_at": null,
+      "outcome": "active",
+      "owner": "task_a"
+    },
+    {
+      "kind": "sub_agent",
+      "id": "task_b:row-1",
+      "at": "2026-11-27T10:00:00.000Z",
+      "turn_id": "00000000-0000-4000-8000-000000000004:local-turn-1",
+      "sub_agent": "task_b",
+      "run": 1,
+      "status": "running",
+      "stopped_by": null,
+      "stop_reason": null,
+      "started_at": "2026-11-27T10:00:00.000Z",
+      "ended_at": null
+    },
+    {
+      "kind": "turn",
+      "id": "turn:task_b:run-1",
+      "at": "2026-11-27T10:00:00.000Z",
+      "turn_id": "task_b:run-1",
+      "started_at": "2026-11-27T10:00:00.000Z",
+      "ended_at": null,
+      "outcome": "active",
+      "owner": "task_b"
+    },
+    {
+      "kind": "sub_agent",
+      "id": "task_c:row-1",
+      "at": "2026-11-27T10:00:00.000Z",
+      "turn_id": "00000000-0000-4000-8000-000000000004:local-turn-1",
+      "sub_agent": "task_c",
+      "run": 1,
+      "status": "completed",
+      "stopped_by": null,
+      "stop_reason": null,
+      "started_at": "2026-11-27T10:00:00.000Z",
+      "ended_at": "2026-11-27T10:00:00.000Z"
+    },
+    {
+      "kind": "turn",
+      "id": "turn:task_c:run-1",
+      "at": "2026-11-27T10:00:00.000Z",
+      "turn_id": "task_c:run-1",
+      "started_at": "2026-11-27T10:00:00.000Z",
+      "ended_at": "2026-11-27T10:00:00.000Z",
+      "outcome": "completed",
+      "owner": "task_c"
+    },
+    {
+      "kind": "steps",
+      "id": "00000000-0000-4000-8000-000000000004:toolu_read_c",
+      "at": "",
+      "steps": [
+        {
+          "kind": "read",
+          "variant": null,
+          "target": "Read",
+          "targets": [
+            {
+              "text": "docs/api.md",
+              "lines": null,
+              "scope": null
+            }
+          ],
+          "command": null,
+          "exit_code": null,
+          "folder": null,
+          "timed_out": false,
+          "duration_ms": null,
+          "no_matches": false,
+          "state": "done",
+          "result": null,
+          "output": "1\t# Rate limits",
+          "full_output": null,
+          "started_at": "2026-11-27T10:00:00.000Z",
+          "added_lines": null,
+          "removed_lines": null,
+          "decision": null,
+          "ticketd": null,
+          "awaiting": false
+        }
+      ],
+      "turn_id": "task_c:run-1",
+      "owner": "task_c"
+    },
+    {
+      "kind": "response",
+      "id": "00000000-0000-4000-8000-000000000004:text-1",
+      "at": "2026-11-27T10:00:00.000Z",
+      "text": "I started three reviewers. They run in the background, and I'll put their findings together when they finish.",
+      "state": "complete",
+      "turn_id": "00000000-0000-4000-8000-000000000004:local-turn-1"
+    },
+    {
+      "kind": "steps",
+      "id": "00000000-0000-4000-8000-000000000004:toolu_read_a",
+      "at": "",
+      "steps": [
+        {
+          "kind": "read",
+          "variant": null,
+          "target": "Read",
+          "targets": [
+            {
+              "text": "src/api/rate-limit.ts",
+              "lines": null,
+              "scope": null
+            }
+          ],
+          "command": null,
+          "exit_code": null,
+          "folder": null,
+          "timed_out": false,
+          "duration_ms": null,
+          "no_matches": false,
+          "state": "done",
+          "result": null,
+          "output": "1\texport const LIMIT = 5;",
+          "full_output": null,
+          "started_at": "2026-11-27T10:00:00.000Z",
+          "added_lines": null,
+          "removed_lines": null,
+          "decision": null,
+          "ticketd": null,
+          "awaiting": false
+        }
+      ],
+      "turn_id": "task_a:run-1",
+      "owner": "task_a"
+    },
+    {
+      "kind": "steps",
+      "id": "00000000-0000-4000-8000-000000000004:toolu_read_b",
+      "at": "",
+      "steps": [
+        {
+          "kind": "read",
+          "variant": null,
+          "target": "Read",
+          "targets": [
+            {
+              "text": "src/api/rate-limit.test.ts",
+              "lines": null,
+              "scope": null
+            }
+          ],
+          "command": null,
+          "exit_code": null,
+          "folder": null,
+          "timed_out": false,
+          "duration_ms": null,
+          "no_matches": false,
+          "state": "running",
+          "result": null,
+          "output": null,
+          "full_output": null,
+          "started_at": "2026-11-27T10:00:00.000Z",
+          "added_lines": null,
+          "removed_lines": null,
+          "decision": null,
+          "ticketd": null,
+          "awaiting": false
+        }
+      ],
+      "turn_id": "task_b:run-1",
+      "owner": "task_b"
+    }
+  ],
+  "cursor": 0
+}

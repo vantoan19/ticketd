@@ -1185,6 +1185,7 @@ TICKETD_UPDATE_FORMAT_LEDGER=1 cargo test -p ticketd-core --lib format::
 + table chat_sub_agents
 + column chat_interactions.sub_agent_id
 + column chat_messages.sub_agent_id
++ column chat_notices.sub_agents_stopped
 + column chat_sub_agent_runs.chat_id
 + column chat_sub_agent_runs.detail
 + column chat_sub_agent_runs.ended_at
@@ -1207,3 +1208,5 @@ TICKETD_UPDATE_FORMAT_LEDGER=1 cargo test -p ticketd-core --lib format::
 + column chat_sub_agents.payload
 + column chat_sub_agents.tool_id
 + column chat_tools.sub_agent_id
++ column chat_turns.origin_by
++ column chat_turns.origin_sub_agent

@@ -147,6 +147,24 @@ pub(crate) fn migrate(connection: &Connection) -> Result<(), Error> {
          CREATE INDEX IF NOT EXISTS chat_sub_agents_chat ON chat_sub_agents(chat_id);
          CREATE INDEX IF NOT EXISTS chat_sub_agent_runs_chat ON chat_sub_agent_runs(chat_id, position);"
     ))?;
+    // A turn the person did not start says who did, and a Stop of sub-agents with no turn
+    // says how many it stopped (it is a notice with a count).
+    for (table, column, definition) in [
+        ("chat_turns", "origin_by", "TEXT"),
+        ("chat_turns", "origin_sub_agent", "TEXT"),
+        ("chat_notices", "sub_agents_stopped", "INTEGER"),
+    ] {
+        let has: bool = connection.query_row(
+            "SELECT EXISTS(SELECT 1 FROM pragma_table_info(?1) WHERE name = ?2)",
+            [table, column],
+            |row| row.get(0),
+        )?;
+        if !has {
+            connection.execute_batch(&format!(
+                "ALTER TABLE {table} ADD COLUMN {column} {definition};"
+            ))?;
+        }
+    }
     Ok(())
 }
 

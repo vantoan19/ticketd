@@ -85,6 +85,9 @@ pub struct Facts<'a> {
     /// How many files the last turn changed.
     pub files_changed: Option<usize>,
     pub last_response: Option<&'a str>,
+    /// How many sub-agents the person stopped while no turn ran, when that is the Chat's
+    /// last event (no turn has started since).
+    pub stopped_sub_agents: Option<i64>,
 }
 
 /// What a turn's changes read as, in order: each ticket's status moves netted into one
@@ -257,14 +260,24 @@ pub fn status(facts: &Facts<'_>) -> Status {
         return make(Rank::Working, "Stop not confirmed", None);
     }
     if matches!(facts.activity, "working" | "waiting") {
-        return make(
-            Rank::Working,
-            "Working",
-            facts.opening.then(|| "Starting".to_owned()),
-        );
+        let detail = match facts.live.sub_agents {
+            _ if facts.opening => Some("Starting".to_owned()),
+            0 => None,
+            1 => Some("1 sub-agent".to_owned()),
+            count => Some(format!("{count} sub-agents")),
+        };
+        return make(Rank::Working, "Working", detail);
     }
     if facts.problem == Some((ChatProblemKind::Failed, false)) {
         return make(Rank::Failed, "Failed", facts.failure.map(str::to_owned));
+    }
+    if let Some(count) = facts.stopped_sub_agents.filter(|count| *count > 0) {
+        let noun = if count == 1 {
+            "sub-agent"
+        } else {
+            "sub-agents"
+        };
+        return make(Rank::Idle, &format!("You stopped {count} {noun}"), None);
     }
     // What the turn did, by what is worth most: a record it changed, the files it
     // changed, then the first words of its reply.

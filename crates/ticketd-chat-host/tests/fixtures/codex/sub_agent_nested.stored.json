@@ -21,7 +21,8 @@
       "problem_resets_at": null,
       "ending": null,
       "started_at": "2026-11-27T10:00:00.000Z",
-      "ended_at": null
+      "ended_at": null,
+      "origin": null
     },
     "seen_through": 0,
     "read_through": null,
@@ -83,7 +84,8 @@
         "problem_resets_at": null,
         "ending": null,
         "started_at": "2026-11-27T10:00:00.000Z",
-        "ended_at": null
+        "ended_at": null,
+        "origin": null
       }
     },
     {

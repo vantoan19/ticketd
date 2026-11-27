@@ -5,7 +5,7 @@
 //! their own tasks and report back as messages, so runtime events and commands keep
 //! being handled while they are pending. Every durable write goes through the core.
 
-use std::collections::{BTreeMap, HashSet, VecDeque};
+use std::collections::{BTreeMap, HashMap, HashSet, VecDeque};
 use std::future::{Future, pending};
 use std::path::PathBuf;
 use std::sync::Arc;
@@ -15,8 +15,8 @@ use std::time::Duration;
 use ticketd_core::{
     Chat, ChatAttachmentContent, ChatInputChange, ChatInputReceipt, ChatInteractionKind,
     ChatInteractionState, ChatMessage, ChatObservation, ChatOwner, ChatSessionOrigin,
-    ChatSubAgentState, ChatSubAgentStopper, ChatSubmissionIntent, ChatToolState, ChatTurnReceipt,
-    ChatTurnState, Error, Workspace,
+    ChatSubAgentState, ChatSubAgentStopper, ChatSubmissionIntent, ChatToolState, ChatTurnOrigin,
+    ChatTurnReceipt, ChatTurnStarter, ChatTurnState, Error, Workspace,
 };
 use tokio::sync::{mpsc, oneshot};
 use tokio::task::JoinHandle;
@@ -59,8 +59,14 @@ use crate::{
     NativeTurnId, NoticeKind, OpenRequest, OpenedRuntime, Problem, ProviderDetail, Refusal,
     RespondOutcome, RuntimeEvent, RuntimeGeneration, SessionStart, SubAgentOutcome,
     SubAgentStopper, Submission, SubmissionId, SubmissionKind, Subscription, ToolStatus,
-    TurnEvidence, TurnOutcome,
+    TurnEvidence, TurnOrigin, TurnOutcome, TurnStarter,
 };
+
+/// How long a Chat whose last sub-agent just finished with no turn running stays working,
+/// for the harness to resume the main agent by itself (Claude Code does, a second or
+/// several after the task ends). It keeps the Chat from going quiet and notifying Done
+/// before the turn that follows, which would notify a second time.
+const WAKE_GRACE: Duration = Duration::from_secs(10);
 
 const QUEUE_READ_RETRY: Duration = Duration::from_millis(250);
 const LINK_CONTEXT_RETRY: Duration = Duration::from_secs(1);
@@ -259,6 +265,8 @@ enum ContextRefresh {
 struct ActiveTurn {
     turn_id: String,
     native: NativeTurnId,
+    /// Started by the harness or by ticketd, not by the person's message.
+    by_itself: bool,
     /// Open for as long as the Turn is, so every line about it is correlated and its close
     /// records how long it took.
     span: tracing::Span,
@@ -335,6 +343,12 @@ pub(crate) struct Supervisor {
     /// When an unconfirmed start stops counting as work in progress.
     unconfirmed_deadline: Option<Instant>,
     active: Option<ActiveTurn>,
+    /// The sub-agents running in this runtime, by native ID, and whether each runs in the
+    /// background. One in the foreground ends with its turn.
+    sub_agents: HashMap<String, bool>,
+    /// While a sub-agent has just finished with no turn running: until when the main agent
+    /// is still expected to resume by itself, and the Chat stays working.
+    wake_until: Option<Instant>,
     /// Input the person sent for immediate dispatch, ahead of the queue.
     direct: VecDeque<(PendingInput, DirectSend)>,
     /// Prepared edits keep their saved rows. The automatic queue waits for the
@@ -509,6 +523,8 @@ impl Supervisor {
             show_text_at: None,
             checkpoint_at: None,
             stop_deadline: None,
+            sub_agents: HashMap::new(),
+            wake_until: None,
             shutting_down: false,
             shut_down_for: None,
             queue_started: false,
@@ -534,6 +550,7 @@ impl Supervisor {
                 self.stop_deadline,
                 self.unconfirmed_deadline,
                 self.queue_read_retry_at,
+                self.wake_until,
                 self.context_retry_at(),
             ]
             .into_iter()
@@ -845,7 +862,11 @@ impl Supervisor {
                 let _ = reply.send(Ok(()));
             }
             Command::Stop(reply) => {
-                let _ = reply.send(self.request_stop());
+                let stopped = self.request_stop();
+                if stopped.is_ok() {
+                    self.stop_sub_agents_at_rest().await;
+                }
+                let _ = reply.send(stopped);
             }
             Command::ResumeQueue(reply) => {
                 let _ = reply.send(self.resume_queue().await);
@@ -1560,10 +1581,85 @@ impl Supervisor {
             self.stop_when_turn_known = true;
             self.stop = Some(StopState::Requested);
             self.stop_deadline = Some(Instant::now() + INTERRUPT_TIMEOUT);
-        } else {
-            self.interrupt_sub_agents();
         }
+        // With no turn running, `stop_sub_agents_at_rest` stops what runs on its own.
         Ok(())
+    }
+
+    /// A sub-agent run ended. When it was the last, and no turn runs, the main agent is
+    /// expected to resume by itself, and the Chat stays working until it does.
+    fn sub_agent_ended(&mut self, native: &str, outcome: &SubAgentOutcome) {
+        self.sub_agents.remove(native);
+        if self.active.is_none()
+            && self.sub_agents.is_empty()
+            && matches!(
+                outcome,
+                SubAgentOutcome::Completed | SubAgentOutcome::Failed
+            )
+        {
+            self.wake_until = Some(Instant::now() + WAKE_GRACE);
+        }
+    }
+
+    /// Every sub-agent still running was stopped by the person. With `note`, the Chat says
+    /// how many were stopped (when no turn is there to say it was stopped).
+    fn end_sub_agents_stopped(
+        &mut self,
+        observations: &mut Vec<ChatObservation>,
+        note: Option<usize>,
+    ) {
+        let mut running: Vec<String> = self.sub_agents.keys().cloned().collect();
+        running.sort();
+        self.sub_agents.clear();
+        observations.extend(
+            running
+                .into_iter()
+                .map(|native_id| ChatObservation::SubAgentEnded {
+                    native_id,
+                    native_run_id: None,
+                    state: ChatSubAgentState::Stopped,
+                    stopped_by: Some(ChatSubAgentStopper::Person),
+                    stop_reason: None,
+                    detail: None,
+                }),
+        );
+        if let Some(count) = note.filter(|count| *count > 0) {
+            observations.push(ChatObservation::SubAgentsStopped {
+                notice_id: Uuid::new_v4().to_string(),
+                count: count as i64,
+            });
+        }
+        let batch = std::mem::take(observations);
+        self.record(batch);
+    }
+
+    /// Stop with no turn running but sub-agents running: they are stopped, the Chat says
+    /// how many, and the harness process ends, which ends every one of them for certain.
+    async fn stop_sub_agents_at_rest(&mut self) {
+        if self.active.is_some()
+            || self.unconfirmed_start.is_some()
+            || self.dispatching.is_some()
+            || self.opening.is_some()
+        {
+            return;
+        }
+        self.wake_until = None;
+        if self.sub_agents.is_empty() {
+            return;
+        }
+        // A harness that keeps sub-agents running by itself (Codex's child threads) is told
+        // to stop each, then every one still running is stopped by the person and the Chat
+        // says how many, and the process ends: nothing runs in it any more.
+        let running = self.sub_agents.len();
+        if let Some(runtime) = &self.runtime {
+            let (handle, generation) = (runtime.handle.clone(), runtime.generation);
+            self.drive(handle.interrupt_sub_agents(generation)).await;
+        }
+        self.end_sub_agents_stopped(&mut Vec::new(), Some(running));
+        // The next message opens the session again.
+        if let Some(reason) = self.stop_runtime(StopReason::Quit).await {
+            self.notice(format!("Stopping the harness was not confirmed: {reason}"));
+        }
     }
 
     /// The person decided to send input again although its first delivery is uncertain.
@@ -1641,15 +1737,6 @@ impl Supervisor {
             // each to stop too, after the turn, in one order.
             handle.interrupt_sub_agents(generation).await;
         });
-    }
-
-    /// Stop with no turn running: only the sub-agents the harness still runs can be stopped.
-    fn interrupt_sub_agents(&mut self) {
-        let Some(runtime) = &self.runtime else {
-            return;
-        };
-        let (handle, generation) = (runtime.handle.clone(), runtime.generation);
-        tokio::spawn(async move { handle.interrupt_sub_agents(generation).await });
     }
 
     /// Only a request in the live registry, issued by the current runtime and not yet
@@ -2174,6 +2261,8 @@ impl Supervisor {
         self.refreshing = None;
         self.pending_contexts.clear();
         self.interactions.clear();
+        self.sub_agents.clear();
+        self.wake_until = None;
         self.text.clear();
         self.pending_tools.clear();
         self.clear_direct();
@@ -3007,6 +3096,17 @@ impl Supervisor {
         native: &NativeTurnId,
         observations: &mut Vec<ChatObservation>,
     ) -> Option<String> {
+        self.turn_by(native, None, observations)
+    }
+
+    /// As [`Self::turn`], and a turn seen for the first time says who started it when the
+    /// person did not.
+    fn turn_by(
+        &mut self,
+        native: &NativeTurnId,
+        origin: Option<TurnOrigin>,
+        observations: &mut Vec<ChatObservation>,
+    ) -> Option<String> {
         if self.pending_runtime_loss.is_some() {
             // Storage recovery owns the last observed end while the runtime closes.
             return None;
@@ -3023,10 +3123,20 @@ impl Supervisor {
         observations.push(ChatObservation::TurnStarted {
             turn_id: turn_id.clone(),
             native_turn_id: Some(native.0.clone()),
+            origin: origin.as_ref().map(|origin| ChatTurnOrigin {
+                by: match origin.by {
+                    TurnStarter::Harness => ChatTurnStarter::Harness,
+                    TurnStarter::Ticketd => ChatTurnStarter::Ticketd,
+                },
+                sub_agent: origin.sub_agent.as_ref().map(|agent| agent.0.clone()),
+            }),
         });
+        // The main agent resumed: the grace for it to do so is over.
+        self.wake_until = None;
         self.active = Some(ActiveTurn {
             turn_id: turn_id.clone(),
             native: native.clone(),
+            by_itself: origin.is_some(),
             span: tracing::info_span!("chat_turn"),
         });
         self.unconfirmed_start = None;
@@ -3136,8 +3246,8 @@ impl Supervisor {
                 }
                 self.record(observations);
             }
-            EventKind::TurnStarted { turn } => {
-                self.turn(&turn, &mut observations);
+            EventKind::TurnStarted { turn, origin } => {
+                self.turn_by(&turn, origin, &mut observations);
                 self.record(observations);
             }
             EventKind::TextDelta { turn, item, text } => {
@@ -3292,6 +3402,10 @@ impl Supervisor {
                 );
             }
             EventKind::SubAgentStarted(start) => {
+                self.sub_agents
+                    .insert(start.sub_agent.0.clone(), start.background);
+                // Something runs again: the main agent is not about to resume alone.
+                self.wake_until = None;
                 observations.push(ChatObservation::SubAgentStarted {
                     native_id: start.sub_agent.0,
                     parent: start.parent.map(|parent| parent.0),
@@ -3309,6 +3423,11 @@ impl Supervisor {
                 background,
                 native,
             } => {
+                if let (Some(background), Some(running)) =
+                    (background, self.sub_agents.get_mut(&sub_agent.0))
+                {
+                    *running = background;
+                }
                 self.record(vec![ChatObservation::SubAgentUpdated {
                     native_id: sub_agent.0,
                     native_run_id,
@@ -3322,6 +3441,7 @@ impl Supervisor {
                 outcome,
                 detail,
             } => {
+                self.sub_agent_ended(&sub_agent.0, &outcome);
                 let (state, stopped_by) = match outcome {
                     SubAgentOutcome::Completed => (ChatSubAgentState::Completed, None),
                     SubAgentOutcome::Failed => (ChatSubAgentState::Failed, None),
@@ -3419,8 +3539,12 @@ impl Supervisor {
                 // Queued input does not follow a turn that did not complete. A
                 // take-over ends the agent's turn for the person, who is about to
                 // send (#387 M2): their Chat's queue is not paused for it.
+                // A turn the harness or ticketd started is not one the person is waiting on:
+                // its failure shows, and notifies, but pauses nothing of theirs.
+                let by_itself = is_active && self.active.as_ref().is_some_and(|a| a.by_itself);
                 let pause_queue = ending != TurnEnding::Completed
-                    && self.shut_down_for != Some(StopReason::TakenOver);
+                    && self.shut_down_for != Some(StopReason::TakenOver)
+                    && !by_itself;
                 if is_active {
                     let mut end = ObservedTurnEnd {
                         receipt: ChatTurnReceipt::new(turn_id.clone()),
@@ -3444,6 +3568,12 @@ impl Supervisor {
                 self.text.retain(|buffer| buffer.turn_id != turn_id);
                 self.interactions.retain(|_, live| live.turn_id != turn_id);
                 if is_active {
+                    // A sub-agent in the foreground ended with its turn. When the person
+                    // stopped the turn, every sub-agent still running was stopped with it.
+                    self.sub_agents.retain(|_, background| *background);
+                    if stopped {
+                        self.end_sub_agents_stopped(&mut Vec::new(), None);
+                    }
                     self.active = None;
                     self.stop = None;
                     self.stop_deadline = None;
@@ -3758,6 +3888,11 @@ impl Supervisor {
         if self.checkpoint_at.is_some_and(|at| at <= now) {
             self.record(Vec::new());
         }
+        if self.wake_until.is_some_and(|at| at <= now) {
+            // The main agent did not resume: the Chat is quiet.
+            self.wake_until = None;
+            self.unpublished = true;
+        }
         if self.stop_deadline.is_some_and(|at| at <= now) {
             self.stop_deadline = None;
             if self.stop.is_some() {
@@ -3822,6 +3957,8 @@ impl Supervisor {
 
     fn live(&self) -> ChatLive {
         let working = self.active.is_some()
+            || !self.sub_agents.is_empty()
+            || self.wake_until.is_some()
             || self.dispatching.is_some()
             || self.opening.is_some()
             || self.unconfirmed_start.is_some();
@@ -3834,6 +3971,8 @@ impl Supervisor {
                 Activity::Idle
             },
             running: self.runtime.is_some(),
+            sub_agents: self.sub_agents.len(),
+            waking: self.wake_until.is_some(),
             // Until the session's first turn starts, whatever the process is doing.
             opening: match (&self.opening, &self.runtime) {
                 _ if !working => None,

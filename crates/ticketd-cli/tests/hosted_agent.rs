@@ -334,6 +334,7 @@ fn writes_made_with_a_chat_id_are_credited_to_that_chat() {
                     ChatObservation::TurnStarted {
                         turn_id: turn.into(),
                         native_turn_id: None,
+                        origin: None,
                     },
                     ChatObservation::SubmissionProcessing {
                         attempt_id: format!("attempt-{turn}"),
