@@ -192,11 +192,19 @@ function usePreview(target: PreviewTarget, warm?: Map<string, PreviewInfo>) {
   // still read again, so the state shown is never older than this open.
   const identity = `${id ?? ""}|${uri ?? ""}`;
   const [shown, setShown] = useState(identity);
+  // Counts the viewer's visits: stepping away and back to a file is a new visit, so an
+  // action started on the first cannot settle the second's state.
+  const [visit, setVisit] = useState(0);
   // What the viewer shows now, for work that finishes later: it must not touch
   // the state of a file that was stepped to in the meantime.
-  const latest = useRef({ identity, fileId: undefined as string | undefined });
+  const latest = useRef({
+    identity,
+    visit,
+    fileId: undefined as string | undefined,
+  });
   if (shown !== identity) {
     setShown(identity);
+    setVisit((value) => value + 1);
     setFile(initial);
     setInfo((id && warm?.get(id)) || null);
     setCopy(null);
@@ -208,7 +216,7 @@ function usePreview(target: PreviewTarget, warm?: Map<string, PreviewInfo>) {
     file && file.kind !== "external_reference" ? [file.id] : [],
   );
   useEffect(() => {
-    latest.current = { identity, fileId: file?.id };
+    latest.current = { identity, visit, fileId: file?.id };
   });
   const stored = file ? availability.of(file.id) : undefined;
   // The bytes are still in the sync storage, or on their way: there is nothing to preview
@@ -274,17 +282,18 @@ function usePreview(target: PreviewTarget, warm?: Map<string, PreviewInfo>) {
   }, [id, uri, attempt, awaited]);
   async function action(verb: string, run: () => Promise<void>) {
     // The same file's metadata may reload while this runs (its download finished);
-    // only stepping to another file hands the viewer's state over.
-    const target = latest.current.identity;
+    // only a new visit (stepping to a file, even back to this one) hands the viewer's
+    // state over.
+    const target = latest.current.visit;
     setBusy(true);
     setError(null);
     try {
       await run();
     } catch (reason) {
-      if (latest.current.identity === target)
+      if (latest.current.visit === target)
         setError(describeFailure(reason, verb));
     } finally {
-      if (latest.current.identity === target) setBusy(false);
+      if (latest.current.visit === target) setBusy(false);
     }
   }
   function mediaFailed() {

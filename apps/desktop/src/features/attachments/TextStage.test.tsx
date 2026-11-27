@@ -368,6 +368,54 @@ test("a match past the right edge of an unwrapped line is scrolled into view sid
   await waitFor(() => expect(left).toBeGreaterThan(5000));
 });
 
+test("a match the estimate puts in view is still scrolled to when tabs draw it past the edge", async () => {
+  serve("a\tneedle\nshort\n");
+  render(<Stage />);
+  await screen.findByRole("document");
+  const stage = screen.getByTestId("stage");
+  Object.defineProperty(stage, "clientWidth", { value: 300 });
+  let left = 0;
+  Object.defineProperty(stage, "scrollLeft", {
+    get: () => left,
+    set: (value: number) => {
+      left = value;
+    },
+  });
+  stage.focus();
+  press("w");
+  await waitFor(() =>
+    expect(screen.getByRole("document").hasAttribute("data-wrap")).toBe(false),
+  );
+  // jsdom has no layout: the stage is 300px wide and the drawn mark sits at 1000-1040,
+  // though one character per UTF-16 unit would put it at about 300.
+  const original = HTMLElement.prototype.getBoundingClientRect;
+  HTMLElement.prototype.getBoundingClientRect = function () {
+    if (this.hasAttribute("data-current"))
+      return { top: 100, bottom: 120, left: 1000, right: 1040 } as DOMRect;
+    if (this === stage)
+      return {
+        top: 0,
+        bottom: 600,
+        left: 0,
+        right: 300,
+        width: 300,
+        height: 600,
+      } as DOMRect;
+    return { top: 0, bottom: 0, left: 0, right: 0 } as DOMRect;
+  };
+  try {
+    press("/");
+    const field = await screen.findByRole("textbox", {
+      name: "Find in the text",
+    });
+    fireEvent.change(field, { target: { value: "needle" } });
+    // The measured mark centres in the stage: 870 further than wherever the estimate left it.
+    await waitFor(() => expect(left).toBeGreaterThan(870));
+  } finally {
+    HTMLElement.prototype.getBoundingClientRect = original;
+  }
+});
+
 test("select all and copy take every line of the log, drawn or not, not the page around it", async () => {
   serve();
   render(<Stage />);

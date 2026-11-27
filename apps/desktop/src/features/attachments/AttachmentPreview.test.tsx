@@ -1231,6 +1231,44 @@ test("a Restore that finishes after the viewer stepped to another file does not 
   expect(reads()).toBe(before);
 });
 
+test("an action from an earlier visit to a file does not free the buttons of a later one", async () => {
+  const finishes: Array<() => void> = [];
+  const pair: Attachment[] = [held, shot];
+  serveQuarantined(
+    () => new Promise((resolve) => finishes.push(() => resolve(held))),
+  );
+  function Pair() {
+    const [at, setAt] = useState(0);
+    return (
+      <AttachmentPreview
+        target={{ id: pair[at]!.id, initial: pair[at]! }}
+        browse={{
+          files: pair,
+          onSelect: (next) => setAt(pair.indexOf(next)),
+        }}
+        onClose={() => {}}
+      />
+    );
+  }
+  render(<Pair />);
+  const restore = () =>
+    screen.findByRole<HTMLButtonElement>("button", { name: "Restore file" });
+  fireEvent.click(await restore());
+  await waitFor(() => expect(finishes).toHaveLength(1));
+  fireEvent.click(screen.getByRole("button", { name: "Next file" }));
+  await screen.findByRole("img", { name: "refund.png" });
+  fireEvent.click(screen.getByRole("button", { name: "Previous file" }));
+  // The same file again, a new visit: its own action starts.
+  fireEvent.click(await restore());
+  await waitFor(() => expect(finishes).toHaveLength(2));
+  expect((await restore()).disabled).toBe(true);
+  // The first visit's action ends while the second's is still running.
+  await act(async () => finishes[0]!());
+  await act(async () => {});
+  expect((await restore()).disabled).toBe(true);
+  await act(async () => finishes[1]!());
+});
+
 const runLog: Attachment = {
   ...file,
   id: "run-1",

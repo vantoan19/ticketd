@@ -351,16 +351,16 @@ impl Workspace {
     /// including a file that cannot be read now.
     fn text_excerpt(&self, attachment: &Attachment) -> Option<TextExcerpt> {
         let (_, file) = open_snapshot(&self.connection, attachment).ok()?;
-        text_excerpt_of(&file)
+        text_excerpt_of(&file).ok().flatten()
     }
 
     /// Opens a stored file's checked snapshot for a text read. A snapshot that cannot be
-    /// opened is the storage's error, with how to recover; one that opens but does not read
-    /// as text is `This file is not plain text.`
+    /// opened or read is the storage's error, with how to recover; one that reads but is not
+    /// text is `This file is not plain text.`
     fn open_text(&self, attachment: &Attachment) -> Result<File, Error> {
         let (_, file) = open_snapshot(&self.connection, attachment)
             .map_err(|failure| Error::Attachment(failure.message))?;
-        if text_excerpt_of(&file).is_none() {
+        if text_excerpt_of(&file)?.is_none() {
             return Err(Error::Attachment("This file is not plain text.".into()));
         }
         Ok(file)
@@ -494,23 +494,23 @@ impl Workspace {
     }
 }
 
-/// The start of an open file when it reads as text; None for anything else.
-fn text_excerpt_of(file: &File) -> Option<TextExcerpt> {
-    let length = file.metadata().ok()?.len();
+/// The start of an open file when it reads as text; `None` for a readable file that is not
+/// text. A file that cannot be read is an error, so its cause is not taken for a format.
+fn text_excerpt_of(file: &File) -> Result<Option<TextExcerpt>, Error> {
+    let length = file.metadata()?.len();
     let mut bytes = Vec::new();
     file.take(TEXT_EXCERPT_BYTES as u64)
-        .read_to_end(&mut bytes)
-        .ok()?;
+        .read_to_end(&mut bytes)?;
     let truncated = length > bytes.len() as u64;
     let lossy = match std::str::from_utf8(&bytes) {
         Ok(_) => false,
         Err(error) => !(truncated && error.error_len().is_none()),
     };
-    text_of(&bytes, truncated).map(|text| TextExcerpt {
+    Ok(text_of(&bytes, truncated).map(|text| TextExcerpt {
         text,
         truncated,
         lossy,
-    })
+    }))
 }
 
 /// A PDF version header (`%PDF-1.7`) within the first kilobyte, which is where readers look
@@ -1164,5 +1164,31 @@ mod tests {
             "unavailable: \u{fffd}\u{fffd}\n"
         );
         assert!(text_of(&[0xff; 8], false).is_none());
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn an_excerpt_that_cannot_be_read_is_an_error_not_a_format() {
+        let dir = tempfile::tempdir().unwrap();
+        // A directory opens but cannot be read: the cause must survive.
+        let unreadable = File::open(dir.path()).unwrap();
+        assert!(matches!(
+            text_excerpt_of(&unreadable),
+            Err(crate::Error::Directory(_))
+        ));
+        let text = dir.path().join("a.log");
+        std::fs::write(&text, b"hello\n").unwrap();
+        assert!(
+            text_excerpt_of(&File::open(&text).unwrap())
+                .unwrap()
+                .is_some()
+        );
+        let binary = dir.path().join("b.dat");
+        std::fs::write(&binary, [0u8; 64]).unwrap();
+        assert!(
+            text_excerpt_of(&File::open(&binary).unwrap())
+                .unwrap()
+                .is_none()
+        );
     }
 }

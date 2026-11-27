@@ -316,6 +316,9 @@ function TextLines({
       if (start < stage.scrollLeft || end > stage.scrollLeft + size.width)
         stage.scrollLeft = Math.max(0, (start + end - size.width) / 2);
     }
+    // Where the estimate needs no scroll nothing else draws again, and the drawn mark has
+    // not been measured yet: draw once more so it is.
+    remeasured();
   }
   // A new query scrolls to its first match.
   useEffect(() => {
@@ -453,6 +456,14 @@ function TextLines({
       const top = box.top - stageBox.top;
       if (top < SCOPE_LINE + 8 || top > stageBox.height - BAR_CLEARANCE)
         stage.scrollTop += top - stageBox.height / 2;
+      // Tabs and wide characters draw wider than the estimate of where an unwrapped match
+      // sits, so the drawn mark is what decides whether it needs to come into view.
+      if (!wrap) {
+        const left = box.left - stageBox.left;
+        const right = box.right - stageBox.left;
+        if (left < 0 || right > stageBox.width)
+          stage.scrollLeft += (left + right - stageBox.width) / 2;
+      }
     }
   });
 
