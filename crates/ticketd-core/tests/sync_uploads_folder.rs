@@ -494,9 +494,15 @@ fn a_restore_keeps_the_one_google_account_of_a_computer_that_only_keeps_files_in
     let (_kept, elsewhere) = backup_with_files_in(OTHER);
     Workspace::restore(&path, &elsewhere).unwrap();
     let mut a = Workspace::open(&path).unwrap();
-    assert_eq!(
+    // The computer's own Files folder stays, so its Google account is not forgotten.
+    assert!(matches!(
         a.attachment_upload_destination().unwrap(),
-        AttachmentUploadDestination::Local
+        AttachmentUploadDestination::GoogleDrive { destination, .. }
+            if destination.connection_id == CONNECTION && destination.folder_id == "team-files"
+    ));
+    assert_eq!(
+        a.google_sign_in().unwrap().unwrap().connection_id,
+        CONNECTION
     );
     // Sync can still sign in with this computer's account.
     a.sync_connect(CONNECTION, ACCOUNT).unwrap();

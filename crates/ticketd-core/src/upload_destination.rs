@@ -104,27 +104,35 @@ pub(crate) fn files_google_connection(connection: &Connection) -> Result<Option<
     })
 }
 
-/// A restore keeps this computer's Google sign-in (`kept`, the connection id) in the
-/// restored Workspace. A Files folder in another account than that one would leave Files
-/// and sync on two accounts, so it goes back to this computer, as when the account is
-/// switched. Without a sign-in kept (neither sync's nor a Files folder's), the restored
-/// folder is the only one there is.
+/// A restore keeps this computer's Google sign-in in the restored Workspace: sync's
+/// (`sync_sign_in`, the connection id), otherwise the one the replaced Workspace's Files
+/// folder uses. A restored Files folder in another account than that one would leave Files
+/// and sync on two accounts. When sync holds the sign-in, Files goes back to this
+/// computer, as when the account is switched. When only the replaced Files folder holds
+/// it, that folder is written into the restored Workspace, so the account is not
+/// forgotten. Without a sign-in kept, the restored folder is the only one there is.
 pub(crate) fn follow_kept_google_sign_in(
     restored: &Connection,
-    kept: Option<&str>,
+    replaced: &Connection,
+    sync_sign_in: Option<&str>,
 ) -> Result<(), Error> {
-    let Some(kept) = kept else {
-        return Ok(());
-    };
     // A backup of a format before Files had destinations has none to reset.
     if !crate::backup::table_exists(restored, "attachment_upload_destination")? {
         return Ok(());
     }
-    if let AttachmentUploadDestination::GoogleDrive { destination, .. } =
-        files_destination(restored)?
-        && destination.connection_id != kept
-    {
-        write_destination(restored, &AttachmentUploadDestination::Local)?;
+    let AttachmentUploadDestination::GoogleDrive { destination, .. } = files_destination(restored)?
+    else {
+        return Ok(());
+    };
+    if let Some(kept) = sync_sign_in {
+        if destination.connection_id != kept {
+            write_destination(restored, &AttachmentUploadDestination::Local)?;
+        }
+        return Ok(());
+    }
+    // A replaced Workspace of a format before Files had destinations has none.
+    if files_google_connection(replaced)?.is_some_and(|own| own != destination.connection_id) {
+        write_destination(restored, &files_destination(replaced)?)?;
     }
     Ok(())
 }
