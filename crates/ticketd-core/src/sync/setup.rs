@@ -750,11 +750,14 @@ pub(super) fn remember_replaced_folder(
             label(was.attachment_download)?,
         ],
     )?;
-    // Files and sync share the sign-in kept above: a Files folder in another account goes.
+    // Files and sync share one Google sign-in on this computer: sync's, otherwise the one
+    // the replaced Workspace's Files folder uses. A Files folder in another account goes.
+    let files_sign_in = crate::upload_destination::files_google_connection(replaced)?;
     let kept = was
         .connection
         .as_deref()
-        .filter(|_| was.provider == SyncProvider::GoogleDrive);
+        .filter(|_| was.provider == SyncProvider::GoogleDrive)
+        .or(files_sign_in.as_deref());
     crate::upload_destination::follow_kept_google_sign_in(restored, kept)?;
     if !same_workspace {
         return Ok(());

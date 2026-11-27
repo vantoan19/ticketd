@@ -480,6 +480,40 @@ fn a_restore_onto_a_computer_without_sync_sign_in_keeps_the_backups_drive_folder
     ));
 }
 
+/// A computer whose only Google sign-in is its Files folder (no sync) keeps that account
+/// through a restore, as one with sync signed in does.
+#[test]
+fn a_restore_keeps_the_one_google_account_of_a_computer_that_only_keeps_files_in_drive() {
+    let sim = DriveSim::default();
+    let directory = tempfile::tempdir().unwrap();
+    let path = directory.path().join("Desk");
+    let mut files_only = Workspace::open(&path).unwrap();
+    chosen_folder(&sim, &mut files_only);
+    drop(files_only);
+
+    let (_kept, elsewhere) = backup_with_files_in(OTHER);
+    Workspace::restore(&path, &elsewhere).unwrap();
+    let mut a = Workspace::open(&path).unwrap();
+    assert_eq!(
+        a.attachment_upload_destination().unwrap(),
+        AttachmentUploadDestination::Local
+    );
+    // Sync can still sign in with this computer's account.
+    a.sync_connect(CONNECTION, ACCOUNT).unwrap();
+    drop(a);
+
+    let mut files_only = Workspace::open(&path).unwrap();
+    chosen_folder(&sim, &mut files_only);
+    drop(files_only);
+    let (_same, here) = backup_with_files_in(CONNECTION);
+    Workspace::restore(&path, &here).unwrap();
+    let a = Workspace::open(&path).unwrap();
+    assert!(matches!(
+        a.attachment_upload_destination().unwrap(),
+        AttachmentUploadDestination::GoogleDrive { destination, .. } if destination.connection_id == CONNECTION
+    ));
+}
+
 /// Another handle on the same Workspace file signing in to Google while a Files folder is
 /// being checked with Drive: the folder is refused when it is saved, not accepted on the
 /// strength of a check made before.

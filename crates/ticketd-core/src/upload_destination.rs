@@ -90,10 +90,25 @@ pub(crate) fn refuse_other_files_google_sign_in(
     }
 }
 
+/// The Google account the Files folder of `connection` is in, when it is on Google Drive.
+/// A Workspace of a format before Files had destinations has none.
+pub(crate) fn files_google_connection(connection: &Connection) -> Result<Option<String>, Error> {
+    if !crate::backup::table_exists(connection, "attachment_upload_destination")? {
+        return Ok(None);
+    }
+    Ok(match files_destination(connection)? {
+        AttachmentUploadDestination::GoogleDrive { destination, .. } => {
+            Some(destination.connection_id)
+        }
+        AttachmentUploadDestination::Local => None,
+    })
+}
+
 /// A restore keeps this computer's Google sign-in (`kept`, the connection id) in the
 /// restored Workspace. A Files folder in another account than that one would leave Files
 /// and sync on two accounts, so it goes back to this computer, as when the account is
-/// switched. Without a sign-in kept, the folder is the only one there is.
+/// switched. Without a sign-in kept (neither sync's nor a Files folder's), the restored
+/// folder is the only one there is.
 pub(crate) fn follow_kept_google_sign_in(
     restored: &Connection,
     kept: Option<&str>,
