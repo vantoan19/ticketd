@@ -3948,6 +3948,96 @@ fn a_turn_the_harness_started_says_so_and_a_stop_of_sub_agents_with_no_turn_is_c
 }
 
 #[test]
+fn a_resumed_sub_agent_is_accepted_in_arrival_order_whatever_its_run_ids_sort_like() {
+    let dir = tempfile::tempdir().unwrap();
+    let (mut workspace, chat) = workspace_with_chat(&dir);
+    // Run IDs that are random: the resume's ID sorts before the first run's.
+    workspace
+        .record_chat_observations(
+            &chat.id,
+            vec![
+                start_sub_agent("agent-1", Some("f7c1-first"), None),
+                end_sub_agent("agent-1", Some("f7c1-first"), ChatSubAgentState::Completed),
+                start_sub_agent("agent-1", Some("0a3e-second"), None),
+            ],
+        )
+        .unwrap();
+    let states = |workspace: &Workspace| {
+        sub_agents(workspace, &chat)[0]
+            .runs
+            .iter()
+            .map(|run| (run.run, run.state))
+            .collect::<Vec<_>>()
+    };
+    assert_eq!(
+        states(&workspace),
+        [
+            (1, ChatSubAgentState::Completed),
+            (2, ChatSubAgentState::Running)
+        ]
+    );
+    // Late output of the first run still changes nothing.
+    workspace
+        .record_chat_observations(
+            &chat.id,
+            vec![end_sub_agent(
+                "agent-1",
+                Some("f7c1-first"),
+                ChatSubAgentState::Failed,
+            )],
+        )
+        .unwrap();
+    assert_eq!(states(&workspace)[1], (2, ChatSubAgentState::Running));
+    // The resume's own end is taken.
+    workspace
+        .record_chat_observations(
+            &chat.id,
+            vec![end_sub_agent(
+                "agent-1",
+                Some("0a3e-second"),
+                ChatSubAgentState::Completed,
+            )],
+        )
+        .unwrap();
+    assert_eq!(states(&workspace)[1], (2, ChatSubAgentState::Completed));
+}
+
+#[test]
+fn an_older_runs_start_does_not_change_what_the_record_says_of_the_current_run() {
+    let dir = tempfile::tempdir().unwrap();
+    let (mut workspace, chat) = workspace_with_chat(&dir);
+    let background = |run: &str, background: bool, payload: &str| {
+        let mut started = start_sub_agent("agent-1", Some(run), None);
+        if let ChatObservation::SubAgentStarted {
+            background: flag,
+            payload: said,
+            ..
+        } = &mut started
+        {
+            *flag = background;
+            *said = payload.into();
+        }
+        started
+    };
+    workspace
+        .record_chat_observations(
+            &chat.id,
+            vec![
+                background("run-1", false, r#"{"description":"First"}"#),
+                end_sub_agent("agent-1", Some("run-1"), ChatSubAgentState::Completed),
+                background("run-2", true, r#"{"description":"Second"}"#),
+                // The first run's start arrives again, late.
+                background("run-1", false, r#"{"description":"First, again"}"#),
+            ],
+        )
+        .unwrap();
+    let record = &sub_agents(&workspace, &chat)[0];
+    assert!(record.background);
+    assert_eq!(record.said("description").as_deref(), Some("Second"));
+    assert_eq!(record.runs.len(), 2);
+}
+
+#[test]
 fn the_chat_list_shows_a_harness_started_active_turn_with_its_origin() {
     let dir = tempfile::tempdir().unwrap();
     let (mut workspace, chat) = workspace_with_chat(&dir);

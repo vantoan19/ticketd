@@ -327,10 +327,26 @@ fn same_run(latest: &ChatSubAgentRun, incoming: &Option<String>) -> bool {
     }
 }
 
-/// Whether a frame naming run `incoming` is late: the run it names sorts before the
-/// latest one (the harness orders its run IDs by when they opened).
-fn late(latest: &ChatSubAgentRun, incoming: &Option<String>) -> bool {
-    matches!((&latest.native_run_id, incoming), (Some(kept), Some(incoming)) if incoming < kept)
+/// Whether a frame naming run `incoming` is late: it names a run the record already left
+/// behind. Runs are told apart by when they arrived, never by comparing their IDs (a
+/// harness may name runs with random IDs); a name the record has not seen is a new run.
+fn late(
+    connection: &Connection,
+    record: &str,
+    latest: &ChatSubAgentRun,
+    incoming: &Option<String>,
+) -> Result<bool, Error> {
+    let Some(incoming) = incoming else {
+        return Ok(false);
+    };
+    if latest.native_run_id.as_ref() == Some(incoming) {
+        return Ok(false);
+    }
+    Ok(connection.query_row(
+        "SELECT EXISTS(SELECT 1 FROM chat_sub_agent_runs WHERE sub_agent_id = ?1 AND native_run_id = ?2 AND run < ?3)",
+        params![record, incoming, latest.run],
+        |row| row.get(0),
+    )?)
 }
 
 fn touch_record(connection: &Connection, chat_id: &str, record: &str) -> Result<(), Error> {
@@ -361,6 +377,14 @@ pub(super) fn observe(connection: &Connection, chat_id: &str, change: Change) ->
                     |row| row.get(0),
                 )
                 .optional()?;
+            let latest = latest_run(connection, &record)?;
+            if let Some(latest) = &latest
+                && late(connection, &record, latest, &native_run_id)?
+            {
+                // Output of a run the record already left: it changes nothing, not even
+                // what the record says of the current run.
+                return Ok(());
+            }
             // What it was asked is what it was asked first: a resume says what to do next,
             // which the main agent's own Step shows.
             let payload = match &stored {
@@ -380,10 +404,8 @@ pub(super) fn observe(connection: &Connection, chat_id: &str, change: Change) ->
             }
             // The record first: a follower that reads a run knows whose it is.
             touch_record(connection, chat_id, &record)?;
-            let latest = latest_run(connection, &record)?;
             match latest {
-                Some(latest)
-                    if same_run(&latest, &native_run_id) || late(&latest, &native_run_id) => {}
+                Some(latest) if same_run(&latest, &native_run_id) => {}
                 latest => {
                     let run = latest.map_or(1, |latest| latest.run + 1);
                     let id = format!("{record}:run-{run}");
@@ -425,7 +447,7 @@ pub(super) fn observe(connection: &Connection, chat_id: &str, change: Change) ->
                 return Ok(());
             };
             if let Some(latest) = latest_run(connection, &record)?
-                && late(&latest, &native_run_id)
+                && late(connection, &record, &latest, &native_run_id)?
             {
                 return Ok(());
             }
@@ -457,7 +479,9 @@ pub(super) fn observe(connection: &Connection, chat_id: &str, change: Change) ->
             let Some(latest) = latest_run(connection, &record)? else {
                 return Ok(());
             };
-            if latest.state != ChatSubAgentState::Running || late(&latest, &native_run_id) {
+            if latest.state != ChatSubAgentState::Running
+                || late(connection, &record, &latest, &native_run_id)?
+            {
                 return Ok(());
             }
             end_run(
