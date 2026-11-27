@@ -386,3 +386,23 @@ fn capabilities() -> Capabilities {
         },
     }
 }
+
+/// The real Claude runtime over scripted pipes, for `crate::host_script`.
+#[cfg(test)]
+pub(crate) fn scripted() -> crate::host_script::Runtime {
+    crate::host_script::Runtime {
+        real: Arc::new(ClaudeAdapter::new("/opt/claude/bridge")),
+        capabilities: capabilities(),
+        open: |io, request| {
+            Box::pin(async move {
+                runtime::open_over(
+                    io,
+                    &request,
+                    Path::new("/opt/claude/bin/claude"),
+                    Options::default(),
+                )
+                .await
+            })
+        },
+    }
+}

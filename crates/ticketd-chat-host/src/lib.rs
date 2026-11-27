@@ -17,6 +17,8 @@ pub mod context;
 mod contract;
 pub mod diffstat;
 mod host;
+#[cfg(test)]
+mod host_script;
 mod install;
 mod json_rpc;
 mod outcome;

@@ -322,3 +322,23 @@ impl HarnessAdapter for CodexAdapter {
         runtime::record_choice(recorded, value)
     }
 }
+
+/// The real Codex runtime over scripted pipes, for `crate::host_script`.
+#[cfg(test)]
+pub(crate) fn scripted() -> crate::host_script::Runtime {
+    crate::host_script::Runtime {
+        real: std::sync::Arc::new(CodexAdapter::new()),
+        capabilities: discovery::capabilities(None),
+        open: |io, request| {
+            Box::pin(async move {
+                // As the adapter's own tests: the handshake fixtures play no list requests.
+                let options = Options {
+                    client_version: "0.0.0-test".to_owned(),
+                    list_settings: false,
+                    ..Options::default()
+                };
+                runtime::open_over(io, &request, options).await
+            })
+        },
+    }
+}
