@@ -285,7 +285,7 @@ mod background {
     use std::time::{Duration as Std, Instant};
     use ticketd_core::{ChatSubAgentStopper, ChatTurnStarter};
 
-    const PROMPT: &str = "Review the rate limiter";
+    pub(super) const PROMPT: &str = "Before I merge, review the rate limiter on this branch. In parallel: look for ways around it, check that the tests cover the edge cases, and proofread the API docs.";
 
     /// What the Chats list shows for the Chat, in words.
     async fn row(h: &HostScript) -> String {
@@ -368,9 +368,24 @@ mod background {
         assert_eq!(h.sub_agent_transcript("task_b"), ["tool Read running"]);
         let records = h.sub_agents();
         assert!(records.iter().all(|record| record.background));
-        assert!(records.iter().all(|record| {
-            record.latest().map(|run| run.state) == Some(ChatSubAgentState::Running)
-        }));
+        let states: Vec<_> = records
+            .iter()
+            .map(|record| {
+                (
+                    record.native_id.as_str(),
+                    record.latest().map(|run| run.state),
+                )
+            })
+            .collect();
+        assert_eq!(
+            states,
+            [
+                ("task_a", Some(ChatSubAgentState::Running)),
+                ("task_b", Some(ChatSubAgentState::Running)),
+                // It finished in the turn that started it.
+                ("task_c", Some(ChatSubAgentState::Completed)),
+            ]
+        );
         h.play_all().await;
         h.finish().await;
     }
@@ -433,11 +448,12 @@ mod background {
         assert_eq!(turns[0].origin, None);
         let origin = turns[1].origin.clone().expect("the turn is labelled");
         assert_eq!(origin.by, ChatTurnStarter::Harness);
-        assert_eq!(origin.sub_agent.as_deref(), Some("task_b"));
+        assert_eq!(origin.sub_agent.as_deref(), Some("task_a"));
         assert_eq!(turns[1].state, ChatTurnState::Completed);
         assert!(
             h.transcript()
-                .contains(&"agent: Both reviews are in.".to_owned())
+                .iter()
+                .any(|line| line.starts_with("agent: All three reviews are in."))
         );
         assert_eq!(h.live().await.sub_agents, 0);
 
@@ -451,7 +467,7 @@ mod background {
         watch.see(&status, 2_000);
         assert_eq!(
             watch.shown,
-            ["Done · Both reviews are in."],
+            ["Done · All three reviews are in."],
             "{:?}",
             watch.shown
         );
@@ -528,6 +544,11 @@ mod background {
         assert_eq!(h.notices(), ["You stopped 2 sub-agents."]);
         for record in h.sub_agents() {
             let run = record.latest().expect("a run");
+            if record.native_id == "task_c" {
+                // It finished in the turn, before anything was stopped.
+                assert_eq!(run.state, ChatSubAgentState::Completed);
+                continue;
+            }
             assert_eq!(run.state, ChatSubAgentState::Stopped);
             assert_eq!(run.stopped_by, Some(ChatSubAgentStopper::Person));
         }
@@ -557,10 +578,106 @@ mod background {
         assert_eq!(h.live().await.sub_agents, 0);
         for record in h.sub_agents() {
             let run = record.latest().expect("a run");
+            if record.native_id == "task_c" {
+                // It finished before the Stop.
+                assert_eq!(run.state, ChatSubAgentState::Completed);
+                continue;
+            }
             assert_eq!(run.state, ChatSubAgentState::Stopped);
             assert_eq!(run.stopped_by, Some(ChatSubAgentStopper::Person));
         }
         // The turn's own stop says it: no separate note.
         assert!(h.notices().is_empty(), "{:?}", h.notices());
+    }
+}
+
+// --- Background sub-agents: the stored history, pinned for the desktop ---------------------
+
+mod background_stored {
+    use super::*;
+
+    fn path(name: &str) -> String {
+        format!(
+            "{}/tests/fixtures/claude/sub_agent_background_{name}.stored.json",
+            env!("CARGO_MANIFEST_DIR")
+        )
+    }
+
+    /// The Chat's stored history now must equal the file (made stable), which the desktop
+    /// builds the view of a Chat at that moment from.
+    fn pinned(h: &HostScript, name: &str) {
+        let snapshot = h
+            .core()
+            .chat_snapshot(h.chat_id(), 5_000)
+            .expect("the Chat's history");
+        let stored = made_stable(&serde_json::to_string_pretty(&snapshot).expect("it serializes"));
+        let file = path(name);
+        if std::env::var_os("TICKETD_UPDATE_VIEW_FIXTURES").is_some() {
+            std::fs::write(&file, format!("{stored}\n")).expect("the file is written");
+        }
+        let kept = std::fs::read_to_string(&file).expect(
+            "the stored history; regenerate it with TICKETD_UPDATE_VIEW_FIXTURES=1 cargo test -p ticketd-chat-host --lib host_script::sub_agents",
+        );
+        assert!(
+            kept.trim_end() == stored,
+            "the stored history changed; if that is intended, regenerate {file} with TICKETD_UPDATE_VIEW_FIXTURES=1"
+        );
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn the_stored_history_of_background_sub_agents_is_what_the_desktop_builds_its_views_from()
+    {
+        let mut h = HostScript::claude()
+            .process([
+                fixture!("claude", "handshake"),
+                fixture!("claude", "sub_agent_background"),
+            ])
+            .start();
+        h.send(super::background::PROMPT).await;
+        h.play_to("the SDK took the input").await;
+        h.play_to("the turn ended").await;
+        h.play_to("a sub-agent works after the turn ended").await;
+        h.play_to("both sub-agents work").await;
+        pinned(&h, "working");
+        h.play_to("the first sub-agent finished").await;
+        pinned(&h, "one");
+        h.play_to("the last sub-agent finished").await;
+        h.play_to("Claude resumed by itself and the turn ended")
+            .await;
+        pinned(&h, "done");
+        h.finish().await;
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn the_stored_history_of_sub_agents_running_in_the_turn_that_started_them_is_pinned_too()
+    {
+        let mut h = HostScript::claude()
+            .process([
+                fixture!("claude", "handshake"),
+                fixture!("claude", "sub_agent_background_in_turn"),
+            ])
+            .start();
+        h.send(super::background::PROMPT).await;
+        h.play_to("the SDK took the input").await;
+        h.play_to("two sub-agents run in the turn").await;
+        pinned(&h, "in_turn");
+        h.stop().await;
+        h.play_all().await;
+        h.finish().await;
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn the_stored_history_of_sub_agents_stopped_with_no_turn_is_pinned_too() {
+        let mut h = HostScript::claude()
+            .process([
+                fixture!("claude", "handshake"),
+                fixture!("claude", "sub_agent_background_at_rest"),
+            ])
+            .start();
+        h.send(super::background::PROMPT).await;
+        h.play_all().await;
+        h.stop().await;
+        h.lose_process(0).await;
+        pinned(&h, "stopped");
     }
 }

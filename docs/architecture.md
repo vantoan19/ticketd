@@ -214,6 +214,21 @@ the tool use that started the task. The adapter routes a tagged frame to its
 sub-agent; a frame that arrives before its task is announced waits for it. A sub-agent's
 to-do list is one of its own Steps: only the main agent's plan is the turn's.
 
+A sub-agent in the background outlasts the turn that started it, so nothing it does opens or
+ends a turn, and what it ran before the turn ended finishes afterwards as its own. The
+supervisor keeps the sub-agents running in the runtime (`ChatLive.sub_agents`): the Chat is
+working while any runs (the Chats list says "Working · 2 sub-agents"; the view's
+`turn_running` is false while no turn does), and goes quiet, and is told once as Done, when
+none does and no turn runs. Claude Code resumes the main agent by itself when a background
+sub-agent finishes, seconds later, so after the last one ends the Chat stays working for a
+short grace (`WAKE_GRACE`) instead of notifying Done twice. The turn it then starts is the
+harness's, not the person's: the turn records its origin (`chat_turns.origin_by`,
+`origin_sub_agent`), a turn is only labelled so when the person has no input written that the
+harness has not shown it processing, and a failure of such a turn shows and notifies but
+does not pause the person's queue. Stop with no turn running ends the running sub-agents as
+stopped by the person, notes how many (a Chat notice carrying `sub_agents_stopped`) and ends
+the harness process; Stop during a turn interrupts it and stops every sub-agent with it.
+
 The storage half of this design exists: the core's Chat workflows
 (`crates/ticketd-core/src/chats.rs`) own these records and the change log. Chat
 tables do not move the workspace change token, so streaming a turn does not make
