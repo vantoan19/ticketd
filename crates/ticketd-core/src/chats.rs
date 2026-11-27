@@ -3728,6 +3728,39 @@ impl Workspace {
         })
     }
 
+    /// A ticket's history with the agent each status move is credited to: see
+    /// [`Self::ticket_write_credits`]. Other entries carry none.
+    pub fn ticket_history_credits(
+        &self,
+        reference: &str,
+    ) -> Result<Vec<(crate::HistoryEntry, Option<ChatWriteCredit>)>, Error> {
+        self.read(|_| {
+            let ticket = self.show_ticket(reference)?;
+            let entries = crate::history::read(&self.connection, &ticket.id)?;
+            let numbers = crate::history::numbers(&self.connection, &ticket.id)?;
+            let mut credits = credit::ticket_credits(&self.connection, &ticket.id, &ticket.reference)?;
+            Ok(entries
+                .into_iter()
+                .zip(numbers)
+                .map(|(entry, number)| (entry, credits.statuses.remove(&number)))
+                .collect())
+        })
+    }
+
+    /// One sub-agent of a Chat, by the harness's own ID for it, with its runs.
+    pub fn chat_sub_agent(
+        &self,
+        chat_id: &str,
+        native_id: &str,
+    ) -> Result<Option<ChatSubAgent>, Error> {
+        self.read(|_| {
+            sub_agents::read_record(
+                &self.connection,
+                &sub_agents::record_id(chat_id, native_id),
+            )
+        })
+    }
+
     /// The agents of Chats on this computer with a credited write on the ticket, and
     /// whether each is running now (a sub-agent's latest run is; the main agent has an
     /// active turn): the label "{model} is working on this ticket" reads this.
