@@ -215,14 +215,19 @@ export function SettingsStateProvider({
     if (setup.complete && !setupFinished) setPreference("setupFinished", true);
   }, [setup.complete, setupFinished]);
   // The row leaves the sidebar when Settings is closed after finishing, not
-  // under the person's eyes: whether it was finished is read as Settings opens.
+  // under the person's eyes: whether it was finished or hidden is read as Settings opens.
   const [wasActive, setWasActive] = useState(active);
   const [finishedOnOpen, setFinishedOnOpen] = useState(setupFinished);
+  const [hiddenOnOpen, setHiddenOnOpen] = useState(setupHidden);
   if (active !== wasActive) {
     setWasActive(active);
-    if (active) setFinishedOnOpen(setupFinished);
+    if (active) {
+      setFinishedOnOpen(setupFinished);
+      setHiddenOnOpen(setupHidden);
+    }
   }
-  const setupRow = !setupHidden && !finishedOnOpen;
+  // Hiding it works the same way: the sidebar does not jump under the person.
+  const setupRow = !hiddenOnOpen && !finishedOnOpen;
   const hideSetup = useCallback(() => setPreference("setupHidden", true), []);
 
   const value = useMemo(

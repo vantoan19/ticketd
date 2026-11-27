@@ -12,7 +12,8 @@ import "./patterns.css";
  * `size="sm"` is 32px for toolbars and popovers, `default` 40px for dialogs;
  * `fill` takes the free width up to 360px (a pane header). The placeholder is
  * "Search {things}…". Escape clears a value, then leaves the field to the
- * caller (`onKeyDown`). A `count` of matches sits before the clear button.
+ * caller (`onKeyDown`). A `count` of matches sits before the clear button, which `clearable={false}`
+ * leaves out where Escape is the way out.
  */
 function SearchInput({
   value,
@@ -20,6 +21,7 @@ function SearchInput({
   size = "sm",
   fill = false,
   count,
+  clearable = true,
   className,
   onKeyDown,
   ...props
@@ -30,6 +32,8 @@ function SearchInput({
   fill?: boolean;
   /** How many things match, shown inside the field before the clear button. */
   count?: number | string | undefined;
+  /** Show the clear button. Escape clears either way. */
+  clearable?: boolean;
 }) {
   const input = React.useRef<HTMLInputElement>(null);
   return (
@@ -61,7 +65,7 @@ function SearchInput({
       {value && count !== undefined && (
         <Count data-slot="search-count">{count}</Count>
       )}
-      {value && (
+      {value && clearable && (
         <IconButton
           type="button"
           data-slot="search-clear"

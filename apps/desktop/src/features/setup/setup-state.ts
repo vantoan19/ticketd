@@ -4,6 +4,7 @@ import type { CliStatus } from "@/lib/api/cli";
 import type { NotificationPermission } from "@/lib/api/notifications";
 import type { SourceEntry } from "@/lib/api/sources";
 import type { SyncStatus } from "@/lib/sync-api";
+import { signsInWithGh } from "@/features/settings/sources/source-rows";
 import {
   commandLineFix,
   type CommandLineFix,
@@ -230,7 +231,7 @@ function agentUpdateStep(update: AgentUpdate | null | undefined): SetupStep {
       description:
         "Paste this into Claude Code or Codex, then wait for its first update.",
     };
-  // Said as the board writes it, "25 Nov": the sentence is English whatever the locale.
+  // The day reads as every other date in the app does, in the person's locale.
   const day = new Date(update.reported_at);
   return {
     ...base,
@@ -239,7 +240,7 @@ function agentUpdateStep(update: AgentUpdate | null | undefined): SetupStep {
     description: `${agentDisplayName(update.editing_agent)} updated ${update.reference}${
       Number.isNaN(day.getTime())
         ? "."
-        : ` on ${day.toLocaleDateString("en-GB", { day: "numeric", month: "short" })}.`
+        : ` on ${day.toLocaleDateString(undefined, { day: "numeric", month: "short" })}.`
     }`,
   };
 }
@@ -255,7 +256,7 @@ function sourcesFact(connected: readonly SourceEntry[]) {
   const parts = [...providers.values()].map(({ name, count }) =>
     count > 1 ? `${name}, ${count} connections` : name,
   );
-  const gh = providers.has("github") ? ", through your gh login" : "";
+  const gh = connected.some(signsInWithGh) ? ", through your gh login" : "";
   return `${joinNames(parts)}${gh}.`;
 }
 

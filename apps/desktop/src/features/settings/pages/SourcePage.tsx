@@ -36,6 +36,7 @@ export function SourcePage({
   onProjectLinked?: (projectId: string, connection: string) => void;
 }) {
   const schedule = useSourceActivity();
+  const [adding, setAdding] = useState(false);
   const [visited, setVisited] = useState(active);
   if (active && !visited) setVisited(true);
   if (!visited) return null;
@@ -44,6 +45,9 @@ export function SourcePage({
     <SourceManage
       id={connection}
       name={entry.saved?.name ?? entry.connector.name}
+      sourceName={entry.connector.name}
+      {...(entry.next_id &&
+        !entry.unavailable && { onAdd: () => setAdding(true) })}
       onRemoved={() => {
         void (async () => {
           if (onChanged) await onChanged();
@@ -67,6 +71,27 @@ export function SourcePage({
       }}
     />
   );
+  // Another connection to the same source, as a second account: its own form,
+  // and its page opens once it is saved.
+  if (adding && entry.next_id)
+    return (
+      <SourceCard
+        key={entry.next_id}
+        entry={{ ...entry, saved: null }}
+        hidden={!active}
+        adding={{
+          id: entry.next_id,
+          onCancel: () => setAdding(false),
+          onAdded: (source) => {
+            void (async () => {
+              await onChanged?.({ ...entry, saved: source });
+              setAdding(false);
+              if (source.id) onOpen?.(source.id);
+            })();
+          },
+        }}
+      />
+    );
   if (entry.unavailable)
     return active ? (
       <SettingsDrillIn

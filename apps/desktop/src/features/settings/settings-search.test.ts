@@ -6,6 +6,7 @@ import {
   searchSettingsFor,
   sourceEntries,
   splitMatch,
+  supportEntries,
 } from "./settings-search";
 
 const sectionIds = new Set<string>(SETTINGS_SECTIONS.map(({ id }) => id));
@@ -214,4 +215,29 @@ test("while Chat is off, an Automations word finds the Agents page, not the hidd
       (hit) => hit.title === "Agents" && hit.section === "agents",
     ),
   ).toEqual([]);
+});
+
+test("About's Support cards are found by what they are for", () => {
+  for (const query of ["star", "support", "sponsor", "donate", "github"]) {
+    const titles = searchSettings(query, SETTINGS_ENTRIES).map(
+      (entry) => entry.title,
+    );
+    expect(titles, query).toContain("Star on GitHub");
+  }
+  const star = SETTINGS_ENTRIES.find(
+    (entry) => entry.title === "Star on GitHub",
+  );
+  expect(star?.section).toBe("about");
+});
+
+test("Buy me a coffee is a result only while its card shows", () => {
+  expect(supportEntries(null)).toEqual([]);
+  const [coffee] = supportEntries("https://buymeacoffee.com/example");
+  expect(coffee?.title).toBe("Buy me a coffee");
+  expect(coffee?.section).toBe("about");
+  expect(
+    searchSettings("donate", supportEntries("https://x.example")).map(
+      (entry) => entry.title,
+    ),
+  ).toEqual(["Buy me a coffee"]);
 });

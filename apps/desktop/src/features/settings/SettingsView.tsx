@@ -3,6 +3,7 @@ import { modifierKeyLabel } from "@/lib/platform";
 import { useEffect, useLayoutEffect, useRef, useState } from "react";
 import {
   SEARCH_INPUT_ID,
+  agentPageId,
   resolveSettingsPage,
   type LegacySettingsPageId,
   type SettingsPageId,
@@ -147,11 +148,11 @@ export function SettingsView({
       {selected === "command-line" && <CommandLinePage />}
       {selected === "agent-skills" && <AgentSkillsPage />}
       {selected === "agents" && (
-        <AgentsPage onOpen={(id) => onSelect?.(`agent-${id}`)} />
+        <AgentsPage onOpen={(id) => onSelect?.(agentPageId(id))} />
       )}
-      {selected.startsWith("agent-") && (
+      {selected.startsWith("agent:") && (
         <AgentPage
-          id={selected.slice("agent-".length)}
+          id={selected.slice("agent:".length)}
           onBack={() => onSelect?.("agents")}
         />
       )}

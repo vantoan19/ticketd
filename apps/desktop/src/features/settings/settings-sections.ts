@@ -157,6 +157,8 @@ export interface SettingsOpening {
   needs?: SettingsSectionId | null;
   /** The page the person last used, as stored: an old name, or one that no longer exists, is tolerated. */
   last?: string | null;
+  /** Chats are on, so Automations is in the sidebar. Left out, every page is listed. */
+  chatsOn?: boolean;
 }
 
 /**
@@ -169,7 +171,9 @@ export function initialSettingsPage(opening: SettingsOpening): SettingsPageId {
   if (opening.setupPending) return "setup";
   const last = opening.last ? resolveSettingsPage(opening.last) : null;
   // Set up ticketd has left the sidebar by now; Search and a thing opened in place are not pages to come back to.
-  if (last && navSectionOf(last) === last && last !== "setup") return last;
+  const listed = last !== "automations" || opening.chatsOn !== false;
+  if (last && listed && navSectionOf(last) === last && last !== "setup")
+    return last;
   return "appearance";
 }
 
@@ -179,10 +183,16 @@ export const SEARCH_INPUT_ID = "settings-search-input";
 /**
  * A page Settings can open: a section, Search, a connection opened in place
  * (`source-<connection id>`, shown under Ticket sources) or an agent opened in
- * place (`agent-<harness id>`, shown under Agents).
+ * place (`agent:<harness id>`, shown under Agents). The agent prefix has a colon
+ * because no section id has one: `agent-skills` is a section of its own.
  */
 export type SettingsPageId =
-  SettingsSectionId | "search" | `source-${string}` | `agent-${string}`;
+  SettingsSectionId | "search" | `source-${string}` | `agent:${string}`;
+
+/** The page id of an agent opened in place. */
+export function agentPageId(harnessId: string): SettingsPageId {
+  return `agent:${harnessId}`;
+}
 
 /**
  * Page names that earlier versions used, in saved state, links and code that
@@ -206,7 +216,7 @@ export function resolveSettingsPage(page: string): SettingsPageId {
   if (
     page === "search" ||
     page.startsWith("source-") ||
-    page.startsWith("agent-")
+    page.startsWith("agent:")
   )
     return page as SettingsPageId;
   return SETTINGS_SECTIONS.some((section) => section.id === page)
@@ -218,7 +228,7 @@ export function resolveSettingsPage(page: string): SettingsPageId {
 export function navSectionOf(page: SettingsPageId): SettingsSectionId | null {
   if (page === "search") return null;
   if (page.startsWith("source-")) return "ticket-sources";
-  if (page.startsWith("agent-")) return "agents";
+  if (page.startsWith("agent:")) return "agents";
   return page as SettingsSectionId;
 }
 

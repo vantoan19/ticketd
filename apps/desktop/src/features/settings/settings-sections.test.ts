@@ -48,8 +48,10 @@ test("current names, Search and a connection stay as they are; a name nobody kno
 
 test("a connection selects Ticket sources in the sidebar, an agent selects Agents, and Search selects nothing", () => {
   expect(navSectionOf("source-github")).toBe("ticket-sources");
-  expect(navSectionOf("agent-claude-code")).toBe("agents");
-  expect(resolveSettingsPage("agent-codex")).toBe("agent-codex");
+  expect(navSectionOf("agent:claude-code")).toBe("agents");
+  expect(resolveSettingsPage("agent:codex")).toBe("agent:codex");
+  // A section whose id starts like an agent page is still its own page.
+  expect(navSectionOf("agent-skills")).toBe("agent-skills");
   expect(navSectionOf("search")).toBeNull();
   expect(navSectionOf("about")).toBe("about");
 });
@@ -57,6 +59,24 @@ test("a connection selects Ticket sources in the sidebar, an agent selects Agent
 test("Settings opens on Set up ticketd while it is neither finished nor hidden, else on Appearance", () => {
   expect(initialSettingsPage({ setupPending: true })).toBe("setup");
   expect(initialSettingsPage({ setupPending: false })).toBe("appearance");
+});
+
+test("a last page the sidebar hides now is not come back to", () => {
+  // Automations is listed only while Chats are on.
+  expect(
+    initialSettingsPage({
+      setupPending: false,
+      last: "automations",
+      chatsOn: false,
+    }),
+  ).toBe("appearance");
+  expect(
+    initialSettingsPage({
+      setupPending: false,
+      last: "automations",
+      chatsOn: true,
+    }),
+  ).toBe("automations");
 });
 
 test("Settings opens on the page that needs the person before anything else", () => {
@@ -90,6 +110,9 @@ test("with nothing to fix, Settings opens on the page last used, once Set up tic
   expect(initialSettingsPage({ setupPending: false, last: "search" })).toBe(
     "appearance",
   );
+  expect(
+    initialSettingsPage({ setupPending: false, last: "agent:codex" }),
+  ).toBe("appearance");
   expect(
     initialSettingsPage({ setupPending: false, last: "source-github" }),
   ).toBe("appearance");

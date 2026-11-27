@@ -373,6 +373,7 @@ function AppContent() {
           setupPending,
           needs: needsPageRef.current,
           last: settingsPage,
+          chatsOn: chat.enabled,
         }),
       );
     }

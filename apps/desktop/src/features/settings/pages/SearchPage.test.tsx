@@ -161,6 +161,20 @@ test("a new query selects the first result again", () => {
   expect(selected()).toEqual([results()[0]]);
 });
 
+test("while the page fades out after the field is cleared, the last results stay", () => {
+  const { rerender } = render(
+    <Harness openSetting={() => {}} query="backup" />,
+  );
+  const before = titles();
+  rerender(<Harness openSetting={() => {}} query="" />);
+  expect(titles()).toEqual(before);
+  expect(
+    screen.queryByText(
+      "Type to search every setting by name, description or related word.",
+    ),
+  ).toBeNull();
+});
+
 test("choosing a result opens its page and names the setting to show", () => {
   const openSetting = vi.fn();
   render(<Harness openSetting={openSetting} query="backup" />);

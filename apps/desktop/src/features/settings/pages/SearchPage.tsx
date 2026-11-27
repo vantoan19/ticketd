@@ -12,6 +12,7 @@ import {
 } from "@/features/settings/settings-sections";
 import {
   SETTINGS_ENTRIES,
+  supportEntries,
   searchSettingsFor,
   sourceEntries,
   splitMatch,
@@ -61,7 +62,7 @@ export function SearchPage() {
     const pages = new Map<SettingsPageId, PageInfo>(
       SETTINGS_SECTIONS.map((section) => [section.id, section]),
     );
-    const entries: SettingsEntry[] = [...SETTINGS_ENTRIES];
+    const entries: SettingsEntry[] = [...SETTINGS_ENTRIES, ...supportEntries()];
     for (const { connector, saved } of sources) {
       const id = saved?.id ?? connector.provider;
       const label = saved?.name ?? connector.name;
@@ -83,7 +84,12 @@ export function SearchPage() {
     return { pages, entries };
   }, [sources]);
 
-  const needle = query.trim();
+  // Clearing the field sends the person back to their page, which takes a
+  // moment to fade this one out: keep showing the last results until it has.
+  const typed = query.trim();
+  const [held, setHeld] = useState(typed);
+  if (typed && typed !== held) setHeld(typed);
+  const needle = typed || held;
   // Rows that Chat shows, and the Automations page, are listed only while it is on.
   const results = useMemo(
     () =>

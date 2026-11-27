@@ -534,3 +534,11 @@ test("clearing the search field returns to the page the search came from", async
   expect((field() as HTMLInputElement).value).toBe("");
   await screen.findByRole("heading", { level: 1, name: "Attention" });
 });
+
+test("the search field has no clear button; Escape is the way out", async () => {
+  render(<Settings initial="attention" />);
+  await act(async () => {});
+  fireEvent.change(field(), { target: { value: "backup" } });
+  await screen.findByRole("heading", { name: /settings? match/ });
+  expect(screen.queryByRole("button", { name: "Clear search" })).toBeNull();
+});

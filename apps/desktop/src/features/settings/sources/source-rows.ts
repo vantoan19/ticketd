@@ -39,10 +39,19 @@ export function withArticle(phrase: string): string {
   return `${/^[aeiou]/i.test(phrase) ? "An" : "A"} ${phrase}`;
 }
 
+/** GitHub signs in through the person's `gh` login, as long as its connector asks for no secret of its own. */
+export function signsInWithGh(entry: SourceEntry): boolean {
+  const { provider, schema } = entry.connector;
+  return (
+    provider === "github" &&
+    !schema.fields.some(({ type }) => type === "secret")
+  );
+}
+
 /** Who the source signs in as, in the person's words, from what the connector declares. */
 export function signsInWith(entry: SourceEntry): string {
-  const { provider, schema } = entry.connector;
-  if (provider === "github") return "Your gh login";
+  const { schema } = entry.connector;
+  if (signsInWithGh(entry)) return "Your gh login";
   const secret = schema.fields.find((field) => field.type === "secret");
   if (!secret) return "No sign-in";
   const label = secret.label.trim();
