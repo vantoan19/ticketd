@@ -202,14 +202,11 @@ test("with sync on Drive, choosing Drive needs no consent and no folder", async 
   expect(screen.queryByRole("button", { name: "Change folder…" })).toBeNull();
 });
 
-test("a Drive folder chosen before sync moves to the Uploads folder once sync is on Drive", async () => {
+test("opening the page makes no call to Drive, even with a Drive folder chosen before sync", async () => {
   answer({ attachment_upload_destination: drive });
   page(syncing());
-  expect(
-    await screen.findByText("Uploads, inside your “ticketd” sync folder"),
-  ).toBeTruthy();
-  expect(calls("use_sync_uploads_folder")).toHaveLength(1);
-  expect(screen.queryByText("“Team files”")).toBeNull();
+  expect(await screen.findByText("“Team files”")).toBeTruthy();
+  expect(calls("use_sync_uploads_folder")).toHaveLength(0);
 });
 
 test("the Uploads folder stays put and keeps its words while the page is open", async () => {

@@ -177,6 +177,9 @@ test("An older copy first: one action replaces it with one install call", async 
   );
 
   expect(await screen.findByText("Installed")).toBeTruthy();
+  // Nothing is left to do, so the fix's footer goes with the fix.
+  expect(document.body.textContent).not.toContain("administrator password");
+  expect(document.body.textContent).not.toContain("Replaces ticketd");
   // Removing and installing is one call, so the system asks once.
   expect(invoke.mock.calls.filter(([c]) => c === "install_cli")).toEqual([
     ["install_cli", { other: older }],

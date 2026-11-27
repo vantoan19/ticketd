@@ -1209,6 +1209,9 @@ pub fn sync_download_workspace(
     })?;
     // Let go first, so the run this wakes is not turned away by the hold.
     drop(no_run);
+    // The replaced Workspace starts with its files on this computer, so this is a no-op
+    // until a Drive folder is chosen; the other ways into sync call it the same way.
+    follow_uploads(&mut *open_workspace()?);
     woken(Ok(Downloaded {
         status,
         safety_backup: safety_backup.display().to_string(),

@@ -55,8 +55,8 @@ export const cliClient = {
   },
   /**
    * The one fix: links this app's `ticketd` where terminals find it and removes
-   * `other`, the copy in the way. On macOS and Linux the system asks for the
-   * administrator password once for both. Setup runs this, then installs the
+   * `other`, the copy in the way. On macOS the system asks for the administrator
+   * password once for both; Windows and Linux ask for nothing. Setup runs this, then installs the
    * agent skills, so a person is asked once.
    */
   async install(other: OtherCli | null = null): Promise<CliInstallation> {

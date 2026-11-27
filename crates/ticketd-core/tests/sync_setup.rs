@@ -2608,3 +2608,81 @@ fn synced_workspace_at_format(desks: &Desks, format: i64) -> PathBuf {
         .unwrap();
     path
 }
+
+/// What a restore leaves to decide after Reconnect: the one record that differs, with the
+/// folder's value still held beside this computer's, whatever the restore went back on.
+fn restored_title_in_review(
+    workspace: &Workspace,
+    status: &ticketd_core::sync::SyncStatus,
+) -> (String, String) {
+    assert_eq!(status.recovery, None);
+    assert_eq!(status.needs_review.len(), 1, "{:?}", status.needs_review);
+    let conflict = workspace
+        .sync_conflict(ticketd_core::SyncKind::Ticket, &status.needs_review[0].id)
+        .unwrap();
+    let titles: Vec<_> = conflict
+        .fields
+        .iter()
+        .filter(|field| field.field == "title")
+        .collect();
+    assert_eq!(titles.len(), 1, "the title is in conflict");
+    let text = |value: &Option<ticketd_core::SyncValue>| format!("{value:?}");
+    (text(&titles[0].local), text(&titles[0].remote))
+}
+
+/// C3: a restore drops the last-synced copies, so after Reconnect a record the folder changed
+/// since the backup differs from the restored one with nothing to say which side is newer. It
+/// goes to review with both values kept, instead of one side silently taking the other.
+#[test]
+fn reconnecting_after_a_restore_sends_a_record_the_folder_changed_since_to_review() {
+    let desks = desks();
+    let (mut a, login, _) = desks.uploaded("Desk A");
+    a.sync_now(&desks.remote).unwrap();
+    let path = desks.directory.path().join("Desk A");
+    let backup = desks.directory.path().join("backup.sqlite3");
+    a.backup(&backup).unwrap();
+    retitle(&mut a, &login, "Log on");
+    a.sync_now(&desks.remote).unwrap();
+    drop(a);
+
+    Workspace::restore(&path, &backup).unwrap();
+    let mut a = Workspace::open(&path).unwrap();
+    assert_eq!(a.show_ticket(&login).unwrap().title, "Login");
+    a.sync_reconnect(&desks.remote).unwrap();
+    let status = a.sync_now(&desks.remote).unwrap();
+
+    let (local, remote) = restored_title_in_review(&a, &status);
+    assert!(local.contains("Login"), "{local}");
+    assert!(remote.contains("Log on"), "{remote}");
+}
+
+/// C3: the same for a restore point saved before the Workspace ever synced and then edited here.
+#[test]
+fn reconnecting_after_a_restore_from_before_sync_sends_differing_records_to_review() {
+    let desks = desks();
+    let path = desks.directory.path().join("Desk A");
+    let mut a = Workspace::open(&path).unwrap();
+    let login = a.create_ticket("Login").unwrap().reference;
+    let before = desks.directory.path().join("before-sync.sqlite3");
+    a.backup(&before).unwrap();
+    a.set_sync_settings("Desk A", 60, AttachmentDownload::Automatic)
+        .unwrap();
+    a.sync_connect("connection-1", "person@example.com")
+        .unwrap();
+    a.sync_upload_workspace(&desks.remote, "ticketd Home")
+        .unwrap();
+    a.sync_now(&desks.remote).unwrap();
+    retitle(&mut a, &login, "Log on");
+    a.sync_now(&desks.remote).unwrap();
+    drop(a);
+
+    Workspace::restore(&path, &before).unwrap();
+    let mut a = Workspace::open(&path).unwrap();
+    retitle(&mut a, &login, "Sign in");
+    a.sync_reconnect(&desks.remote).unwrap();
+    let status = a.sync_now(&desks.remote).unwrap();
+
+    let (local, remote) = restored_title_in_review(&a, &status);
+    assert!(local.contains("Sign in"), "{local}");
+    assert!(remote.contains("Log on"), "{remote}");
+}
