@@ -22,7 +22,9 @@ describe("the host's view of a Claude sub-agent", () => {
   const { chat, items } = snapshot;
 
   it("parses with the interface's own schemas", () => {
-    expect(chat.sub_agents.map((agent) => [agent.id, agent.parent ?? null])).toEqual([
+    expect(
+      chat.sub_agents.map((agent) => [agent.id, agent.parent ?? null]),
+    ).toEqual([
       ["task_a", null],
       ["task_b", "task_a"],
     ]);

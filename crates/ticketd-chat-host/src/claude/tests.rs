@@ -1493,6 +1493,156 @@ fn a_tool_that_failed_after_a_stop_is_reported_as_such() {
     );
 }
 
+/// What a sub-agent's frames and task events become, one at a time.
+mod sub_agents {
+    use super::*;
+    use crate::{NativeSubAgentId, SubAgentOutcome, SubAgentStopper};
+    use serde_json::Value;
+
+    use crate::claude::session::Session;
+
+    fn started(task: &str, tool_use: &str, background: bool) -> Value {
+        json!({"task_id": task, "run_id": "r1", "tool_use_id": tool_use, "parent_task_id": null,
+               "description": "Look", "subagent_type": "Explore", "background": background,
+               "prompt": "Look around.", "spawn_depth": 1})
+    }
+
+    fn ends(events: &[EventKind]) -> Vec<(String, SubAgentOutcome)> {
+        events
+            .iter()
+            .filter_map(|event| match event {
+                EventKind::SubAgentEnded {
+                    sub_agent, outcome, ..
+                } => Some((sub_agent.0.clone(), *outcome)),
+                _ => None,
+            })
+            .collect()
+    }
+
+    #[test]
+    fn a_sub_agents_frames_open_no_turn_and_are_its_own() {
+        let mut session = Session::default();
+        session.event("sub_agent_started", &started("t1", "toolu_a", false));
+        let (events, _) = session
+            .event(
+                "assistant_content",
+                &json!({"parent_tool_use_id": "toolu_a", "model": "claude-haiku-5-5",
+                        "blocks": [{"type": "tool_use", "id": "toolu_r", "name": "Read", "input": {"file_path": "a"}}]}),
+            )
+            .expect("modeled");
+        assert!(session.active_turn().is_none(), "no turn was opened");
+        assert!(
+            !events
+                .iter()
+                .any(|event| matches!(event, EventKind::TurnStarted { .. }))
+        );
+        // The model it reports is passed on once, then the Step is its own.
+        assert!(
+            matches!(&events[0], EventKind::SubAgentUpdated { native: Some(model), .. }
+            if model == &json!({"model": "claude-haiku-5-5"}))
+        );
+        assert!(
+            matches!(&events[1], EventKind::SubAgentToolUpdated { sub_agent, title, .. }
+            if sub_agent == &NativeSubAgentId::new("t1") && title == "Read")
+        );
+        // Thinking and text of a sub-agent are not the main agent's.
+        let (more, _) = session
+            .event("thinking", &json!({"phase": "started", "index": 0, "redacted": false, "at": 1, "parent_tool_use_id": "toolu_a"}))
+            .expect("modeled");
+        assert!(more.is_empty() && session.active_turn().is_none());
+    }
+
+    #[test]
+    fn a_foreground_sub_agent_ends_when_its_call_returns_and_a_background_one_does_not() {
+        let mut session = Session::default();
+        session.event(
+            "assistant_content",
+            &json!({"parent_tool_use_id": null, "blocks": [
+            {"type": "tool_use", "id": "toolu_a", "name": "Agent", "input": {}},
+            {"type": "tool_use", "id": "toolu_b", "name": "Agent", "input": {}}]}),
+        );
+        session.event("sub_agent_started", &started("fore", "toolu_a", false));
+        session.event("sub_agent_started", &started("back", "toolu_b", true));
+        let result = |id: &str, failed: bool| json!({"tool_use_id": id, "parent_tool_use_id": null, "is_error": failed, "text": "x"});
+        let (events, _) = session
+            .event("tool_result", &result("toolu_a", false))
+            .expect("modeled");
+        assert_eq!(
+            ends(&events),
+            [("fore".to_owned(), SubAgentOutcome::Completed)]
+        );
+        // The background launch returns at once and goes on.
+        let (events, _) = session
+            .event("tool_result", &result("toolu_b", false))
+            .expect("modeled");
+        assert!(ends(&events).is_empty());
+    }
+
+    #[test]
+    fn a_stopped_sub_agent_was_stopped_by_the_person_after_stop_and_by_the_main_agent_otherwise() {
+        let stopped = |session: &mut Session| {
+            session.event("sub_agent_started", &started("t1", "toolu_a", true));
+            let (events, _) = session
+                .event(
+                    "sub_agent_ended",
+                    &json!({"task_id": "t1", "run_id": "r1", "tool_use_id": "toolu_a", "status": "stopped", "reason": null, "summary": ""}),
+                )
+                .expect("modeled");
+            ends(&events)
+        };
+        assert_eq!(
+            stopped(&mut Session::default()),
+            [(
+                "t1".to_owned(),
+                SubAgentOutcome::Stopped(SubAgentStopper::MainAgent)
+            )]
+        );
+        let mut session = Session::default();
+        // Stop asks the open turn to end.
+        session.event("input_processing", &json!({"submission_ids": []}));
+        session.interrupt_written();
+        assert_eq!(
+            stopped(&mut session),
+            [(
+                "t1".to_owned(),
+                SubAgentOutcome::Stopped(SubAgentStopper::Person)
+            )]
+        );
+    }
+
+    #[test]
+    fn a_failed_task_update_carries_what_went_wrong() {
+        let mut session = Session::default();
+        session.event("sub_agent_started", &started("t1", "toolu_a", false));
+        let (events, _) = session
+            .event(
+                "sub_agent_updated",
+                &json!({"task_id": "t1", "run_id": "r1", "status": "failed", "description": null, "background": null, "error": "output limit"}),
+            )
+            .expect("modeled");
+        assert!(matches!(events.as_slice(),
+            [EventKind::SubAgentEnded { outcome: SubAgentOutcome::Failed, detail: Some(detail), .. }]
+            if detail == "output limit"));
+    }
+
+    #[test]
+    fn frames_that_wait_for_their_task_are_dropped_with_the_turn_not_kept_for_ever() {
+        let mut session = Session::default();
+        session.event(
+            "assistant_content",
+            &json!({"parent_tool_use_id": "toolu_x", "blocks": [{"type": "tool_use", "id": "toolu_r", "name": "Read", "input": {}}]}),
+        );
+        session.event(
+            "turn_result",
+            &json!({"subtype": "success", "submission_ids": []}),
+        );
+        let (events, _) = session
+            .event("sub_agent_started", &started("t1", "toolu_x", false))
+            .expect("modeled");
+        assert_eq!(events.len(), 1, "{events:?}");
+    }
+}
+
 fn recorded_step_frames() -> impl Iterator<Item = Value> {
     fixture!("recorded-steps").lines().filter_map(|line| {
         let mut frame: Value = serde_json::from_str(line).expect("recorded frame");

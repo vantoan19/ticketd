@@ -456,12 +456,7 @@ type EventBody =
 
 /** A sub-agent task's status, as the SDK's `task_updated` patch names it. */
 export type SubAgentTaskStatus =
-  | "pending"
-  | "running"
-  | "completed"
-  | "failed"
-  | "killed"
-  | "paused";
+  "pending" | "running" | "completed" | "failed" | "killed" | "paused";
 
 export type BridgeEvent = { v: typeof PROTOCOL_VERSION } & EventBody;
 /** An event before the bridge stamps the protocol version on it. */

@@ -909,9 +909,12 @@ export function createBridge(deps: BridgeDeps) {
           emit({ event: "compacted", generation });
           return reportContextUsage(current);
         }
-        if (message.subtype === "task_started") return subAgentStarted(current, message);
-        if (message.subtype === "task_updated") return subAgentUpdated(current, message);
-        if (message.subtype === "task_notification") return subAgentEnded(current, message);
+        if (message.subtype === "task_started")
+          return subAgentStarted(current, message);
+        if (message.subtype === "task_updated")
+          return subAgentUpdated(current, message);
+        if (message.subtype === "task_notification")
+          return subAgentEnded(current, message);
         if (message.subtype !== "init") return unmapped(current, message);
         return emit({
           event: "session_info",
@@ -1065,7 +1068,8 @@ export function createBridge(deps: BridgeDeps) {
       description: text(message.description) ?? "",
       subagent_type: type,
       background: message.is_backgrounded === true,
-      prompt: prompt === null ? null : prompt.slice(0, MAX_SUB_AGENT_PROMPT_CHARS),
+      prompt:
+        prompt === null ? null : prompt.slice(0, MAX_SUB_AGENT_PROMPT_CHARS),
       prompt_truncated: (prompt?.length ?? 0) > MAX_SUB_AGENT_PROMPT_CHARS,
       spawn_depth: number(message.spawn_depth),
     });
