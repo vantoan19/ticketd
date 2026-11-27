@@ -1,4 +1,9 @@
-import { useState, type KeyboardEvent } from "react";
+import {
+  useCallback,
+  useLayoutEffect,
+  useState,
+  type KeyboardEvent,
+} from "react";
 import { ChevronRight, ChevronUp, LoaderCircle, Square } from "lucide-react";
 import { CrossfadeText } from "@/components/ui/motion";
 import { IconButton } from "@/components/ui/icon-button";
@@ -22,6 +27,34 @@ function clock(agent: SubAgent, now: number) {
   return elapsed >= 1000 ? duration(elapsed) : "";
 }
 
+/** Where the keyboard was in the strip as a part of it left: a list row's place, or 0 for the pill. */
+export type StripFocus = { at: number | null };
+
+/** Where the strip's rows are in the open list, and its pill: what focus is handed to. */
+const LIST_ROW = ".chat-subagent-item";
+const pillSelector = `[data-sub-agent="${STRIP_OPENER}"]`;
+
+/**
+ * A ref for a part of the strip that can leave under focus (a sub-agent ended,
+ * the list closed itself): as it detaches, it notes where focus was, so the
+ * strip can hand focus on instead of dropping it to the page.
+ */
+function useNoteLeaving(held: StripFocus) {
+  return useCallback(
+    (element: HTMLElement | null) => {
+      if (!element) return;
+      return () => {
+        if (!element.contains(document.activeElement)) return;
+        const row = element.closest("li");
+        held.at = row?.parentElement
+          ? [...row.parentElement.children].indexOf(row)
+          : 0;
+      };
+    },
+    [held],
+  );
+}
+
 /**
  * The strip: one 28px recessed pill in the tray while any sub-agent runs, in or
  * out of a turn. One running names it and opens it; several count and open a
@@ -32,14 +65,33 @@ export function SubAgentStrip({
   agents,
   onOpen,
   onStop,
+  held,
 }: {
   agents: readonly SubAgent[];
   onOpen: (agent: SubAgent) => void;
   onStop: (agent: SubAgent) => void;
+  /** Filled in when focus was in a part of the strip as it left; the strip or its Chat then hands focus on. */
+  held: StripFocus;
 }) {
   const [open, setOpen] = useState(false);
   const tree = runningTree(agents);
   const now = useNow(tree.length > 0);
+  const noteLeaving = useNoteLeaving(held);
+  // After a commit that took the focused part away: the next row at its place
+  // (or the last), else the pill; with the strip gone, its Chat's message box.
+  useLayoutEffect(() => {
+    const at = held.at;
+    if (at === null || tree.length === 0) return;
+    held.at = null;
+    if (document.activeElement && document.activeElement !== document.body)
+      return;
+    const rows = [...document.querySelectorAll<HTMLElement>(LIST_ROW)];
+    const target =
+      tree.length > 1
+        ? rows[Math.min(at, rows.length - 1)]
+        : document.querySelector<HTMLElement>(pillSelector);
+    target?.focus();
+  });
   const [first] = tree;
   if (!first) return null;
   if (tree.length === 1) {
@@ -47,6 +99,7 @@ export function SubAgentStrip({
     const time = clock(agent, now);
     return (
       <button
+        ref={noteLeaving}
         type="button"
         className="chat-plan-pill chat-subagent-pill"
         data-sub-agent={STRIP_OPENER}
@@ -90,6 +143,7 @@ export function SubAgentStrip({
     <Popover open={open} onOpenChange={setOpen}>
       <PopoverTrigger asChild>
         <button
+          ref={noteLeaving}
           type="button"
           className="chat-plan-pill chat-subagent-pill"
           data-sub-agent={STRIP_OPENER}
@@ -117,7 +171,11 @@ export function SubAgentStrip({
       >
         <ul className="chat-subagent-list">
           {tree.map(({ agent, depth }) => (
-            <li key={agent.id} {...(depth > 0 && { "data-depth": depth })}>
+            <li
+              key={agent.id}
+              ref={noteLeaving}
+              {...(depth > 0 && { "data-depth": depth })}
+            >
               <button
                 type="button"
                 className="chat-subagent-item"

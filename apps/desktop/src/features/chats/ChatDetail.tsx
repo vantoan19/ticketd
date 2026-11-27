@@ -141,7 +141,7 @@ import { useChat } from "@/features/chats/use-chats";
 import { SubAgentView } from "@/features/chats/SubAgentView";
 import { RestartNotice } from "@/features/chats/SubAgentNotices";
 import { SubAgentTray } from "@/features/chats/SubAgentTray";
-import { SubAgentStrip } from "@/features/chats/SubAgentStrip";
+import { SubAgentStrip, type StripFocus } from "@/features/chats/SubAgentStrip";
 import { backKey } from "@/features/chats/sub-agent-words";
 import {
   STRIP_OPENER,
@@ -514,6 +514,14 @@ function Conversation({
   useEffect(() => {
     if (document.activeElement === document.body) messageBox.current?.focus();
   }, []);
+  // Focus was in the strip when its last part left: the message box takes it.
+  const [stripFocus] = useState<StripFocus>({ at: null });
+  useLayoutEffect(() => {
+    if (stripFocus.at === null || runningAgents(chat) > 0) return;
+    stripFocus.at = null;
+    if (!document.activeElement || document.activeElement === document.body)
+      messageBox.current?.focus();
+  });
   const [freshStarts, setFreshStarts] = useState(0);
   const handledFreshStart = useRef(0);
   const composerShown =
@@ -1096,6 +1104,7 @@ function Conversation({
                     strip: (
                       <SubAgentStrip
                         agents={chat.sub_agents}
+                        held={stripFocus}
                         onOpen={(agent) => showSubAgent(agent.id, STRIP_OPENER)}
                         onStop={(agent) =>
                           quietly(

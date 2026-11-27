@@ -1776,6 +1776,7 @@
   color: var(--foreground);
 }
 .chat-subagent .chat-step-suffix {
+  font-variant-numeric: tabular-nums;
   flex: none;
   display: inline-flex;
   gap: 0;
@@ -1869,6 +1870,7 @@
   color: var(--muted-foreground);
 }
 .chat-subagent-foot-words {
+  font-variant-numeric: tabular-nums;
   min-width: 0;
   overflow: hidden;
   text-overflow: ellipsis;
@@ -1900,6 +1902,9 @@
 }
 .chat-subagent-pill .chat-plan-pill-count {
   color: var(--foreground);
+}
+.chat-subagent-pill .chat-plan-pill-now {
+  font-variant-numeric: tabular-nums;
 }
 
 /* The strip's list: 32px rows, nested ones 16px in; Stop shows on hover or focus. */
@@ -1949,7 +1954,7 @@
   visibility: hidden;
 }
 .chat-subagent-list li:hover > [data-size="icon-row-action"],
-.chat-subagent-list li:has(:focus-visible) > [data-size="icon-row-action"] {
+.chat-subagent-list li:focus-within > [data-size="icon-row-action"] {
   visibility: visible;
 }
 @media (hover: none) {

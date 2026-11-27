@@ -1,5 +1,6 @@
 // @vitest-environment jsdom
 import {
+  act,
   cleanup,
   fireEvent,
   render,
@@ -268,7 +269,7 @@ test("Stop in a sub-agent's own view stops it alone and leaves how it ended", as
     screen.getByRole("button", { name: /^Sub-agent Find limiter bypasses/ }),
   );
   await screen.findByRole("heading", { name: "Find limiter bypasses" });
-  const status = screen.getByText(/^Working · 2m/).closest("[role=status]");
+  const status = screen.getByRole("status");
   expect(status?.getAttribute("aria-live")).toBe("polite");
   fireEvent.click(
     screen.getByRole("button", { name: "Stop Find limiter bypasses" }),
@@ -498,4 +499,118 @@ test("Esc stops a running turn, but with only sub-agents running it does nothing
     key: "Escape",
   });
   expect(stopTurn).toHaveBeenCalledTimes(1);
+});
+
+async function openList(chat: MockChat) {
+  const client = await open(chat);
+  const count = chat.chat.sub_agents.filter(
+    (agent) => agent.status === "running",
+  ).length;
+  fireEvent.click(
+    screen.getByRole("button", { name: `${count} sub-agents running` }),
+  );
+  const list = await screen.findByRole("dialog", {
+    name: "Running sub-agents",
+  });
+  const rows = within(list).getAllByRole("button", { name: /^(?!Stop)/ });
+  return { client, rows };
+}
+
+test("a row that ends under focus hands focus to the next row in the open list", async () => {
+  const chat = fixtures().codexNested;
+  const { client, rows } = await openList(chat);
+  (rows[1] as HTMLElement).focus();
+  await act(() => client.stopSubAgent(chat.chat.id, "sa-pay-tests"));
+  await waitFor(() => {
+    const left = within(
+      screen.getByRole("dialog", { name: "Running sub-agents" }),
+    ).getAllByRole("button", { name: /^(?!Stop)/ });
+    expect(left).toHaveLength(2);
+    expect(document.activeElement).toBe(left[1]);
+  });
+});
+
+test("when the list closes itself with one left, focus lands on the pill", async () => {
+  const chat = fixtures().reply;
+  const { client, rows } = await openList(chat);
+  (rows[1] as HTMLElement).focus();
+  await act(() => client.stopSubAgent(chat.chat.id, "sa-tests"));
+  const pill = await screen.findByRole("button", {
+    name: /^Find limiter bypasses, working/,
+  });
+  expect(document.activeElement).toBe(pill);
+});
+
+test("when the strip leaves, focus goes to the message box", async () => {
+  const chat = fixtures().reply;
+  const { client, rows } = await openList(chat);
+  (rows[0] as HTMLElement).focus();
+  await act(async () => {
+    await client.stopSubAgent(chat.chat.id, "sa-bypass");
+    await client.stopSubAgent(chat.chat.id, "sa-tests");
+  });
+  await waitFor(() =>
+    expect(screen.queryByText(/sub-agents? running/)).toBeNull(),
+  );
+  expect(document.activeElement).toBe(
+    screen.getByPlaceholderText("Message Claude Code"),
+  );
+});
+
+test("a pill that leaves under focus hands focus to the message box", async () => {
+  const chat = fixtures().one;
+  const client = await open(chat);
+  const pill = screen.getByRole("button", {
+    name: /^Check limiter test coverage|^Find limiter bypasses/,
+  });
+  pill.focus();
+  const running = chat.chat.sub_agents.find((a) => a.status === "running");
+  await act(() => client.stopSubAgent(chat.chat.id, running?.id ?? ""));
+  await waitFor(() => expect(pill.isConnected).toBe(false));
+  expect(document.activeElement).toBe(
+    screen.getByPlaceholderText("Message Claude Code"),
+  );
+});
+
+test("Stop one in the strip list shows on hover or while anything in its row has focus", () => {
+  // visibility:hidden ignores a focus that arrives in the same instant, so Tab
+  // never reached it (FL-P2-3): the row must show it for :focus-within.
+  expect(chatsCss).toMatch(
+    /\.chat-subagent-list li:focus-within > \[data-size="icon-row-action"\]/,
+  );
+});
+
+test("clocks use tabular figures", () => {
+  for (const selector of [
+    /\.chat-subagent \.chat-step-suffix \{[^}]*font-variant-numeric: tabular-nums/,
+    /\.chat-subagent-foot-words \{[^}]*font-variant-numeric: tabular-nums/,
+    /\.chat-subagent-pill \.chat-plan-pill-now \{[^}]*font-variant-numeric: tabular-nums/,
+  ])
+    expect(chatsCss).toMatch(selector);
+});
+
+test("the view's status says the state; its ticking clock is not read", async () => {
+  await open(fixtures().reply);
+  fireEvent.click(
+    screen.getByRole("button", { name: /^Sub-agent Find limiter bypasses/ }),
+  );
+  await screen.findByRole("heading", { name: "Find limiter bypasses" });
+  const status = document.querySelector(".chat-subagent-foot") as HTMLElement;
+  expect(status.getAttribute("role")).toBe("status");
+  const clock = [...status.querySelectorAll("[aria-hidden='true']")].find(
+    (one) => /\d+[ms]/.test(one.textContent ?? ""),
+  );
+  expect(clock).toBeTruthy();
+  // What is left to read is the word alone.
+  const spoken = [...status.querySelectorAll("*")]
+    .filter((one) => !one.closest("[aria-hidden='true']"))
+    .map((one) => one.textContent ?? "")
+    .join(" ");
+  expect(spoken).toMatch(/Working/);
+  expect(
+    status
+      .querySelector(".chat-subagent-foot-words")
+      ?.getAttribute("aria-hidden"),
+  ).toBeNull();
+  expect(clock?.closest(".chat-subagent-foot-words")).toBeTruthy();
 });
