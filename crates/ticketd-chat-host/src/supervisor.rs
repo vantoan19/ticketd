@@ -1580,6 +1580,7 @@ impl Supervisor {
             self.stop = Some(StopState::Requested);
             self.stop_deadline = Some(Instant::now() + INTERRUPT_TIMEOUT);
         }
+        // With no turn running, `stop_sub_agents_at_rest` stops what runs on its own.
         Ok(())
     }
 
@@ -1730,6 +1731,9 @@ impl Supervisor {
                 generation,
                 outcome,
             });
+            // The sub-agents run on when their parent's turn is interrupted (Codex): ask
+            // each to stop too, after the turn, in one order.
+            handle.interrupt_sub_agents(generation).await;
         });
     }
 

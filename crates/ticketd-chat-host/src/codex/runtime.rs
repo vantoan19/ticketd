@@ -824,6 +824,24 @@ impl HarnessRuntime for CodexRuntime {
             .await
     }
 
+    /// Interrupting the Chat's turn leaves Codex's sub-agents running (their threads are
+    /// their own), so each child that runs a turn gets its own interrupt: also when the
+    /// Chat's turn is over.
+    async fn interrupt_sub_agents(&self, generation: RuntimeGeneration) {
+        let turns = self.connection.rpc.state().peer.session.live_child_turns();
+        for (thread, turn) in turns {
+            let params = json!({"threadId": thread, "turnId": turn});
+            let _ = self
+                .connection
+                .rpc
+                .interrupt(generation, "turn/interrupt", |peer| {
+                    peer.session.child_interrupt_asked(&thread, &turn)?;
+                    Ok((params, Call::Plain))
+                })
+                .await;
+        }
+    }
+
     /// Codex takes model and effort as overrides on `turn/start`, so a change is kept
     /// and goes out with the next turn; the thread keeps it for the turns after.
     async fn change_setting(&self, change: SettingChange) -> SettingOutcome {
