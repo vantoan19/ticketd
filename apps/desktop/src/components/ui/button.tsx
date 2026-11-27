@@ -77,7 +77,10 @@ function Button({
       if (idleWidth.current) node.style.minWidth = `${idleWidth.current}px`;
     } else {
       node.style.minWidth = "";
-      idleWidth.current = node.getBoundingClientRect().width;
+      // Not getBoundingClientRect(): a dialog's opening animation scales the
+      // button, and the width to keep is the layout one, with its fraction.
+      const layout = parseFloat(getComputedStyle(node).width);
+      idleWidth.current = Number.isFinite(layout) ? layout : node.offsetWidth;
     }
   });
   const setRef = React.useCallback(

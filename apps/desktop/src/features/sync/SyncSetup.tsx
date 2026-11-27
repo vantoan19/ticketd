@@ -513,9 +513,6 @@ export function Choose({
                 </Button>
                 <Button
                   size="sm"
-                  // Join…, Reconnect and Start syncing share one width, so Back
-                  // stays where it is when the choice changes.
-                  className="min-w-28"
                   disabled={!options}
                   busy={busy}
                   onClick={() =>

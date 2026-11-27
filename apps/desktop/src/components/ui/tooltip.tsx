@@ -1,5 +1,4 @@
 import * as React from "react";
-import { flushSync } from "react-dom";
 import { cn } from "cn";
 import { Tooltip as TooltipPrimitive } from "radix-ui";
 import { Kbd } from "@/components/ui/kbd";
@@ -99,6 +98,10 @@ function focusFromNavigation() {
 const OVERLAY =
   '[role="dialog"], [role="alertdialog"], [role="menu"], [data-radix-popper-content-wrapper] [role="listbox"]';
 
+function inDialog(node: Element) {
+  return !!node.closest('[role="dialog"], [role="alertdialog"]');
+}
+
 function coveredByOverlay(trigger: Element | null) {
   if (typeof document === "undefined") return false;
   return Array.from(document.querySelectorAll(OVERLAY)).some(
@@ -109,8 +112,9 @@ function coveredByOverlay(trigger: Element | null) {
 /**
  * A short label for the control it wraps (DESIGN.md section 4, P4). It opens
  * on hover after the provider's delay and on keyboard focus, never on focus
- * that returns after a menu or dialog closes. With no `content` nothing is
- * rendered but the child, so a hidden tooltip can never catch Escape.
+ * that returns after a menu or dialog closes, nor on focus inside a dialog.
+ * With no `content` nothing is rendered but the child, so a hidden tooltip can
+ * never catch Escape.
  *
  * - `content`: the label; for icon-only controls use IconButton, which also
  *   names the button. Never the only place an explanation lives.
@@ -209,31 +213,16 @@ function Tooltip({
         onFocus={(event) => {
           measure(event.currentTarget);
           // Radix skips its own open when the event is default-prevented.
-          if (!focusFromNavigation()) event.preventDefault();
+          // Inside a dialog the label never opens on focus: it would be the top
+          // layer and take the Escape that should close the dialog (after Tab
+          // to Close). The control keeps its accessible name.
+          if (!focusFromNavigation() || inDialog(event.currentTarget))
+            event.preventDefault();
         }}
       >
         {children}
       </TooltipPrimitive.Trigger>
-      <TooltipContent
-        side={side ?? regionSide ?? fallbackSide}
-        align={align}
-        onEscapeKeyDown={(event) => {
-          // A label is the top layer, so it would take the first Escape that
-          // should close the dialog around its trigger (after Tab to Close).
-          // Close the label, then let the same key reach the dialog.
-          const node = trigger.current;
-          if (!node?.closest('[role="dialog"], [role="alertdialog"]')) return;
-          event.preventDefault();
-          flushSync(() => setOpen(false));
-          node.dispatchEvent(
-            new KeyboardEvent("keydown", {
-              key: "Escape",
-              bubbles: true,
-              cancelable: true,
-            }),
-          );
-        }}
-      >
+      <TooltipContent side={side ?? regionSide ?? fallbackSide} align={align}>
         {content}
         {keys.map((key) => (
           <Kbd key={key} tone="inverted">

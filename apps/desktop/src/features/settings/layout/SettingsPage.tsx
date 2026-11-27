@@ -71,6 +71,8 @@ export function SettingsPage({
 }) {
   const heading = useRef<HTMLHeadingElement>(null);
   const shell = useRef<HTMLDivElement>(null);
+  // Whether the person's last focus or press was on this page.
+  const inside = useRef(false);
   const { navOpen = false, setNavOpen } = useSettingsState();
   // The trigger carries the dot while any page does.
   const setup = useNeeds().length > 0;
@@ -86,9 +88,9 @@ export function SettingsPage({
   useEffect(() => {
     const root = shell.current;
     if (hidden || !focusTitle || !root) return;
-    let inside = false;
     const track = (event: FocusEvent) => {
-      inside = event.target instanceof Node && root.contains(event.target);
+      inside.current =
+        event.target instanceof Node && root.contains(event.target);
     };
     // A click on empty space puts focus nowhere on purpose; a click on a
     // control that is already focused fires no focus event; a removed control
@@ -100,27 +102,55 @@ export function SettingsPage({
               'button, a[href], input, select, textarea, summary, [role="button"], [tabindex]',
             )
           : null;
-      inside = !!control && root.contains(control);
+      inside.current = !!control && root.contains(control);
     };
-    const observer = new MutationObserver(() => {
+    const repair = () => {
       const active = document.activeElement;
-      if (!inside || (active && active !== document.body)) return;
+      if (!inside.current || (active && active !== document.body)) return;
       const target =
         root.querySelector<HTMLElement>("[data-focus-target]") ??
         heading.current;
       target?.focus({ preventScroll: true });
+    };
+    const observer = new MutationObserver(repair);
+    // A dialog's portal is a child of the body: its removal is the moment the
+    // confirm button's focus is lost, when the page may already have changed.
+    // The dialog returns focus to its opener a tick later; repair only what
+    // that leaves on the body.
+    let later: ReturnType<typeof setTimeout> | undefined;
+    const portals = new MutationObserver(() => {
+      clearTimeout(later);
+      later = setTimeout(repair, 50);
     });
-    document.addEventListener("focusin", track);
+    // Capture, so these run before the shell's own handlers below.
+    document.addEventListener("focusin", track, true);
     document.addEventListener("pointerdown", press, true);
     observer.observe(root, { childList: true, subtree: true });
+    portals.observe(document.body, { childList: true });
     return () => {
-      document.removeEventListener("focusin", track);
+      portals.disconnect();
+      clearTimeout(later);
+      document.removeEventListener("focusin", track, true);
       document.removeEventListener("pointerdown", press, true);
       observer.disconnect();
     };
   }, [hidden, focusTitle]);
+  const claimPortaled = (event: React.SyntheticEvent) => {
+    if (event.target instanceof Node && !shell.current?.contains(event.target))
+      inside.current = true;
+  };
   return (
-    <div className="settings-shell" hidden={hidden} ref={shell}>
+    <div
+      className="settings-shell"
+      hidden={hidden}
+      ref={shell}
+      // A dialog the page opens (a confirm) renders in a portal, outside the
+      // shell's DOM but inside its React tree: focus or a press there still
+      // belongs to the page, so closing the dialog can repair the focus it
+      // drops. A dialog from elsewhere (the palette) never reaches these.
+      onFocus={claimPortaled}
+      onPointerDown={claimPortaled}
+    >
       <div className="settings-panel-bar">
         {drillIn && (
           <Button

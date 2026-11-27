@@ -298,8 +298,9 @@ export function SourceStatusFooter() {
               <Button
                 variant="ghost"
                 size="sm"
-                // "Sign in" opens the line's page, so the rail drops the word.
-                data-rail-hidden={signedOut ? "" : undefined}
+                // The rail shows only the dot: "Sign in" opens the line's page,
+                // and the line's tooltip names what Retry would retry.
+                data-rail-hidden=""
                 onClick={() =>
                   signedOut ? openSettings(connection) : void refreshAll()
                 }
