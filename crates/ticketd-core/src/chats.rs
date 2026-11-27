@@ -17,8 +17,8 @@ use uuid::Uuid;
 use crate::{Error, Workspace};
 
 pub(crate) mod attachments;
-pub(crate) use credit::migrate as migrate_credit;
 pub use attachments::{ChatAttachment, ChatAttachmentContent};
+pub(crate) use credit::migrate as migrate_credit;
 mod credit;
 pub use credit::{
     ChatPlannedWrite, ChatPlannedWriteKind, ChatWriteCredit, TicketWriteCredits, TicketWritingAgent,
@@ -3738,7 +3738,8 @@ impl Workspace {
             let ticket = self.show_ticket(reference)?;
             let entries = crate::history::read(&self.connection, &ticket.id)?;
             let numbers = crate::history::numbers(&self.connection, &ticket.id)?;
-            let mut credits = credit::ticket_credits(&self.connection, &ticket.id, &ticket.reference)?;
+            let mut credits =
+                credit::ticket_credits(&self.connection, &ticket.id, &ticket.reference)?;
             Ok(entries
                 .into_iter()
                 .zip(numbers)
@@ -3754,10 +3755,7 @@ impl Workspace {
         native_id: &str,
     ) -> Result<Option<ChatSubAgent>, Error> {
         self.read(|_| {
-            sub_agents::read_record(
-                &self.connection,
-                &sub_agents::record_id(chat_id, native_id),
-            )
+            sub_agents::read_record(&self.connection, &sub_agents::record_id(chat_id, native_id))
         })
     }
 

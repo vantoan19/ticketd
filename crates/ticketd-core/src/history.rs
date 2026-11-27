@@ -167,8 +167,8 @@ pub(crate) fn read(connection: &Connection, ticket_id: &str) -> Result<Vec<Histo
 
 /// The ticket's history numbers, in the order [`read`] lists its entries.
 pub(crate) fn numbers(connection: &Connection, ticket_id: &str) -> Result<Vec<i64>, Error> {
-    let mut statement =
-        connection.prepare("SELECT number FROM ticket_history WHERE ticket_id = ?1 ORDER BY number")?;
+    let mut statement = connection
+        .prepare("SELECT number FROM ticket_history WHERE ticket_id = ?1 ORDER BY number")?;
     let numbers = statement
         .query_map([ticket_id], |row| row.get(0))?
         .collect::<Result<Vec<_>, _>>()?;

@@ -91,9 +91,7 @@ pub fn credited_history(workspace: &Workspace, reference: &str) -> Result<Vec<Va
 mod tests {
     use super::*;
     use serde_json::json;
-    use ticketd_core::{
-        ChatObservation, ChatOwner, ChatToolState, NewChat, Status, TicketPatch,
-    };
+    use ticketd_core::{ChatObservation, ChatOwner, ChatToolState, NewChat, Status, TicketPatch};
 
     struct Fixture {
         _dir: tempfile::TempDir,
@@ -186,7 +184,9 @@ mod tests {
         .unwrap();
         // A person's own update, on the same ticket, is credited to nobody.
         let mut person = Workspace::open(&fixture.path).unwrap();
-        person.add_activity(&reference, "By a person.", None).unwrap();
+        person
+            .add_activity(&reference, "By a person.", None)
+            .unwrap();
 
         let feed = fixture.host.activity_feed(&reference, 20, 0).unwrap();
         let feed = credited_feed(&fixture.host, &reference, feed).unwrap();
@@ -218,7 +218,10 @@ mod tests {
         assert_eq!(moved["event"]["credited_to"], expected);
 
         let history = credited_history(&fixture.host, &reference).unwrap();
-        let status = history.iter().find(|entry| entry["kind"] == "status").unwrap();
+        let status = history
+            .iter()
+            .find(|entry| entry["kind"] == "status")
+            .unwrap();
         assert_eq!(status["credited_to"], expected);
     }
 
@@ -250,6 +253,9 @@ mod tests {
 
         let feed = fixture.host.activity_feed(&reference, 20, 0).unwrap();
         let feed = credited_feed(&fixture.host, &reference, feed).unwrap();
-        assert!(feed.iter().all(|entry| entry["activity"].get("credited_to").is_none()));
+        assert!(
+            feed.iter()
+                .all(|entry| entry["activity"].get("credited_to").is_none())
+        );
     }
 }

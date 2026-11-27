@@ -303,7 +303,10 @@ pub(super) fn ticket_credits(
     let mut credits = TicketWriteCredits::default();
     for write in writes {
         if !placings.contains_key(&write.chat_id) {
-            placings.insert(write.chat_id.clone(), Placing::load(connection, &write.chat_id)?);
+            placings.insert(
+                write.chat_id.clone(),
+                Placing::load(connection, &write.chat_id)?,
+            );
         }
         let sub_agent = placings[&write.chat_id].credit(&write, reference);
         let credit = ChatWriteCredit {

@@ -136,11 +136,11 @@ use ticketd_core::{
 #[cfg(test)]
 mod codex_sub_agents;
 #[cfg(test)]
-mod write_credit;
-#[cfg(test)]
 mod sub_agents;
 #[cfg(test)]
 mod tests;
+#[cfg(test)]
+mod write_credit;
 
 /// A fixture as the macro [`fixture!`] reads it at compile time.
 #[derive(Clone, Copy)]

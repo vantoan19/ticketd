@@ -82,13 +82,19 @@ mod tests {
     }
 
     fn writes(command: &str) -> Option<Vec<ChatPlannedWrite>> {
-        shell_step_writes("claude-code", "Bash", &bash(command), ChatToolState::Running)
+        shell_step_writes(
+            "claude-code",
+            "Bash",
+            &bash(command),
+            ChatToolState::Running,
+        )
     }
 
     #[test]
     fn a_plain_activity_call_names_an_activity_and_its_ticket() {
-        let found = writes(r#"ticketd activity add T-UB237 --brief "Added a test" --agent claude-code"#)
-            .unwrap();
+        let found =
+            writes(r#"ticketd activity add T-UB237 --brief "Added a test" --agent claude-code"#)
+                .unwrap();
         assert_eq!(found.len(), 1);
         assert_eq!(found[0].kind, ChatPlannedWriteKind::Activity);
         assert!(found[0].references.contains(&"T-UB237".to_owned()));
@@ -99,7 +105,10 @@ mod tests {
         let found = writes("ticketd change T-UB237 --status Done").unwrap();
         assert_eq!(found[0].kind, ChatPlannedWriteKind::Status);
         // A change without a status moves nothing.
-        assert_eq!(writes("ticketd change T-UB237 --title Renamed").unwrap(), []);
+        assert_eq!(
+            writes("ticketd change T-UB237 --title Renamed").unwrap(),
+            []
+        );
     }
 
     #[test]
