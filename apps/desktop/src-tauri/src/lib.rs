@@ -33,10 +33,10 @@ mod workspace_session;
 use ticketd_core::{
     Activity, ActivityPatch, BackupInspection, BatchOperation, ContextGraph, ContextGraphPage,
     CurrentWork, DependencyGraph, Document, DocumentPatch, DocumentSearchResult, DocumentSummary,
-    Evidence, EvidenceInput, InboxEntry, LatestUpdate, MetadataSelection, Plan,
-    PlanView, Project, ProjectArchiveOutcome, ProjectRemoteChange, SidebarCounts, Status,
-    StatusCounts, Ticket, TicketChange, TicketFilter, TicketPatch, Workspace, WorkspaceGraph,
-    WorkspaceGraphRequest, WorkspaceInfo, WriteRequest, WriteResult,
+    Evidence, EvidenceInput, InboxEntry, LatestUpdate, MetadataSelection, Plan, PlanView, Project,
+    ProjectArchiveOutcome, ProjectRemoteChange, SidebarCounts, Status, StatusCounts, Ticket,
+    TicketChange, TicketFilter, TicketPatch, Workspace, WorkspaceGraph, WorkspaceGraphRequest,
+    WorkspaceInfo, WriteRequest, WriteResult,
     source::{ExtensionRegistry, RefreshControl, RefreshProgress},
 };
 
