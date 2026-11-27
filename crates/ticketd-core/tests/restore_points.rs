@@ -417,6 +417,56 @@ fn a_packaged_point_that_lost_its_inventory_table_deletes_no_shared_file() {
     assert_eq!(shared_files(&workspace), files_before);
 }
 
+/// A point that lost both its inventory and its container header names nothing itself, but
+/// its own attachment rows still say it keeps files: no shared file goes.
+#[test]
+fn a_point_that_lost_its_inventory_and_header_but_lists_attachments_deletes_no_shared_file() {
+    let dir = tempfile::tempdir().unwrap();
+    let (workspace, database) = damaged_record_point_alone_needs_a_file(dir.path());
+    let files_before = shared_files(&workspace);
+    {
+        let point = Connection::open(&database).unwrap();
+        point
+            .execute_batch("DROP TABLE ticketd_backup_files; DROP TABLE ticketd_backup_container;")
+            .unwrap();
+    }
+
+    save_more_than_seven_points(&workspace);
+
+    assert!(database.is_file());
+    assert_eq!(shared_files(&workspace), files_before);
+}
+
+/// A damaged-record point saved from a Workspace without attachments needs no file, so an
+/// unneeded one is still pruned: one such point does not stop pruning for good.
+#[test]
+fn a_damaged_record_point_without_attachments_still_lets_an_unneeded_file_be_pruned() {
+    let dir = tempfile::tempdir().unwrap();
+    let workspace = open(dir.path());
+    let point = workspace
+        .save_daily_restore_point_at(day(10))
+        .unwrap()
+        .unwrap();
+    let database = std::path::PathBuf::from(&point.path);
+    {
+        let point = Connection::open(&database).unwrap();
+        point
+            .execute_batch(
+                "DROP TABLE IF EXISTS ticketd_backup_files; DROP TABLE IF EXISTS ticketd_backup_container;",
+            )
+            .unwrap();
+    }
+    fs::write(database.with_extension("json"), b"{ not json").unwrap();
+    let store = workspace.restore_points_folder().unwrap().join("files");
+    fs::create_dir_all(&store).unwrap();
+    fs::write(store.join("left-over"), b"x").unwrap();
+
+    save_more_than_seven_points(&workspace);
+
+    assert!(database.is_file());
+    assert_eq!(shared_files(&workspace), 0);
+}
+
 /// A retained point's record can still parse and name the wrong files: what the point needs
 /// is read from its own verified inventory too, so a wrong record deletes nothing it needs.
 #[test]

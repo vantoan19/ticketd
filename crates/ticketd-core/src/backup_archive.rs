@@ -506,6 +506,34 @@ pub(crate) fn unpack_database(connection: &Connection) -> Result<(), Error> {
     Ok(())
 }
 
+/// Whether the attachment rows of `connection` list a file a backup keeps: a retained
+/// local snapshot (a purged one is not kept), downloaded here. The same rows
+/// [`validate`] requires files for.
+pub(crate) fn keeps_attachment_files(connection: &Connection) -> Result<bool, Error> {
+    if !table_exists(connection, "attachments")? {
+        return Ok(false);
+    }
+    let has_purge =
+        connection.pragma_query_value(None, "user_version", |row| row.get::<_, i64>(0))? >= 54;
+    let downloaded = if table_exists(connection, "sync_attachments")? {
+        " AND id NOT IN (SELECT id FROM sync_attachments WHERE state != 'downloaded')"
+    } else {
+        ""
+    };
+    let retained = if has_purge {
+        " AND purge_state='retained'"
+    } else {
+        ""
+    };
+    Ok(connection.query_row(
+        &format!(
+            "SELECT EXISTS(SELECT 1 FROM attachments WHERE kind='local_snapshot'{retained}{downloaded})"
+        ),
+        [],
+        |row| row.get(0),
+    )?)
+}
+
 pub(crate) fn content(connection: &Connection) -> Result<crate::AttachmentBackupContent, Error> {
     let container_version = container_version(connection)?.and_then(|v| u32::try_from(v).ok());
     let (local_snapshots, remote_references) = if table_exists(connection, "attachments")? {
