@@ -699,6 +699,14 @@ impl HostScript {
             .expect_err("the host did not report success")
     }
 
+    /// Whether the adapter has closed the harness's input, waiting a bounded time for it.
+    pub async fn harness_input_closed(&mut self) -> bool {
+        let mut peer = self.peer().await;
+        tokio::time::timeout(Duration::from_secs(10), peer.stdin_closed())
+            .await
+            .unwrap_or(false)
+    }
+
     /// The harness process exits with `code`, whatever the fixture still holds.
     pub async fn lose_process(&mut self, code: i32) {
         self.peer().await.exit(code);
