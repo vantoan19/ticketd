@@ -11,10 +11,7 @@ import { subAgentView } from "@/features/chats/sub-agents";
  * with the schemas the interface parses real data with.
  */
 const sent = JSON.parse(
-  readFileSync(
-    new URL("./codex-sub-agent-view.json", import.meta.url),
-    "utf8",
-  ),
+  readFileSync(new URL("./codex-sub-agent-view.json", import.meta.url), "utf8"),
 ) as unknown;
 
 describe("the host's view of Codex sub-agents", () => {
@@ -51,8 +48,13 @@ describe("the host's view of Codex sub-agents", () => {
     const view = subAgentView(chat, items, "thr_b", Date.now());
     expect(view?.ancestors.map((agent) => agent.id)).toEqual(["thr_a"]);
     expect(view?.items.map((item) => item.kind)).toEqual(["turn", "steps"]);
-    expect(view?.brief.text).toBe("Codex doesn't report what a sub-agent was asked.");
+    expect(view?.brief.text).toBe(
+      "Codex doesn't report what a sub-agent was asked.",
+    );
     const outer = subAgentView(chat, items, "thr_a", Date.now());
-    expect(outer?.items.map((item) => item.kind)).toEqual(["turn", "sub_agent"]);
+    expect(outer?.items.map((item) => item.kind)).toEqual([
+      "turn",
+      "sub_agent",
+    ]);
   });
 });
