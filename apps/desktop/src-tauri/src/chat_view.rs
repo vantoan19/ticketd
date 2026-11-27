@@ -2182,9 +2182,13 @@ fn sub_agent_run_items(run: &ChatSubAgentRun, chat: &Chat, tracker: &Tracker) ->
 /// How the model a sub-agent reported reads: the harness's own name for it when the live
 /// session lists it, else the id as reported, else the harness.
 fn model_name(reported: Option<&str>, live: &ChatLive, harness: &str) -> String {
-    let Some(reported) = reported.filter(|model| !model.is_empty()) else {
-        return harness.to_owned();
-    };
+    model_label(reported, live).unwrap_or_else(|| harness.to_owned())
+}
+
+/// The model as the live session names it, else the id as reported; `None` when none
+/// was reported.
+fn model_label(reported: Option<&str>, live: &ChatLive) -> Option<String> {
+    let reported = reported.filter(|model| !model.is_empty())?;
     let options = live
         .settings
         .as_deref()
@@ -2201,7 +2205,58 @@ fn model_name(reported: Option<&str>, live: &ChatLive, harness: &str) -> String 
                 .filter(|option| option.id.len() > 3 && reported.starts_with(option.id.as_str()))
                 .max_by_key(|option| option.id.len())
         });
-    listed.map_or_else(|| reported.to_owned(), |option| option.label.clone())
+    Some(listed.map_or_else(|| reported.to_owned(), |option| option.label.clone()))
+}
+
+/// The model a sub-agent's own frames reported, as the ticket's label names it.
+pub(crate) fn sub_agent_model(record: &ChatSubAgent, live: &ChatLive) -> Option<String> {
+    model_label(record.said("model").as_deref(), live)
+}
+
+/// The model the Chat's live session reports for the main agent, as the session names it.
+pub(crate) fn main_agent_model(live: &ChatLive) -> Option<String> {
+    let model = live.settings.as_deref()?.reported.model.as_ref()?;
+    let id = model.answered_by.as_deref().or(model.current.as_deref());
+    model_label(id, live)
+}
+
+/// What a running Step is doing in a few words ("Running npm test -- rate-limit"), for a
+/// line that says what an agent does now.
+pub(crate) fn running_words(tool: &ChatTool, chat: &Chat) -> Option<String> {
+    const LIMIT: usize = 60;
+    let harness = harness_name(&chat.harness);
+    let step = steps_while(tool, harness, chat, None, true)
+        .into_iter()
+        .next()?;
+    if step.ticketd.is_some() {
+        return Some(cut_at_word(&step.target, LIMIT));
+    }
+    let what = step
+        .command
+        .clone()
+        .or_else(|| step.targets.first().map(|target| target.text.clone()))
+        .filter(|what| !what.is_empty())
+        .unwrap_or_else(|| step.target.clone());
+    let what = cut_at_word(first_line_of(&what).as_deref().unwrap_or(&what), LIMIT);
+    Some(match step.kind {
+        "run" => format!("Running {what}"),
+        "read" => format!("Reading {what}"),
+        "search" => format!("Searching {what}"),
+        "edit" => format!("Editing {what}"),
+        "create" => format!("Creating {what}"),
+        "delete" => format!("Deleting {what}"),
+        "web" => format!("Browsing {what}"),
+        _ => format!("Using {what}"),
+    })
+}
+
+/// What the harness called a sub-agent's work; failing that, the kind of sub-agent it is.
+pub(crate) fn sub_agent_title(record: &ChatSubAgent) -> String {
+    let said = |key: &str| record.said(key).filter(|said| !said.trim().is_empty());
+    said("description")
+        .map(|description| first_line_of(&description).unwrap_or(description))
+        .or_else(|| said("subagent_type"))
+        .unwrap_or_else(|| "Sub-agent".to_owned())
 }
 
 /// A sub-agent as the screens read it, or `None` when it has no run yet.
@@ -2226,11 +2281,7 @@ fn sub_agent_view(record: &ChatSubAgent, chat: &Chat, live: &ChatLive) -> Option
         },
     );
     let said = |key: &str| record.said(key).filter(|said| !said.trim().is_empty());
-    // What the harness called the work; failing that, the kind of sub-agent it is.
-    let title = said("description")
-        .map(|description| first_line_of(&description).unwrap_or(description))
-        .or_else(|| said("subagent_type"))
-        .unwrap_or_else(|| "Sub-agent".to_owned());
+    let title = sub_agent_title(record);
     let prompt = said("prompt");
     Some(SubAgentView {
         id: record.native_id.clone(),
@@ -5282,6 +5333,14 @@ mod tests {
         env!("CARGO_MANIFEST_DIR"),
         "/../src/features/chats/codex-sub-agent-view.json"
     );
+    const AGY_STORED: &str = concat!(
+        env!("CARGO_MANIFEST_DIR"),
+        "/../../../crates/ticketd-chat-host/tests/fixtures/antigravity/sub_agent.stored.json"
+    );
+    const AGY_VIEW: &str = concat!(
+        env!("CARGO_MANIFEST_DIR"),
+        "/../src/features/chats/antigravity-sub-agent-view.json"
+    );
     const VIEW: &str = concat!(
         env!("CARGO_MANIFEST_DIR"),
         "/../src/features/chats/claude-sub-agent-view.json"
@@ -5690,5 +5749,63 @@ mod tests {
             .expect("the request is shown");
         assert!(shown.get("owner").is_none());
         assert_eq!(shown["title"], "Claude Code wants to run");
+    }
+
+    #[test]
+    fn the_view_of_an_ended_antigravity_sub_agent_is_the_contract_the_interface_parses() {
+        let stored: ticketd_core::ChatSnapshot =
+            serde_json::from_str(&std::fs::read_to_string(AGY_STORED).expect("the stored history"))
+                .expect("the stored history reads");
+        let tracker = Tracker::from_snapshot(&stored.items, &stored.sub_agents);
+        let live = ChatLive::idle();
+        let state = super::chat_state(&stored.chat, &live, &tracker, &Surroundings::default());
+        let rows: Vec<Item> = stored
+            .items
+            .iter()
+            .flat_map(|record| items(record, &stored.chat, &live, None, &tracker))
+            .collect();
+        let view = serde_json::to_string_pretty(&json!({
+            "chat": state,
+            "items": rows,
+            "cursor": 0,
+        }))
+        .unwrap();
+        if std::env::var_os("TICKETD_UPDATE_VIEW_FIXTURES").is_some() {
+            std::fs::write(AGY_VIEW, format!("{view}\n")).expect("the view is written");
+        }
+        let kept = std::fs::read_to_string(AGY_VIEW).expect(
+            "the view; regenerate it with TICKETD_UPDATE_VIEW_FIXTURES=1 cargo test -p ticketd-desktop --lib chat_view",
+        );
+        assert!(
+            kept.trim_end() == view,
+            "the view changed; if that is intended, regenerate {AGY_VIEW} with TICKETD_UPDATE_VIEW_FIXTURES=1"
+        );
+
+        // Antigravity reports a sub-agent's brief but neither its words nor its end, and
+        // cannot stop it alone: the record says so, and a finished run is "completed".
+        let [agent] = state.sub_agents.as_slice() else {
+            panic!("one sub-agent: {:?}", state.sub_agents);
+        };
+        assert_eq!(agent.title, "Session Auditor");
+        assert_eq!(agent.status, "completed");
+        assert_eq!(agent.model, "gemini-3.1-pro");
+        let capabilities = &agent.capabilities;
+        assert_eq!(
+            (
+                capabilities.brief,
+                capabilities.text,
+                capabilities.end,
+                capabilities.stop,
+                capabilities.resume
+            ),
+            (true, false, false, false, false)
+        );
+        assert!(
+            agent
+                .brief
+                .as_ref()
+                .and_then(|brief| brief.text.as_deref())
+                .is_some_and(|text| text.starts_with("Scan the session routes"))
+        );
     }
 }

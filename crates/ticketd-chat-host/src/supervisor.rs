@@ -3750,22 +3750,36 @@ impl Supervisor {
     ) {
         let tool_id = format!("{run}:{}", item.0);
         let state = tool_state(status);
+        let input = detail.map(|d| d.payload().to_owned()).unwrap_or_default();
+        let first = self
+            .runtime
+            .as_mut()
+            .is_some_and(|runtime| runtime.tools.insert(tool_id.clone()));
+        // A shell Step's window opens when it is first seen, so a write made while it runs
+        // can be credited to the agent that ran it.
+        let window = if first {
+            self.shell_window(&title, &input, state)
+        } else {
+            None
+        };
         let tool = ChatObservation::Tool {
             tool_id: tool_id.clone(),
             turn_id,
             owner,
             name: title,
-            input: detail.map(|d| d.payload().to_owned()).unwrap_or_default(),
+            input,
             state,
             output,
         };
         self.pending_tools.retain(|(id, _)| *id != tool_id);
-        let first = self
-            .runtime
-            .as_mut()
-            .is_some_and(|runtime| runtime.tools.insert(tool_id.clone()));
         if first || state != ChatToolState::Running {
             observations.push(tool);
+            if let Some(writes) = window {
+                observations.push(ChatObservation::ShellStep {
+                    tool_id: tool_id.clone(),
+                    writes,
+                });
+            }
             self.record(observations);
         } else {
             // Progress of a running tool is saved with the next checkpoint.
@@ -3774,6 +3788,17 @@ impl Supervisor {
             self.checkpoint_at
                 .get_or_insert(Instant::now() + TEXT_CHECKPOINT_INTERVAL);
         }
+    }
+
+    /// What the plain `ticketd` calls of a Step could write, when it is a shell Step.
+    fn shell_window(
+        &self,
+        title: &str,
+        input: &str,
+        state: ChatToolState,
+    ) -> Option<Vec<ticketd_core::ChatPlannedWrite>> {
+        let adapter = self.adapter.as_ref()?;
+        crate::write_credit::shell_step_writes(adapter.harness().key.as_str(), title, input, state)
     }
 
     /// Records a turn's reasoning, plan or files as the tool record that keeps it,

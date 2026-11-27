@@ -24,7 +24,7 @@
       "kind": "message",
       "value": {
         "id": "00000000-0000-4000-8000-000000000002",
-        "position": 2,
+        "position": 1,
         "role": "user",
         "text": "Review the rate limiter",
         "attachments": [],
@@ -54,7 +54,7 @@
       "kind": "session",
       "value": {
         "id": "00000000-0000-4000-8000-000000000005",
-        "position": 4,
+        "position": 2,
         "native_session_id": "sess-1",
         "origin": "new",
         "started_at": "2026-11-27T10:00:00.000Z"
@@ -64,7 +64,7 @@
       "kind": "turn",
       "value": {
         "id": "00000000-0000-4000-8000-000000000004:local-turn-1",
-        "position": 7,
+        "position": 3,
         "native_turn_id": "local-turn-1",
         "state": "completed",
         "detail": null,
@@ -80,7 +80,7 @@
       "kind": "tool",
       "value": {
         "id": "00000000-0000-4000-8000-000000000004:plan:local-turn-1",
-        "position": 9,
+        "position": 4,
         "turn_id": "00000000-0000-4000-8000-000000000004:local-turn-1",
         "owner": {
           "kind": "main"
@@ -97,7 +97,7 @@
       "kind": "tool",
       "value": {
         "id": "00000000-0000-4000-8000-000000000004:toolu_agent_a",
-        "position": 10,
+        "position": 5,
         "turn_id": "00000000-0000-4000-8000-000000000004:local-turn-1",
         "owner": {
           "kind": "main"
@@ -114,7 +114,7 @@
       "kind": "sub_agent_run",
       "value": {
         "id": "00000000-0000-4000-8000-000000000001:sub-agent:task_a:run-1",
-        "position": 12,
+        "position": 6,
         "sub_agent": "task_a",
         "run": 1,
         "native_run_id": "run_a_1",
@@ -131,7 +131,7 @@
       "kind": "tool",
       "value": {
         "id": "00000000-0000-4000-8000-000000000004:toolu_todo_sub",
-        "position": 14,
+        "position": 7,
         "turn_id": "00000000-0000-4000-8000-000000000004:local-turn-1",
         "owner": {
           "kind": "sub_agent",
@@ -149,7 +149,7 @@
       "kind": "tool",
       "value": {
         "id": "00000000-0000-4000-8000-000000000004:toolu_read_a",
-        "position": 16,
+        "position": 8,
         "turn_id": "00000000-0000-4000-8000-000000000004:local-turn-1",
         "owner": {
           "kind": "sub_agent",
@@ -167,7 +167,7 @@
       "kind": "tool",
       "value": {
         "id": "00000000-0000-4000-8000-000000000004:toolu_agent_b",
-        "position": 18,
+        "position": 9,
         "turn_id": "00000000-0000-4000-8000-000000000004:local-turn-1",
         "owner": {
           "kind": "sub_agent",
@@ -185,7 +185,7 @@
       "kind": "sub_agent_run",
       "value": {
         "id": "00000000-0000-4000-8000-000000000001:sub-agent:task_b:run-1",
-        "position": 20,
+        "position": 10,
         "sub_agent": "task_b",
         "run": 1,
         "native_run_id": "run_b_1",
@@ -202,7 +202,7 @@
       "kind": "tool",
       "value": {
         "id": "00000000-0000-4000-8000-000000000004:toolu_read_b",
-        "position": 22,
+        "position": 11,
         "turn_id": "00000000-0000-4000-8000-000000000004:local-turn-1",
         "owner": {
           "kind": "sub_agent",
@@ -220,7 +220,7 @@
       "kind": "message",
       "value": {
         "id": "00000000-0000-4000-8000-000000000004:task_b:text-1",
-        "position": 26,
+        "position": 12,
         "role": "assistant",
         "text": "The tests cover the limit.",
         "attachments": [],
@@ -241,7 +241,7 @@
       "kind": "message",
       "value": {
         "id": "00000000-0000-4000-8000-000000000004:task_a:text-2",
-        "position": 30,
+        "position": 13,
         "role": "assistant",
         "text": "The limiter allows 5.",
         "attachments": [],
@@ -262,7 +262,7 @@
       "kind": "message",
       "value": {
         "id": "00000000-0000-4000-8000-000000000004:text-3",
-        "position": 32,
+        "position": 14,
         "role": "assistant",
         "text": "The limiter allows 5 requests and its tests cover it.",
         "attachments": [],
@@ -292,7 +292,7 @@
       "runs": [
         {
           "id": "00000000-0000-4000-8000-000000000001:sub-agent:task_a:run-1",
-          "position": 12,
+          "position": 6,
           "sub_agent": "task_a",
           "run": 1,
           "native_run_id": "run_a_1",
@@ -317,7 +317,7 @@
       "runs": [
         {
           "id": "00000000-0000-4000-8000-000000000001:sub-agent:task_b:run-1",
-          "position": 20,
+          "position": 10,
           "sub_agent": "task_b",
           "run": 1,
           "native_run_id": "run_b_1",

@@ -164,6 +164,25 @@ Prompt at a time and ends its Turn on the Prompt reply. It applies partial
 tool updates by native tool ID and preserves native approval choice IDs until
 a person responds.
 
+Antigravity's sub-agents are child conversations that make tool calls on the
+main agent's session, with IDs of the form `<childId>:call_...` ([ADR
+0029](adr/0029-sub-agents-are-a-lane-of-their-own-in-a-chat.md)). The adapter
+groups those calls by the prefix: a child becomes a sub-agent at its first
+call, its Steps belong to it (an approval it asks names that Step), and it never
+joins the main agent's Steps, text or reasoning. `invoke_subagent`, the main agent's own launch call,
+completes at launch and names no child, so the child's title and brief come from
+it only when exactly one launch call is open when the child appears (several
+parallel launches cannot be told apart, and a wrong brief is worse than none).
+The Chat's model is the sub-agent's. Antigravity holds the Prompt open until the
+children finish and reports neither their messages nor their end, so a
+sub-agent ends with the Prompt (Stopped by the person when the Prompt was
+cancelled) and the descriptor declares no sub-agent text, end or Stop for one.
+Updates that arrive with no Prompt in flight open nothing. The CLI credits a
+write exactly from `ANTIGRAVITY_SOURCE_METADATA`: the descriptor names the
+variable and where the tool call ID is in its JSON, and the Step whose ID ends
+with it is the writer's. Nothing reads Antigravity's files and no child is
+attached with `session/load`.
+
 During ordinary Chat resume, if Antigravity reports missing history for the
 requested Session or an unsupported resume method, the supervisor posts a
 notice and opens an empty Session without replaying the transcript. Other
@@ -358,6 +377,42 @@ within the observed Turn, with the matching agent name, and while no other Chat
 of that harness had an observed Turn running. The host captures the receipt in
 the same transaction as the Turn end, including when contact is lost. Save as
 Document is the ordinary Document-creation workflow applied to a stored response.
+
+The same tags say which agent of the Chat wrote, so a ticket can credit a
+sub-agent (ADR 0029). The credit needs no Turn, so a background sub-agent's
+writes count too, and is read from what is stored when it is asked for. A
+harness that names each command it runs (a descriptor's `call_variable`, Codex's
+`CODEX_TOOL_CALL_ID`) has the CLI record that key with the write; the Step whose
+native ID is the key says who ran it, and a key no Step has credits the Chat
+alone. Otherwise the host tells the core which Steps are shell commands
+(`ChatObservation::ShellStep`) and the core keeps a **window** for each: the
+two feeds' heads when the Step was first seen and when it ended (`chat_step_windows`).
+A write inside one window is that Step's owner's; inside several, the one Step
+whose plain `ticketd` call (parsed from its command) could be that write, when
+only one could; anywhere else it stays with the Chat, with the sub-agent unknown.
+Commands are never changed and printed output is never matched. Only status moves
+and Activities are credited; evidence and Documents are not. Credit is
+device-local, because Chats do not sync: the interface's `credited_to` is filled
+only where the Chat is on the computer, and only for a sub-agent.
+`ticket_write_credits` and `ticket_writing_agents` read it.
+
+**The ticket label.** The desktop command `chat_ticket_agents` answers who is at
+work on a ticket: the main agent of a Chat linked to the ticket while its turn
+runs (waiting for sub-agents or for the person counts as running), and any main
+agent or sub-agent with a credited write on the ticket while it runs, even from
+a Chat not linked to it. Finished, stopped and lost sub-agents and Chats at rest
+never count. The list comes in the order the label reads it: an agent waiting for
+approval first, then Chat by Chat (the most recently active first), each Chat's
+main agent before its sub-agents, the oldest start first. A sub-agent's model is
+the one its own frames reported (Claude's `message.model`, Codex's
+`subAgentActivity.model`) in the session's own words; a main agent's is the
+model its live session reports; with none the interface names the harness. A main
+agent's `doing` is its running Step in words, else "Waiting for N sub-agents". An
+`approval` is a pending request the host still holds, read by the agent that asked.
+The desktop's watcher compares every ticket's list with the last one it announced
+and fires the overview event when the set or a field changes, on a Chat's change
+and on a change of the Workspace (a credited write from the CLI), so a label
+appears, changes and goes without a refresh.
 
 A harness process started for an Automation run also gets the run's ID in
 `TICKETD_AUTOMATION_RUN_ID`. A CLI that inherits a non-blank value logs every ticket

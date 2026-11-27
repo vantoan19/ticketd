@@ -179,6 +179,14 @@ pub struct SubAgentSupport {
     pub stop: bool,
     /// A sub-agent that was lost can be resumed.
     pub resume: bool,
+    /// The environment variable the harness sets on each command it runs, naming that one
+    /// command (Codex's `CODEX_TOOL_CALL_ID`, which is the command Step's item ID). The CLI
+    /// records it with a write, so the write is credited to the exact agent that ran the
+    /// command. `None`: the harness gives no such key.
+    pub call_variable: Option<&'static str>,
+    /// Where the key is inside the variable's value when that is JSON, as the object keys
+    /// to follow (Antigravity: `tool`, `toolCall`, `id`). Empty: the value is the key.
+    pub call_key_path: &'static [&'static str],
 }
 
 pub static CLAUDE_CODE: HarnessDescriptor = HarnessDescriptor {
@@ -245,6 +253,10 @@ pub static CLAUDE_CODE: HarnessDescriptor = HarnessDescriptor {
         end: true,
         stop: false,
         resume: true,
+        // Claude Code gives a sub-agent's command no key of its own: its writes are
+        // credited by commit order.
+        call_variable: None,
+        call_key_path: &[],
     },
 };
 
@@ -299,6 +311,8 @@ pub static CODEX: HarnessDescriptor = HarnessDescriptor {
         end: true,
         stop: false,
         resume: false,
+        call_variable: Some("CODEX_TOOL_CALL_ID"),
+        call_key_path: &[],
     },
 };
 
@@ -370,10 +384,34 @@ pub static ANTIGRAVITY: HarnessDescriptor = HarnessDescriptor {
         end: false,
         stop: false,
         resume: false,
+        // `ANTIGRAVITY_SOURCE_METADATA` is JSON that carries the ID of the tool call that
+        // runs the command (the ID a sub-agent's Step has after its `<childId>:` prefix).
+        call_variable: Some("ANTIGRAVITY_SOURCE_METADATA"),
+        call_key_path: &["tool", "toolCall", "id"],
     },
 };
 
 pub static HARNESS_DESCRIPTORS: &[&HarnessDescriptor] = &[&CLAUDE_CODE, &CODEX, &ANTIGRAVITY];
+
+/// The key the harness that ran this command gave it, read from the environment through
+/// `read` (which returns a variable's value, if it has one): the first declared variable
+/// that is set and holds a key. A JSON value names its key by the descriptor's path; a
+/// value that does not hold one names nothing.
+pub fn call_key(read: impl Fn(&str) -> Option<String>) -> Option<String> {
+    HARNESS_DESCRIPTORS.iter().find_map(|descriptor| {
+        let support = &descriptor.sub_agents;
+        let value = read(support.call_variable?)?;
+        if support.call_key_path.is_empty() {
+            return Some(value);
+        }
+        let mut found = &serde_json::from_str::<serde_json::Value>(&value).ok()?;
+        for key in support.call_key_path {
+            found = found.get(key)?;
+        }
+        let key = found.as_str()?.trim();
+        (!key.is_empty()).then(|| key.to_owned())
+    })
+}
 
 pub fn descriptor(key: &str) -> Option<&'static HarnessDescriptor> {
     find_descriptor(HARNESS_DESCRIPTORS, key)
@@ -392,6 +430,37 @@ pub fn find_descriptor<'a>(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    fn environment<'a>(name: &'a str, value: &'a str) -> impl Fn(&str) -> Option<String> + 'a {
+        move |asked| (asked == name).then(|| value.to_owned())
+    }
+
+    #[test]
+    fn a_plain_call_variable_is_the_key() {
+        let read = environment("CODEX_TOOL_CALL_ID", "exec-1");
+        assert_eq!(call_key(read).as_deref(), Some("exec-1"));
+    }
+
+    #[test]
+    fn a_json_call_variable_gives_the_key_its_path_names() {
+        let metadata = r#"{"tool":{"conversationId":"c-1", "stepIndex":3, "toolCall":{"id":"call_7", "name":"run_command"}}}"#;
+        let read = environment("ANTIGRAVITY_SOURCE_METADATA", metadata);
+        assert_eq!(call_key(read).as_deref(), Some("call_7"));
+    }
+
+    #[test]
+    fn a_value_that_holds_no_key_names_nothing() {
+        for value in [
+            "not json",
+            "{}",
+            r#"{"tool":{"toolCall":{}}}"#,
+            r#"{"tool":{"toolCall":{"id":"  "}}}"#,
+            r#"{"tool":{"toolCall":{"id":7}}}"#,
+        ] {
+            let read = environment("ANTIGRAVITY_SOURCE_METADATA", value);
+            assert_eq!(call_key(read), None, "{value}");
+        }
+    }
 
     /// Every mode a Chat can pick says in one sentence what it can touch, so the
     /// Permissions menu never shows a bare name next to a described one.

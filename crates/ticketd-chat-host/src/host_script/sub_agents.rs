@@ -322,7 +322,9 @@ const STORED_MESSAGES: &str = concat!(
 
 /// `text` with each distinct identifier the host chose (`8-4-4-4-12` hex) replaced by
 /// `00000000-0000-4000-8000-<n>` in order of appearance, and every time (which is when the
-/// test ran) by one steady time.
+/// test ran) by one steady time, and every `position` by its rank among the distinct
+/// positions: which number a record gets depends on how its neighbours interleave, which
+/// varies run to run under load, while their order does not.
 pub(super) fn made_stable(text: &str) -> String {
     let bytes = text.as_bytes();
     let hex = |i: usize| bytes.get(i).is_some_and(u8::is_ascii_hexdigit);
@@ -367,7 +369,33 @@ pub(super) fn made_stable(text: &str) -> String {
             at = end;
         }
     }
-    stable
+    ranked_positions(&stable)
+}
+
+/// `text` with the value of each `"position": <n>` line replaced by its rank (1, 2, ...)
+/// among the distinct values in the text; equal positions stay equal, order is kept.
+fn ranked_positions(text: &str) -> String {
+    let value = |line: &str| {
+        line.trim_start()
+            .strip_prefix("\"position\": ")
+            .map(|rest| rest.trim_end_matches(',').to_owned())
+            .and_then(|rest| rest.parse::<u64>().ok())
+    };
+    let mut distinct: Vec<u64> = text.lines().filter_map(value).collect();
+    distinct.sort_unstable();
+    distinct.dedup();
+    text.lines()
+        .map(|line| match value(line) {
+            Some(n) => {
+                let rank = distinct.binary_search(&n).expect("it was collected") + 1;
+                let indent = &line[..line.len() - line.trim_start().len()];
+                let comma = if line.ends_with(',') { "," } else { "" };
+                format!("{indent}\"position\": {rank}{comma}")
+            }
+            None => line.to_owned(),
+        })
+        .collect::<Vec<_>>()
+        .join("\n")
 }
 
 /// The stored history after `fixture` played, compared with the file at `path` (or
@@ -393,6 +421,33 @@ async fn assert_pinned(process: [super::Fixture; 2], prompt: &str, path: &str) {
         kept.trim_end() == stored,
         "the stored history changed; if that is intended, regenerate {path} with TICKETD_UPDATE_VIEW_FIXTURES=1"
     );
+}
+
+#[tokio::test(start_paused = true)]
+async fn the_stored_history_of_a_nested_sub_agent_is_the_file_the_desktop_builds_its_view_from() {
+    assert_pinned(
+        [
+            fixture!("claude", "handshake"),
+            fixture!("claude", "sub_agent_nested"),
+        ],
+        "Review the rate limiter",
+        STORED,
+    )
+    .await;
+}
+
+#[tokio::test(start_paused = true)]
+async fn the_stored_history_of_a_sub_agent_that_speaks_is_the_file_the_desktop_builds_its_view_from()
+ {
+    assert_pinned(
+        [
+            fixture!("claude", "handshake"),
+            fixture!("claude", "sub_agent_messages"),
+        ],
+        MESSAGES_PROMPT,
+        STORED_MESSAGES,
+    )
+    .await;
 }
 
 // --- Sub-agents in the background, outside any turn -------------------------------------
@@ -909,31 +964,4 @@ pub(super) mod approvals {
         assert!(h.live().await.interactions.is_empty());
         assert_eq!(h.attention().await.rank, Rank::Done);
     }
-}
-
-#[tokio::test(start_paused = true)]
-async fn the_stored_history_of_a_nested_sub_agent_is_the_file_the_desktop_builds_its_view_from() {
-    assert_pinned(
-        [
-            fixture!("claude", "handshake"),
-            fixture!("claude", "sub_agent_nested"),
-        ],
-        "Review the rate limiter",
-        STORED,
-    )
-    .await;
-}
-
-#[tokio::test(start_paused = true)]
-async fn the_stored_history_of_a_sub_agent_that_speaks_is_the_file_the_desktop_builds_its_view_from()
- {
-    assert_pinned(
-        [
-            fixture!("claude", "handshake"),
-            fixture!("claude", "sub_agent_messages"),
-        ],
-        MESSAGES_PROMPT,
-        STORED_MESSAGES,
-    )
-    .await;
 }
