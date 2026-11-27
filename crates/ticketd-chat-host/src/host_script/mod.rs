@@ -129,9 +129,12 @@ use crate::{
     SendMode, WorkspaceOpener,
 };
 use ticketd_core::{
-    Chat, ChatItem, ChatMessage, ChatRole, ChatTurn, NewChat, Workspace, WorkspaceSession,
+    Chat, ChatItem, ChatMessage, ChatOwner, ChatRole, ChatSubAgent, ChatTurn, NewChat, Workspace,
+    WorkspaceSession,
 };
 
+#[cfg(test)]
+mod sub_agents;
 #[cfg(test)]
 mod tests;
 
@@ -713,12 +716,66 @@ impl HostScript {
             .items
     }
 
-    /// One short line per stored item, in history order:
+    /// One short line per item of the main agent's transcript, in history order:
     /// `you: text`, `agent: text` (`(streaming)` while cut short), `turn <state>`,
     /// `tool <name> <state>`, `approval|question "<prompt>" <state>`, `notice: text`,
-    /// `session <id>`.
+    /// `session <id>`, and `sub-agent "<title>" <state>` for each run of a sub-agent
+    /// the main agent started. A sub-agent's own Steps are not in it: they are in
+    /// `sub_agent_transcript`, as the view shows them only in the sub-agent's view.
     pub fn transcript(&self) -> Vec<String> {
-        self.items().iter().map(line).collect()
+        let snapshot = self
+            .core()
+            .chat_snapshot(&self.chat.id, 5_000)
+            .expect("the Chat's history");
+        snapshot
+            .items
+            .iter()
+            .filter(|item| !matches!(item, ChatItem::Tool(tool) if tool.owner != ChatOwner::Main))
+            .filter(|item| match item {
+                // A nested sub-agent's row is in its parent's view.
+                ChatItem::SubAgentRun(run) => snapshot
+                    .sub_agents
+                    .iter()
+                    .find(|record| record.native_id == run.sub_agent)
+                    .is_some_and(|record| record.parent.is_none()),
+                _ => true,
+            })
+            .map(|item| line(item, &snapshot.sub_agents))
+            .collect()
+    }
+
+    /// The Chat's sub-agents, oldest first.
+    pub fn sub_agents(&self) -> Vec<ChatSubAgent> {
+        self.core()
+            .chat_snapshot(&self.chat.id, 5_000)
+            .expect("the Chat's history")
+            .sub_agents
+    }
+
+    /// What one sub-agent's own view shows, in history order: `tool <name> <state>` for
+    /// each Step it ran and `sub-agent "<title>" <state>` for each sub-agent it started.
+    pub fn sub_agent_transcript(&self, native_id: &str) -> Vec<String> {
+        let snapshot = self
+            .core()
+            .chat_snapshot(&self.chat.id, 5_000)
+            .expect("the Chat's history");
+        snapshot
+            .items
+            .iter()
+            .filter(|item| match item {
+                ChatItem::Tool(tool) => matches!(
+                    &tool.owner,
+                    ChatOwner::SubAgent { native_id: owner } if owner == native_id
+                ),
+                ChatItem::SubAgentRun(run) => snapshot
+                    .sub_agents
+                    .iter()
+                    .find(|record| record.native_id == run.sub_agent)
+                    .is_some_and(|record| record.parent.as_deref() == Some(native_id)),
+                _ => false,
+            })
+            .map(|item| line(item, &snapshot.sub_agents))
+            .collect()
     }
 
     /// The text of the Chat's stored notices.
@@ -816,7 +873,7 @@ impl HostScript {
     }
 }
 
-fn line(item: &ChatItem) -> String {
+fn line(item: &ChatItem, sub_agents: &[ChatSubAgent]) -> String {
     match item {
         ChatItem::Session(session) => format!("session {}", session.native_session_id),
         ChatItem::Message(message) => {
@@ -844,5 +901,17 @@ fn line(item: &ChatItem) -> String {
             format!("{:?}", request.state).to_lowercase()
         ),
         ChatItem::Notice(notice) => format!("notice: {}", notice.text),
+        ChatItem::SubAgentRun(run) => {
+            let title = sub_agents
+                .iter()
+                .find(|record| record.native_id == run.sub_agent)
+                .and_then(|record| record.said("description"))
+                .unwrap_or_else(|| "Sub-agent".to_owned());
+            let resumed = if run.run > 1 { " (resumed)" } else { "" };
+            format!(
+                "sub-agent {title:?}{resumed} {}",
+                format!("{:?}", run.state).to_lowercase()
+            )
+        }
     }
 }

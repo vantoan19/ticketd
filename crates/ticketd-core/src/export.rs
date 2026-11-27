@@ -134,6 +134,14 @@ const EXPORTED: &[(&str, &str)] = &[
         "chat_notices",
         "id, chat_id, position, text, from_harness, created_at",
     ),
+    (
+        "chat_sub_agents",
+        "id, chat_id, native_id, parent_native_id, tool_id, background, payload, created_at",
+    ),
+    (
+        "chat_sub_agent_runs",
+        "id, chat_id, sub_agent_id, position, run, native_run_id, turn_id, state, stopped_by, stop_reason, detail, started_at, ended_at",
+    ),
     ("automations", "id, name, definition, trashed, created_at"),
     (
         "automation_agents",

@@ -299,6 +299,8 @@ type EventBody =
       uuid: string | null;
       message_id: string | null;
       parent_tool_use_id: string | null;
+      /** The model the message reports, e.g. a sub-agent's own (null when it says none). */
+      model: string | null;
       blocks: ContentBlock[];
       error: string | null;
       aborted: boolean;
@@ -384,6 +386,53 @@ type EventBody =
       session_id: string | null;
     }
   | {
+      /**
+       * A sub-agent began, or was resumed for another run: an agent-kind task. Shell
+       * and monitor tasks, and ambient or transcript-less ones, are not sub-agents
+       * and arrive as `sdk_message_unmapped`. `tool_use_id` is the `Agent` tool call
+       * that started it, and what its frames name as `parent_tool_use_id`.
+       */
+      event: "sub_agent_started";
+      generation: number;
+      task_id: string;
+      run_id: string | null;
+      tool_use_id: string | null;
+      /** The sub-agent task whose agent started this one; null for the main agent's. */
+      parent_task_id: string | null;
+      description: string;
+      subagent_type: string | null;
+      /** Registered in the background rather than blocking the `Agent` tool call. */
+      background: boolean;
+      /** What it was asked, cut to `MAX_SUB_AGENT_PROMPT_CHARS`. */
+      prompt: string | null;
+      prompt_truncated: boolean;
+      spawn_depth: number | null;
+    }
+  | {
+      /** A change to a sub-agent's task state. Only what the SDK patched is set. */
+      event: "sub_agent_updated";
+      generation: number;
+      task_id: string;
+      run_id: string | null;
+      status: SubAgentTaskStatus | null;
+      description: string | null;
+      /** Set when the task moved to (or out of) the background. */
+      background: boolean | null;
+      error: string | null;
+    }
+  | {
+      /** A sub-agent run ended, as the SDK's task notification says. */
+      event: "sub_agent_ended";
+      generation: number;
+      task_id: string;
+      run_id: string | null;
+      tool_use_id: string | null;
+      status: "completed" | "failed" | "stopped";
+      /** Set when it did not end in an ordinary way: `worker_restart`. */
+      reason: string | null;
+      summary: string;
+    }
+  | {
       event: "sdk_message_unmapped";
       generation: number;
       sdk_type: string | null;
@@ -404,6 +453,10 @@ type EventBody =
       error: ErrorInfo | null;
       unresolved_inputs: { submission_id: string; evidence: InputEvidence }[];
     };
+
+/** A sub-agent task's status, as the SDK's `task_updated` patch names it. */
+export type SubAgentTaskStatus =
+  "pending" | "running" | "completed" | "failed" | "killed" | "paused";
 
 export type BridgeEvent = { v: typeof PROTOCOL_VERSION } & EventBody;
 /** An event before the bridge stamps the protocol version on it. */

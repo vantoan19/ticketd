@@ -198,6 +198,22 @@ its harness started (format 105), and its turn is optional: work a sub-agent doe
 outside the main agent's turns has no turn. The owner is the harness's native ID of
 the sub-agent within the Chat, and absent for the main agent.
 
+A sub-agent is a record of its own, keyed by the Chat and that native ID. It holds the
+sub-agent that started it (for nesting), the Step that started it, whether it runs in
+the background, and the harness's own words about it (description, type, prompt and
+model) as one stored payload: title, type and model are read from the payload when a
+view is built, as Step kinds are. Each time the harness starts or resumes it is a run,
+which is a row in the Chat's history, so it shows where it began; a run knows the turn
+that was active then, how it ended and who stopped it. Output of an earlier run that
+arrives late is dropped. The Steps a sub-agent owns belong to the run they were recorded
+in, told by their position between the runs'. A foreground run ends with the turn that
+started it, the way the turn ended, and every run still going when contact is lost is
+lost. For Claude Code the bridge forwards agent-kind task events as typed events (shells,
+monitors, ambient and transcript-less tasks are not sub-agents) and tags every frame with
+the tool use that started the task. The adapter routes a tagged frame to its
+sub-agent; a frame that arrives before its task is announced waits for it. A sub-agent's
+to-do list is one of its own Steps: only the main agent's plan is the turn's.
+
 The storage half of this design exists: the core's Chat workflows
 (`crates/ticketd-core/src/chats.rs`) own these records and the change log. Chat
 tables do not move the workspace change token, so streaming a turn does not make

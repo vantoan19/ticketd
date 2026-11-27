@@ -3,8 +3,8 @@ use ticketd_core::{
     CHAT_TOOL_OUTPUT_LIMIT, Chat, ChatCatchUp, ChatDelivery, ChatDeliveryDecision, ChatInputChange,
     ChatInputStanding, ChatInteractionKind, ChatInteractionState, ChatItem, ChatLink, ChatLinkKind,
     ChatListFilter, ChatMessage, ChatObservation, ChatOwner, ChatQueueEdit, ChatRecord,
-    ChatSessionOrigin, ChatSubmissionIntent, ChatToolState, ChatTurnState, Error, NewChat,
-    Workspace,
+    ChatSessionOrigin, ChatSubAgent, ChatSubAgentRun, ChatSubAgentState, ChatSubAgentStopper,
+    ChatSubmissionIntent, ChatToolState, ChatTurnState, Error, NewChat, Workspace,
 };
 
 /// A Workspace file as format `version` left it, holding one Chat (`chat-1`) with one
@@ -1274,6 +1274,7 @@ fn saved_input_possible_submission_acknowledgment_processing_and_outcome_are_sep
             ChatItem::Tool(_) => "tool",
             ChatItem::Interaction(_) => "interaction",
             ChatItem::Notice(_) => "notice",
+            ChatItem::SubAgentRun(_) => "sub-agent run",
         })
         .collect();
     assert_eq!(kinds, ["message", "turn", "message", "tool", "interaction"]);
@@ -1454,7 +1455,10 @@ fn losing_contact_marks_work_uncertain_and_keeps_the_queue_without_dispatching()
                     ("Partial", false)
                 );
             }
-            ChatItem::Message(_) | ChatItem::Session(_) | ChatItem::Notice(_) => {}
+            ChatItem::Message(_)
+            | ChatItem::Session(_)
+            | ChatItem::Notice(_)
+            | ChatItem::SubAgentRun(_) => {}
         }
     }
     assert_eq!(
@@ -3222,6 +3226,7 @@ fn history_pages_include_turnless_records() {
             ChatItem::Tool(item) => item.position,
             ChatItem::Interaction(item) => item.position,
             ChatItem::Notice(item) => item.position,
+            ChatItem::SubAgentRun(item) => item.position,
         })
         .collect();
     let newest = *positions.iter().max().unwrap();
@@ -3350,4 +3355,288 @@ fn upgrading_from_format_104_makes_existing_steps_and_approvals_main_agent_work(
     record_turnless_sub_agent_work(&mut workspace, &chat);
     let (tools, _) = steps_and_approvals(&workspace, &chat);
     assert_eq!(tools.len(), 2);
+}
+
+// --- Sub-agents ---------------------------------------------------------------------
+
+fn start_sub_agent(native_id: &str, run: Option<&str>, turn: Option<&str>) -> ChatObservation {
+    ChatObservation::SubAgentStarted {
+        native_id: native_id.into(),
+        parent: None,
+        tool_id: Some("tool-agent".into()),
+        turn_id: turn.map(str::to_owned),
+        native_run_id: run.map(str::to_owned),
+        background: false,
+        payload: r#"{"description":"Find limiter bypasses","subagent_type":"Explore"}"#.into(),
+    }
+}
+
+fn end_sub_agent(native_id: &str, run: Option<&str>, state: ChatSubAgentState) -> ChatObservation {
+    ChatObservation::SubAgentEnded {
+        native_id: native_id.into(),
+        native_run_id: run.map(str::to_owned),
+        state,
+        stopped_by: None,
+        stop_reason: None,
+        detail: None,
+    }
+}
+
+#[allow(clippy::unwrap_used)]
+fn sub_agents(workspace: &Workspace, chat: &Chat) -> Vec<ChatSubAgent> {
+    workspace.chat_snapshot(&chat.id, 500).unwrap().sub_agents
+}
+
+#[allow(clippy::unwrap_used)]
+fn run_rows(workspace: &Workspace, chat: &Chat) -> Vec<ChatSubAgentRun> {
+    workspace
+        .chat_snapshot(&chat.id, 500)
+        .unwrap()
+        .items
+        .into_iter()
+        .filter_map(|item| match item {
+            ChatItem::SubAgentRun(run) => Some(run),
+            _ => None,
+        })
+        .collect()
+}
+
+#[test]
+fn a_sub_agent_is_one_record_per_chat_and_native_id_with_its_parent_and_starting_step() {
+    let dir = tempfile::tempdir().unwrap();
+    let (mut workspace, chat) = workspace_with_chat(&dir);
+    start_turn(&mut workspace, &chat, "Review it", "turn-1");
+    workspace
+        .record_chat_observations(
+            &chat.id,
+            vec![
+                start_sub_agent("agent-1", Some("run-a"), Some("turn-1")),
+                ChatObservation::SubAgentStarted {
+                    native_id: "agent-2".into(),
+                    parent: Some("agent-1".into()),
+                    tool_id: Some("tool-nested".into()),
+                    turn_id: Some("turn-1".into()),
+                    native_run_id: None,
+                    background: true,
+                    payload: r#"{"description":"Check the tests"}"#.into(),
+                },
+                // The same start again changes nothing.
+                start_sub_agent("agent-1", Some("run-a"), Some("turn-1")),
+            ],
+        )
+        .unwrap();
+    let records = sub_agents(&workspace, &chat);
+    assert_eq!(records.len(), 2);
+    let first = &records[0];
+    assert_eq!(first.native_id, "agent-1");
+    assert_eq!(first.parent, None);
+    assert_eq!(first.tool_id.as_deref(), Some("tool-agent"));
+    assert_eq!(
+        first.said("description").as_deref(),
+        Some("Find limiter bypasses")
+    );
+    assert_eq!(first.said("subagent_type").as_deref(), Some("Explore"));
+    assert!(!first.background);
+    assert_eq!(first.runs.len(), 1);
+    assert_eq!(
+        first.latest().map(|run| run.state),
+        Some(ChatSubAgentState::Running)
+    );
+    assert_eq!(
+        first.latest().and_then(|run| run.turn_id.as_deref()),
+        Some("turn-1")
+    );
+    let nested = &records[1];
+    assert_eq!(nested.parent.as_deref(), Some("agent-1"));
+    assert!(nested.background);
+    // Each run is a row of the Chat's history, in the order they began.
+    let rows = run_rows(&workspace, &chat);
+    assert_eq!(
+        rows.iter()
+            .map(|run| run.sub_agent.as_str())
+            .collect::<Vec<_>>(),
+        ["agent-1", "agent-2"]
+    );
+    assert!(rows[0].position < rows[1].position);
+}
+
+#[test]
+fn a_resumed_sub_agent_adds_a_run_and_a_late_frame_of_the_earlier_run_is_dropped() {
+    let dir = tempfile::tempdir().unwrap();
+    let (mut workspace, chat) = workspace_with_chat(&dir);
+    workspace
+        .record_chat_observations(
+            &chat.id,
+            vec![
+                start_sub_agent("agent-1", Some("run-a"), None),
+                end_sub_agent("agent-1", Some("run-a"), ChatSubAgentState::Completed),
+                start_sub_agent("agent-1", Some("run-b"), None),
+            ],
+        )
+        .unwrap();
+    let record = &sub_agents(&workspace, &chat)[0];
+    assert_eq!(
+        record
+            .runs
+            .iter()
+            .map(|run| (run.run, run.state))
+            .collect::<Vec<_>>(),
+        [
+            (1, ChatSubAgentState::Completed),
+            (2, ChatSubAgentState::Running)
+        ]
+    );
+    // The notification of run a arrives again, late: run b is not ended by it.
+    workspace
+        .record_chat_observations(
+            &chat.id,
+            vec![end_sub_agent(
+                "agent-1",
+                Some("run-a"),
+                ChatSubAgentState::Failed,
+            )],
+        )
+        .unwrap();
+    let record = &sub_agents(&workspace, &chat)[0];
+    assert_eq!(
+        record.latest().map(|run| run.state),
+        Some(ChatSubAgentState::Running)
+    );
+    assert_eq!(record.runs[0].state, ChatSubAgentState::Completed);
+    assert_eq!(run_rows(&workspace, &chat).len(), 2);
+}
+
+#[test]
+fn a_stopped_run_records_who_stopped_it_and_an_ended_run_stays_ended() {
+    let dir = tempfile::tempdir().unwrap();
+    let (mut workspace, chat) = workspace_with_chat(&dir);
+    workspace
+        .record_chat_observations(
+            &chat.id,
+            vec![
+                start_sub_agent("agent-1", Some("run-a"), None),
+                ChatObservation::SubAgentEnded {
+                    native_id: "agent-1".into(),
+                    native_run_id: Some("run-a".into()),
+                    state: ChatSubAgentState::Stopped,
+                    stopped_by: Some(ChatSubAgentStopper::MainAgent),
+                    stop_reason: Some("ignored for the main agent".into()),
+                    detail: Some("ignored for a stopped run".into()),
+                },
+                end_sub_agent("agent-1", Some("run-a"), ChatSubAgentState::Completed),
+            ],
+        )
+        .unwrap();
+    let run = &sub_agents(&workspace, &chat)[0].runs[0];
+    assert_eq!(run.state, ChatSubAgentState::Stopped);
+    assert_eq!(run.stopped_by, Some(ChatSubAgentStopper::MainAgent));
+    assert!(run.ended_at.is_some());
+    // A run cannot end as running.
+    assert!(
+        workspace
+            .record_chat_observations(
+                &chat.id,
+                vec![end_sub_agent("agent-1", None, ChatSubAgentState::Running)],
+            )
+            .is_err()
+    );
+}
+
+#[test]
+fn the_foreground_runs_of_a_turn_end_with_it_and_a_background_run_goes_on() {
+    let dir = tempfile::tempdir().unwrap();
+    let (mut workspace, chat) = workspace_with_chat(&dir);
+    start_turn(&mut workspace, &chat, "Review it", "turn-1");
+    workspace
+        .record_chat_observations(
+            &chat.id,
+            vec![
+                start_sub_agent("fore", Some("run-a"), Some("turn-1")),
+                ChatObservation::SubAgentStarted {
+                    native_id: "back".into(),
+                    parent: None,
+                    tool_id: None,
+                    turn_id: Some("turn-1".into()),
+                    native_run_id: Some("run-b".into()),
+                    background: true,
+                    payload: "{}".into(),
+                },
+                ChatObservation::TurnEnded {
+                    turn_id: "turn-1".into(),
+                    state: ChatTurnState::Interrupted,
+                    detail: None,
+                    problem: None,
+                    problem_resets_at: None,
+                    ending: Some("stopped_by_ticketd:turned_off".into()),
+                },
+            ],
+        )
+        .unwrap();
+    let records = sub_agents(&workspace, &chat);
+    let fore = records[0].latest().unwrap();
+    assert_eq!(
+        (fore.state, fore.stopped_by, fore.stop_reason.as_deref()),
+        (
+            ChatSubAgentState::Stopped,
+            Some(ChatSubAgentStopper::Ticketd),
+            Some("turned_off")
+        )
+    );
+    assert_eq!(
+        records[1].latest().unwrap().state,
+        ChatSubAgentState::Running
+    );
+
+    // Contact lost: nothing says whether the background one still runs.
+    workspace
+        .mark_chat_contact_lost(Some(&chat.id), "ticketd quit", "contact_lost")
+        .unwrap();
+    assert_eq!(
+        sub_agents(&workspace, &chat)[1].latest().unwrap().state,
+        ChatSubAgentState::Lost
+    );
+}
+
+#[test]
+fn a_sub_agents_change_reaches_a_follower_as_its_record_and_its_run() {
+    let dir = tempfile::tempdir().unwrap();
+    let (mut workspace, chat) = workspace_with_chat(&dir);
+    let since = workspace.chat_change_sequence().unwrap();
+    workspace
+        .record_chat_observations(
+            &chat.id,
+            vec![start_sub_agent("agent-1", Some("run-a"), None)],
+        )
+        .unwrap();
+    let ticketd_core::ChatCatchUp::Changes { changes, .. } =
+        workspace.chat_changes(&chat.id, since, 100).unwrap()
+    else {
+        panic!("expected changes");
+    };
+    let kinds: Vec<&str> = changes
+        .iter()
+        .map(|change| match &change.record {
+            ChatRecord::SubAgent(_) => "record",
+            ChatRecord::Item(ChatItem::SubAgentRun(_)) => "run",
+            _ => "other",
+        })
+        .collect();
+    assert_eq!(kinds, ["record", "run"]);
+}
+
+#[test]
+fn upgrading_from_format_104_gives_a_chat_no_sub_agents_and_the_tables_take_them() {
+    let dir = tempfile::tempdir().unwrap();
+    let path = dir.path().join("workspace.sqlite3");
+    old_chat_workspace(&path, 104, "completed");
+    let mut workspace = Workspace::open(&path).unwrap();
+    let chat = workspace.chat("chat-1").unwrap();
+    assert!(sub_agents(&workspace, &chat).is_empty());
+    workspace
+        .record_chat_observations(
+            &chat.id,
+            vec![start_sub_agent("agent-1", None, Some("turn-1"))],
+        )
+        .unwrap();
+    assert_eq!(sub_agents(&workspace, &chat).len(), 1);
 }

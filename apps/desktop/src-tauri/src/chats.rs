@@ -1870,7 +1870,8 @@ impl Chats {
         let projects = self.projects.subscribe();
         let (attached, subscription) = host.attach(chat_id).await?;
         let workspace = self.workspace()?;
-        let tracker = Tracker::from_items(&attached.snapshot.items);
+        let tracker =
+            Tracker::from_snapshot(&attached.snapshot.items, &attached.snapshot.sub_agents);
         let chat = attached.snapshot.chat;
         let mut around = surroundings(
             &workspace,
@@ -1980,8 +1981,16 @@ impl Chats {
                 Update::Chat(Some(ChatUpdate::Changes(changes))) => {
                     let active = view.chat.active_turn.as_ref().map(|turn| turn.id.clone());
                     let mut records = Vec::new();
+                    // A sub-agent's record first: its runs and Steps are read by it.
+                    for change in &changes {
+                        if let ChatRecord::SubAgent(record) = &change.record {
+                            view.tracker.note_sub_agent(record);
+                        }
+                    }
                     for change in changes {
                         match change.record {
+                            // Read above; what shows of it is told with the Chat's state.
+                            ChatRecord::SubAgent(_) => {}
                             ChatRecord::Chat(chat) => {
                                 view.chat = chat;
                                 view.around = None;
@@ -2005,6 +2014,10 @@ impl Chats {
                                     view.around = None;
                                 }
                                 view.tracker.note(&item);
+                                // A run that moved changes how the Steps it ran read.
+                                if let ChatItem::SubAgentRun(run) = &item {
+                                    records.extend(view.tracker.sub_agent_steps(&run.sub_agent));
+                                }
                                 records.push(item);
                             }
                         }
