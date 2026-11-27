@@ -1669,6 +1669,23 @@ fn a_late_end_of_an_older_turn_leaves_the_current_turns_approvals_and_commands_a
     )));
 }
 
+/// Terminal cleanup reaches the whole thread: it is refused for a turn the child has
+/// left behind, even when the child's later turn is over too.
+#[test]
+fn terminal_cleanup_is_refused_for_a_turn_a_later_turn_has_replaced_even_when_it_ended() {
+    let mut session = Session::default();
+    open_thread(&mut session);
+    let started =
+        |turn: &str| json!({"threadId": "thr_c", "turn": {"id": turn, "rootTurnId": "turn_1"}});
+    let ended = |turn: &str| json!({"threadId": "thr_c", "turn": {"id": turn, "status": "completed", "items": [], "error": null}});
+    session.notification("turn/started", &started("turn_a"));
+    assert!(session.child_cleanup_asked("thr_c", "turn_a").is_ok());
+    session.notification("turn/started", &started("turn_b"));
+    session.notification("turn/completed", &ended("turn_b"));
+    assert!(session.child_cleanup_asked("thr_c", "turn_a").is_err());
+    assert!(session.child_cleanup_asked("thr_c", "turn_b").is_ok());
+}
+
 fn unattended(edit_files: bool, use_web: bool) -> crate::Unattended {
     crate::Unattended {
         run_id: "run-1".into(),

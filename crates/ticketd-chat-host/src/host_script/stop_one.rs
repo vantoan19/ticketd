@@ -267,8 +267,36 @@ mod codex {
         let HostError::SubAgentNotStopped(reason) = refused else {
             panic!("{refused:?}");
         };
-        assert!(reason.contains("commands"), "{reason}");
+        assert!(reason.contains("commands ended"), "{reason}");
         assert_eq!(run(&h, &first).state, ChatSubAgentState::Stopped);
+    }
+
+    /// Stopping a sub-agent also interrupts the sub-agents it started. When one of those
+    /// interrupts is not confirmed, the Stop is not a success: that sub-agent may go on.
+    #[tokio::test(start_paused = true)]
+    async fn a_stop_whose_nested_interrupt_is_not_confirmed_is_not_a_success() {
+        let mut h = HostScript::codex()
+            .process([
+                fixture!("codex", "handshake"),
+                fixture!("codex", "sub_agent_stop_one_nested_unconfirmed"),
+            ])
+            .start();
+        h.send(ASK).await;
+        h.play_to("two sub-agents run commands").await;
+        let first = h
+            .sub_agents()
+            .into_iter()
+            .map(|record| record.native_id)
+            .min()
+            .unwrap();
+
+        let refused = h
+            .stop_sub_agent_then_refused(&first, "the first sub-agent was stopped")
+            .await;
+        let HostError::SubAgentNotStopped(reason) = refused else {
+            panic!("{refused:?}");
+        };
+        assert!(reason.contains("started"), "{reason}");
     }
 
     /// Cleaning a child's terminals reaches the whole thread: it is sent only while the turn
