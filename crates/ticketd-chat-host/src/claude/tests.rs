@@ -461,6 +461,34 @@ async fn cancellation_invalidates_answers_even_when_one_is_already_on_its_way() 
 }
 
 #[tokio::test(start_paused = true)]
+async fn a_refused_input_does_not_hide_the_origin_of_the_turn_the_harness_starts_by_itself() {
+    let (mut peer, runtime, mut events) = open().await;
+    let refusal = |command: &Value| {
+        json!({"v": 1, "event": "command_rejected", "id": command["id"],
+            "code": "turn_active", "message": "a turn is active"})
+    };
+    let (outcome, ()) = tokio::join!(runtime.submit(start_turn("sub-1", "hello")), async {
+        let command = peer.written().await;
+        peer.send(&format!("{}\n", refusal(&command))).await;
+    });
+    assert!(matches!(outcome, DispatchOutcome::Rejected { .. }));
+    drain(&mut events).await;
+    // The bridge does not hold the input, so output with none behind it is the harness's.
+    let output = json!({"v": 1, "event": "assistant_content", "generation": 7,
+        "parent_tool_use_id": null, "model": "claude-haiku-5-5",
+        "blocks": [{"type": "text", "text": "Back."}]});
+    peer.send(&format!("{output}\n")).await;
+    let started = drain(&mut events)
+        .await
+        .into_iter()
+        .find_map(|event| match event {
+            EventKind::TurnStarted { origin, .. } => Some(origin),
+            _ => None,
+        });
+    assert!(matches!(started, Some(Some(_))), "{started:?}");
+}
+
+#[tokio::test(start_paused = true)]
 async fn a_result_resolves_the_inputs_it_names_and_no_others() {
     let (mut peer, runtime, mut events) = open().await;
     peer.load(fixture!("merged_inputs"));
@@ -1957,6 +1985,84 @@ mod sub_agents {
         assert!(
             events.iter().any(|event| matches!(event,
                 EventKind::InteractionResolved { request, .. } if request.0 == "q1")),
+            "{events:?}"
+        );
+    }
+
+    #[test]
+    fn a_new_runs_report_is_not_dropped_for_repeating_the_last_runs() {
+        let launch = |run: &str| {
+            json!({"task_id": "t1", "run_id": run, "tool_use_id": "toolu_a", "parent_task_id": null,
+                   "description": "Look", "subagent_type": "Explore", "background": true,
+                   "prompt": "Look around.", "spawn_depth": 1})
+        };
+        let ended = |run: &str| {
+            json!({"task_id": "t1", "run_id": run, "tool_use_id": "toolu_a", "status": "completed",
+                   "reason": null, "summary": "No changes."})
+        };
+        let mut session = Session::default();
+        session.event("sub_agent_started", &launch("r1"));
+        let (events, _) = session
+            .event("sub_agent_ended", &ended("r1"))
+            .expect("modeled");
+        assert_eq!(messages(&events), ["No changes."]);
+        session.event("sub_agent_started", &launch("r2"));
+        let (events, _) = session
+            .event("sub_agent_ended", &ended("r2"))
+            .expect("modeled");
+        assert_eq!(messages(&events), ["No changes."]);
+        // The same run's repeat is still said once.
+        let (events, _) = session
+            .event("sub_agent_ended", &ended("r2"))
+            .expect("modeled");
+        assert!(messages(&events).is_empty(), "{events:?}");
+    }
+
+    #[test]
+    fn a_denial_for_a_background_sub_agents_tool_outlives_the_turn() {
+        use crate::{ApprovalDecision, InteractionAnswer, NativeRequestId, ToolStatus};
+        let mut session = Session::default();
+        session.event("sub_agent_started", &started("t1", "toolu_a", true));
+        session.event(
+            "assistant_content",
+            &said(
+                "toolu_a",
+                json!({"type": "tool_use", "id": "toolu_r", "name": "Bash", "input": {"command": "rm -rf x"}}),
+            ),
+        );
+        session.event(
+            "permission_request",
+            &json!({"request_id": "req-1", "tool_name": "Bash", "tool_use_id": "toolu_r",
+                    "agent_id": "t1", "input": {"command": "rm -rf x"}}),
+        );
+        session
+            .answer(
+                &NativeRequestId::new("req-1"),
+                &InteractionAnswer::Approval(ApprovalDecision::Deny),
+            )
+            .expect("live");
+        session.event(
+            "assistant_content",
+            &json!({"parent_tool_use_id": null, "blocks": [{"type": "text", "text": "Waiting."}]}),
+        );
+        session.event(
+            "turn_result",
+            &json!({"subtype": "success", "submission_ids": []}),
+        );
+        let (events, _) = session
+            .event(
+                "tool_result",
+                &json!({"tool_use_id": "toolu_r", "parent_tool_use_id": "toolu_a", "is_error": true, "text": "denied"}),
+            )
+            .expect("modeled");
+        assert!(
+            events.iter().any(|event| matches!(
+                event,
+                EventKind::SubAgentToolUpdated {
+                    status: ToolStatus::Declined,
+                    ..
+                }
+            )),
             "{events:?}"
         );
     }

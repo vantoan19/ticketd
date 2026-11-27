@@ -771,6 +771,10 @@ fn rejected(state: &mut State, id: &str, event: &Value) -> Vec<EventKind> {
             None => unexpected(),
         },
         Kind::Submit(submission) => {
+            // Unless the bridge still holds an earlier input of that ID, it holds nothing.
+            if code != "duplicate_submission" {
+                state.session.input_refused(&submission.0);
+            }
             if waiter_gone(command.waiter, reason.clone()) {
                 return vec![EventKind::SubmissionEvidence {
                     submission,
