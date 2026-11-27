@@ -1,6 +1,8 @@
 //! Test support shared by the adapters: the provider side of a scripted process. A
 //! fixture is a JSON-lines transcript of `client` frames the adapter must write,
 //! `server` frames the provider sends, and `mark` lines where the test acts.
+//!
+//! `crate::host_script` builds on this to run a whole Chat host over a fixture.
 
 use std::collections::VecDeque;
 use std::sync::Arc;
@@ -15,13 +17,33 @@ use tokio::time::timeout;
 use crate::stdio::{ChildProcess, Io};
 use crate::{EventKind, InteractionKind, TurnOutcome};
 
+/// Rewrites a fixture frame before it is sent or compared, for values a fixture
+/// cannot know (see `host_script`'s "values the host chooses"). `Err` says why not.
+pub(crate) type Binder = Box<dyn FnMut(&mut Value) -> Result<(), String> + Send>;
+
+/// One line of a fixture and where it came from, for failure messages.
+struct Step {
+    line: Value,
+    at: String,
+}
+
+/// How far a call to [`Peer::play_to_mark`] got.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) enum Played {
+    /// Stopped at a `mark` line, with its name.
+    Mark(String),
+    /// The transcript is exhausted.
+    End,
+}
+
 /// The provider side of the pipes.
 pub(crate) struct Peer {
     from_adapter: BufReader<DuplexStream>,
     to_adapter: Option<DuplexStream>,
     pub stderr: DuplexStream,
     pub exit: Arc<watch::Sender<Option<Option<i32>>>>,
-    script: VecDeque<Value>,
+    script: VecDeque<Step>,
+    binder: Option<Binder>,
 }
 
 struct ScriptedChild {
@@ -57,6 +79,7 @@ pub(crate) fn pipes_with_input_capacity(capacity: usize) -> (Peer, Io) {
         stderr: stderr_writer,
         exit: Arc::clone(&exit),
         script: VecDeque::new(),
+        binder: None,
     };
     let io = Io {
         stdout: Box::new(stdout),
@@ -69,29 +92,117 @@ pub(crate) fn pipes_with_input_capacity(capacity: usize) -> (Peer, Io) {
 
 impl Peer {
     pub fn load(&mut self, fixture: &str) {
-        self.script = fixture
-            .lines()
-            .map(|line| serde_json::from_str(line).expect("fixture line is JSON"))
-            .collect();
+        self.load_parts(&[("fixture", fixture)]);
+    }
+
+    /// Loads several named transcripts as one, with a `mark` between them so a test
+    /// can act when one part is done (the first part is usually the handshake). Lines
+    /// that are none of `client`, `server` and `mark` (the `note`) are skipped.
+    pub fn load_parts(&mut self, parts: &[(&str, &str)]) {
+        self.script.clear();
+        for (index, (name, fixture)) in parts.iter().enumerate() {
+            if index > 0 {
+                self.script.push_back(Step {
+                    line: serde_json::json!({"mark": format!("after {}", parts[index - 1].0)}),
+                    at: (*name).to_owned(),
+                });
+            }
+            for (number, line) in fixture.lines().enumerate() {
+                let line = line.trim();
+                if line.is_empty() {
+                    continue;
+                }
+                let at = format!("{name}:{}", number + 1);
+                let line = serde_json::from_str(line)
+                    .unwrap_or_else(|error| panic!("{at} is not JSON: {error}"));
+                self.script.push_back(Step { line, at });
+            }
+        }
+    }
+
+    pub fn bind(&mut self, binder: Binder) {
+        self.binder = Some(binder);
+    }
+
+    /// Whether the transcript has nothing left but marks.
+    pub fn exhausted(&self) -> bool {
+        self.script
+            .iter()
+            .all(|step| step.line.get("client").is_none() && step.line.get("server").is_none())
     }
 
     /// Plays the transcript up to the next mark or its end.
     pub async fn play(&mut self) {
+        if let Err(failure) = self.play_to_mark().await {
+            panic!("{failure}");
+        }
+    }
+
+    /// As [`Peer::play`], saying where it stopped, and returning what went wrong as
+    /// text instead of panicking: the host's own task opens the runtime, and a panic
+    /// there would be lost.
+    pub async fn play_to_mark(&mut self) -> Result<Played, String> {
         while let Some(step) = self.script.pop_front() {
-            if step.get("mark").is_some() {
-                return;
+            if let Some(mark) = step.line.get("mark") {
+                return Ok(Played::Mark(
+                    mark.as_str()
+                        .map_or_else(|| mark.to_string(), str::to_owned),
+                ));
             }
-            if let Some(frame) = step.get("server") {
+            if let Some(frame) = step.line.get("server") {
+                let frame = self.bound(frame, &step.at)?;
                 self.send(&format!("{frame}\n")).await;
-            } else if let Some(expected) = step.get("client") {
-                assert_eq!(&self.written().await, expected);
+            } else if let Some(expected) = step.line.get("client") {
+                let expected = self.bound(expected, &step.at)?;
+                let Some(actual) = self.try_written().await else {
+                    return Err(format!(
+                        "{}: the fixture expects the adapter to write\n  {}\nbut it wrote nothing in 5 s",
+                        step.at,
+                        shown(&expected),
+                    ));
+                };
+                if actual != expected {
+                    return Err(format!(
+                        "{}: the adapter wrote a frame the fixture does not expect\n  fixture: {}\n  adapter: {}\n  first difference: {}",
+                        step.at,
+                        shown(&expected),
+                        shown(&actual),
+                        difference(&expected, &actual, "$"),
+                    ));
+                }
             }
         }
+        Ok(Played::End)
+    }
+
+    fn bound(&mut self, frame: &Value, at: &str) -> Result<Value, String> {
+        let mut frame = frame.clone();
+        if let Some(binder) = &mut self.binder {
+            binder(&mut frame).map_err(|why| format!("{at}: {why}"))?;
+        }
+        Ok(frame)
     }
 
     pub async fn send(&mut self, line: &str) {
         let stdout = self.to_adapter.as_mut().expect("stdout is open");
         stdout.write_all(line.as_bytes()).await.expect("stdout");
+    }
+
+    /// The next frame the adapter wrote, or `None` when it wrote none in 5 s.
+    pub async fn try_written(&mut self) -> Option<Value> {
+        self.try_written_within(Duration::from_secs(5)).await
+    }
+
+    pub async fn try_written_within(&mut self, wait: Duration) -> Option<Value> {
+        let mut line = String::new();
+        let read = timeout(wait, self.from_adapter.read_line(&mut line))
+            .await
+            .ok()?;
+        read.expect("stdin");
+        if line.is_empty() {
+            return None;
+        }
+        Some(serde_json::from_str(&line).expect("the adapter wrote JSON"))
     }
 
     /// The next frame the adapter wrote.
@@ -125,6 +236,49 @@ impl Peer {
     pub fn exit(&mut self, code: i32) {
         self.exit.send_replace(Some(Some(code)));
         self.to_adapter = None;
+    }
+}
+
+/// A frame on one line, cut where it would flood a failure message.
+fn shown(frame: &Value) -> String {
+    let text = frame.to_string();
+    match text.char_indices().nth(1500) {
+        Some((cut, _)) => format!("{}... ({} bytes)", &text[..cut], text.len()),
+        None => text,
+    }
+}
+
+/// Where two frames first differ, as a path with both values.
+fn difference(expected: &Value, actual: &Value, path: &str) -> String {
+    match (expected, actual) {
+        (Value::Object(expected), Value::Object(actual)) => {
+            for (key, value) in expected {
+                match actual.get(key) {
+                    None => return format!("{path}.{key} is missing from the adapter's frame"),
+                    Some(other) if other != value => {
+                        return difference(value, other, &format!("{path}.{key}"));
+                    }
+                    Some(_) => {}
+                }
+            }
+            match actual.keys().find(|key| !expected.contains_key(*key)) {
+                Some(key) => format!("{path}.{key} is not in the fixture's frame"),
+                None => "none".to_owned(),
+            }
+        }
+        (Value::Array(expected), Value::Array(actual)) if expected.len() == actual.len() => {
+            for (index, (value, other)) in expected.iter().zip(actual).enumerate() {
+                if value != other {
+                    return difference(value, other, &format!("{path}[{index}]"));
+                }
+            }
+            "none".to_owned()
+        }
+        _ => format!(
+            "{path}: fixture {}, adapter {}",
+            shown(expected),
+            shown(actual)
+        ),
     }
 }
 
