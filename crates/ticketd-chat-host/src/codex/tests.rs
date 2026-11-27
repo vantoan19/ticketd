@@ -14,7 +14,7 @@ use tokio::time::{sleep, timeout};
 use super::CodexAdapter;
 use super::mapping::Session;
 use super::runtime::{Options, login_state, open_over, probe_login, probe_options, probe_skills};
-use crate::conformance::{NewTurn, Provider, SubAgentApprovals};
+use crate::conformance::{NewTurn, Provider, SubAgentApprovals, SubAgentFrames};
 use crate::outcome::read_end;
 use crate::scripted::{Peer, brief, pipes};
 use crate::{
@@ -2451,6 +2451,23 @@ impl Provider for AppServer {
 
     fn events(&mut self) -> &mut EventStream {
         &mut self.events
+    }
+
+    fn sub_agent_frames(&self) -> SubAgentFrames {
+        SubAgentFrames::Separate
+    }
+
+    async fn play_sub_agent_at_rest(&mut self) {
+        // A child thread starts a turn of its own, says something, runs a command and ends,
+        // while the Chat's thread runs nothing: its frames are the child's, never the Chat's.
+        self.peer.load(
+            r#"{"server":{"method":"turn/started","params":{"threadId":"thr_a","turn":{"id":"turn_2","rootTurnId":"turn_1","items":[],"itemsView":"notLoaded","status":"inProgress","error":null}}}}
+{"server":{"method":"item/completed","params":{"item":{"type":"agentMessage","id":"msg_a","text":"Reading the limiter.","phase":"commentary"},"threadId":"thr_a","turnId":"turn_2"}}}
+{"server":{"method":"item/started","params":{"item":{"type":"commandExecution","id":"exec_a","command":"cat src/limit.ts","cwd":"/work/chat-1","status":"inProgress","commandActions":[]},"threadId":"thr_a","turnId":"turn_2"}}}
+{"server":{"method":"item/completed","params":{"item":{"type":"commandExecution","id":"exec_a","command":"cat src/limit.ts","cwd":"/work/chat-1","status":"completed","commandActions":[],"aggregatedOutput":"export const LIMIT = 5;","exitCode":0},"threadId":"thr_a","turnId":"turn_2"}}}
+{"server":{"method":"turn/completed","params":{"threadId":"thr_a","turn":{"id":"turn_2","status":"completed","items":[],"error":null}}}}"#,
+        );
+        self.peer.play().await;
     }
 
     fn sub_agent_approvals(&self) -> SubAgentApprovals {
