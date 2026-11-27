@@ -43,7 +43,10 @@ async fn a_child_thread_is_a_sub_agent_whose_steps_and_words_are_its_own() {
     let record = only_sub_agent(&h);
     assert_eq!(record.parent, None);
     assert_eq!(record.said("model").as_deref(), Some("gpt-test"));
-    assert_eq!(record.said("agentPath").as_deref(), Some("/root/echo_retry"));
+    assert_eq!(
+        record.said("agentPath").as_deref(),
+        Some("/root/echo_retry")
+    );
     assert_eq!(record.said("description").as_deref(), Some("Echo retry"));
     assert_eq!(latest(&h), ChatSubAgentState::Running);
 
@@ -71,7 +74,10 @@ async fn a_child_thread_is_a_sub_agent_whose_steps_and_words_are_its_own() {
     let own = h.sub_agent_transcript(&only_sub_agent(&h).native_id);
     assert_eq!(own.len(), 3, "{own:?}");
     assert_eq!(own[0], "agent: I’ll run `echo hi` and check its output.");
-    assert!(own[1].starts_with("tool ") && own[1].ends_with(" completed"), "{own:?}");
+    assert!(
+        own[1].starts_with("tool ") && own[1].ends_with(" completed"),
+        "{own:?}"
+    );
     assert_eq!(own[2], "agent: `hi`");
     assert!(h.notices().is_empty(), "{:?}", h.notices());
 }
@@ -131,14 +137,20 @@ async fn a_new_parent_turn_while_a_child_runs_leaves_the_child_alone() {
 
     let turns = h.turns();
     assert_eq!(turns.len(), 2, "{turns:?}");
-    assert!(turns.iter().all(|turn| turn.state == ChatTurnState::Completed));
+    assert!(
+        turns
+            .iter()
+            .all(|turn| turn.state == ChatTurnState::Completed)
+    );
     // One run, which ended on its own, whatever the parent's turns did.
     let record = only_sub_agent(&h);
     assert_eq!(runs(&record), [(ChatSubAgentState::Completed, None)]);
     let own = h.sub_agent_transcript(&record.native_id);
     assert!(own.iter().any(|line| line.starts_with("tool ")), "{own:?}");
     assert!(
-        h.transcript().iter().all(|line| !line.starts_with("tool sleep")),
+        h.transcript()
+            .iter()
+            .all(|line| !line.starts_with("tool sleep")),
         "{:?}",
         h.transcript()
     );
@@ -189,7 +201,10 @@ async fn a_childs_new_turn_is_a_new_run_of_the_same_sub_agent() {
         .collect();
     assert_eq!(rows.len(), 2, "{rows:?}");
     assert!(rows[0].ends_with("stopped"), "{rows:?}");
-    assert!(rows[1].contains("(resumed)") && rows[1].ends_with("completed"), "{rows:?}");
+    assert!(
+        rows[1].contains("(resumed)") && rows[1].ends_with("completed"),
+        "{rows:?}"
+    );
 }
 
 #[tokio::test(start_paused = true)]
@@ -213,7 +228,10 @@ async fn stop_interrupts_the_turn_and_every_live_child_turn() {
     assert_eq!(turns[0].state, ChatTurnState::Interrupted);
     assert_eq!(
         runs(&only_sub_agent(&h)),
-        [(ChatSubAgentState::Stopped, Some(ChatSubAgentStopper::Person))]
+        [(
+            ChatSubAgentState::Stopped,
+            Some(ChatSubAgentStopper::Person)
+        )]
     );
 }
 
@@ -237,7 +255,10 @@ async fn stop_with_no_turn_running_still_interrupts_the_children() {
 
     assert_eq!(
         runs(&only_sub_agent(&h)),
-        [(ChatSubAgentState::Stopped, Some(ChatSubAgentStopper::Person))]
+        [(
+            ChatSubAgentState::Stopped,
+            Some(ChatSubAgentStopper::Person)
+        )]
     );
     // The parent's turn was over: it stays as it ended.
     assert_eq!(h.turns()[0].state, ChatTurnState::Completed);
@@ -350,7 +371,10 @@ async fn multi_agent_v1_names_the_child_in_the_spawn_call() {
     assert_eq!(latest(&h), ChatSubAgentState::Completed);
     assert_eq!(
         h.sub_agent_transcript("thr_a"),
-        ["tool /bin/zsh -lc 'npm test' completed", "agent: Two payment tests fail."]
+        [
+            "tool /bin/zsh -lc 'npm test' completed",
+            "agent: Two payment tests fail."
+        ]
     );
     assert_eq!(h.turns().len(), 1);
 }
@@ -392,7 +416,9 @@ async fn what_a_child_asks_never_opens_a_turn_and_is_not_answered_yet() {
     assert!(h.live().await.interactions.is_empty());
     assert_eq!(
         h.notices(),
-        ["A Codex sub-agent asked for approval. ticketd cannot offer it yet, so it was not answered."]
+        [
+            "A Codex sub-agent asked for approval. ticketd cannot offer it yet, so it was not answered."
+        ]
     );
     h.play_all().await;
     h.finish().await;

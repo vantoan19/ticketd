@@ -4767,7 +4767,10 @@ mod tests {
         assert_eq!(one[0]["kind"], "response");
         assert_eq!(one[0]["text"], "The first findings.");
         assert_eq!(one[0]["state"], "complete");
-        assert_eq!((one[0]["owner"].as_str(), one[0]["turn_id"].as_str()), (Some("a"), Some("a:run-1")));
+        assert_eq!(
+            (one[0]["owner"].as_str(), one[0]["turn_id"].as_str()),
+            (Some("a"), Some("a:run-1"))
+        );
         // A resumed sub-agent's words belong to the run they were written in.
         assert_eq!(two[0]["turn_id"], "a:run-2");
         // The main agent's last response and everything it keeps stay its own.
@@ -4857,9 +4860,10 @@ mod tests {
 
     #[test]
     fn the_view_of_nested_codex_sub_agents_is_the_contract_the_interface_parses() {
-        let stored: ticketd_core::ChatSnapshot =
-            serde_json::from_str(&std::fs::read_to_string(CODEX_STORED).expect("the stored history"))
-                .expect("the stored history reads");
+        let stored: ticketd_core::ChatSnapshot = serde_json::from_str(
+            &std::fs::read_to_string(CODEX_STORED).expect("the stored history"),
+        )
+        .expect("the stored history reads");
         let tracker = Tracker::from_snapshot(&stored.items, &stored.sub_agents);
         let live = ChatLive::idle();
         let state = super::chat_state(&stored.chat, &live, &tracker, &Surroundings::default());
@@ -4895,10 +4899,28 @@ mod tests {
             .iter()
             .filter(|row| row.get("owner").is_none())
             .collect();
-        let kind_of = |value: &serde_json::Value| value["kind"].as_str().unwrap_or_default().to_owned();
-        assert_eq!(main.iter().filter(|row| kind_of(row) == "sub_agent").count(), 1);
-        assert!(main.iter().all(|row| kind_of(row) != "response" || row["turn_id"].is_null() || !row["turn_id"].as_str().unwrap_or_default().contains(":run-")));
+        let kind_of =
+            |value: &serde_json::Value| value["kind"].as_str().unwrap_or_default().to_owned();
+        assert_eq!(
+            main.iter()
+                .filter(|row| kind_of(row) == "sub_agent")
+                .count(),
+            1
+        );
+        assert!(main.iter().all(|row| {
+            kind_of(row) != "response"
+                || row["turn_id"].is_null()
+                || !row["turn_id"]
+                    .as_str()
+                    .unwrap_or_default()
+                    .contains(":run-")
+        }));
         assert_eq!(state.sub_agents.len(), 2);
-        assert!(state.sub_agents.iter().all(|agent| !agent.capabilities.brief));
+        assert!(
+            state
+                .sub_agents
+                .iter()
+                .all(|agent| !agent.capabilities.brief)
+        );
     }
 }

@@ -17,8 +17,8 @@
 use serde_json::{Value, json};
 
 use super::{
-    EventKind, HashMap, NativeItemId, NativeSubAgentId, Refusal, Session, ToolProgress,
-    ToolStatus, delta, item_detail, item_output, item_status, progress_output, text, tool_title,
+    EventKind, HashMap, NativeItemId, NativeSubAgentId, Refusal, Session, ToolProgress, ToolStatus,
+    delta, item_detail, item_output, item_status, progress_output, text, tool_title,
 };
 use crate::contract::{SubAgentOutcome, SubAgentStart, SubAgentStopper};
 use crate::records::MESSAGE_RECORD_NAME;
@@ -69,7 +69,9 @@ impl Session {
     }
 
     fn child_mut(&mut self, thread: &str) -> Option<&mut Child> {
-        self.children.iter_mut().find(|child| child.thread == thread)
+        self.children
+            .iter_mut()
+            .find(|child| child.thread == thread)
     }
 
     /// The child that started a thread's work: `None` when it is the Chat's own thread.
@@ -239,7 +241,7 @@ impl Session {
                 let Some(title) = tool_title(kind, item) else {
                     return events;
                 };
-                events.push(self.child_tool(thread, turn, id, kind, title, item, completed));
+                events.extend(self.child_tool(thread, turn, id, kind, title, item, completed));
             }
         }
         events
@@ -255,8 +257,8 @@ impl Session {
         title: String,
         item: &Value,
         completed: bool,
-    ) -> EventKind {
-        let child = self.child_mut(thread).expect("the child is registered");
+    ) -> Option<EventKind> {
+        let child = self.child_mut(thread)?;
         let cut_off = turn.is_some() && child.stopping.as_deref() == turn;
         let status = item_status(item, completed, cut_off);
         let output = item_output(item);
@@ -271,14 +273,14 @@ impl Session {
             };
             child.tools.insert(id.to_owned(), progress);
         }
-        EventKind::SubAgentToolUpdated {
+        Some(EventKind::SubAgentToolUpdated {
             sub_agent: NativeSubAgentId::new(thread),
             item: NativeItemId::new(id),
             title,
             status,
             output,
             detail: Some(detail),
-        }
+        })
     }
 
     fn child_tool_output(&mut self, thread: &str, params: &Value) -> Vec<EventKind> {
@@ -357,7 +359,11 @@ impl Session {
 
     /// ticketd is about to ask Codex to interrupt a child's turn. Refused when that turn
     /// is over.
-    pub(crate) fn child_interrupt_asked(&mut self, thread: &str, turn: &str) -> Result<(), Refusal> {
+    pub(crate) fn child_interrupt_asked(
+        &mut self,
+        thread: &str,
+        turn: &str,
+    ) -> Result<(), Refusal> {
         match self.child_mut(thread) {
             Some(child) if child.turn.as_deref() == Some(turn) => {
                 child.stopping = Some(turn.to_owned());
