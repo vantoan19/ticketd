@@ -3,7 +3,7 @@
 {"server":{"v":1,"event":"hello","id":"c1","protocol":1,"sdk_version":"0.3.322","sdk_claude_code_version":"2.1.322"}}
 {"client":{"id":"c2","cmd":"inspect","claude_executable":"/opt/claude/bin/claude"}}
 {"server":{"v":1,"event":"inspection","id":"c2","claude_executable":"/opt/claude/bin/claude","claude_version":"2.1.322","sdk_version":"0.3.322","sdk_claude_code_version":"2.1.322","pairing":"matched","error":null}}
-{"client":{"id":"c3","cmd":"open","generation":7,"cwd":"/work/chat-1","claude_executable":"/opt/claude/bin/claude","unattended":{"model":"claude-test","allowed_tools":["Bash(ticketd *)","PowerShell(ticketd *)","Bash(ticketd.exe *)","PowerShell(ticketd.exe *)","Bash(npm test *)","PowerShell(npm test *)"],"disallowed_tools":["Edit","Write","NotebookEdit","WebFetch","WebSearch"],"max_turns":40}}}
+{"client":{"id":"c3","cmd":"open","generation":7,"cwd":"/work/chat-1","claude_executable":"/opt/claude/bin/claude","unattended":{"model":"claude-test","allowed_tools":["Bash(ticketd *)","PowerShell(ticketd *)","Bash(ticketd.exe *)","PowerShell(ticketd.exe *)","Bash(npm test *)","PowerShell(npm test *)"],"disallowed_tools":["Edit","Write","NotebookEdit","WebFetch","WebSearch","Agent"],"max_turns":40}}}
 {"server":{"v":1,"event":"session_opened","generation":7,"id":"c3"}}
 {"server":{"v":1,"event":"session_initialized","generation":7,"claude_code_version":"2.1.322"}}
 {"mark":"the session is open"}
