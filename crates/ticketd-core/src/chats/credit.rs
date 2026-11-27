@@ -23,7 +23,7 @@ use rusqlite::{Connection, OptionalExtension, params};
 use serde::{Deserialize, Serialize};
 
 use super::receipt::FEED_HEADS;
-use super::{Error, invalid};
+use super::{CHAT_AGENT_CHANGES_LIMIT, CHAT_AGENT_EXCERPT_LIMIT, ChatAgentChange, Error, invalid};
 
 /// What a `ticketd` call a shell Step names would write.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
@@ -159,6 +159,8 @@ struct Write {
 
 struct Window {
     owner: Option<String>,
+    /// The position of the Step in the Chat's history.
+    position: i64,
     history: (i64, Option<i64>),
     activities: (i64, Option<i64>),
     open: bool,
@@ -194,14 +196,15 @@ impl Window {
 /// What is known about one Chat, loaded once for all of its writes.
 struct Placing {
     windows: Vec<Window>,
-    /// Native IDs of the Chat's Steps with their owner, to find the Step a call key names.
-    steps: Vec<(String, Option<String>)>,
+    /// Native IDs of the Chat's Steps with their owner and position, to find the Step a
+    /// call key names.
+    steps: Vec<(String, Option<String>, i64)>,
 }
 
 impl Placing {
     fn load(connection: &Connection, chat_id: &str) -> Result<Self, Error> {
         let mut statement = connection.prepare(
-            "SELECT t.sub_agent_id, w.history_start, w.history_end, w.activities_start, w.activities_end, t.state = 'running', w.writes
+            "SELECT t.sub_agent_id, w.history_start, w.history_end, w.activities_start, w.activities_end, t.state = 'running', w.writes, t.position
              FROM chat_step_windows w JOIN chat_tools t ON t.id = w.tool_id WHERE w.chat_id = ?1",
         )?;
         let windows = statement
@@ -209,6 +212,7 @@ impl Placing {
                 let writes: String = row.get(6)?;
                 Ok(Window {
                     owner: row.get(0)?,
+                    position: row.get(7)?,
                     history: (row.get(1)?, row.get(2)?),
                     activities: (row.get(3)?, row.get(4)?),
                     open: row.get(5)?,
@@ -217,54 +221,64 @@ impl Placing {
                 })
             })?
             .collect::<Result<Vec<_>, _>>()?;
-        let mut statement =
-            connection.prepare("SELECT id, sub_agent_id FROM chat_tools WHERE chat_id = ?1")?;
+        let mut statement = connection
+            .prepare("SELECT id, sub_agent_id, position FROM chat_tools WHERE chat_id = ?1")?;
         let steps = statement
-            .query_map([chat_id], |row| Ok((row.get(0)?, row.get(1)?)))?
+            .query_map([chat_id], |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?)))?
             .collect::<Result<Vec<_>, _>>()?;
         Ok(Self { windows, steps })
     }
 
-    /// The owner of the Step the harness's own key names: `Some(None)` is the main agent.
-    fn by_key(&self, key: &str) -> Option<Option<String>> {
+    /// The owner of the Step the harness's own key names, with its position:
+    /// `Some((None, _))` is the main agent.
+    fn by_key(&self, key: &str) -> Option<(Option<String>, i64)> {
         self.steps
             .iter()
-            .find(|(id, _)| {
+            .find(|(id, _, _)| {
                 id == key
                     || id
                         .strip_suffix(key)
                         .is_some_and(|before| before.ends_with(':'))
             })
-            .map(|(_, owner)| owner.clone())
+            .map(|(_, owner, position)| (owner.clone(), *position))
     }
 
-    fn by_window(&self, write: &Write, reference: &str) -> Option<String> {
+    fn by_window(&self, write: &Write, reference: &str) -> Option<(String, i64)> {
         let inside: Vec<&Window> = self
             .windows
             .iter()
             .filter(|window| window.holds(write.feed, write.number))
             .collect();
-        match inside.as_slice() {
+        let only = match inside.as_slice() {
             [] => None,
-            [only] => only.owner.clone(),
+            [only] => Some(*only),
             several => {
                 let mut named = several
                     .iter()
                     .filter(|window| window.could_write(write.feed, reference));
                 match (named.next(), named.next()) {
-                    (Some(only), None) => only.owner.clone(),
+                    (Some(only), None) => Some(*only),
                     _ => None,
                 }
             }
+        }?;
+        only.owner.clone().map(|owner| (owner, only.position))
+    }
+
+    /// The sub-agent a write is credited to and the position of the Step that made it.
+    fn place(&self, write: &Write, reference: &str) -> Option<(String, i64)> {
+        match &write.call_id {
+            // The harness named the call: its Step, or nobody. A window never stands in.
+            Some(key) => {
+                let (owner, position) = self.by_key(key)?;
+                Some((owner?, position))
+            }
+            None => self.by_window(write, reference),
         }
     }
 
     fn credit(&self, write: &Write, reference: &str) -> Option<String> {
-        match &write.call_id {
-            // The harness named the call: its Step, or nobody. A window never stands in.
-            Some(key) => self.by_key(key).flatten(),
-            None => self.by_window(write, reference),
-        }
+        self.place(write, reference).map(|(owner, _)| owner)
     }
 }
 
@@ -368,4 +382,72 @@ pub(super) fn writing_agents(
             })
         })
         .collect()
+}
+
+/// What a sub-agent's run changed in tickets: the writes credited to it whose Step lies in
+/// the run (from `from` to before `until`, positions in the Chat's history), as the Chat's
+/// own turn lists its changes. Oldest first.
+pub(super) fn sub_agent_changes(
+    connection: &Connection,
+    chat_id: &str,
+    native_id: &str,
+    from: i64,
+    until: Option<i64>,
+) -> Result<Vec<ChatAgentChange>, Error> {
+    let mut statement = connection.prepare(
+        "SELECT 0, h.number, NULL, w.call_id, t.reference, t.title, h.from_value, h.to_value, h.timestamp
+         FROM ticket_history h JOIN tickets t ON t.id = h.ticket_id
+         JOIN chat_record_writes w ON w.history_number = h.number
+         WHERE w.chat_id = ?1 AND h.kind = 'status'
+         UNION ALL
+         SELECT 1, a.number, a.id, w.call_id, t.reference, t.title, '', a.brief, a.reported_at
+         FROM activities a JOIN tickets t ON t.id = a.ticket_id
+         JOIN chat_record_writes w ON w.activity_id = a.id
+         WHERE w.chat_id = ?1
+         ORDER BY 9, 1, 2",
+    )?;
+    let rows = statement
+        .query_map([chat_id], |row| {
+            let status = row.get::<_, i64>(0)? == 0;
+            Ok((
+                Write {
+                    feed: if status { Feed::Status } else { Feed::Activity },
+                    number: row.get(1)?,
+                    activity_id: row.get(2)?,
+                    chat_id: chat_id.to_owned(),
+                    call_id: row.get(3)?,
+                },
+                row.get::<_, String>(4)?,
+                row.get::<_, String>(5)?,
+                row.get::<_, String>(6)?,
+                row.get::<_, String>(7)?,
+            ))
+        })?
+        .collect::<Result<Vec<_>, _>>()?;
+    let placing = Placing::load(connection, chat_id)?;
+    let mut changes = Vec::new();
+    for (write, reference, title, from_value, to_value) in rows {
+        let Some((owner, position)) = placing.place(&write, &reference) else {
+            continue;
+        };
+        if owner != native_id || position < from || until.is_some_and(|until| position >= until) {
+            continue;
+        }
+        changes.push(match write.feed {
+            Feed::Status => ChatAgentChange::Status {
+                reference,
+                title,
+                from: from_value,
+                to: to_value,
+            },
+            Feed::Activity => ChatAgentChange::Update {
+                reference,
+                excerpt: to_value.chars().take(CHAT_AGENT_EXCERPT_LIMIT).collect(),
+            },
+        });
+        if changes.len() >= CHAT_AGENT_CHANGES_LIMIT {
+            break;
+        }
+    }
+    Ok(changes)
 }

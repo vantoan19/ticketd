@@ -4285,6 +4285,38 @@ async fn a_request_waiting_on_the_person_is_the_agents_approval() {
 }
 
 #[tokio::test(start_paused = true)]
+async fn a_sub_agents_own_view_lists_the_records_it_changed() {
+    let f = Fixture::new().await;
+    let ticket = f.core().create_ticket("Rate limiter").unwrap();
+    let chat_id = f.linked_chat(&ticket.id).await;
+    f.start_sub_agent(
+        "sa-tests",
+        json!({ "description": "Check limiter test coverage" }),
+    )
+    .await;
+    f.sub_agent_writes(&chat_id, "sa-tests", &ticket.reference);
+    f.end_sub_agent("sa-tests").await;
+
+    let (opened, _) = f.open(&chat_id).await;
+    let items = serde_json::to_value(&opened.snapshot.items).unwrap();
+    let records: Vec<&Value> = items
+        .as_array()
+        .unwrap()
+        .iter()
+        .filter(|item| item["kind"] == "records" && item["owner"] == "sa-tests")
+        .collect();
+    assert_eq!(records.len(), 1, "{items:#}");
+    assert_eq!(
+        records[0]["net"],
+        json!([{
+            "kind": "update",
+            "reference": ticket.reference,
+            "excerpt": "Added a case for a request with no key.",
+        }])
+    );
+}
+
+#[tokio::test(start_paused = true)]
 async fn the_chats_list_row_names_the_sub_agent_that_asks_for_approval() {
     let f = Fixture::new().await;
     let ticket = f.core().create_ticket("Rate limiter").unwrap();
