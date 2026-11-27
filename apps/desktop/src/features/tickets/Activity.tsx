@@ -90,6 +90,7 @@ import { revealInDetail } from "./detail-scroll";
 import { z } from "zod";
 import { useWorkspaceChange } from "@/lib/workspace-change";
 import { editedUpdateFills, useOpenTicket } from "./open-ticket";
+import { updateClampLines } from "./update-clamp";
 import {
   DraftRecoveryGate,
   useDraftRecovery,
@@ -1192,11 +1193,12 @@ function RecoveredActivity({
                     })}
                   >
                     <div className="markdown-preview activity-note">
-                      <Clamp>
+                      <Clamp lines={updateClampLines(item.note.brief)}>
                         <MarkdownDocument
                           source={item.note.brief}
                           select={select}
                           revision={revision}
+                          attachmentCards
                         />
                       </Clamp>
                     </div>

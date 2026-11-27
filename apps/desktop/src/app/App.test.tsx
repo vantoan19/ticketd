@@ -8213,7 +8213,7 @@ test.each(["missing", "quarantined", "unavailable"])(
     const pane = await screen.findByRole("region", { name: "notes.txt" });
     const stage = pane.querySelector(".attachment-preview-stage");
     if (state === "missing") {
-      await within(pane).findByText("This file is missing from this computer");
+      await within(pane).findByText("Missing from this computer");
       expect(
         within(pane).getByRole("button", { name: "Open file" }),
       ).toHaveProperty("disabled", true);
@@ -8234,7 +8234,7 @@ test.each(["missing", "quarantined", "unavailable"])(
         expect.objectContaining({ id: "attachment-state" }),
       );
     } else {
-      await within(pane).findByText("Couldn't read this file");
+      await within(pane).findByText("Couldn’t read this file");
       retry = true;
       fireEvent.click(within(pane).getByRole("button", { name: "Retry" }));
       await within(pane).findByText("Recovered preview");
@@ -8491,8 +8491,12 @@ test("empty Ticket Files adds an existing file and detaches with Undo", async ()
   );
   fireEvent.click(screen.getByRole("button", { name: "Insert selected" }));
   fireEvent.click(await screen.findByRole("button", { name: "review.txt" }));
+  fireEvent.pointerDown(
+    await screen.findByRole("button", { name: "More actions" }),
+    { button: 0, ctrlKey: false },
+  );
   fireEvent.click(
-    await screen.findByRole("button", { name: "Detach from ticket" }),
+    await screen.findByRole("menuitem", { name: "Detach from ticket" }),
   );
   fireEvent.click(await screen.findByRole("button", { name: "Undo" }));
   expect(

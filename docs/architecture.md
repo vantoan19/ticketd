@@ -888,8 +888,38 @@ authorizes a workspace UUID and attachment ID, opens only a complete managed loc
 snapshot, and classifies bounded header evidence against a passive-media allowlist.
 It returns a read handle, never a filesystem path to React. PNG, JPEG, GIF, WebP,
 BMP, WAV, MP3, recognized Ogg, MP4 and WebM containers can be attempted; container
-recognition is not a codec guarantee. HTML, SVG, PDF, office files, playlists and
+recognition is not a codec guarantee. SVG, office files, playlists and
 unrecognized content retain metadata and explicit export/open fallback actions.
+A `.html` or `.htm` snapshot that is UTF-8 text of at most 8 MiB reports `html` in
+its preview and is read whole through the same checked snapshot by
+`Workspace::attachment_html` (a Tauri command returning the text over IPC); it is
+never added to the media allowlist, so the `attachment-media` route still refuses it.
+A stored file that starts with `%PDF-` (within its first kilobyte, whatever its name)
+and is at most 32 MiB reports `pdf` in its preview and is read whole through the same
+checked snapshot by `Workspace::attachment_pdf`, a Tauri command that answers with one
+raw binary IPC response. It is also never added to the media allowlist. The viewer parses
+it with the bundled pdf.js (the legacy build, loaded lazily) and draws pages onto
+canvases; the worker is a same-origin asset, so no CDN and no network are involved.
+The app CSP is unchanged: workers and scripts come from `'self'`, canvases need no
+grant, and `connect-src` still allows only IPC, so pdf.js is configured not to fetch
+anything (no WASM decoders, no external font or CMap files; fonts are drawn as glyph
+shapes, system fonts stand in for unembedded ones, and scripting and XFA forms are off).
+The one cost is that images using JPEG 2000 or JBIG2, and unembedded CJK fonts, may
+not draw. A PDF that cannot be parsed shows the fallback and keeps Open and Export.
+A card's first-page still is drawn from the same read for a PDF of at most 8 MiB.
+A stored plain-text file (UTF-8 with no control characters other than tab, line breaks
+and form feed, once terminal escape sequences are set aside) reports `text` in its preview:
+its total size and what the viewer shows. `Workspace::attachment_text` reads it through the
+same checked snapshot and answers with one raw binary IPC response of UTF-8: the whole file
+up to 20 MiB, otherwise the last 5 MiB, cut on a character boundary and after the next line
+break when one is within 64 KiB. ANSI escape sequences (colours, cursor moves, titles) are
+removed and a stray control character or invalid byte becomes U+FFFD, so one bad byte never
+hides a log; the same removal lets an ANSI-coloured log preview at all. The 64 KiB
+`text_excerpt` stays for other callers. `Workspace::attachment_text_first_line` (a separate command, asked only for a partial file) counts the lines before that tail so the viewer numbers it as the file does. The viewer draws only the lines near the view, in
+blocks of 64 whose heights are estimated from the wrap width and replaced by their measured
+height once drawn, so Find, Wrap and a 20 MB log stay responsive; a file of more than a
+million lines shows its last million, because a scrolling element tops out near 33 million
+pixels.
 External references use the same preview entry point with cached provider details,
 current-source wording and explicit Open in Drive. They never enter the local media
 route or offer an original-byte export; unknown provider size remains unknown.
@@ -930,6 +960,27 @@ claim until that reader unmounts; ordinary reading creates no claim. Cancellatio
 and failed protection leave the selected reference unchanged. Preview usage is a
 display projection of `attachment_usage`, with the full count and at most 20 labeled
 entries, including drafts, Undo and Trash; the display subset never decides cleanup.
+
+### HTML reports
+
+The viewer renders an HTML report read-only in a `<iframe sandbox="">` whose
+`srcdoc` is built from the text that `attachment_html` returns. Isolation has four
+independent layers: the empty sandbox (no scripts, forms, popups or app origin: the
+frame has an opaque origin and no access to IPC or the application); the app CSP
+that a srcdoc frame inherits (no inline script, no network, `connect-src` limited
+to IPC); a leading `<meta>` CSP of `default-src 'none'; style-src 'unsafe-inline';
+img-src data:; font-src data:`, which intersects with the app policy so a report
+cannot read another attachment through `attachment-media:` (the app allows that
+scheme for images); and a parse with `DOMParser` that removes scripts, event
+handlers, links, forms, frames, `<base>` and `<meta http-equiv>` before the document
+is handed to the frame, so links do nothing. `frame-src 'none'` stays: WebKit does
+not apply it to `about:srcdoc` frames (verified in WKWebView; WebView2 and WebKitGTK
+are checked in the platform matrix). Reports keep inline styles and `data:` images;
+`data:` fonts are blocked by the app CSP's `font-src`. Keyboard events inside a
+sandboxed frame do not reach the viewer, so Escape closes the viewer from the stage
+and header, and Shift+Tab leaves the frame. J and K (next and previous file) behave
+the same way: they work from the stage and header, and the Previous and Next buttons
+always work.
 
 ## Document editing
 

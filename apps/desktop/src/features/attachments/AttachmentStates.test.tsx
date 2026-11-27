@@ -77,7 +77,7 @@ test("a missing file is flagged in the library and its preview offers a real way
   expect(await within(row).findByText("Missing")).toBeTruthy();
   fireEvent.click(row);
   const pane = await screen.findByRole("region", { name: "notes.txt" });
-  await within(pane).findByText("This file is missing from this computer");
+  await within(pane).findByText("Missing from this computer");
   // Open can't work, and says why instead of failing.
   expect(
     within(pane).getByRole<HTMLButtonElement>("button", { name: "Open file" })
@@ -148,4 +148,54 @@ test("an upload over the limit says its size and the limit, and offers Change li
   fireEvent.click(within(row).getByRole("button", { name: "Change limit" }));
   expect(openSettings).toHaveBeenCalledWith("attachments");
   await waitFor(() => expect(changed).toHaveBeenCalledWith(false));
+});
+
+const stored = (name: string, size: number) => ({
+  ...notes,
+  display_name: name,
+  original_filename: name,
+  size_bytes: size,
+});
+function previewing(answer: object) {
+  vi.mocked(invoke).mockImplementation(async (command) =>
+    command === "attachment_workspace_id" ? "workspace" : answer,
+  );
+  render(<AttachmentPreview target={{ id: notes.id }} onClose={() => {}} />);
+}
+
+test("a format with no preview says its one sentence, with its extension on the tile", async () => {
+  previewing(
+    preview("unsupported", { attachment: stored("traces.zip", 48_000_000) }),
+  );
+  expect(await screen.findByText("No preview for ZIP archives")).toBeTruthy();
+  expect(
+    screen.getByText("Open it in its app to see what’s inside."),
+  ).toBeTruthy();
+  expect(screen.getByText("ZIP", { selector: "span" })).toBeTruthy();
+});
+
+test("a file too large to preview says its size and what to do", async () => {
+  previewing(
+    preview("too_large", {
+      attachment: stored("recording.mov", 1_932_735_283),
+    }),
+  );
+  expect(await screen.findByText("Too large to preview")).toBeTruthy();
+  expect(
+    screen.getByText("It’s 1.8 GB. Open it in its app to watch it."),
+  ).toBeTruthy();
+});
+
+test("Open and Export stay disabled for a stored copy that can't be read", async () => {
+  previewing(
+    preview("unavailable", {
+      attachment: stored("scan.pdf", 1200),
+      message: "permission denied",
+    }),
+  );
+  expect(await screen.findByText("Couldn’t read this file")).toBeTruthy();
+  for (const name of ["Open file", "Export file"])
+    expect(
+      screen.getByRole<HTMLButtonElement>("button", { name }).disabled,
+    ).toBe(true);
 });

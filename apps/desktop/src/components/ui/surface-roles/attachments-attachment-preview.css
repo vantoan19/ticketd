@@ -10,6 +10,45 @@
 .attachment-preview-text {
   white-space: pre-wrap;
 }
+.attachment-preview-stage:focus-visible {
+  outline: 2px solid var(--ring);
+  outline-offset: -2px;
+}
+.attachment-report-note,
+.attachment-preview-stage > [data-slot="alert"].ui-notice {
+  background: var(--surface);
+  box-shadow: inset 0 -1px 0 var(--group-hairline);
+  color: var(--muted-foreground);
+  font-size: var(--text-caption);
+  line-height: var(--text-caption-line);
+}
+/* A report that paints no page of its own reads as white paper in both themes
+   (its document asks for a light scheme), like a PDF page. */
+.attachment-report-frame {
+  background: white;
+}
+.attachment-state-tile {
+  border-radius: var(--radius-card);
+  background: var(--surface);
+  box-shadow: var(--shadow-border-base);
+  color: var(--muted-foreground);
+}
+.attachment-state-title {
+  color: var(--foreground);
+  font-size: var(--text-ui);
+  line-height: var(--text-ui-line);
+  font-weight: 500;
+}
+.attachment-state-sentence,
+.attachment-state-progress {
+  color: var(--muted-foreground);
+  font-size: var(--text-ui);
+  line-height: var(--text-ui-line);
+}
+.attachment-preview-details {
+  background: var(--surface);
+  box-shadow: inset 1px 0 0 var(--group-hairline);
+}
 .attachment-preview-text:focus-visible {
   outline: 2px solid var(--ring);
   outline-offset: 2px;
@@ -22,4 +61,40 @@
 }
 .attachment-uses [data-slot="record-link"] {
   text-align: start;
+}
+.attachment-text-scope {
+  background: var(--surface);
+  box-shadow: inset 0 -1px 0 var(--group-hairline);
+  color: var(--muted-foreground);
+  font-size: var(--text-caption);
+  line-height: var(--text-caption-line);
+}
+.attachment-text {
+  background: var(--surface);
+  color: var(--foreground);
+}
+.attachment-text:focus-visible {
+  outline: 2px solid var(--ring);
+  outline-offset: -2px;
+}
+.attachment-text-line::before {
+  color: var(--disabled-foreground);
+}
+/* Every match is tinted and underlined; the current one is inverted, which keeps
+   its contrast in both themes. */
+.attachment-text-match {
+  border-radius: var(--radius-segment);
+  background: var(--accent);
+  box-shadow: inset 0 -1.5px 0 var(--foreground);
+  color: inherit;
+}
+.attachment-text-match[data-current] {
+  background: var(--foreground);
+  box-shadow: none;
+  color: var(--background);
+}
+.attachment-text-count {
+  padding-inline: 8px;
+  min-width: 7ch;
+  white-space: nowrap;
 }

@@ -74,6 +74,9 @@ pub enum AttachmentAvailabilityState {
     NotDownloaded,
 }
 
+/// The state, progress, size and whether runs gave up, as one query reads them.
+type AvailabilityRow = (Option<String>, Option<u64>, Option<u64>, bool);
+
 /// Whether an Attachment's bytes are on this device.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct AttachmentAvailability {
@@ -81,6 +84,10 @@ pub struct AttachmentAvailability {
     pub state: AttachmentAvailabilityState,
     /// Percent received, while downloading.
     pub progress: Option<u8>,
+    /// Why runs gave up fetching these bytes, while they are not here: the
+    /// storage's words, or empty when none was kept. `None` when nothing failed.
+    #[serde(default)]
+    pub failure: Option<String>,
 }
 
 /// Attachment bytes this device is still to fetch.
@@ -471,15 +478,15 @@ impl Workspace {
     ) -> Result<Vec<AttachmentAvailability>, Error> {
         let mut found = Vec::new();
         for id in ids {
-            let row: Option<(Option<String>, Option<u64>, Option<u64>)> = self
+            let row: Option<AvailabilityRow> = self
                 .connection
                 .query_row(
-                    "SELECT s.state, s.progress, a.size_bytes FROM attachments a LEFT JOIN sync_attachments s ON s.id = a.id WHERE a.id = ?1",
+                    "SELECT s.state, s.progress, a.size_bytes, s.failed IS NOT NULL FROM attachments a LEFT JOIN sync_attachments s ON s.id = a.id WHERE a.id = ?1",
                     [id],
-                    |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?)),
+                    |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?, row.get(3)?)),
                 )
                 .optional()?;
-            let Some((state, progress, size)) = row else {
+            let Some((state, progress, size, gave_up)) = row else {
                 continue;
             };
             let state = match state.as_deref() {
@@ -494,10 +501,26 @@ impl Workspace {
                 }
                 _ => None,
             };
+            // The reason is the one told in the Inbox when the runs gave up.
+            let failure = if gave_up && state == AttachmentAvailabilityState::NotDownloaded {
+                let reason: Option<String> = self
+                    .connection
+                    .query_row(
+                        "SELECT json_extract(notice, '$.reason') FROM sync_notices WHERE cause = 'attachment-save:' || ?1 OR cause LIKE 'attachment:' || ?1 || ':%' OR cause LIKE 'attachment-fetch:' || ?1 || ':%' ORDER BY rowid DESC LIMIT 1",
+                        [id],
+                        |row| row.get(0),
+                    )
+                    .optional()?
+                    .flatten();
+                Some(reason.unwrap_or_default())
+            } else {
+                None
+            };
             found.push(AttachmentAvailability {
                 id: id.clone(),
                 state,
                 progress,
+                failure,
             });
         }
         Ok(found)

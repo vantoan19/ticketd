@@ -1,0 +1,240 @@
+/* FileCard and FileGrid: a fixed 176px card, so a still that arrives late
+   fades into its frame without moving anything. Layout only; colors, radii and
+   shadows are the shared tokens. */
+.file-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, 176px);
+  gap: 12px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+.file-card-item,
+.file-grid > li {
+  display: flex;
+  min-width: 0;
+}
+.file-card {
+  position: relative;
+  display: flex;
+  width: 176px;
+  flex: none;
+  border-radius: var(--radius-card);
+  background: var(--surface);
+  box-shadow: var(--shadow-border-base);
+  transition: box-shadow var(--dur-enter) ease;
+}
+.file-card:hover {
+  box-shadow: var(--shadow-card-lift);
+}
+.file-card-open {
+  display: flex;
+  flex-direction: column;
+  width: 100%;
+  min-width: 0;
+  padding: 0;
+  border-radius: var(--radius-card);
+  color: var(--foreground);
+  text-align: start;
+}
+.file-card-open:focus-visible {
+  outline: 2px solid var(--ring);
+  outline-offset: 0;
+}
+.file-card-frame {
+  position: relative;
+  display: block;
+  aspect-ratio: 16 / 10;
+  overflow: hidden;
+  border-radius: var(--radius-card) var(--radius-card) 0 0;
+  background: var(--recessed);
+  box-shadow: 0 1px 0 var(--group-hairline);
+}
+.file-card-tile {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  color: var(--muted-foreground);
+}
+.file-card-tile > svg {
+  width: 22px;
+  height: 22px;
+}
+.file-card-label {
+  font-family: var(--font-mono);
+  font-size: var(--text-caption);
+  font-weight: 500;
+  line-height: var(--text-caption-line);
+  color: var(--foreground);
+}
+.file-card-more {
+  font-family: var(--font-mono);
+  font-size: var(--text-reading-heading);
+  font-weight: 500;
+  line-height: var(--text-reading-heading-line);
+  color: var(--foreground);
+}
+.file-card-still {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  border: 0;
+  object-fit: cover;
+  object-position: top;
+  pointer-events: none;
+  animation: file-card-fade var(--dur-enter) ease both;
+}
+/* A report's first screen: the sandboxed frame at 1280px wide, scaled to the
+   card and cropped from the top. */
+iframe.file-card-still {
+  position: absolute;
+  inset: 0 auto auto 0;
+  width: 1280px;
+  height: 800px;
+  transform: scale(calc(176 / 1280));
+  transform-origin: top left;
+}
+/* A PDF's first page, as paper: 62% of the frame's width, centered and
+   top-aligned, with a soft shadow. The page is white in both themes. */
+img.file-card-still[data-paper] {
+  inset: 0 auto auto 19%;
+  width: 62%;
+  height: auto;
+  background: white;
+  box-shadow: var(--shadow-medium);
+}
+/* A Document's first page: laid out as a 432px page and scaled to the same
+   paper, 62% of the frame's width, so its text reads as a page's texture. */
+.file-card-page {
+  position: absolute;
+  inset: 0 auto auto 19%;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  width: 432px;
+  height: 460px;
+  padding: 32px 28px;
+  overflow: hidden;
+  background: white;
+  box-shadow: var(--shadow-medium);
+  color: black;
+  font-size: var(--text-doc);
+  line-height: var(--text-doc-line);
+  transform: scale(calc(0.62 * 176 / 432));
+  transform-origin: top left;
+  pointer-events: none;
+  animation: file-card-fade var(--dur-enter) ease both;
+}
+.file-card-page > strong {
+  margin-bottom: 4px;
+  font-size: var(--text-reading-heading);
+  font-weight: 600;
+  line-height: var(--text-reading-heading-line);
+}
+.file-card-page > span {
+  flex: none;
+  overflow: hidden;
+  opacity: 0.7;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+@keyframes file-card-fade {
+  from {
+    opacity: 0;
+  }
+}
+.file-card-band {
+  display: flex;
+  flex: 1 1 auto;
+  flex-direction: column;
+  border-radius: 0 0 var(--radius-card) var(--radius-card);
+}
+.file-card-open:hover .file-card-band {
+  background: var(--hover);
+}
+.file-card-name {
+  display: -webkit-box;
+  padding: 8px 10px 0;
+  overflow: hidden;
+  overflow-wrap: anywhere;
+  font-size: var(--text-ui);
+  line-height: var(--text-preview-line);
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
+}
+/* A cut name arrives as its two lines; each stays on one line. */
+.file-card-name[data-measured] > span {
+  display: block;
+  overflow: hidden;
+  white-space: pre;
+}
+.file-card-caption {
+  display: block;
+  padding: 2px 10px 10px;
+  overflow: hidden;
+  color: var(--muted-foreground);
+  font-size: var(--text-caption);
+  line-height: var(--text-caption-line);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.file-card-action {
+  position: absolute;
+  top: 4px;
+  right: 4px;
+  visibility: hidden;
+}
+.file-card:hover .file-card-action,
+.file-card:focus-within .file-card-action {
+  visibility: visible;
+}
+@media (hover: none) {
+  .file-card-action {
+    visibility: visible;
+  }
+}
+
+/* Attachment links that stand alone on their line in written text become cards;
+   consecutive ones share a row, 10px apart: three cards (548px) then fit the
+   550px column of an update next to the timeline's scrollbar, where 12px gaps
+   (552px) wrapped the third onto a second row. */
+.markdown-document [data-cards] {
+  display: inline-flex;
+  flex-wrap: wrap;
+  gap: 12px 10px;
+  max-width: 100%;
+  margin: 0 10px 12px 0;
+  vertical-align: top;
+  list-style: none;
+}
+/* A card's gap belongs between cards, not after the last: the last of a run
+   takes it back, so the run is as wide as its cards and the gaps between them,
+   even with the whitespace the Markdown leaves between paragraphs. */
+.markdown-document [data-cards]:not(:has(+ [data-cards])) {
+  margin-inline-end: -10px;
+}
+
+/* A link in a sentence: the family glyph at 14px before the words. */
+.attachment-link-glyph {
+  display: inline-block;
+  width: 14px;
+  height: 14px;
+  margin-inline-end: 4px;
+  vertical-align: -2px;
+  color: var(--muted-foreground);
+}
+
+/* The 12px between blocks also holds above and below a run of cards. The cards'
+   own margin (above) is a row gap that must stay, and it zeroes the block gap
+   the text above would add, so the text above and below take the gap instead. */
+.markdown-document > :has(+ [data-cards]) {
+  margin-bottom: 12px;
+}
+.markdown-document > [data-cards] + :not([data-cards]) {
+  margin-top: 0;
+}
