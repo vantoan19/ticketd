@@ -137,3 +137,24 @@ test("a stylesheet's embedded data: URLs are local, whatever the quoting, and an
   ])
     expect(style(remote), remote).toBe(true);
 });
+
+test("older remote pictures (a background, lowsrc, an SVG image or use) count as online images", () => {
+  const remote = [
+    `<body background="https://example.com/paper.png"><p>Hi</p>`,
+    `<p>Hi</p><table><tr><td background="//example.com/cell.gif">x</td></tr></table>`,
+    `<p>Hi</p><img src="data:image/gif;base64,R0lGOD" lowsrc="https://example.com/low.gif">`,
+    `<p>Hi</p><svg width="9" height="9"><image href="https://example.com/a.png"/></svg>`,
+    `<p>Hi</p><svg width="9" height="9"><image xlink:href="https://example.com/a.png"/></svg>`,
+    `<p>Hi</p><svg width="9" height="9"><use href="https://example.com/s.svg#a"/></svg>`,
+  ];
+  for (const markup of remote)
+    expect(prepareReport(markup).external, markup).toBe(true);
+  // Pictures that are part of the file, and a link to a spot in it, are not remote.
+  const local = [
+    `<body background="data:image/gif;base64,R0lGOD"><p>Hi</p>`,
+    `<p>Hi</p><svg width="9" height="9"><defs><g id="a"/></defs><use href="#a"/><image href="data:image/gif;base64,R0lGOD"/></svg>`,
+    `<p>Hi</p><a href="https://example.com">link</a>`,
+  ];
+  for (const markup of local)
+    expect(prepareReport(markup).external, markup).toBe(false);
+});

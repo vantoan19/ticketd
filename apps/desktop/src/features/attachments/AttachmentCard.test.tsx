@@ -424,3 +424,22 @@ test("cards that left before their turn do not hold up the one still waiting beh
   expect(reads()).not.toContain("gone-d");
   await act(async () => releases.get("stays-e")!());
 });
+
+test("a picture card asks for its file's facts once, not once for the still and once for Missing", async () => {
+  const arrive = viewport();
+  vi.mocked(invoke).mockImplementation(async (command) => {
+    if (command === "attachment_workspace_id") return "workspace";
+    return info(stored("shot", "shot.png"));
+  });
+  render(
+    <AttachmentCard file={stored("shot", "shot.png")} onOpen={() => {}} />,
+  );
+  arrive();
+  await waitFor(() =>
+    expect(document.querySelector("img.file-card-still")).not.toBeNull(),
+  );
+  const asked = (name: string) =>
+    vi.mocked(invoke).mock.calls.filter(([command]) => command === name);
+  expect(asked("attachment_preview")).toHaveLength(1);
+  expect(asked("attachment_workspace_id")).toHaveLength(1);
+});

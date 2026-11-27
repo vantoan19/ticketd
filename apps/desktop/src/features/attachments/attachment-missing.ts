@@ -1,6 +1,7 @@
 import { useEffect, useState } from "react";
-import { attachments, type Attachment } from "@/lib/api/attachments";
+import type { Attachment } from "@/lib/api/attachments";
 import { purged } from "./file-words";
+import { cardWorkspace, readCardPreview } from "./card-preview";
 
 /**
  * Whether a kept local file's stored copy is gone from this computer, for the
@@ -18,8 +19,8 @@ export function useMissing(file: Attachment, wanted: boolean): boolean {
     if (!wanted || !asks) return;
     let current = true;
     void (async () => {
-      const workspace = await attachments.workspaceId();
-      const info = await attachments.preview(workspace, file.id);
+      const workspace = await cardWorkspace();
+      const info = await readCardPreview(workspace, file.id);
       if (current)
         setFound({
           id: file.id,

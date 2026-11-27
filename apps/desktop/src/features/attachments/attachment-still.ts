@@ -3,6 +3,7 @@ import { attachments, type Attachment } from "@/lib/api/attachments";
 import { prepareReport } from "./html-report";
 import { purged } from "./file-words";
 import { openPdf } from "./pdf-document";
+import { cardWorkspace, readCardPreview } from "./card-preview";
 
 /** A picture's still is the picture itself, up to the inline limit. */
 const IMAGE_LIMIT = 5 * 1024 * 1024;
@@ -146,9 +147,9 @@ export function useStill(file: Attachment, wanted: boolean): Still | null {
     if (!wanted || !kind) return;
     let current = true;
     void (async () => {
-      const workspace = await attachments.workspaceId();
+      const workspace = await cardWorkspace();
       if (kind === "image") {
-        const info = await attachments.preview(workspace, file.id);
+        const info = await readCardPreview(workspace, file.id);
         if (
           current &&
           info.status === "available" &&

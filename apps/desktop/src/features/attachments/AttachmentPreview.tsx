@@ -89,6 +89,7 @@ import { FittedTitle } from "./FittedTitle";
 import { HtmlStage } from "./HtmlStage";
 import { ImageStage } from "./ImageStage";
 import { PdfStage, type StageKeys } from "./PdfStage";
+import { SVG_LIMIT, SvgStage } from "./SvgStage";
 import { TextStage } from "./TextStage";
 import { PreviewLoading, PreviewState, RetryActions } from "./PreviewState";
 import { RenameAttachment } from "./RenameAttachment";
@@ -107,6 +108,9 @@ export type ReferenceReplacement = (
   requestId: string,
   signal: AbortSignal,
 ) => Promise<void>;
+
+/** The largest file the app previews at all (100 MiB); a picture under it that is too large has too many pixels. */
+const PREVIEW_BYTES = 100 * 1024 * 1024;
 
 /** Where a file is used, as the "Used in" list names each place. */
 const usageKinds: Record<string, string> = {
@@ -1044,6 +1048,15 @@ function PreviewStage({
         }
       />
     );
+  else if (info?.status === "unsupported" && file?.size_bytes === 0)
+    body = (
+      <PreviewState
+        family={type.family}
+        label={label}
+        title="Empty file"
+        sentence="It has no content, so there’s nothing to show."
+      />
+    );
   else if (info?.pdf && file) {
     pdfShown = true;
     body = (
@@ -1064,6 +1077,27 @@ function PreviewStage({
         file={file}
         attempt={preview.attempt}
         onRetry={preview.retry}
+      />
+    );
+  } else if (
+    info?.text &&
+    file &&
+    !info.text.partial &&
+    info.text.total_bytes <= SVG_LIMIT &&
+    /\.svg$/i.test(file.original_filename)
+  ) {
+    // An SVG is a picture, drawn as an image (never as a document).
+    pictureShown = true;
+    body = (
+      <SvgStage
+        key={`${preview.workspace}/${file.id}/${preview.attempt}`}
+        workspace={preview.workspace}
+        file={file}
+        attempt={preview.attempt}
+        onRetry={preview.retry}
+        onError={preview.mediaFailed}
+        scrollerRef={scroller}
+        keysRef={stageKeys}
       />
     );
   } else if (info?.text && file) {
@@ -1103,7 +1137,14 @@ function PreviewStage({
         family={type.family}
         label={label}
         title="Too large to preview"
-        sentence={`${file?.size_bytes != null ? `It’s ${formatSize(file.size_bytes)}. ` : ""}Open it in its app to ${see}.`}
+        sentence={
+          // A picture within the file-size limit is held back by its pixels, not its bytes.
+          type.family === "image" &&
+          file?.size_bytes != null &&
+          file.size_bytes <= PREVIEW_BYTES
+            ? "Its picture has too many pixels to show here. Open it in its app to see it."
+            : `${file?.size_bytes != null ? `It’s ${formatSize(file.size_bytes)}. ` : ""}Open it in its app to ${see}.`
+        }
       />
     );
   else if (info)
