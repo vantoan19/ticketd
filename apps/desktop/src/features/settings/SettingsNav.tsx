@@ -129,6 +129,7 @@ export function SettingsNav({
             id={SEARCH_INPUT_ID}
             data-responsive-navigation="settings-search"
             fill
+            clearable={false}
             aria-label="Search settings"
             placeholder="Search settings"
             value={query}

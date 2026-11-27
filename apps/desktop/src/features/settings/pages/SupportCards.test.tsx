@@ -9,6 +9,7 @@ import {
 import { afterEach, beforeEach, expect, test, vi } from "vitest";
 import { revealFailureDetails } from "@/test/failure-details";
 import { workspaceClient } from "@/lib/api/workspace";
+import { findSetting } from "@/features/settings/settings-highlight";
 import { SupportCards } from "@/features/settings/pages/SupportCards";
 
 vi.mock("@/lib/api/workspace", () => ({
@@ -59,4 +60,14 @@ test("a link that cannot open says so", async () => {
   fireEvent.click(screen.getByRole("button", { name: "Star on GitHub" }));
   await revealFailureDetails();
   expect(screen.getByRole("alert").textContent).toContain("no browser");
+});
+
+test("Search shows the whole card, not just its button", () => {
+  const { container } = render(<SupportCards coffeeUrl={COFFEE} />);
+  expect(
+    findSetting(container, "Star on GitHub")?.getAttribute("data-kind"),
+  ).toBe("star");
+  expect(
+    findSetting(container, "Buy me a coffee")?.getAttribute("data-kind"),
+  ).toBe("coffee");
 });

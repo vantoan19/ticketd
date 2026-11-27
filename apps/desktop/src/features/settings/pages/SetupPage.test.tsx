@@ -543,7 +543,9 @@ test("Hide checklist removes the row, and Search still finds the page", async ()
   await settle();
   expect(setupRow()).not.toBeNull();
   fireEvent.click(screen.getByRole("button", { name: "Hide checklist" }));
-  expect(setupRow()).toBeNull();
+  // The row stays under the person's eyes, so the sidebar does not jump; the
+  // choice is kept, and the row is gone when Settings opens again.
+  expect(setupRow()).not.toBeNull();
   expect(loadPreferences().setupHidden).toBe(true);
   // The page stays, without the button that hid it.
   expect(
@@ -564,6 +566,15 @@ test("Hide checklist removes the row, and Search still finds the page", async ()
   expect(
     await screen.findByRole("heading", { level: 1, name: "Set up ticketd" }),
   ).toBeTruthy();
+});
+
+test("a hidden checklist's row is gone the next time Settings opens", async () => {
+  const first = render(<Settings />);
+  await settle();
+  fireEvent.click(screen.getByRole("button", { name: "Hide checklist" }));
+  first.unmount();
+  render(<Settings initial="appearance" />);
+  await settle();
   expect(setupRow()).toBeNull();
 });
 

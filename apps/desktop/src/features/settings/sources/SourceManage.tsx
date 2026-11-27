@@ -20,11 +20,17 @@ import { sourcesClient } from "@/lib/api/sources";
 export function SourceManage({
   id,
   name,
+  sourceName,
+  onAdd,
   onRemoved,
 }: {
   id: string;
   /** The name the catalog holds. */
   name: string;
+  /** The source's own name ("Linear"), for the way to add another connection. */
+  sourceName?: string;
+  /** Starts another connection to this source, for a second account. Left out when none can be added. */
+  onAdd?: () => void;
   /** Called once the connection is gone, after the catalog has been told. */
   onRemoved: () => void;
 }) {
@@ -160,6 +166,22 @@ export function SourceManage({
             </form>
           )}
         </SettingsRow>
+        {onAdd && (
+          <SettingsRow
+            title="Another connection"
+            description={`Sign in with a second ${sourceName ?? "account"} account, with its own rules.`}
+            trailing={
+              <Button
+                size="sm"
+                variant="outline"
+                aria-label={`Add another ${sourceName ?? "source"} connection`}
+                onClick={onAdd}
+              >
+                Add connection
+              </Button>
+            }
+          />
+        )}
         <SettingsRow
           title="Remove connection"
           description="Its tickets keep their last synced content and your work."

@@ -398,8 +398,24 @@ test("a row opens its agent in place: breadcrumb, back control, sign-in, program
   ).toBeTruthy();
 });
 
+test.each([true, false])(
+  "Agent skills opens its own page and keeps it selected, with Chats %s",
+  async (chats) => {
+    render(<Settings client={spied(chats)} />);
+    await screen.findByRole("list", { name: "Agents" });
+    fireEvent.click(navItem("Agent skills"));
+    await screen.findByRole("heading", { level: 1, name: "Agent skills" });
+    await settled();
+    expect(
+      screen.getByRole("heading", { level: 1, name: "Agent skills" }),
+    ).toBeTruthy();
+    expect(navItem("Agent skills").getAttribute("aria-current")).toBe("page");
+    expect(navItem("Agents").getAttribute("aria-current")).toBeNull();
+  },
+);
+
 test("Escape and the breadcrumb return from an opened agent", async () => {
-  render(<Settings client={spied(true)} initial="agent-codex" />);
+  render(<Settings client={spied(true)} initial="agent:codex" />);
   await screen.findByRole("heading", { level: 1, name: "Codex" });
   fireEvent.keyDown(document.body, { key: "Escape" });
   expect(
@@ -420,7 +436,7 @@ test("Escape and the breadcrumb return from an opened agent", async () => {
 });
 
 test("an agent that is not signed in shows the same fix in its opened view", async () => {
-  render(<Settings client={spied(true)} initial="agent-codex" />);
+  render(<Settings client={spied(true)} initial="agent:codex" />);
   await screen.findByRole("heading", { level: 1, name: "Codex" });
   const signIn = () =>
     screen
@@ -441,7 +457,7 @@ test("an agent that is not signed in shows the same fix in its opened view", asy
 });
 
 test("an agent that is not installed offers where to get it, in its opened view", async () => {
-  render(<Settings client={spied(true)} initial="agent-antigravity" />);
+  render(<Settings client={spied(true)} initial="agent:antigravity" />);
   await screen.findByRole("heading", { level: 1, name: "Antigravity" });
   expect(screen.queryByRole("heading", { name: "Sign-in" })).toBeNull();
   const get = await screen.findByRole("button", { name: /Get Antigravity/ });
@@ -457,7 +473,7 @@ test("an agent that is not installed offers where to get it, in its opened view"
 test("Open New Chat leaves Settings for New Chat, starting with this agent", async () => {
   const client = spied(true);
   client.options.set("claude-code", opusOptions());
-  render(<Settings client={client} initial="agent-claude-code" />);
+  render(<Settings client={client} initial="agent:claude-code" />);
   fireEvent.click(await screen.findByRole("button", { name: "Open New Chat" }));
   expect(localStorage.getItem("ticketd.chat-harness")).toBe("claude-code");
 });

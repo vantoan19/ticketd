@@ -1,4 +1,4 @@
-import { expect, test } from "vitest";
+import { expect, test, vi } from "vitest";
 import type { AgentSkill } from "@/lib/api/agent-skills";
 import type { CliStatus } from "@/lib/api/cli";
 import type { SourceEntry } from "@/lib/api/sources";
@@ -69,7 +69,7 @@ const fresh: SetupReadings = {
 
 const source = (provider: string, name: string): SourceEntry =>
   ({
-    connector: { provider, name },
+    connector: { provider, name, schema: { fields: [] } },
     saved: { provider, config: {}, account: "a", saved_at: "2026-11-25" },
   }) as unknown as SourceEntry;
 
@@ -221,6 +221,40 @@ test("step 2 ticks on the first update an agent wrote, and says which and when",
   );
   expect(step.done).toBe(true);
   expect(step.description).toMatch(/^Codex updated T-KQ27 on /);
+});
+
+test("step 2 names the day in the app's own date format, not a fixed locale", () => {
+  const dates = vi.spyOn(Date.prototype, "toLocaleDateString");
+  setupStep(
+    deriveSetup({
+      ...fresh,
+      agentUpdate: {
+        reference: "T-KQ27",
+        editing_agent: "codex",
+        reported_at: "2026-11-25T10:00:00Z",
+      },
+    }),
+    "agent-update",
+  );
+  expect(dates).toHaveBeenCalledWith(undefined, expect.anything());
+  dates.mockRestore();
+});
+
+test("step 3 says gh only for a GitHub connection that signs in with gh", () => {
+  const withKey = {
+    connector: {
+      provider: "github",
+      name: "GitHub",
+      schema: {
+        fields: [{ key: "token", label: "Access token", type: "secret" }],
+      },
+    },
+    saved: { provider: "github", config: {}, account: "a", saved_at: "x" },
+  } as unknown as SourceEntry;
+  expect(
+    setupStep(deriveSetup({ ...fresh, sources: [withKey] }), "sources")
+      .description,
+  ).toBe("GitHub.");
 });
 
 test("steps 3 to 5 tick from a connected source, sync and the system's permission", () => {

@@ -1,3 +1,4 @@
+import { BUY_ME_A_COFFEE_URL } from "@/lib/support-links";
 import {
   SETTINGS_SECTIONS,
   navSectionOf,
@@ -301,7 +302,32 @@ export const SETTINGS_ENTRIES: readonly SettingsEntry[] = [
     keywords: "licenses open source libraries fonts",
     section: "about",
   },
+  {
+    title: "Star on GitHub",
+    description: "Helps other people find ticketd.",
+    keywords: "support sponsor donate star favourite repository",
+    section: "about",
+  },
 ];
+
+/**
+ * Rows that About shows only sometimes. The Buy me a coffee card appears once
+ * the maintainer's page is known, so Search lists it only then.
+ */
+export function supportEntries(
+  coffeeUrl: string | null = BUY_ME_A_COFFEE_URL,
+): SettingsEntry[] {
+  return coffeeUrl
+    ? [
+        {
+          title: "Buy me a coffee",
+          description: "Helps one maintainer keep ticketd going.",
+          keywords: "support sponsor donate tip",
+          section: "about",
+        },
+      ]
+    : [];
+}
 
 /**
  * What a connection adds to Search: its row in the Ticket sources table, then

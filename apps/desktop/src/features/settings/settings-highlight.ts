@@ -15,8 +15,8 @@ function plain(text: string | null) {
 /** The part of a page that names the page, never one of its settings. */
 const PAGE_HEADING = ".settings-panel-bar, .settings-page-header";
 
-/** What a setting's title belongs to: its row, its table row, or its section. */
-const SETTING = ".settings-list-row, tr, .settings-section";
+/** What a setting's title belongs to: its row, its table row, its Support card, or its section. */
+const SETTING = ".settings-list-row, tr, .support-card, .settings-section";
 
 /** The text an element holds itself, not in its children: "Chats" in `Chats <Badge>`. */
 function ownText(element: Element) {

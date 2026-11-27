@@ -44,6 +44,29 @@ const saved = {
   saved_at: "2026-01-01T00:00:00Z",
 };
 const connected: SourceEntry = { ...githubSource, saved };
+/** GitHub as the core describes it: a Repositories field to fill in. */
+const withRepositories: SourceEntry = {
+  ...connected,
+  next_id: "github-3",
+  connector: {
+    ...githubSource.connector,
+    schema: {
+      fields: [
+        {
+          key: "repositories",
+          label: "Repositories",
+          required: true,
+          type: "multi_select",
+          options: { source: "dynamic", depends_on: [] },
+          allow_custom: true,
+          min_items: 1,
+          max_items: 2,
+          format: "owner_name",
+        },
+      ],
+    },
+  },
+};
 
 beforeEach(() => {
   vi.mocked(sourcesClient.checkConnection).mockResolvedValue({
@@ -62,6 +85,7 @@ function show(
   {
     onBack = vi.fn(),
     onChanged = vi.fn(async () => {}),
+    onOpen = vi.fn(),
     readCatalog = vi.fn(() => 1),
   } = {},
 ) {
@@ -82,6 +106,7 @@ function show(
         active
         onBack={onBack}
         onChanged={onChanged}
+        onOpen={onOpen}
       />
     </SourceActivityContext.Provider>
   );
@@ -89,6 +114,7 @@ function show(
   return {
     onBack,
     onChanged,
+    onOpen,
     readCatalog,
     update: (next: SourceEntry) => view.rerender(page(next)),
   };
@@ -207,4 +233,73 @@ test("an unavailable source's page says what happened and still renames and remo
   });
   await waitFor(() => expect(onBack).toHaveBeenCalled());
   expect(sourcesClient.remove).toHaveBeenCalledWith("tracker");
+});
+
+test("a saved source can still take a second connection, for another account", async () => {
+  const added = {
+    ...saved,
+    id: "github-3",
+    name: "Side project",
+    config: { repositories: ["o/side"] },
+  };
+  const preview = {
+    provider: "github",
+    account: "octo",
+    issues: [],
+    matched: 0,
+    complete: true,
+  };
+  vi.mocked(sourcesClient.options).mockResolvedValue([]);
+  vi.mocked(sourcesClient.preview).mockResolvedValue(preview);
+  vi.mocked(sourcesClient.add).mockResolvedValue({ source: added, preview });
+  const { onChanged, onOpen } = show(withRepositories);
+  fireEvent.click(
+    await screen.findByRole("button", {
+      name: "Add another GitHub connection",
+    }),
+  );
+  await screen.findByRole("heading", {
+    level: 1,
+    name: "Add GitHub connection",
+  });
+  const repositories = screen.getByRole("textbox", { name: /^Repositories/ });
+  fireEvent.change(repositories, { target: { value: "o/side" } });
+  fireEvent.keyDown(repositories, { key: "Enter" });
+  fireEvent.change(screen.getByLabelText("Connection name"), {
+    target: { value: "Side project" },
+  });
+  fireEvent.click(screen.getByRole("button", { name: "Preview matches" }));
+  await screen.findByRole("region", { name: "Preview" });
+  fireEvent.click(screen.getByRole("button", { name: "Add connection" }));
+  await waitFor(() => expect(onOpen).toHaveBeenCalledWith("github-3"));
+  expect(sourcesClient.add).toHaveBeenCalledWith(
+    "github",
+    "github-3",
+    "Side project",
+    { repositories: ["o/side"] },
+  );
+  expect(onChanged).toHaveBeenCalledWith({
+    ...withRepositories,
+    saved: added,
+  });
+});
+
+test("cancelling a second connection returns to the source's page", async () => {
+  vi.mocked(sourcesClient.options).mockResolvedValue([]);
+  show(withRepositories);
+  fireEvent.click(
+    await screen.findByRole("button", {
+      name: "Add another GitHub connection",
+    }),
+  );
+  fireEvent.click(await screen.findByRole("button", { name: "Cancel" }));
+  expect(
+    await screen.findByRole("button", { name: "Rename Work" }),
+  ).toBeTruthy();
+});
+
+test("with no ID to give it, a source offers no second connection", async () => {
+  show(connected);
+  await screen.findByRole("button", { name: "Rename Work" });
+  expect(screen.queryByRole("button", { name: /Add another/ })).toBeNull();
 });
