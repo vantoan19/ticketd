@@ -100,6 +100,7 @@ mod claude {
             );
         }
         // Nothing was written to the harness: the fixture's Stop frame was never asked for.
+        h.peer().await.assert_nothing_written().await;
     }
 
     #[tokio::test(start_paused = true)]
@@ -290,18 +291,37 @@ mod codex {
             .min()
             .unwrap();
 
+        let steps_of_first = |h: &HostScript| -> Vec<(String, ChatToolState)> {
+            h.items()
+                .into_iter()
+                .filter_map(|item| match item {
+                    ChatItem::Tool(tool)
+                        if tool.owner
+                            == ChatOwner::SubAgent {
+                                native_id: first.clone(),
+                            } =>
+                    {
+                        Some((tool.id, tool.state))
+                    }
+                    _ => None,
+                })
+                .collect()
+        };
+        let before = steps_of_first(&h);
+        assert!(
+            before
+                .iter()
+                .any(|(_, state)| *state == ChatToolState::Running),
+            "{before:?}"
+        );
+
         h.stop_sub_agent(&first).await;
         h.play_to("the first sub-agent was stopped").await;
 
-        let failed = h
-            .items()
-            .into_iter()
-            .filter(|item| {
-                matches!(item, ChatItem::Tool(tool)
-                    if tool.state == ChatToolState::Failed
-                        && tool.owner == ChatOwner::SubAgent { native_id: first.clone() })
-            })
-            .count();
-        assert_eq!(failed, 0);
+        // The same Steps are still stored under the stopped sub-agent, as they were: the
+        // late exit -1 changed none of them to Failed (a Step of a stopped run reads as
+        // not finished, by the run's state).
+        assert_eq!(steps_of_first(&h), before);
+        assert_eq!(run(&h, &first).state, ChatSubAgentState::Stopped);
     }
 }
