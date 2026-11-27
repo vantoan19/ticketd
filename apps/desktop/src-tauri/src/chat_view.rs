@@ -1100,6 +1100,7 @@ impl Tracker {
             queued: false,
             editing: false,
             requires_link_context: false,
+            note: None,
             attempts: Vec::new(),
             created_at: String::new(),
         };
@@ -2120,10 +2121,7 @@ fn sub_agent_view(record: &ChatSubAgent, chat: &Chat, live: &ChatLive) -> Option
     );
     let said = |key: &str| record.said(key).filter(|said| !said.trim().is_empty());
     // What the harness called the work; failing that, the kind of sub-agent it is.
-    let title = said("description")
-        .map(|description| first_line_of(&description).unwrap_or(description))
-        .or_else(|| said("subagent_type"))
-        .unwrap_or_else(|| "Sub-agent".to_owned());
+    let title = record.title();
     let prompt = said("prompt");
     Some(SubAgentView {
         id: record.native_id.clone(),
@@ -2745,6 +2743,7 @@ mod tests {
             read_through: None,
             marked_unread: false,
             muted: false,
+            restart_notice: Vec::new(),
             created_at: String::new(),
         }
     }
@@ -4288,6 +4287,7 @@ mod tests {
             queued: false,
             editing: false,
             requires_link_context: false,
+            note: None,
             attempts: vec![ChatSubmissionAttempt {
                 id: "a".to_owned(),
                 intent: ChatSubmissionIntent::Steer,
@@ -4395,6 +4395,7 @@ mod tests {
             queued: false,
             editing: false,
             requires_link_context: false,
+            note: None,
             attempts: Vec::new(),
             created_at: "2026-11-25T09:30:00Z".to_owned(),
         };

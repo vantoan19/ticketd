@@ -625,10 +625,24 @@ impl Session {
         }
     }
 
+    /// Whether a frame naming run `incoming` of `task` is late: the run it names sorts
+    /// before the one that runs now (the SDK orders a task's run IDs by when they opened).
+    fn late_run(&self, task: &str, incoming: Option<&str>) -> bool {
+        matches!(
+            (self.sub_agents.known.get(task).and_then(|agent| agent.run.as_deref()), incoming),
+            (Some(current), Some(incoming)) if incoming < current
+        )
+    }
+
     fn sub_agent_updated(&mut self, event: &Value, events: &mut Vec<EventKind>) {
         let Some(task) = text(event, "task_id") else {
             return;
         };
+        // A resumed task is the same task with a new run: what an earlier run says now
+        // changes nothing about the one that runs.
+        if self.late_run(task, text(event, "run_id")) {
+            return;
+        }
         let background = event["background"].as_bool();
         let described = text(event, "description");
         let outcome = match text(event, "status") {
@@ -674,6 +688,9 @@ impl Session {
         let Some(task) = text(event, "task_id") else {
             return;
         };
+        if self.late_run(task, text(event, "run_id")) {
+            return;
+        }
         let outcome = match text(event, "status") {
             Some("completed") => SubAgentOutcome::Completed,
             Some("failed") => SubAgentOutcome::Failed,

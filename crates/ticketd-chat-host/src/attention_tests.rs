@@ -24,6 +24,7 @@ fn chat(seen_through: i64) -> Chat {
         read_through: None,
         marked_unread: false,
         muted: false,
+        restart_notice: Vec::new(),
         created_at: String::new(),
     }
 }
@@ -539,4 +540,41 @@ fn a_reply_with_long_spacing_keeps_whole_words_not_a_fragment() {
     let mut row = facts(&chat, &live, Some(&ended));
     row.last_response = Some(&spaced);
     assert_eq!(seen_words(row), format!("A {}", "b".repeat(40)));
+}
+
+#[test]
+fn sub_agents_that_lost_contact_are_a_muted_line_with_no_dot_until_the_next_message_tells_the_agent() {
+    let live = idle();
+    let ended = turn(5, TurnEnding::Completed);
+    let mut seen = chat(5);
+    seen.restart_notice = vec!["a".to_owned(), "b".to_owned()];
+    let status = status(&facts(&seen, &live, Some(&ended)));
+    assert_eq!(
+        (status.rank, status.word.as_str(), status.unread()),
+        (Rank::Idle, "2 sub-agents lost contact", false)
+    );
+    assert_eq!(status.detail, None);
+
+    seen.restart_notice.truncate(1);
+    assert_eq!(
+        super::status(&facts(&seen, &live, Some(&ended))).word,
+        "1 sub-agent lost contact"
+    );
+
+    // What needs the person, or has not been seen, still comes first.
+    let unseen = chat(0);
+    let mut unseen = unseen;
+    unseen.restart_notice = vec!["a".to_owned()];
+    let status = super::status(&facts(&unseen, &live, Some(&ended)));
+    assert_eq!((status.rank, status.word.as_str()), (Rank::Done, "Done"));
+    let mut working = facts(&seen, &live, Some(&ended));
+    working.activity = "working";
+    assert_eq!(super::status(&working).rank, Rank::Working);
+
+    // Told: the row says what the Chat did last again.
+    seen.restart_notice.clear();
+    assert_eq!(
+        super::status(&facts(&seen, &live, Some(&ended))).word,
+        "All done. See x."
+    );
 }
