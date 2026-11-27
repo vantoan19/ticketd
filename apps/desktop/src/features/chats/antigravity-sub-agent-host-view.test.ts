@@ -48,6 +48,13 @@ describe("the host's view of an Antigravity sub-agent", () => {
     expect(view?.limits).toBe(true);
     expect(view?.brief.reported).toBe(true);
     expect(view?.ending).toBeNull();
-    expect(view?.items.map((item) => item.kind)).toEqual(["turn", "steps"]);
+    // Its command's approval, answered, is the sub-agent's own (folded into the Step), not
+    // the main agent's.
+    expect(view?.items.map((item) => item.kind)).toEqual([
+      "turn",
+      "steps",
+      "request",
+    ]);
+    expect(main.some((item) => item.kind === "request")).toBe(false);
   });
 });

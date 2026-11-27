@@ -61,8 +61,12 @@ pub(crate) enum SubAgentApprovals {
     /// The request names the sub-agent that asked, belongs to no turn, and goes only when
     /// that sub-agent's run ends (Claude Code, Codex).
     Owned,
-    /// The adapter does not model sub-agents' approvals yet (Antigravity until its own
-    /// ticket, and the fake): the properties assert nothing for it.
+    /// The request names the sub-agent that asked, but the harness holds the main agent's
+    /// turn open until its sub-agents finish, so the request cannot outlive that turn and
+    /// goes with it (Antigravity).
+    EndsWithTheTurn,
+    /// The adapter does not model sub-agents' approvals (the fake): the properties assert
+    /// nothing for it.
     NotModelled,
 }
 
@@ -429,6 +433,23 @@ async fn a_sub_agents_approval_outlives_the_parents_turn(p: &mut dyn Provider) {
 
     p.end_parent_turn("s1").await;
     let ended = drain(p.events()).await;
+    if p.sub_agent_approvals() == SubAgentApprovals::EndsWithTheTurn {
+        // The declared difference: the harness ends the request's asker with the turn.
+        assert!(
+            ended.iter().any(|event| matches!(
+                event,
+                EventKind::InteractionResolved {
+                    request: gone,
+                    resolution: InteractionResolution::Withdrawn,
+                } if *gone == request
+            )),
+            "the request went with the turn it was held in: {ended:?}"
+        );
+        let answered = p.respond(p.approval_answer(&request, GENERATION)).await;
+        assert_eq!(answered, RespondOutcome::NotSent(Refusal::UnknownRequest));
+        p.assert_nothing_else_written().await;
+        return;
+    }
     assert!(
         ended
             .iter()
@@ -451,7 +472,8 @@ async fn a_sub_agents_approval_outlives_the_parents_turn(p: &mut dyn Provider) {
 /// The request goes when its asker's run ends, and not before: nothing more can be
 /// answered then.
 async fn a_sub_agents_approval_goes_with_its_asker(p: &mut dyn Provider) {
-    if p.sub_agent_approvals() == SubAgentApprovals::NotModelled {
+    // A harness whose sub-agents end with the turn has no separate end to test.
+    if p.sub_agent_approvals() != SubAgentApprovals::Owned {
         return;
     }
     let request = a_sub_agent_asks_in_a_turn(p).await;

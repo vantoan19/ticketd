@@ -1896,7 +1896,7 @@ use std::sync::Arc;
 
 use async_trait::async_trait;
 
-use crate::conformance::{NewTurn, Provider, SubAgentFrames};
+use crate::conformance::{NewTurn, Provider, SubAgentApprovals, SubAgentFrames};
 use crate::{EventStream, HarnessRuntime, NativeRequestId, NativeTurnId, RuntimeGeneration};
 
 struct AcpProvider {
@@ -1954,6 +1954,48 @@ impl Provider for AcpProvider {
 
     fn sub_agent_frames(&self) -> SubAgentFrames {
         SubAgentFrames::EndWithThePrompt
+    }
+
+    fn sub_agent_approvals(&self) -> SubAgentApprovals {
+        SubAgentApprovals::EndsWithTheTurn
+    }
+
+    async fn play_sub_agent_approval(&mut self, _id: &str) -> NativeRequestId {
+        // A child conversation's command asks, named by the prefix of its tool call.
+        let frames = recorded(RESUME);
+        let mut permission = frames
+            .iter()
+            .find(|frame| frame["server"]["method"] == "session/request_permission")
+            .unwrap()["server"]
+            .clone();
+        permission["params"]["toolCall"]["toolCallId"] = json!("child_1:call_1");
+        send(&mut self.peer, &permission).await;
+        drain(&mut self.opened.events)
+            .await
+            .into_iter()
+            .find_map(|kind| match kind {
+                EventKind::InteractionRequested(request) => {
+                    assert_eq!(
+                        request.owner,
+                        Some(crate::NativeSubAgentId::new("child_1")),
+                        "it names the child conversation"
+                    );
+                    Some(request.request)
+                }
+                _ => None,
+            })
+            .expect("agy asked on the child's behalf")
+    }
+
+    async fn end_parent_turn(&mut self, _id: &str) {
+        let id = self.prompt.take().expect("a prompt in flight")["id"].clone();
+        send(
+            &mut self.peer,
+            &json!({"jsonrpc":"2.0","id":id,"result":{"stopReason":"end_turn","usage":{
+                "inputTokens":1,"outputTokens":1,"cachedReadTokens":0,"cachedWriteTokens":0,
+                "thoughtTokens":0,"totalTokens":2}}}),
+        )
+        .await;
     }
 
     async fn play_sub_agent_at_rest(&mut self) {

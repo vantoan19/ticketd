@@ -263,7 +263,7 @@ request card is worded without the asker's name ("wants to run"): the interface 
 sub-agent's title before it, and the Chats list row ("Approval needed · {sub-agent}") and the
 notification (the card's title) say it too. The conformance suite holds every adapter to it
 (`a_sub_agents_approval_outlives_the_parents_turn`, `a_sub_agents_approval_goes_with_its_asker`),
-each declaring whether it models sub-agent approvals.
+each declaring its differences: Antigravity names the asker too (the child conversation in the tool call's ID), but holds the main agent's Prompt open until its children finish, so its request cannot outlive that Prompt and goes with it.
 
 A sub-agent in the background outlasts the turn that started it, so nothing it does opens or
 ends a turn, and what it ran before the turn ended finishes afterwards as its own. The

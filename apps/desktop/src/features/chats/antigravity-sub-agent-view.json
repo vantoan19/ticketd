@@ -165,10 +165,11 @@
       "kind": "request",
       "id": "00000000-0000-4000-8000-000000000004:request:00000000-0000-4000-8000-000000000005:\"1\"",
       "at": "2026-11-27T10:00:00.000Z",
-      "turn_id": "00000000-0000-4000-8000-000000000004:00000000-0000-4000-8000-000000000005",
+      "turn_id": "00000000-0000-4000-8000-000000000007:run-1",
+      "owner": "00000000-0000-4000-8000-000000000007",
       "request": "approval",
-      "title": "Antigravity asked for approval for",
-      "subject": "rg -n \"session.regenerate\" src/auth",
+      "title": "asked to search for",
+      "subject": "session.regenerate",
       "reason": "Search the session routes",
       "options": [],
       "free_text": false,
@@ -177,7 +178,7 @@
       "answer": null,
       "folded": true,
       "resolved_at": "2026-11-27T10:00:00.000Z",
-      "command": null,
+      "command": "rg -n \"session.regenerate\" src/auth",
       "ticketd": null
     }
   ],

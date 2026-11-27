@@ -24,7 +24,7 @@
       "kind": "message",
       "value": {
         "id": "00000000-0000-4000-8000-000000000002",
-        "position": 2,
+        "position": 1,
         "role": "user",
         "text": "Have a sub-agent change a file",
         "attachments": [],
@@ -54,7 +54,7 @@
       "kind": "session",
       "value": {
         "id": "00000000-0000-4000-8000-000000000005",
-        "position": 4,
+        "position": 2,
         "native_session_id": "thr_1",
         "origin": "new",
         "started_at": "2026-11-27T10:00:00.000Z"
@@ -64,7 +64,7 @@
       "kind": "turn",
       "value": {
         "id": "00000000-0000-4000-8000-000000000004:turn_1",
-        "position": 8,
+        "position": 3,
         "native_turn_id": "turn_1",
         "state": "completed",
         "detail": null,
@@ -80,7 +80,7 @@
       "kind": "sub_agent_run",
       "value": {
         "id": "00000000-0000-4000-8000-000000000001:sub-agent:thr_a:run-1",
-        "position": 11,
+        "position": 4,
         "sub_agent": "thr_a",
         "run": 1,
         "native_run_id": null,
@@ -97,7 +97,7 @@
       "kind": "tool",
       "value": {
         "id": "00000000-0000-4000-8000-000000000004:exec_1",
-        "position": 13,
+        "position": 5,
         "turn_id": "00000000-0000-4000-8000-000000000004:turn_1",
         "owner": {
           "kind": "sub_agent",
@@ -115,7 +115,7 @@
       "kind": "interaction",
       "value": {
         "id": "00000000-0000-4000-8000-000000000004:request:0",
-        "position": 14,
+        "position": 6,
         "turn_id": null,
         "owner": {
           "kind": "sub_agent",
@@ -136,7 +136,7 @@
       "kind": "message",
       "value": {
         "id": "00000000-0000-4000-8000-000000000004:msg_2",
-        "position": 15,
+        "position": 7,
         "role": "assistant",
         "text": "Waiting for the sub-agent.",
         "attachments": [],
@@ -166,7 +166,7 @@
       "runs": [
         {
           "id": "00000000-0000-4000-8000-000000000001:sub-agent:thr_a:run-1",
-          "position": 11,
+          "position": 4,
           "sub_agent": "thr_a",
           "run": 1,
           "native_run_id": null,

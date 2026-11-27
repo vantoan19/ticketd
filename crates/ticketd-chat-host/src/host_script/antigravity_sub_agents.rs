@@ -9,7 +9,8 @@
 use super::{HostScript, fixture};
 use crate::InteractionAnswer;
 use ticketd_core::{
-    ChatItem, ChatOwner, ChatSubAgent, ChatSubAgentState, ChatSubAgentStopper, ChatTurnState,
+    ChatInteractionState, ChatItem, ChatOwner, ChatSubAgent, ChatSubAgentState,
+    ChatSubAgentStopper, ChatTurnState,
 };
 
 const FIRST: &str = "00000000-0000-4000-8000-0000000000c1";
@@ -70,10 +71,21 @@ async fn a_childs_tool_calls_are_a_sub_agents_steps_and_it_ends_with_the_prompt(
         "started by the launch call: {record:?}"
     );
 
-    // Its approval is asked in the Chat and waits for the person.
+    // Its approval is asked in the Chat and waits for the person, and is the sub-agent's:
+    // not the main agent's.
     assert_eq!(h.live().await.interactions.len(), 1);
+    assert_eq!(
+        h.requests(),
+        [(
+            ChatOwner::SubAgent {
+                native_id: FIRST.to_owned()
+            },
+            ChatInteractionState::Pending
+        )]
+    );
     allow(&mut h).await;
     h.play_to("the sub-agent's command ended").await;
+    assert_eq!(h.requests()[0].1, ChatInteractionState::Answered);
     assert_eq!(
         h.sub_agent_transcript(FIRST),
         ["tool rg -n \"session.regenerate\" src/auth completed"]
