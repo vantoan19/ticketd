@@ -170,7 +170,7 @@ test("a label held shut never opens the next one at once", () => {
   }
 });
 
-test("one Escape closes a dialog whose Close button shows its label", async () => {
+test("one Escape closes a dialog whose Close button is focused with the keyboard", async () => {
   const closed = vi.fn();
   render(
     <Dialog open onOpenChange={(open) => !open && closed()}>
@@ -184,15 +184,32 @@ test("one Escape closes a dialog whose Close button shows its label", async () =
   // The dialog focuses its first control on opening; Tab arrives from elsewhere.
   act(() => close.blur());
   tabTo(close);
-  // The dialog hides everything outside it from the accessibility tree.
-  await waitFor(() =>
-    expect(
-      document.querySelector('[data-slot="tooltip-content"]'),
-    ).not.toBeNull(),
-  );
+  // No label over the dialog: it would be the layer that takes the Escape.
+  await new Promise((resolve) => setTimeout(resolve, 50));
+  expect(document.querySelector('[data-slot="tooltip-content"]')).toBeNull();
+  const keydowns: KeyboardEvent[] = [];
+  document.addEventListener("keydown", (event) => keydowns.push(event), true);
   fireEvent.keyDown(document.activeElement ?? document.body, {
     key: "Escape",
   });
   expect(closed).toHaveBeenCalledTimes(1);
-  expect(document.querySelector('[data-slot="tooltip-content"]')).toBeNull();
+  // One key, one event: nothing re-dispatches Escape.
+  expect(keydowns.filter((event) => event.key === "Escape")).toHaveLength(1);
+});
+
+test("Escape on a label outside any dialog closes just that label", async () => {
+  const escaped = vi.fn();
+  render(
+    <div onKeyDown={(event) => event.key === "Escape" && escaped()}>
+      <Tooltip content="Archive">
+        <button type="button">Archive</button>
+      </Tooltip>
+    </div>,
+  );
+  tabTo(screen.getByRole("button", { name: "Archive" }));
+  await waitFor(() => expect(screen.getByRole("tooltip")).not.toBeNull());
+  fireEvent.keyDown(document.activeElement ?? document.body, {
+    key: "Escape",
+  });
+  await waitFor(() => expect(screen.queryByRole("tooltip")).toBeNull());
 });

@@ -257,6 +257,23 @@ test("a source that is only unreachable still offers Retry", () => {
   expect(refreshAll).toHaveBeenCalledTimes(1);
 });
 
+test("the folded rail drops the Retry word, as it drops Sign in", () => {
+  line({
+    entries: [connection],
+    sources: [
+      health({
+        health: "unavailable",
+        error: { code: "network", message: "Offline" },
+      }),
+    ],
+  });
+  expect(
+    screen
+      .getByRole("button", { name: "Retry" })
+      .hasAttribute("data-rail-hidden"),
+  ).toBe(true);
+});
+
 test("a connection whose extension is missing gets a line of its own, once", () => {
   line({ entries: [{ ...connection, unavailable: true }] });
   expect(screen.getAllByText("Work GitHub unavailable")).toHaveLength(1);

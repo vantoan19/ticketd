@@ -21,6 +21,33 @@ function parts(command: string) {
 }
 
 /**
+ * A terminal command as arguments: each whitespace-separated token stays together
+ * (a browser would otherwise break after the dashes of `--evidence`), so a
+ * long command wraps only between arguments. An inline block is one unit for
+ * line breaking, and still breaks inside itself when it alone is wider than
+ * the block (a long path).
+ */
+function tokens(command: string) {
+  return command.split(/(\s+)/).map((token, index) =>
+    /^\s+$/.test(token) || token === "" ? (
+      token
+    ) : (
+      <span key={index} className="inline-block max-w-full">
+        {parts(token).map((part, at) =>
+          part.placeholder ? (
+            <span key={at} data-placeholder className="text-(--syntax-keyword)">
+              {part.text}
+            </span>
+          ) : (
+            part.text
+          ),
+        )}
+      </span>
+    ),
+  );
+}
+
+/**
  * A command to run in a terminal, in a recessed mono block with a muted `$`
  * prompt that is neither selectable nor copied. ALL_CAPS words (PATH, TICKET,
  * FOLDER) are placeholders shown in the keyword color; say so near the block.
@@ -60,21 +87,7 @@ export function CommandBlock({
             {"$ "}
           </span>
         )}
-        {plain
-          ? command
-          : parts(command).map((part, index) =>
-              part.placeholder ? (
-                <span
-                  key={index}
-                  data-placeholder
-                  className="text-(--syntax-keyword)"
-                >
-                  {part.text}
-                </span>
-              ) : (
-                part.text
-              ),
-            )}
+        {plain ? command : tokens(command)}
       </code>
       <span
         role="status"
