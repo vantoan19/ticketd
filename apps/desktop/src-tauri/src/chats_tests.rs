@@ -4317,6 +4317,55 @@ async fn a_sub_agents_own_view_lists_the_records_it_changed() {
 }
 
 #[tokio::test(start_paused = true)]
+async fn a_sub_agents_approval_is_its_own_entry_on_the_ticket_before_it_writes_anything() {
+    let f = Fixture::new().await;
+    let ticket = f.core().create_ticket("Rate limiter").unwrap();
+    f.linked_chat(&ticket.id).await;
+    f.start_sub_agent(
+        "sa-tests",
+        json!({
+            "description": "Check limiter test coverage",
+            "model": "claude-sonnet-5-5",
+            "model_name": "Claude Sonnet 5.5",
+        }),
+    )
+    .await;
+    f.emit(EventKind::InteractionRequested(InteractionRequest {
+        request: NativeRequestId::new("approval-1"),
+        turn: None,
+        owner: Some(NativeSubAgentId::new("sa-tests")),
+        item: None,
+        kind: InteractionKind::Approval {
+            description: "npm test -- rate-limit".to_owned(),
+            reason: None,
+            decisions: vec![ApprovalDecision::Allow, ApprovalDecision::Deny],
+        },
+        detail: None,
+    }))
+    .await;
+
+    let agents = f.agents(&ticket.id);
+    let asking = agents
+        .iter()
+        .find(|agent| agent.sub_agent.as_deref() == Some("sa-tests"))
+        .unwrap_or_else(|| panic!("the sub-agent's own entry: {agents:?}"));
+    assert_eq!(asking.model.as_deref(), Some("Claude Sonnet 5.5"));
+    assert_eq!(
+        asking
+            .approval
+            .as_ref()
+            .map(|approval| approval.summary.as_str()),
+        Some("npm test -- rate-limit")
+    );
+    let main = agents.iter().find(|agent| agent.sub_agent.is_none());
+    assert_eq!(
+        main.and_then(|main| main.approval.as_ref()),
+        None,
+        "the main agent asks nothing"
+    );
+}
+
+#[tokio::test(start_paused = true)]
 async fn the_chats_list_row_names_the_sub_agent_that_asks_for_approval() {
     let f = Fixture::new().await;
     let ticket = f.core().create_ticket("Rate limiter").unwrap();

@@ -218,6 +218,22 @@ impl<'a> Reader<'a> {
         for agent in self.workspace.ticket_writing_agents(reference)? {
             wanted.push((agent.chat_id, agent.sub_agent));
         }
+        // A sub-agent that asks for approval is at work on the ticket its Chat is linked
+        // to, before it has written anything: the label names it, not the main agent.
+        let linked: Vec<String> = wanted.iter().map(|(chat_id, _)| chat_id.clone()).collect();
+        for chat_id in linked {
+            let Some(chat) = self.chats.iter().find(|chat| chat.id == chat_id) else {
+                continue;
+            };
+            let facts = self.facts(chat)?;
+            wanted.extend(
+                facts
+                    .approvals
+                    .keys()
+                    .flatten()
+                    .map(|native| (chat_id.clone(), Some(native.clone()))),
+            );
+        }
         wanted.sort();
         wanted.dedup();
         let mut rows = Vec::new();
