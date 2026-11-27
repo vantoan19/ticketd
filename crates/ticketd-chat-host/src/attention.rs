@@ -48,9 +48,18 @@ pub struct Status {
     pub label: String,
     /// What it is about; truncated first.
     pub detail: Option<String>,
+    /// What a notification says in place of `line()`, when that is something else: a
+    /// sub-agent's approval says its card's title, which names it and what it would do.
+    #[serde(skip)]
+    announcement: Option<String>,
 }
 
 impl Status {
+    /// What the system's notification says.
+    pub fn notification(&self) -> String {
+        self.announcement.clone().unwrap_or_else(|| self.line())
+    }
+
     /// Unseen, and not already counted as waiting: the blue dot.
     pub fn unread(&self) -> bool {
         self.unseen && matches!(self.rank, Rank::Done | Rank::Idle)
@@ -88,6 +97,20 @@ pub struct Facts<'a> {
     /// How many sub-agents the person stopped while no turn ran, when that is the Chat's
     /// last event (no turn has started since).
     pub stopped_sub_agents: Option<i64>,
+    /// Who asked each request a sub-agent asked, by its interaction ID. A request not
+    /// listed is the main agent's.
+    pub asking: &'a [Asking],
+}
+
+/// A request a sub-agent asked, as the Chat view words it.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Asking {
+    pub interaction_id: String,
+    /// The sub-agent's title.
+    pub asker: String,
+    /// The request card's title, naming the sub-agent: "Check limiter test coverage
+    /// wants to run npm test".
+    pub card: String,
 }
 
 /// What a turn's changes read as, in order: each ticket's status moves netted into one
@@ -221,15 +244,33 @@ pub fn status(facts: &Facts<'_>) -> Status {
         word: word.to_owned(),
         label: label.to_owned(),
         detail,
+        announcement: None,
     };
     let make = |rank, word: &str, detail: Option<String>| labelled(rank, word, word, detail);
     let requests = &facts.live.interactions;
     let approval = requests.iter().find_map(|request| match &request.kind {
         InteractionKind::Approval { description, .. }
-        | InteractionKind::NativeApproval { description, .. } => Some(description),
+        | InteractionKind::NativeApproval { description, .. } => {
+            Some((description, &request.interaction_id))
+        }
         InteractionKind::Question { .. } => None,
     });
-    if let Some(description) = approval {
+    if let Some((description, interaction)) = approval {
+        // A sub-agent's approval names it: that is what the row and the notification say.
+        if let Some(asking) = facts
+            .asking
+            .iter()
+            .find(|asking| &asking.interaction_id == interaction)
+        {
+            return Status {
+                announcement: Some(asking.card.clone()),
+                ..make(
+                    Rank::Approval,
+                    "Approval needed",
+                    Some(asking.asker.clone()),
+                )
+            };
+        }
         // A ticketd call reads without ticketd's path or the variable naming it.
         let command = match crate::step_kind::ticketd_calls(description) {
             Some(calls) => calls
@@ -439,7 +480,7 @@ fn show(row: &Row<'_>) -> Alert {
     Alert::Show {
         chat_id: row.id.to_owned(),
         title: row.title.to_owned(),
-        body: row.status.line(),
+        body: row.status.notification(),
     }
 }
 

@@ -684,6 +684,7 @@ async fn a_view_follows_numbered_changes_in_ticketd_terms_and_answers_only_live_
     f.emit(EventKind::InteractionRequested(InteractionRequest {
         request: NativeRequestId::new("approval-1"),
         turn: Some(turn()),
+        owner: None,
         item: None,
         kind: InteractionKind::Approval {
             description: "Run cargo test".to_owned(),
@@ -776,6 +777,7 @@ async fn a_decided_approval_folds_into_the_step_it_answered_and_no_other() {
     f.emit(EventKind::InteractionRequested(InteractionRequest {
         request: NativeRequestId::new("approval-1"),
         turn: Some(turn()),
+        owner: None,
         item: Some(NativeItemId::new("cmd-1")),
         kind: InteractionKind::Approval {
             description: "rm -rf node_modules".to_owned(),
@@ -4242,6 +4244,7 @@ async fn a_request_waiting_on_the_person_is_the_agents_approval() {
     f.emit(EventKind::InteractionRequested(InteractionRequest {
         request: NativeRequestId::new("approval-1"),
         turn: Some(turn()),
+        owner: None,
         item: None,
         kind: InteractionKind::Approval {
             description: "npm test -- rate-limit".to_owned(),

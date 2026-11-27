@@ -682,20 +682,6 @@ impl Session {
                 return (Vec::new(), Some(json!({"id": id, "result": result})));
             }
         }
-        if self.is_other_thread(params) {
-            // A sub-agent asks, on its own turn: offering it is a later slice (the request
-            // would have to outlive the Chat's turn and name who asks). It is not
-            // answered, and it never opens a turn.
-            let notice = EventKind::Notice {
-                turn: None,
-                kind: NoticeKind::Warning,
-                message: "A Codex sub-agent asked for approval. ticketd cannot offer it yet, \
-                          so it was not answered."
-                    .to_owned(),
-                detail: Some(detail(method, params)),
-            };
-            return (vec![notice], None);
-        }
         let reason = text(params, &["reason"]);
         let (kind, shown) = match method {
             "item/commandExecution/requestApproval" => {
@@ -745,23 +731,38 @@ impl Session {
         let item = matches!(kind, RequestKind::Approval { .. })
             .then(|| text(params, &["itemId"]).map(NativeItemId::new))
             .flatten();
-        let turn = text(params, &["turnId"]).map(NativeTurnId::new);
-        self.runtime.register_request(
-            request.clone(),
-            turn.as_ref(),
-            Request {
-                id: id.clone(),
-                kind,
-            },
-        );
-        let requested = EventKind::InteractionRequested(InteractionRequest {
+        let payload = Request {
+            id: id.clone(),
+            kind,
+        };
+        // A sub-agent asks on its own turn, which is not the Chat's: the request is the
+        // child's, lives as long as the child's turn, and opens no turn of the Chat.
+        let (turn, owner, mut events) =
+            match text(params, &["threadId"]).filter(|_| self.is_other_thread(params)) {
+                Some(thread) => {
+                    let child_turn = text(params, &["turnId"]);
+                    let events = self.known(thread, child_turn, json!({}));
+                    let owner = NativeSubAgentId::new(thread);
+                    self.runtime
+                        .register_owned_request(request.clone(), owner.clone(), payload);
+                    (None, Some(owner), events)
+                }
+                None => {
+                    let turn = text(params, &["turnId"]).map(NativeTurnId::new);
+                    self.runtime
+                        .register_request(request.clone(), turn.as_ref(), payload);
+                    (turn, None, Vec::new())
+                }
+            };
+        events.push(EventKind::InteractionRequested(InteractionRequest {
             request,
             turn,
+            owner,
             item,
             kind: shown,
             detail: Some(detail(method, params)),
-        });
-        (vec![requested], None)
+        }));
+        (events, None)
     }
 
     /// Builds the reply frame for a live request and marks it answered. Nothing is

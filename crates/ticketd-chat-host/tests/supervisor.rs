@@ -239,6 +239,7 @@ impl Fixture {
         self.emit(EventKind::InteractionRequested(InteractionRequest {
             request: NativeRequestId::new("approval-1"),
             turn: None,
+            owner: None,
             item: None,
             kind: InteractionKind::Approval {
                 description: "Run cargo test".to_owned(),
@@ -807,6 +808,7 @@ async fn incompatible_answers_leave_a_native_approval_waiting_for_its_option() {
     f.emit(EventKind::InteractionRequested(InteractionRequest {
         request: request.clone(),
         turn: None,
+        owner: None,
         item: None,
         kind: InteractionKind::NativeApproval {
             description: "Read the fixtures".to_owned(),
@@ -4986,6 +4988,7 @@ async fn a_permission_restart_without_a_native_session_retires_the_old_runtime()
     f.emit(EventKind::InteractionRequested(InteractionRequest {
         request: NativeRequestId::new("late-approval"),
         turn: Some(turn_1()),
+        owner: None,
         item: None,
         kind: InteractionKind::Approval {
             description: "Approve the old runtime's request".to_owned(),
@@ -5185,6 +5188,7 @@ async fn an_unconfirmed_permission_restart_rechecks_the_old_runtime_before_recov
     f.emit(EventKind::InteractionRequested(InteractionRequest {
         request: NativeRequestId::new("late-approval"),
         turn: Some(turn_1()),
+        owner: None,
         item: None,
         kind: InteractionKind::Approval {
             description: "Approve the previous runtime's request".to_owned(),
@@ -5612,6 +5616,7 @@ async fn turning_chat_off_and_on_keeps_waiting_for_the_previous_permission_runti
     f.emit(EventKind::InteractionRequested(InteractionRequest {
         request: NativeRequestId::new("late-approval"),
         turn: Some(turn_1()),
+        owner: None,
         item: None,
         kind: InteractionKind::Approval {
             description: "Approve the previous runtime's request".to_owned(),

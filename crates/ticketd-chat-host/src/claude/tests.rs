@@ -14,7 +14,7 @@ use tokio::time::{sleep, timeout};
 
 use super::runtime::{Options, open_over, probe, probe_options};
 use super::{BRIDGE_SIDECAR_NAME, ClaudeAdapter, candidates, locate, verdict};
-use crate::conformance::{NewTurn, Provider, SubAgentFrames};
+use crate::conformance::{NewTurn, Provider, SubAgentApprovals, SubAgentFrames};
 use crate::install::{LaunchEnvironment, Os};
 use crate::outcome::read_end;
 use crate::scripted::{Peer, brief, pipes};
@@ -2390,6 +2390,48 @@ impl Provider for Bridge {
 
     fn sub_agent_frames(&self) -> SubAgentFrames {
         SubAgentFrames::Separate
+    }
+
+    fn sub_agent_approvals(&self) -> SubAgentApprovals {
+        SubAgentApprovals::Owned
+    }
+
+    async fn play_sub_agent_approval(&mut self, _id: &str) -> NativeRequestId {
+        self.peer.load(
+            r#"{"server":{"v":1,"event":"sub_agent_started","generation":7,"task_id":"task_bg","run_id":"run_bg_1","tool_use_id":"toolu_bg","parent_task_id":null,"description":"Check limiter test coverage","subagent_type":"general-purpose","background":true,"prompt":"Run the tests.","prompt_truncated":false,"spawn_depth":1}}
+{"server":{"v":1,"event":"permission_request","generation":7,"request_id":"7-2","tool_name":"Bash","tool_use_id":"toolu_bg_test","input":{"command":"npm test"},"title":null,"display_name":"Bash","description":null,"decision_reason":null,"blocked_path":null,"agent_id":"task_bg","default_to_no":false,"can_remember":true}}"#,
+        );
+        self.peer.play().await;
+        let shown = drain(&mut self.events).await;
+        shown
+            .into_iter()
+            .find_map(|event| match event {
+                EventKind::InteractionRequested(request) => {
+                    assert_eq!(request.turn, None, "a sub-agent's request has no turn");
+                    assert_eq!(
+                        request.owner,
+                        Some(crate::NativeSubAgentId::new("task_bg")),
+                        "it names the sub-agent"
+                    );
+                    Some(request.request)
+                }
+                _ => None,
+            })
+            .expect("the bridge asked on the sub-agent's behalf")
+    }
+
+    async fn end_parent_turn(&mut self, id: &str) {
+        self.peer.load(&format!(
+            r#"{{"server":{{"v":1,"event":"turn_result","generation":7,"correlation":"uuid","submission_ids":["{id}"],"unmatched_uuids":[],"pending_submission_ids":[],"subtype":"success","is_error":false,"result_text":"ok","errors":[],"stop_reason":"end_turn","terminal_reason":"completed","denials":[],"queued_turn_count":0,"num_turns":1,"duration_ms":1,"session_id":"sess-1"}}}}"#
+        ));
+        self.peer.play().await;
+    }
+
+    async fn end_sub_agent(&mut self) {
+        self.peer.load(
+            r#"{"server":{"v":1,"event":"sub_agent_ended","generation":7,"task_id":"task_bg","run_id":"run_bg_1","tool_use_id":"toolu_bg","status":"stopped","reason":null,"summary":"Stopped."}}"#,
+        );
+        self.peer.play().await;
     }
 
     async fn play_sub_agent_at_rest(&mut self) {

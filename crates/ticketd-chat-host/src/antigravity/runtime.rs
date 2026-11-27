@@ -641,7 +641,11 @@ impl Session {
         }
         events.push(EventKind::InteractionRequested(InteractionRequest {
             request: native,
+            // Registered under the Prompt's turn: Antigravity holds the Prompt open until its
+            // children finish, so a child's approval cannot outlive it, and the Prompt's end
+            // withdraws it. It is the child's all the same.
             turn: Some(prompt.turn.clone()),
+            owner: child_of(&tool).map(NativeSubAgentId::new),
             item: Some(NativeItemId::new(tool.0.as_ref())),
             kind: InteractionKind::NativeApproval {
                 description: prompt.tools.get(&tool).map_or_else(
