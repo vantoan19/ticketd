@@ -106,6 +106,39 @@ test("not asked yet: one Allow notifications button asks the system once, and th
   expect(button("Allow notifications")).toBeNull();
 });
 
+test("the answer to the ask is what the row shows, even when the read after it fails", async () => {
+  vi.mocked(notificationClient.permission).mockResolvedValue(NOT_ASKED);
+  vi.mocked(notificationClient.ask).mockImplementation(async () => {
+    vi.mocked(notificationClient.permission).mockRejectedValue(
+      new Error("unreadable"),
+    );
+    return ALLOWED;
+  });
+  page();
+  fireEvent.click(
+    await screen.findByRole("button", { name: "Allow notifications" }),
+  );
+  await screen.findByText("Allowed");
+  expect(button("Allow notifications")).toBeNull();
+  expect((chatSwitch() as HTMLButtonElement).disabled).toBe(false);
+});
+
+test("where the system cannot say, the row does not claim Allowed", async () => {
+  vi.mocked(notificationClient.permission).mockResolvedValue({
+    ...ALLOWED,
+    reported: false,
+    settings: false,
+  });
+  page();
+  await screen.findByText("Not reported");
+  expect(screen.queryByText("Allowed")).toBeNull();
+  expect(
+    screen.getByText(/doesn’t say whether notifications are on/),
+  ).toBeTruthy();
+  // The delivery fallback stays: Chat notifications still work.
+  expect((chatSwitch() as HTMLButtonElement).disabled).toBe(false);
+});
+
 test("until notifications are allowed Chat notifications read off and cannot change, and the choice comes back once allowed", async () => {
   vi.mocked(notificationClient.permission).mockResolvedValue(NOT_ASKED);
   page();
