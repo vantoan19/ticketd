@@ -1,4 +1,4 @@
-import { useRef, useState, type ReactNode } from "react";
+import { useLayoutEffect, useRef, useState, type ReactNode } from "react";
 import { createPortal } from "react-dom";
 import { Button } from "@/components/ui/button";
 import { FileText, Paperclip, Plus } from "lucide-react";
@@ -56,6 +56,15 @@ export function TicketFiles({
   const loaded = files.found !== null && docs.links !== null;
   const empty = loaded && !files.found?.length && !docs.links?.length;
   const failed = files.loadFailure ?? docs.loadFailure;
+  // With nothing attached the section is hidden and its File button sits in the header.
+  const hidden = empty && Boolean(emptyTarget);
+  useLayoutEffect(() => {
+    // Focus that was on the section's heading would be lost with it.
+    if (hidden && section.current?.contains(document.activeElement))
+      emptyTarget?.querySelector<HTMLElement>("button")?.focus({
+        preventScroll: true,
+      });
+  }, [hidden, emptyTarget]);
   const fileItems = useAttachmentItems(files.found ?? [], (file) => {
     files.setError(null);
     setSelected(file);
@@ -125,7 +134,7 @@ export function TicketFiles({
           ),
           emptyTarget,
         )}
-      <div ref={section} hidden={empty && Boolean(emptyTarget)}>
+      <div ref={section} hidden={hidden}>
         <RailSection
           label="Files"
           count={
@@ -181,7 +190,13 @@ export function TicketFiles({
             selected={selected}
             onSelected={setSelected}
             fallbackFocus={() => {
-              // The file that opened the viewer was detached: land on the heading.
+              // The file that opened the viewer was detached. With nothing left the
+              // section is hidden, and the File button in the header is the place.
+              if (section.current?.hidden)
+                return (
+                  emptyTarget?.querySelector<HTMLElement>("button") ?? null
+                );
+              // Otherwise land on the heading.
               const heading = section.current?.querySelector<HTMLElement>("h3");
               heading?.setAttribute("tabindex", "-1");
               return heading ?? null;

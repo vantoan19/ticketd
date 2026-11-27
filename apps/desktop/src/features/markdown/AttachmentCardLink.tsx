@@ -25,7 +25,13 @@ export function AttachmentCardLink({
   const [found, setFound] = useState<
     { uri: string; file: Attachment | null } | undefined
   >();
-  const [open, setOpen] = useState(false);
+  // The reference and replacement the viewer opened on: a later edit of the text
+  // must not retarget an open viewer or its Replace picker.
+  const [opened, setOpened] = useState<{
+    uri: string;
+    replace: typeof onReplace;
+  } | null>(null);
+  const open = () => setOpened({ uri, replace: onReplace });
   useEffect(() => {
     let current = true;
     attachments.resolve(uri).then(
@@ -56,7 +62,7 @@ export function AttachmentCardLink({
           label={label}
           storage={availability.of(file.id)}
           storageKnown={availability.known}
-          onOpen={() => setOpen(true)}
+          onOpen={open}
         />
       ) : (
         <FileCard
@@ -64,14 +70,14 @@ export function AttachmentCardLink({
           caption=""
           glyph={<File aria-hidden="true" />}
           label="FILE"
-          onOpen={() => setOpen(true)}
+          onOpen={open}
         />
       )}
-      {open && (
+      {opened && (
         <PlacePreview
-          uri={uri}
-          onClose={() => setOpen(false)}
-          onReplace={onReplace}
+          uri={opened.uri}
+          onClose={() => setOpened(null)}
+          onReplace={opened.replace}
         />
       )}
     </>

@@ -192,6 +192,9 @@ function usePreview(target: PreviewTarget, warm?: Map<string, PreviewInfo>) {
   // still read again, so the state shown is never older than this open.
   const identity = `${id ?? ""}|${uri ?? ""}`;
   const [shown, setShown] = useState(identity);
+  // What the viewer shows now, for work that finishes later: it must not touch
+  // the state of a file that was stepped to in the meantime.
+  const latest = useRef({ identity, fileId: undefined as string | undefined });
   if (shown !== identity) {
     setShown(identity);
     setFile(initial);
@@ -204,6 +207,9 @@ function usePreview(target: PreviewTarget, warm?: Map<string, PreviewInfo>) {
   const availability = useAvailability(
     file && file.kind !== "external_reference" ? [file.id] : [],
   );
+  useEffect(() => {
+    latest.current = { identity, fileId: file?.id };
+  });
   const stored = file ? availability.of(file.id) : undefined;
   // The bytes are still in the sync storage, or on their way: there is nothing to preview
   // yet. Once they arrive the preview is read again.
@@ -218,11 +224,12 @@ function usePreview(target: PreviewTarget, warm?: Map<string, PreviewInfo>) {
       error?.code === "unauthenticated");
   const { download } = availability;
   // Where Attachments download when opened, opening one is what fetches it:
-  // once per file, so a download that failed waits for the Download button.
-  const fetched = useRef("");
+  // once per file, so a download that failed waits for the Download button, even
+  // after the viewer stepped away and came back.
+  const fetched = useRef(new Set<string>());
   useEffect(() => {
-    if (!absent || fetched.current === absent) return;
-    fetched.current = absent;
+    if (!absent || fetched.current.has(absent)) return;
+    fetched.current.add(absent);
     void syncApi
       .settings()
       .then((settings) =>
@@ -230,12 +237,15 @@ function usePreview(target: PreviewTarget, warm?: Map<string, PreviewInfo>) {
           ? download(absent)
           : undefined,
       )
-      .catch((reason: unknown) =>
-        setError(describeFailure(reason, "download")),
-      );
+      .catch((reason: unknown) => {
+        // The failure belongs to the file that started the download.
+        if (latest.current.fileId === absent)
+          setError(describeFailure(reason, "download"));
+      });
   }, [absent, download]);
   useEffect(() => {
     const current = ++generation.current;
+    let read = false;
     void (async () => {
       const owningWorkspace = await attachments.workspaceId();
       const resolvedFile = id ? null : await attachments.resolve(uri ?? "");
@@ -246,30 +256,35 @@ function usePreview(target: PreviewTarget, warm?: Map<string, PreviewInfo>) {
       setWorkspace(owningWorkspace);
       setFile(preview.attachment);
       setInfo(preview);
+      read = true;
       setCopy(null);
       if (preview.attachment.kind === "external_reference") {
         const inspection = await attachments.inspectDriveCopy(resolved);
         if (generation.current === current) setCopy(inspection);
       }
     })().catch((reason: unknown) => {
-      if (generation.current === current)
-        setError(describeFailure(reason, "load the preview"));
+      if (generation.current !== current) return;
+      // A neighbor read ahead is not kept over a read of the file itself that failed.
+      if (!read) setInfo(null);
+      setError(describeFailure(reason, "load the preview"));
     });
     return () => {
       generation.current += 1;
     };
   }, [id, uri, attempt, awaited]);
   async function action(verb: string, run: () => Promise<void>) {
-    const current = generation.current;
+    // The same file's metadata may reload while this runs (its download finished);
+    // only stepping to another file hands the viewer's state over.
+    const target = latest.current.identity;
     setBusy(true);
     setError(null);
     try {
       await run();
     } catch (reason) {
-      if (generation.current === current)
+      if (latest.current.identity === target)
         setError(describeFailure(reason, verb));
     } finally {
-      if (generation.current === current) setBusy(false);
+      if (latest.current.identity === target) setBusy(false);
     }
   }
   function mediaFailed() {
@@ -294,6 +309,10 @@ function usePreview(target: PreviewTarget, warm?: Map<string, PreviewInfo>) {
     setError(null);
     setAttempt((value) => value + 1);
   }
+  /** Reads the file again, but only while it is still the one shown. */
+  function retryIfShown(fileId: string) {
+    if (latest.current.fileId === fileId) retry();
+  }
   function renamed(next: Attachment) {
     setFile(next);
     setInfo((previous) =>
@@ -315,6 +334,7 @@ function usePreview(target: PreviewTarget, warm?: Map<string, PreviewInfo>) {
     failed,
     mediaFailed,
     retry,
+    retryIfShown,
     renamed,
     error,
     setError,
@@ -534,7 +554,7 @@ function PreviewHeader({
         ? { message: "Copied link" }
         : {
             tone: "error",
-            message: "Couldn’t copy the link. Select it and copy it instead.",
+            message: "Couldn’t copy the link.",
           },
     );
   };
@@ -736,7 +756,7 @@ function PreviewHeader({
                             file.id,
                             crypto.randomUUID(),
                           );
-                          preview.retry();
+                          preview.retryIfShown(file.id);
                           onChanged?.();
                         })
                       }
@@ -824,7 +844,7 @@ function PreviewStage({
         onClick={() =>
           void preview.action("restore the file", async () => {
             await attachments.restore(file.id, crypto.randomUUID());
-            preview.retry();
+            preview.retryIfShown(file.id);
             onChanged?.();
           })
         }
@@ -1317,7 +1337,7 @@ function PreviewFailure({ preview }: { preview: Preview }) {
 type Origin = {
   /** What had focus when the viewer opened: the card or link that opened it. */
   focus: HTMLElement | null;
-  /** Every scrolled ancestor of it, and the document, with their positions. */
+  /** Every ancestor of it, and the document, with their positions (the top included). */
   scroll: [Element, number][];
 };
 
@@ -1361,9 +1381,9 @@ function captureOrigin(): Origin {
   const focus = captureOpener();
   const scroll: [Element, number][] = [];
   for (let node: Element | null = focus; node; node = node.parentElement)
-    if (node.scrollTop > 0) scroll.push([node, node.scrollTop]);
+    scroll.push([node, node.scrollTop]);
   const root = document.scrollingElement;
-  if (root && root.scrollTop > 0) scroll.push([root, root.scrollTop]);
+  if (root) scroll.push([root, root.scrollTop]);
   return { focus, scroll };
 }
 

@@ -325,6 +325,7 @@ test("detaching the open file lands focus on the Files heading", async () => {
   let attached = [file];
   vi.mocked(invoke).mockImplementation(async (command, args) => {
     if (command === "ticket_attachments") return attached;
+    if (command === "document_context_links") return [[], []];
     if (command === "set_ticket_attachment") {
       attached = (args as { present: boolean }).present ? [file] : [];
       return ticket;
@@ -353,6 +354,42 @@ test("detaching the open file lands focus on the Files heading", async () => {
       screen.getByRole("heading", { name: "Files" }),
     ),
   );
+});
+
+test("detaching the last file lands focus on the File button when the empty section is hidden", async () => {
+  let attached = [file];
+  vi.mocked(invoke).mockImplementation(async (command, args) => {
+    if (command === "ticket_attachments") return attached;
+    if (command === "document_context_links") return [[], []];
+    if (command === "set_ticket_attachment") {
+      attached = (args as { present: boolean }).present ? [file] : [];
+      return ticket;
+    }
+    return null;
+  });
+  // The ticket page gives an empty section's File button a place in its header.
+  const header = document.body.appendChild(document.createElement("span"));
+  render(
+    <TestOpenTicket ticket={ticket}>
+      <TicketAttachments emptyTarget={header} />
+    </TestOpenTicket>,
+  );
+  const row = await screen.findByRole("button", { name: "Trace" });
+  row.focus();
+  fireEvent.click(row);
+  await screen.findByRole("dialog");
+  fireEvent.pointerDown(screen.getByRole("button", { name: "More actions" }), {
+    button: 0,
+    ctrlKey: false,
+  });
+  fireEvent.click(
+    await screen.findByRole("menuitem", { name: "Detach from ticket" }),
+  );
+  await waitFor(() => expect(screen.queryByRole("dialog")).toBeNull());
+  await waitFor(() =>
+    expect(document.activeElement).toBe(header.querySelector("button")),
+  );
+  header.remove();
 });
 
 test("detaching the open file lands focus on the Files heading even when the files are read again slowly", async () => {
