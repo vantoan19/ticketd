@@ -3867,6 +3867,26 @@ impl Workspace {
                 .collect())
         })
     }
+    /// [`Self::ticket_write_credits`] for only the Activities `activity_ids` and the status
+    /// moves `status_numbers` (their numbers in the history feed): what a page of the
+    /// ticket's feed shows, without attributing every other write on the ticket.
+    pub fn ticket_write_credits_for(
+        &self,
+        reference: &str,
+        activity_ids: &[String],
+        status_numbers: &[i64],
+    ) -> Result<TicketWriteCredits, Error> {
+        self.read(|_| {
+            let ticket = self.show_ticket(reference)?;
+            credit::ticket_credits_scoped(
+                &self.connection,
+                &ticket.id,
+                &ticket.reference,
+                Some((activity_ids, status_numbers)),
+            )
+        })
+    }
+
 
     /// One sub-agent of a Chat, by the harness's own ID for it, with its runs.
     pub fn chat_sub_agent(

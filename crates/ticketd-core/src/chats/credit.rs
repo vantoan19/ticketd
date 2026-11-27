@@ -288,18 +288,39 @@ pub(super) fn ticket_credits(
     ticket_id: &str,
     reference: &str,
 ) -> Result<TicketWriteCredits, Error> {
+    ticket_credits_scoped(connection, ticket_id, reference, None)
+}
+
+/// The credit of the tagged writes on a ticket, only those of the Activities and status
+/// moves in `scope` (Activity IDs, history numbers) when given. A write is placed by its
+/// Chat's windows alone, so the others change nothing about the ones kept.
+pub(super) fn ticket_credits_scoped(
+    connection: &Connection,
+    ticket_id: &str,
+    reference: &str,
+    scope: Option<(&[String], &[i64])>,
+) -> Result<TicketWriteCredits, Error> {
+    let (activities, statuses) = match scope {
+        Some((activities, statuses)) => (
+            Some(serde_json::to_string(activities)?),
+            Some(serde_json::to_string(statuses)?),
+        ),
+        None => (None, None),
+    };
     let mut statement = connection.prepare(
         "SELECT 0, h.number, NULL, w.chat_id, w.call_id
          FROM ticket_history h JOIN chat_record_writes w ON w.history_number = h.number
          WHERE h.ticket_id = ?1 AND h.kind = 'status'
+           AND (?3 IS NULL OR h.number IN (SELECT value FROM json_each(?3)))
          UNION ALL
          SELECT 1, a.number, a.id, w.chat_id, w.call_id
          FROM activities a JOIN chat_record_writes w ON w.activity_id = a.id
          WHERE a.ticket_id = ?1
+           AND (?2 IS NULL OR a.id IN (SELECT value FROM json_each(?2)))
          ORDER BY 1, 2",
     )?;
     let writes = statement
-        .query_map([ticket_id], |row| {
+        .query_map(params![ticket_id, activities, statuses], |row| {
             Ok(Write {
                 feed: if row.get::<_, i64>(0)? == 0 {
                     Feed::Status

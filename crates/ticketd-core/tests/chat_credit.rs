@@ -186,6 +186,41 @@ fn a_status_change_is_credited_like_an_activity() {
 }
 
 #[test]
+fn a_scoped_lookup_credits_only_the_writes_it_is_asked_about_exactly_as_the_full_one_does() {
+    let mut setup = setup();
+    setup.observe(vec![start_sub_agent("sa-tests")]);
+    open(&mut setup, "run-1:bash-1", sub_agent("sa-tests"), vec![]);
+    let inside = setup.activity(None, "Added a case for a request with no key.");
+    setup.move_to(None, Status::InProgress);
+    close(&mut setup, "run-1:bash-1", sub_agent("sa-tests"));
+    let outside = setup.activity(None, "After the Step ended.");
+    let full = setup.credits();
+    let number = *full.statuses.keys().next().unwrap();
+
+    let page = setup
+        .host
+        .ticket_write_credits_for(&setup.reference, std::slice::from_ref(&inside), &[])
+        .unwrap();
+    assert_eq!(page.activities.len(), 1, "{page:?}");
+    assert_eq!(page.activities.get(&inside), full.activities.get(&inside));
+    assert!(page.statuses.is_empty(), "{page:?}");
+
+    let page = setup
+        .host
+        .ticket_write_credits_for(&setup.reference, &[outside.clone()], &[number])
+        .unwrap();
+    assert_eq!(page.activities.get(&outside), full.activities.get(&outside));
+    assert_eq!(page.statuses.get(&number), full.statuses.get(&number));
+    assert_eq!(page.activities.len() + page.statuses.len(), 2, "{page:?}");
+
+    let none = setup
+        .host
+        .ticket_write_credits_for(&setup.reference, &[], &[])
+        .unwrap();
+    assert!(none.activities.is_empty() && none.statuses.is_empty());
+}
+
+#[test]
 fn writes_outside_every_window_stay_with_the_chat() {
     let mut setup = setup();
     setup.observe(vec![start_sub_agent("sa-tests")]);
