@@ -1967,6 +1967,13 @@ fn an_attachment_that_cannot_be_saved_here_is_not_downloaded_again_by_every_run(
     assert_eq!(fetched, 0);
     assert_eq!(status.attachment_downloads.count, 0);
     assert_eq!(unreadable(&b), ["attachments/notes.txt"]);
+    // The viewer is told why, from the same notice.
+    let failure = b
+        .attachment_availability(std::slice::from_ref(&attachment))
+        .unwrap()
+        .remove(0)
+        .failure;
+    assert!(failure.is_some_and(|reason| !reason.is_empty()));
 
     // With the way clear, asking for it fetches it and withdraws the notice.
     std::fs::remove_dir_all(&taken).unwrap();
