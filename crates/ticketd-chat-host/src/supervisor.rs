@@ -1708,11 +1708,24 @@ impl Supervisor {
                     SubAgentOutcome::Completed | SubAgentOutcome::Failed
                 )
             {
-                self.unreported.retain(|finished| finished.native != native);
-                self.unreported.push(Finished {
+                let finished = Finished {
                     native: native.to_owned(),
                     failed: *outcome == SubAgentOutcome::Failed,
-                });
+                };
+                // The person's message is on its way and no turn runs yet: the turn it
+                // starts sees the finish itself, so the finish rides that message and
+                // wakes nothing. Only if the message is not accepted is it told later.
+                if let Some(dispatch) = self
+                    .dispatching
+                    .as_mut()
+                    .filter(|dispatch| dispatch.starts_turn && !is_wake(&dispatch.attempt))
+                {
+                    dispatch.finished.retain(|one| one.native != native);
+                    dispatch.finished.push(finished);
+                    return;
+                }
+                self.unreported.retain(|one| one.native != native);
+                self.unreported.push(finished);
                 self.wake_after
                     .get_or_insert_with(|| Instant::now() + WAKE_SETTLE);
             }
