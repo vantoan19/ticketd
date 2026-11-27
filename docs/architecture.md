@@ -168,8 +168,8 @@ Antigravity's sub-agents are child conversations that make tool calls on the
 main agent's session, with IDs of the form `<childId>:call_...` ([ADR
 0029](adr/0029-sub-agents-are-a-lane-of-their-own-in-a-chat.md)). The adapter
 groups those calls by the prefix: a child becomes a sub-agent at its first
-call, its Steps and approvals belong to it, and it never joins the main agent's
-Steps, text or reasoning. `invoke_subagent`, the main agent's own launch call,
+call, its Steps belong to it (an approval it asks names that Step), and it never
+joins the main agent's Steps, text or reasoning. `invoke_subagent`, the main agent's own launch call,
 completes at launch and names no child, so the child's title and brief come from
 it only when exactly one launch call is open when the child appears (several
 parallel launches cannot be told apart, and a wrong brief is worse than none).

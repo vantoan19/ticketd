@@ -5208,10 +5208,9 @@ mod tests {
 
     #[test]
     fn the_view_of_an_ended_antigravity_sub_agent_is_the_contract_the_interface_parses() {
-        let stored: ticketd_core::ChatSnapshot = serde_json::from_str(
-            &std::fs::read_to_string(AGY_STORED).expect("the stored history"),
-        )
-        .expect("the stored history reads");
+        let stored: ticketd_core::ChatSnapshot =
+            serde_json::from_str(&std::fs::read_to_string(AGY_STORED).expect("the stored history"))
+                .expect("the stored history reads");
         let tracker = Tracker::from_snapshot(&stored.items, &stored.sub_agents);
         let live = ChatLive::idle();
         let state = super::chat_state(&stored.chat, &live, &tracker, &Surroundings::default());
