@@ -129,7 +129,7 @@ async fn after_a_restart_the_running_sub_agents_are_lost_and_the_next_message_sa
     let mut h = HostScript::claude()
         .process([
             fixture!("claude", "handshake"),
-            fixture!("claude", "sub_agent_background_at_rest"),
+            fixture!("claude", "sub_agent_restart_before"),
         ])
         .process([
             fixture!("claude", "handshake_resume"),

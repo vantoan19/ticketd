@@ -3704,6 +3704,37 @@ fn a_resumed_run_keeps_the_step_that_resumed_it_and_the_first_run_leaves_it_to_t
 }
 
 #[test]
+fn a_resume_keeps_what_the_sub_agent_was_first_asked() {
+    let dir = tempfile::tempdir().unwrap();
+    let (mut workspace, chat) = workspace_with_chat(&dir);
+    let started = |run: &str, prompt: &str| ChatObservation::SubAgentStarted {
+        native_id: "agent-1".into(),
+        parent: None,
+        tool_id: None,
+        turn_id: None,
+        native_run_id: Some(run.into()),
+        background: true,
+        payload: format!(r#"{{"description":"Find limiter bypasses","prompt":"{prompt}"}}"#),
+    };
+    workspace
+        .record_chat_observations(
+            &chat.id,
+            vec![
+                started("run-a", "Find every way around the limiter."),
+                end_sub_agent("agent-1", Some("run-a"), ChatSubAgentState::Completed),
+                started("run-b", "Also check retries."),
+            ],
+        )
+        .unwrap();
+    let record = &sub_agents(&workspace, &chat)[0];
+    assert_eq!(
+        record.said("prompt").as_deref(),
+        Some("Find every way around the limiter.")
+    );
+    assert_eq!(record.said("description").as_deref(), Some("Find limiter bypasses"));
+}
+
+#[test]
 fn a_stopped_run_records_who_stopped_it_and_an_ended_run_stays_ended() {
     let dir = tempfile::tempdir().unwrap();
     let (mut workspace, chat) = workspace_with_chat(&dir);

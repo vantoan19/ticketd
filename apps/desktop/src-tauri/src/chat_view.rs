@@ -5248,6 +5248,10 @@ mod tests {
                     Activity::Idle
                 },
                 running: working,
+                // Claude Code takes a message into the turn that runs.
+                steering: working.then_some(ticketd_chat_host::SteeringBehavior {
+                    interrupts_tools: false,
+                }),
                 sub_agents: if working { 2 } else { 0 },
                 ..ChatLive::idle()
             };

@@ -309,6 +309,14 @@ fn merged(kept: &str, incoming: &str) -> Result<String, Error> {
     Ok(Value::Object(payload).to_string())
 }
 
+fn without_prompt(payload: &str) -> Result<String, Error> {
+    let Value::Object(mut incoming) = serde_json::from_str(payload)? else {
+        return Err(invalid("a sub-agent's payload must be a JSON object"));
+    };
+    incoming.remove("prompt");
+    Ok(Value::Object(incoming).to_string())
+}
+
 /// The newest run of a record, with its record ID.
 fn latest_run(connection: &Connection, record: &str) -> Result<Option<ChatSubAgentRun>, Error> {
     Ok(read_runs(connection, record)?.pop())
@@ -359,7 +367,12 @@ pub(super) fn observe(connection: &Connection, chat_id: &str, change: Change) ->
                     |row| row.get(0),
                 )
                 .optional()?;
-            let payload = merged(stored.as_deref().unwrap_or("{}"), &payload)?;
+            // What it was asked is what it was asked first: a resume says what to do next,
+            // which the main agent's own Step shows.
+            let payload = match &stored {
+                Some(kept) => merged(kept, &without_prompt(&payload)?)?,
+                None => merged("{}", &payload)?,
+            };
             if stored.is_none() {
                 connection.execute(
                     "INSERT INTO chat_sub_agents (id, chat_id, native_id, parent_native_id, tool_id, background, payload) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)",

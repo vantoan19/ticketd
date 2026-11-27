@@ -26,9 +26,9 @@
     "opening": null,
     "catching_up": false,
     "steering": {
-      "available": false,
+      "available": true,
       "images_refused": false,
-      "effect": null
+      "effect": "Joins after the current tool finishes"
     },
     "stopping": false,
     "links": [],
@@ -53,7 +53,7 @@
         "started_at": "2026-11-27T10:00:00.000Z",
         "runs": 2,
         "brief": {
-          "text": "Continue the search for ways around the rate limiter.",
+          "text": "Find every way a request could get past the rate limiter in src/api: a missing or spoofed API key, header case, retries, and routes mounted before the limiter. Report each one with its file and line.",
           "source": "main_agent"
         },
         "capabilities": {
@@ -74,7 +74,7 @@
         "started_at": "2026-11-27T10:00:00.000Z",
         "runs": 2,
         "brief": {
-          "text": "Continue checking that the tests cover the limiter's edge cases.",
+          "text": "Check that the tests in src/api/rate-limit.test.ts cover the limiter's edge cases: a missing key, header case, refills and separate keys. Add the cases that are missing, run them, and post the result on T-KQ29.",
           "source": "main_agent"
         },
         "capabilities": {
@@ -362,9 +362,9 @@
           "timed_out": false,
           "duration_ms": null,
           "no_matches": false,
-          "state": "unknown",
+          "state": "done",
           "result": null,
-          "output": null,
+          "output": "1\timport { LIMIT } from './rate-limit';",
           "full_output": null,
           "started_at": "2026-11-27T10:00:00.000Z",
           "added_lines": null,
@@ -497,7 +497,6 @@
           "target": "npm test -- rate-limit",
           "targets": [],
           "command": "npm test -- rate-limit",
-          "description": "Run the limiter tests",
           "exit_code": null,
           "folder": null,
           "timed_out": false,
