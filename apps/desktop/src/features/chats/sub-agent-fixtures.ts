@@ -471,8 +471,10 @@ export function heroChat(
       index === 0 ? { ...run, work: run.work ?? work } : run,
     ),
   });
+  // Only sub-agents run: not while a resumed main turn is active.
   const background =
     options.replied !== false &&
+    !options.resumedIn &&
     Object.values(states).some((runs) => runs.at(-1)?.status === "running");
   return chatWith({
     id: "c-limiter",
