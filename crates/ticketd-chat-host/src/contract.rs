@@ -1204,6 +1204,14 @@ pub trait HarnessRuntime: Send + Sync + std::fmt::Debug {
     /// Requests interruption of the expected active turn.
     async fn interrupt(&self, request: InterruptRequest) -> InterruptOutcome;
 
+    /// Interrupts the work of every sub-agent the harness still runs, whether or not a
+    /// turn is active: a harness that keeps them running when the main agent's turn is
+    /// interrupted (Codex's child threads) must be told about each one. Each sub-agent's
+    /// own end is reported as [`EventKind::SubAgentEnded`]. Nothing to do by default.
+    async fn interrupt_sub_agents(&self, generation: RuntimeGeneration) {
+        let _ = generation;
+    }
+
     /// Changes a session setting. The supervisor calls it only between turns, so each
     /// turn runs on one set of settings.
     async fn change_setting(&self, change: SettingChange) -> SettingOutcome {

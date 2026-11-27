@@ -1598,17 +1598,16 @@ impl Supervisor {
         }
     }
 
-    /// Every sub-agent still running was stopped by the person. With `say`, the Chat
-    /// notes how many (when no turn is there to say it was stopped). Returns how many.
+    /// Every sub-agent still running was stopped by the person. With `note`, the Chat says
+    /// how many were stopped (when no turn is there to say it was stopped).
     fn end_sub_agents_stopped(
         &mut self,
         observations: &mut Vec<ChatObservation>,
-        say: bool,
-    ) -> usize {
+        note: Option<usize>,
+    ) {
         let mut running: Vec<String> = self.sub_agents.keys().cloned().collect();
         running.sort();
         self.sub_agents.clear();
-        let count = running.len();
         observations.extend(
             running
                 .into_iter()
@@ -1621,7 +1620,7 @@ impl Supervisor {
                     detail: None,
                 }),
         );
-        if say && count > 0 {
+        if let Some(count) = note.filter(|count| *count > 0) {
             observations.push(ChatObservation::SubAgentsStopped {
                 notice_id: Uuid::new_v4().to_string(),
                 count: count as i64,
@@ -1629,7 +1628,6 @@ impl Supervisor {
         }
         let batch = std::mem::take(observations);
         self.record(batch);
-        count
     }
 
     /// Stop with no turn running but sub-agents running: they are stopped, the Chat says
@@ -1646,8 +1644,16 @@ impl Supervisor {
         if self.sub_agents.is_empty() {
             return;
         }
-        self.end_sub_agents_stopped(&mut Vec::new(), true);
-        // Nothing runs in it any more; the next message opens the session again.
+        // A harness that keeps sub-agents running by itself (Codex's child threads) is told
+        // to stop each, then every one still running is stopped by the person and the Chat
+        // says how many, and the process ends: nothing runs in it any more.
+        let running = self.sub_agents.len();
+        if let Some(runtime) = &self.runtime {
+            let (handle, generation) = (runtime.handle.clone(), runtime.generation);
+            self.drive(handle.interrupt_sub_agents(generation)).await;
+        }
+        self.end_sub_agents_stopped(&mut Vec::new(), Some(running));
+        // The next message opens the session again.
         if let Some(reason) = self.stop_runtime(StopReason::Quit).await {
             self.notice(format!("Stopping the harness was not confirmed: {reason}"));
         }
@@ -3492,7 +3498,7 @@ impl Supervisor {
                     // stopped the turn, every sub-agent still running was stopped with it.
                     self.sub_agents.retain(|_, background| *background);
                     if stopped {
-                        self.end_sub_agents_stopped(&mut Vec::new(), false);
+                        self.end_sub_agents_stopped(&mut Vec::new(), None);
                     }
                     self.active = None;
                     self.stop = None;
