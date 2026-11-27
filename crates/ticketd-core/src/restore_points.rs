@@ -508,6 +508,13 @@ fn read_shared_hashes(path: &Path, verify: bool) -> Result<Vec<String>, Error> {
         OpenFlags::SQLITE_OPEN_READ_ONLY | OpenFlags::SQLITE_OPEN_NO_MUTEX,
     )?;
     if !crate::backup::table_exists(&connection, "ticketd_backup_files")? {
+        // A packaged point (it has a container header) that lost its inventory is damaged,
+        // not empty. One with neither table never held attachment files.
+        if verify && crate::backup::table_exists(&connection, "ticketd_backup_container")? {
+            return Err(Error::Backup(
+                "the file inventory of a restore point is missing".into(),
+            ));
+        }
         return Ok(Vec::new());
     }
     if verify && !crate::backup_archive::inventory_is_intact(&connection)? {
