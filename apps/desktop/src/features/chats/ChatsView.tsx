@@ -395,7 +395,7 @@ export function ChatsView({
         titleControl={(title) => (
           <DropdownMenu>
             <DropdownMenuTrigger asChild>
-              <Button variant="ghost" size="sm">
+              <Button variant="ghost" size="sm" className="-ml-1.5">
                 <span className="truncate">{title}</span>
                 <ChevronDown aria-hidden />
               </Button>

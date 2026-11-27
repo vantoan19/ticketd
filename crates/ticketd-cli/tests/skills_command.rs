@@ -79,6 +79,21 @@ fn bundled_guides_work_without_opening_or_creating_a_workspace() {
 }
 
 #[test]
+fn the_context_guide_asks_for_documents_people_can_skim() {
+    let dir = tempfile::tempdir().unwrap();
+    let guide = run(dir.path(), &["skills", "get", "context"]);
+    let section = guide
+        .split("\n## Write Documents people can skim\n")
+        .nth(1)
+        .and_then(|rest| rest.split("\n## ").next())
+        .unwrap();
+    assert!(section.contains("`--summary`"));
+    assert!(section.contains("ticketd never makes one"));
+    assert!(guide.contains("ticketd document create --title \"Example document\" --summary "));
+    assert!(guide.contains("ticketd document change DOCUMENT_ID --summary "));
+}
+
+#[test]
 fn installation_is_repeatable_and_preserves_differing_files_until_explicit_replacement() {
     let dir = tempfile::tempdir().unwrap();
     // Relative destinations work for either harness and can contain spaces.

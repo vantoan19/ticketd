@@ -29,7 +29,7 @@ const EXPORTED: &[(&str, &str)] = &[
     ("entities", "id, kind"),
     (
         "documents",
-        "id, title, body, created_at, updated_at, trashed, originating_activity_id, kept",
+        "id, title, body, created_at, updated_at, trashed, originating_activity_id, kept, summary",
     ),
     ("context_mentions", "source_id, target_id, passage"),
     (
@@ -116,7 +116,7 @@ const EXPORTED: &[(&str, &str)] = &[
     ),
     (
         "chat_messages",
-        "id, chat_id, position, role, text, complete, turn_id, created_at",
+        "id, chat_id, position, role, text, complete, turn_id, created_at, editing, requires_link_context",
     ),
     (
         "chat_submission_attempts",
@@ -192,6 +192,10 @@ const OMITTED_TABLES: &[(&str, &str)] = &[
     (
         "automation_settings",
         "device-local: how many runs execute at once",
+    ),
+    (
+        "chat_attachments",
+        "device-local Chat snapshots retained with their bytes in complete Workspace backups",
     ),
     (
         "chat_changes",

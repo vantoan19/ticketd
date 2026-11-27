@@ -23,6 +23,7 @@ test("choices persist and unknown stored values fall back to defaults", () => {
   expect(loadPreferences()).toEqual({
     theme: "system",
     openTickets: "split",
+    openDocuments: "split",
     ticketLayout: "list",
     ticketRows: "simple",
     sidebarCollapsed: false,
@@ -32,6 +33,9 @@ test("choices persist and unknown stored values fall back to defaults", () => {
     notifyChats: true,
     attachmentDetails: false,
     attachmentWrap: true,
+    documentsView: "current",
+    documentsSort: "opened",
+    documentGroups: {},
   });
   expect(setPreference("theme", "dark")).toBe(true);
   expect(setPreference("openTickets", "expanded")).toBe(true);

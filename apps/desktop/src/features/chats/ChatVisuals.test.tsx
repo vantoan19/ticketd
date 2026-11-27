@@ -8,6 +8,8 @@ import {
   waitFor,
   within,
 } from "@testing-library/react";
+import { readFileSync } from "node:fs";
+import { join } from "node:path";
 import { afterEach, expect, test, vi } from "vitest";
 import {
   ChatClientContext,
@@ -17,7 +19,6 @@ import {
 } from "@/features/chats/client";
 import { ChatProvider } from "@/features/chats/ChatProvider";
 import { ChatsView } from "@/features/chats/ChatsView";
-import { drafts } from "@/features/chats/drafts";
 import { HarnessMark } from "@/features/chats/HarnessMark";
 import {
   chatState,
@@ -37,9 +38,14 @@ window.ResizeObserver = class {
   disconnect() {}
 };
 
+// jsdom has no cascade or layout, so a rule that keeps a row to one line is read as text.
+const css = readFileSync(join(__dirname, "chats.css"), "utf8").replace(
+  /\/\*[\s\S]*?\*\//g,
+  "",
+);
+
 afterEach(() => {
   cleanup();
-  drafts.clear();
   watching.clear();
 });
 
@@ -99,6 +105,63 @@ async function show(
   return client;
 }
 
+test("a failed attachment save names its file and stays with it while another download finishes", async () => {
+  const notes = { id: "notes", name: "notes.txt", media_type: "text/plain" };
+  const summary = {
+    id: "summary",
+    name: "summary.txt",
+    media_type: "text/plain",
+  };
+  const client = await show([
+    {
+      chat: chatState({ id: "c1", title: "Files sent" }),
+      items: [
+        {
+          id: "u1",
+          at,
+          kind: "user",
+          text: "Two files",
+          delivery: "delivered",
+          attachments: [notes, summary],
+        },
+      ],
+    },
+  ]);
+  let failNotes!: (error: Error) => void;
+  let finishSummary!: () => void;
+  vi.spyOn(client, "exportAttachment")
+    .mockImplementationOnce(
+      () => new Promise<void>((_resolve, reject) => (failNotes = reject)),
+    )
+    .mockImplementationOnce(
+      () => new Promise<void>((resolve) => (finishSummary = resolve)),
+    );
+  const list = within(screen.getByRole("list", { name: "Sent attachments" }));
+  const saveNotes = list.getByRole("button", { name: "Save notes.txt" });
+  const saveSummary = list.getByRole("button", { name: "Save summary.txt" });
+  const notesRow = saveNotes.closest("li");
+  if (!notesRow) throw new Error("Missing notes attachment row.");
+  const notesTile = within(notesRow);
+
+  fireEvent.click(saveNotes);
+  fireEvent.click(saveSummary);
+  await act(async () => failNotes(new Error("Writing failed")));
+  const alert = notesTile.getByRole("alert");
+  expect(alert.textContent).toContain("Couldn't save “notes.txt”.");
+  expect(saveNotes.getAttribute("aria-describedby")).toBe(alert.id);
+  expect(saveSummary.hasAttribute("aria-describedby")).toBe(false);
+  expect(saveSummary).toHaveProperty("disabled", true);
+
+  await act(async () => finishSummary());
+  expect(saveSummary).toHaveProperty("disabled", false);
+  expect(notesTile.getByRole("alert")).toBe(alert);
+  await act(async () => fireEvent.click(saveSummary));
+  expect(notesTile.getByRole("alert")).toBe(alert);
+
+  await act(async () => fireEvent.click(saveNotes));
+  expect(notesTile.queryByRole("alert")).toBeNull();
+});
+
 /** A turn still running, so its rows show unfolded. */
 const steps = (
   ...list: Extract<TranscriptItem, { kind: "steps" }>["steps"]
@@ -128,7 +191,12 @@ test("each step kind has its own icon; a running step shows the spinner instead"
       chat: chatState({ id: "c1", title: "Limiter", activity: "working" }),
       items: steps(
         { kind: "read", target: "a.ts", targets: [{ text: "a.ts" }] },
-        { kind: "search", target: "x", targets: [{ text: "x" }] },
+        {
+          kind: "search",
+          target: "x",
+          targets: [{ text: "x" }],
+          no_matches: true,
+        },
         {
           kind: "run",
           target: "npm test",
@@ -144,6 +212,274 @@ test("each step kind has its own icon; a running step shows the spinner instead"
   expect(icon(rows[0])).toContain("lucide-eye");
   expect(icon(rows[1])).toContain("lucide-search");
   expect(icon(rows[2])).toContain("chat-spin");
+});
+
+const roles = readFileSync(
+  join(__dirname, "../../components/ui/surface-roles/chats-chats.css"),
+  "utf8",
+).replace(/\/\*[\s\S]*?\*\//g, "");
+
+test("only the step that runs is marked, and its verb and command take ink", async () => {
+  await show([
+    {
+      chat: chatState({ id: "c1", title: "Limiter", activity: "working" }),
+      items: steps(
+        { kind: "read", target: "a.ts", targets: [{ text: "a.ts" }] },
+        {
+          kind: "run",
+          target: "npm test",
+          command: "npm test",
+          state: "running",
+        },
+      ),
+    },
+  ]);
+  const rows = [...document.querySelectorAll(".chat-steps")];
+  expect(rows.map((row) => row.hasAttribute("data-running"))).toEqual([
+    false,
+    true,
+  ]);
+  // The cascade is read as text (jsdom has none); the spinner and clock stay muted.
+  expect(roles).toMatch(
+    /\.chat-steps\[data-running\] \.chat-step-verb,\s*\.chat-steps\[data-running\] \.chat-step-command \{[^}]*color: var\(--foreground\)/,
+  );
+});
+
+test("the working line's spinner is in the step rows' icon box", async () => {
+  await show([
+    {
+      chat: chatState({ id: "c1", title: "Limiter", activity: "working" }),
+      items: steps({
+        kind: "read",
+        target: "a.ts",
+        targets: [{ text: "a.ts" }],
+      }),
+    },
+  ]);
+  await waitFor(() =>
+    expect(
+      document.querySelector(".chat-working > .chat-row-icon > .chat-spin"),
+    ).toBeTruthy(),
+  );
+});
+
+test("a turn with a work line gives back the 4px inside its 28px row", async () => {
+  await show([
+    {
+      chat: chatState({ id: "c1", title: "Limiter" }),
+      items: [
+        ...steps({ kind: "read", target: "a.ts", targets: [{ text: "a.ts" }] }),
+        {
+          id: "turn:t1",
+          at,
+          kind: "turn",
+          turn_id: "t1",
+          started_at: at,
+          ended_at: at,
+          outcome: "completed",
+        },
+        {
+          id: "r1",
+          at,
+          kind: "response",
+          state: "complete",
+          text: "Done.",
+          turn_id: "t1",
+        },
+      ],
+    },
+  ]);
+  expect(
+    document.querySelector(".chat-turnpart")?.hasAttribute("data-fold"),
+  ).toBe(true);
+  expect(css).toMatch(
+    /\.chat-turnpart \{[^}]*contain-intrinsic-block-size: auto 28px[^}]*margin: -4px -12px;\s*padding: 4px 12px/,
+  );
+  expect(css).toMatch(/\.chat-turnpart\[data-fold\] \{\s*margin-block: -8px/);
+});
+
+test("a step row is one 20px line inside its 28px", () => {
+  expect(css).toMatch(
+    /\.chat-step-words\[data-line\] \{[^}]*height: 20px[^}]*white-space: nowrap/,
+  );
+});
+
+test("a long work-line label stays on one line and ends in an ellipsis", () => {
+  expect(css).toMatch(
+    /\.chat-fold > span \{[^}]*overflow: hidden;\s*text-overflow: ellipsis;\s*white-space: nowrap/,
+  );
+});
+
+test("a described command reads its description and opens to the exact command", async () => {
+  await show([
+    {
+      chat: chatState({ id: "c1", title: "Limiter", activity: "working" }),
+      items: steps(
+        {
+          kind: "run",
+          target: "gh pr create --fill",
+          command: "gh pr create --fill",
+          description: "Create the PR with gh",
+          output: "https://example.test/pull/1",
+        },
+        {
+          kind: "run",
+          target: "gh pr create --web",
+          command: "gh pr create --web",
+          description: "Open the PR in a browser",
+          state: "failed",
+          exit_code: 1,
+        },
+      ),
+    },
+  ]);
+  const row = button("Create the PR with gh");
+  expect(row.textContent).toBe("Create the PR with gh");
+  expect(row.textContent).not.toContain("gh pr create");
+  fireEvent.click(row);
+  expect(
+    screen.getByRole("region", { name: "Output of gh pr create --fill" })
+      .textContent,
+  ).toBe("$ gh pr create --fill\n\nhttps://example.test/pull/1");
+  // A failed one keeps the description, then says it.
+  expect(button("Open the PR in a browser, Failed").textContent).toBe(
+    "Open the PR in a browser · Failed",
+  );
+});
+
+test("a command with no description is one muted mono line", async () => {
+  await show([
+    {
+      chat: chatState({ id: "c1", title: "Limiter", activity: "working" }),
+      items: steps({
+        kind: "run",
+        target: "gh pr create --fill --title 'a long title'",
+        command: "gh pr create --fill --title 'a long title'\n--body x",
+        state: "failed",
+      }),
+    },
+  ]);
+  const row = screen.getByRole("button", { name: /^Run gh pr create/ });
+  // Only the command's first line, set apart so a long one can end in an ellipsis.
+  const command = row.querySelector(".chat-step-command");
+  expect(command?.textContent).toBe(
+    "gh pr create --fill --title 'a long title'",
+  );
+  expect(row.querySelector(".chat-step-words")?.hasAttribute("data-line")).toBe(
+    true,
+  );
+  expect(row.textContent).toBe(
+    "Run gh pr create --fill --title 'a long title' · Failed",
+  );
+});
+
+test("a row naming two long files keeps to one line until its names cannot fit", async () => {
+  await show([
+    {
+      chat: chatState({ id: "c1", title: "Limiter", activity: "working" }),
+      items: steps({
+        kind: "read",
+        target: "host.rs",
+        targets: [
+          { text: "crates/ticketd-core/src/source/extension/host.rs" },
+          { text: "docs/ticket-source-extensions-and-their-contracts.md" },
+        ],
+        state: "failed",
+      }),
+    },
+  ]);
+  const words = document.querySelector(".chat-step-words");
+  // The cascade is read as text (jsdom has none): a line row names its files as
+  // direct children, the dot and the outcome stay together, and nothing clips.
+  expect(words?.hasAttribute("data-line")).toBe(true);
+  expect(words?.querySelectorAll(":scope > .chat-file-name")).toHaveLength(2);
+  expect(words?.lastElementChild?.className).toBe("chat-step-suffix");
+  expect(words?.lastElementChild?.textContent).toMatch(/Failed$/);
+  expect(css).toMatch(
+    /\.chat-step-words\[data-line\] \{[^}]*flex-wrap: wrap[^}]*white-space: nowrap/,
+  );
+  // A name's flex basis is its minimum, so the row wraps only when the shrunken
+  // names cannot fit, and otherwise they grow and truncate on the one line. The
+  // row clips nothing, so a name's button and its focus ring stay visible
+  // (measured in Chromium and WebKit at 340px and 480px; jsdom has no layout).
+  expect(css).toMatch(
+    /\.chat-step-words\[data-line\] \.chat-file-name \{[^}]*flex: 1 1 calc\(var\(--keep, 0\) \* 1ch \+ 4px\);[^}]*max-width: max-content/,
+  );
+  expect(css).not.toContain("chat-step-names");
+  // A name gives way only down to "…" and its extension (--keep characters), so
+  // the next word is never overlapped.
+  expect(css).toMatch(/\.chat-file-name \{[^}]*min-width: calc\(var\(--keep/);
+  const names = [
+    ...(words?.querySelectorAll<HTMLElement>(".chat-file-name") ?? []),
+  ];
+  expect(names.map((name) => name.style.getPropertyValue("--keep"))).toEqual([
+    "7", // host.rs is short: kept whole
+    "4", // "…" and ".md"
+  ]);
+  expect(
+    names.map((name) => name.querySelector(".chat-file-tail")?.textContent),
+  ).toEqual(["host.rs", ".md"]);
+});
+
+test("a path in a step row is its folder, muted, then its name", async () => {
+  await show([
+    {
+      chat: chatState({ id: "c1", title: "Limiter", activity: "working" }),
+      items: steps(
+        {
+          kind: "edit",
+          target: "src/auth/limiter.ts",
+          targets: [{ text: "src/auth/limiter.ts" }],
+          added_lines: 13,
+          removed_lines: 0,
+        },
+        {
+          kind: "read",
+          variant: "list",
+          target: "src/auth",
+          targets: [{ text: "src/auth" }],
+          output: "limiter.ts",
+        },
+      ),
+    },
+  ]);
+  const file = button("Open src/auth/limiter.ts");
+  expect(file.querySelector(".chat-path-dir")?.textContent).toBe("src/auth/");
+  expect(file.textContent).toBe("src/auth/limiter.ts");
+  // The row's count reads "+13" alone.
+  expect(document.querySelector(".chat-file-counts")?.textContent).toBe("+13");
+  // A folder in a row that opens is the same.
+  const folder = document.querySelector(".chat-steps code.chat-path");
+  expect(folder?.textContent).toBe("src/auth");
+  expect(folder?.querySelector(".chat-path-dir")?.textContent).toBe("src/");
+});
+
+test("reads and searches in a row are one 'Explored' row that opens to what they named", async () => {
+  await show([
+    {
+      chat: chatState({ id: "c1", title: "Limiter", activity: "working" }),
+      items: steps(
+        { kind: "read", target: "a.ts", targets: [{ text: "src/a.ts" }] },
+        {
+          kind: "search",
+          target: "limiter",
+          targets: [{ text: "limiter", scope: "src" }],
+        },
+        {
+          kind: "read",
+          target: "b.ts",
+          targets: [{ text: "src/b.ts" }, { text: "c.ts" }],
+        },
+      ),
+    },
+  ]);
+  const row = button("Explored 3 files · 1 search");
+  expect(row.textContent).toBe("Explored 3 files · 1 search");
+  fireEvent.click(row);
+  expect(button("Open src/a.ts")).toBeTruthy();
+  expect(button("Open src/b.ts")).toBeTruthy();
+  expect(button("Open c.ts")).toBeTruthy();
+  expect(screen.getByText("limiter", { selector: "code" })).toBeTruthy();
 });
 
 test("a file name opens the file; one that is gone becomes plain text and says so", async () => {
@@ -167,8 +503,9 @@ test("a file name opens the file; one that is gone becomes plain text and says s
     { goneFiles: ["old.ts"] },
   );
   const first = button("Open src/auth/index.ts");
-  // A repeated name gains its folder.
-  expect(first.textContent).toBe("auth/index.ts");
+  // Its folder comes before the name, muted, so two files of one name stay apart.
+  expect(first.textContent).toBe("src/auth/index.ts");
+  expect(first.querySelector(".chat-path-dir")?.textContent).toBe("src/auth/");
   fireEvent.click(first);
   await waitFor(() =>
     expect(client.openedFiles).toEqual(["src/auth/index.ts"]),
@@ -213,7 +550,7 @@ test("a bounded patch shows omitted paths and qualifies its line counts", async 
   expect(
     screen.getByText("Applied the patch.", { selector: "pre" }),
   ).toBeTruthy();
-  expect(screen.getByText("+3 −0")).toBeTruthy();
+  expect(screen.getByText("+3")).toBeTruthy();
 });
 
 test("an opened bounded patch shows its full failure output with the named paths", async () => {

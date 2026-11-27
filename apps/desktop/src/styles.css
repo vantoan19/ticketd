@@ -62,6 +62,8 @@
   --text-wordmark: 15px;
   --text-caption: 12px;
   --text-caption-line: 16px;
+  --text-meta: 13px;
+  --text-meta-line: 20px;
   --text-ui: 14px;
   --text-ui-line: 20px;
   --text-code: 13px;
@@ -72,6 +74,30 @@
   --text-reading-heading: 18px;
   --text-reading-heading-line: 28px;
   --text-reading-heading-tracking: -0.2px;
+  /* The Document reader's heading ladder (DESIGN.md section 3): sections,
+     subsections, and a body-size bold for lower levels. */
+  --text-reading-section: 22px;
+  --text-reading-section-line: 30px;
+  --text-reading-section-tracking: -0.44px;
+  --text-reading-subsection: 17px;
+  --text-reading-subsection-line: 26px;
+  --text-reading-subsection-tracking: -0.2px;
+  --reading-space-section: 44px;
+  --reading-space-subsection: 28px;
+  --reading-space-minor: 20px;
+  --reading-space-after-heading: 8px;
+  --reading-space-item: 6px;
+  --reading-column: 600px;
+  /* The Document outline's ticks (DESIGN.md section 8). */
+  --outline-tick-section: 16px;
+  --outline-tick-subsection: 10px;
+  --outline-tick-thickness: 2px;
+  --outline-tick-gap: 9px;
+  --outline-hit: 10px;
+  --outline-popover-width: 288px;
+  --outline-scroll-margin: 24px;
+  /* The width of a scrollbar (the rule near the end of this file), for layouts that give it back. */
+  --scrollbar-size: 10px;
   --text-doc: 15px;
   --text-doc-line: 24px;
   --text-doc-title: 28px;
@@ -1817,8 +1843,8 @@ body:has([data-slot="dialog-overlay"])
    text colour so it sits quietly in both themes and widens a little on hover.
    (scrollbar-width or scrollbar-color would switch these rules off.) */
 ::-webkit-scrollbar {
-  width: 10px;
-  height: 10px;
+  width: var(--scrollbar-size);
+  height: var(--scrollbar-size);
 }
 ::-webkit-scrollbar-track,
 ::-webkit-scrollbar-corner {
@@ -2743,16 +2769,63 @@ html[data-hover-held] .sidebar-nav button:hover:not([data-active="true"]) {
   font-size: var(--text-doc);
   line-height: var(--text-doc-line);
 }
-.chat-ai .markdown-document :is(h1, h2, h3, h4, h5, h6) {
+/* Reply headings (DESIGN 15): h1-h3 at the reading size, h4-h6 and a paragraph
+   that is only bold (boldOnly) at the body size; both 600 on the body's line
+   height. A heading groups with what follows: space above, little below. */
+.chat-ai .markdown-document :where(h1, h2, h3, h4, h5, h6, p[data-bold-only]) {
   color: var(--foreground);
   font-size: var(--text-doc);
   font-weight: 600;
   line-height: var(--text-doc-line);
   letter-spacing: normal;
 }
+.chat-ai .markdown-document :is(h1, h2, h3) {
+  font-size: var(--text-reading);
+}
+.chat-ai .markdown-document > * + :is(h1, h2, h3) {
+  margin-top: 24px;
+}
+.chat-ai .markdown-document > * + :is(h4, h5, h6, p[data-bold-only]) {
+  margin-top: 20px;
+}
+.chat-ai .markdown-document > :is(h1, h2, h3) + * {
+  margin-top: 6px;
+}
+.chat-ai .markdown-document > :is(h4, h5, h6, p[data-bold-only]) + * {
+  margin-top: 4px;
+}
 .chat-pane[data-expanded] .chat-ai .markdown-document {
   font-size: var(--text-reading);
   line-height: var(--text-reading-line);
+}
+/* Headings scale with the body in expanded Chat. */
+.chat-pane[data-expanded]
+  .chat-ai
+  .markdown-document
+  :is(h4, h5, h6, p[data-bold-only]) {
+  font-size: var(--text-reading);
+  line-height: var(--text-reading-line);
+}
+.chat-pane[data-expanded] .chat-ai .markdown-document :is(h1, h2, h3) {
+  font-size: var(--text-reading-heading);
+  line-height: var(--text-reading-heading-line);
+}
+/* A progress note is the agent talking while it works: the working size, ink,
+   not the answer's. Its headings and expanded-pane sizes follow it. */
+.chat-turn-response .chat-ai,
+.chat-turn-response .chat-ai .markdown-document,
+.chat-pane[data-expanded] .chat-turn-response .chat-ai .markdown-document,
+.chat-turn-response
+  .chat-ai
+  .markdown-document
+  :where(h1, h2, h3, h4, h5, h6, p[data-bold-only]),
+.chat-pane[data-expanded]
+  .chat-turn-response
+  .chat-ai
+  .markdown-document
+  :is(h1, h2, h3, h4, h5, h6, p[data-bold-only]) {
+  font-size: var(--text-ui);
+  line-height: var(--text-ui-line);
 }
 .markdown-document > * + * {
   margin-top: 12px;
@@ -4085,12 +4158,33 @@ kbd,
   box-shadow: inset -1px 0 0 var(--border);
 }
 .documents-group {
-  background: var(--recessed);
-  border-radius: var(--radius-card);
   color: var(--muted-foreground);
-  font-size: var(--text-ui);
+  font-size: var(--text-caption);
   font-weight: 500;
-  line-height: var(--text-ui-line);
+  line-height: var(--text-caption-line);
+}
+.documents-group-toggle {
+  border: 0;
+  background: transparent;
+  color: var(--muted-foreground);
+  font: inherit;
+  font-size: var(--text-caption);
+  font-weight: 500;
+  line-height: var(--text-caption-line);
+  cursor: pointer;
+}
+.documents-group-toggle:hover {
+  color: var(--foreground);
+}
+.documents-group-toggle {
+  border-radius: var(--radius-card);
+}
+.documents-group-toggle:focus-visible {
+  outline: 2px solid var(--ring);
+  outline-offset: -2px;
+}
+.documents-folds {
+  box-shadow: inset 0 1px 0 var(--group-hairline);
 }
 .documents-page .document-list-open {
   border: 0;
@@ -4105,6 +4199,10 @@ kbd,
 .ui-item-navigator[data-open] {
   background: var(--accent);
 }
+/* The open Document keeps its fill under the pointer and the keyboard. */
+.document-list .ui-item-navigator[data-open]:is(:hover, :focus-within) {
+  background: var(--accent);
+}
 .ui-item-navigator:has(.document-list-open:focus-visible) {
   outline: 2px solid var(--ring);
   outline-offset: -2px;
@@ -4112,21 +4210,19 @@ kbd,
 .document-list-open:focus-visible {
   outline: none;
 }
-.document-list-kind,
 .document-list-meta,
-.document-list-date,
-.documents-include {
+.document-list-date {
   color: var(--muted-foreground);
 }
 .document-list-meta,
-.document-list-date,
-.documents-include {
+.document-list-date {
   font-size: var(--text-caption);
   line-height: var(--text-caption-line);
 }
-.document-list time:focus-visible {
+/* [tabindex] outranks the rule that clears a scripted focus ring: the time is reached by key. */
+.document-list time[tabindex]:focus-visible {
   outline: 2px solid var(--ring);
-  outline-offset: 2px;
+  outline-offset: -2px;
   border-radius: var(--radius-segment);
 }
 .document-list mark {
@@ -4134,14 +4230,16 @@ kbd,
   color: inherit;
 }
 .document-bar {
-  box-shadow: 0 1px 0 var(--border);
+  box-shadow: 0 1px 0 var(--header-boundary);
   font-size: var(--text-ui);
   line-height: var(--text-ui-line);
 }
 .document-bar .document-return,
-.document-bar .document-plan-crumb,
-.document-crumb-sep {
+.document-bar .document-plan-crumb {
   color: var(--muted-foreground);
+}
+.document-crumb-sep {
+  color: var(--disabled-foreground);
 }
 .document-title,
 .ui-input-title {
@@ -4154,11 +4252,30 @@ kbd,
   background: transparent;
   box-shadow: none;
 }
-.document-subtitle,
 .document-status {
   color: var(--muted-foreground);
   font-size: var(--text-caption);
   line-height: var(--text-caption-line);
+}
+.document-meta {
+  color: var(--muted-foreground);
+  font-size: var(--text-meta);
+  line-height: var(--text-meta-line);
+}
+.document-meta .document-status {
+  font-size: inherit;
+  line-height: inherit;
+}
+.document-meta .ui-button-link {
+  color: inherit;
+}
+.document-meta-sep {
+  color: var(--disabled-foreground);
+}
+.document-meta .document-tags li {
+  background: var(--recessed);
+  color: var(--foreground);
+  border-radius: var(--radius);
 }
 .document-workspace .document-body {
   --text-editor: var(--text-reading);
@@ -4168,17 +4285,103 @@ kbd,
   font-size: var(--text-reading);
   line-height: var(--text-reading-line);
 }
+/* Blocks are 12px apart in rich editing as in reading: the editor's own 12px above and below
+   each block would add up to 24px wherever a reading rule gives a block less. */
+.document-workspace .document-body .rich-document > * {
+  margin-block: 0;
+}
+.document-workspace .document-body .rich-document > * + * {
+  margin-top: 12px;
+}
+/* The heading ladder: 22/30, 17/26, then the body size in bold, with room
+   above each and a short step below. Reading and rich editing share it. */
 .document-workspace
   .document-body
   :is(.markdown-document, .rich-document)
-  :is(h2, h3, h4, h5, h6) {
-  font-size: var(--text-reading-heading);
-  line-height: var(--text-reading-heading-line);
+  :is(h1, h2, h3, h4, h5, h6) {
+  font-size: var(--text-reading);
+  line-height: var(--text-reading-line);
   font-weight: 600;
-  letter-spacing: var(--text-reading-heading-tracking);
+  letter-spacing: normal;
+}
+.document-workspace
+  .document-body
+  :is(.markdown-document, .rich-document)
+  :is(h1, h2) {
+  font-size: var(--text-reading-section);
+  line-height: var(--text-reading-section-line);
+  letter-spacing: var(--text-reading-section-tracking);
+}
+.document-workspace .document-body :is(.markdown-document, .rich-document) h3 {
+  font-size: var(--text-reading-subsection);
+  line-height: var(--text-reading-subsection-line);
+  letter-spacing: var(--text-reading-subsection-tracking);
+}
+.document-workspace
+  .document-body
+  :is(.markdown-document, .rich-document)
+  > *
+  + :is(h4, h5, h6) {
+  margin-top: var(--reading-space-minor);
+}
+.document-workspace
+  .document-body
+  :is(.markdown-document, .rich-document)
+  > *
+  + h3 {
+  margin-top: var(--reading-space-subsection);
+}
+.document-workspace
+  .document-body
+  :is(.markdown-document, .rich-document)
+  > *
+  + :is(h1, h2) {
+  margin-top: var(--reading-space-section);
+}
+.document-workspace
+  .document-body
+  :is(.markdown-document, .rich-document)
+  > :is(h1, h2, h3, h4, h5, h6) {
+  margin-bottom: var(--reading-space-after-heading);
+}
+.document-workspace
+  .document-body
+  :is(.markdown-document, .rich-document)
+  > :is(h1, h2, h3, h4, h5, h6)
+  + * {
+  margin-top: var(--reading-space-after-heading);
+}
+.document-workspace
+  .document-body
+  :is(.markdown-document, .rich-document)
+  li
+  + li,
+.document-workspace
+  .document-body
+  :is(.markdown-document, .rich-document)
+  li
+  > :is(ul, ol) {
+  margin-top: var(--reading-space-item);
+}
+/* The column holds the text; a wide table may use the reader's width inside
+   its gutters, centred on the column, and scrolls only beyond that. */
+.document-workspace
+  .document-body
+  .markdown-document
+  > :not(.markdown-table-scroll),
+.document-workspace .document-body > .markdown-editor {
+  width: 100%;
+  max-width: var(--reading-column);
+  margin-inline: auto;
+}
+.document-workspace .document-body .markdown-table-scroll {
+  width: max-content;
+  min-width: min(100%, var(--reading-column));
+  max-width: 100%;
+  margin-inline: auto;
 }
 .document-workspace .document-body .markdown-editor {
-  margin: 0;
+  margin-block: 0;
   background: transparent;
   box-shadow: none;
 }
@@ -4189,35 +4392,29 @@ kbd,
   padding: 0;
   min-height: 0;
 }
-.document-rail {
-  background: transparent;
-  box-shadow: inset 0 1px 0 var(--border);
+.document-end {
   font-size: var(--text-ui);
   line-height: var(--text-ui-line);
 }
-.document-linked-header h2 {
-  color: var(--foreground);
-  font-size: var(--text-ui);
-  line-height: var(--text-ui-line);
-  font-weight: 500;
-}
-.document-rail section > h2,
-.document-rail dt,
-.document-rail p {
+.document-end section > h2 {
   color: var(--muted-foreground);
   font-size: var(--text-caption);
   line-height: var(--text-caption-line);
   font-weight: 400;
 }
-.document-rail .connected-label {
+.document-end .connected-label {
   line-height: var(--text-ui-line);
 }
-.document-rail .document-tags li {
-  box-shadow: var(--shadow-border-base);
-  border-radius: var(--radius);
+.document-linked-role {
+  color: var(--muted-foreground);
 }
-.document-rail-actions {
-  box-shadow: inset 0 1px 0 var(--border);
+.document-end p {
+  color: var(--muted-foreground);
+  font-size: var(--text-caption);
+  line-height: var(--text-caption-line);
+}
+.document-details dt {
+  color: var(--muted-foreground);
 }
 .document-trash-notice > [data-slot="alert"] {
   height: 32px;

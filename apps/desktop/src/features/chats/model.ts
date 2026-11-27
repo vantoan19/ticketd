@@ -12,6 +12,13 @@ import type {
   TranscriptItem,
   ItemOf,
 } from "@/features/chats/client";
+import { scopeIsPath } from "@/features/chats/files";
+import {
+  count,
+  exploredCounts,
+  stretchesOf,
+  type TurnBlock,
+} from "@/features/chats/stretch";
 import { formatTime } from "@/lib/format";
 
 /**
@@ -49,9 +56,6 @@ export function applyChange(
       : [...snapshot.items, change.item],
   };
 }
-
-const count = (n: number, one: string, many = `${one}s`) =>
-  `${n} ${n === 1 ? one : many}`;
 
 /** Running, succeeded, and any other outcome; then what three or more count as. */
 const STEP_VERBS = {
@@ -118,13 +122,27 @@ export function ticketdParts(
   const parts: StepWords["parts"] = [];
   const reference = (call: TicketdCall | undefined) =>
     call?.words.find((word) => word.code && !word.record)?.text;
-  calls.forEach((call, index) => {
-    const before = calls[index - 1];
+  // A call made again word for word, right after itself, is one clause, "(3 times)",
+  // not said again; one made again after another call keeps its place in the order.
+  const said: { call: TicketdCall; times: number }[] = [];
+  for (const call of calls) {
+    const last = said[said.length - 1];
+    const again =
+      last &&
+      last.call.verb === call.verb &&
+      JSON.stringify(last.call.words) === JSON.stringify(call.words)
+        ? last
+        : undefined;
+    if (again) again.times += 1;
+    else said.push({ call, times: 1 });
+  }
+  said.forEach(({ call, times }, index) => {
+    const before = said[index - 1]?.call;
     const repeats = before?.verb === call.verb;
     if (index > 0) {
       if (repeats)
         parts.push({
-          text: calls[index + 1]?.verb === call.verb ? "," : "and",
+          text: said[index + 1]?.call.verb === call.verb ? "," : "and",
         });
       else parts.push({ text: "," }, { text: "then" });
     }
@@ -147,6 +165,7 @@ export function ticketdParts(
                 : { text: word.text },
       );
     }
+    if (times > 1) parts.push({ text: `(${times} times)` });
   });
   return parts;
 }
@@ -165,9 +184,25 @@ const OUTCOME_WORDS = {
   unknown: "Not confirmed",
 } as const;
 
+/**
+ * A step as a row shows it. A row that merges a run of reads and searches ("Explored 6
+ * files · 2 searches") keeps what each kind named, for when it opens.
+ */
+export type ViewStep = Step & {
+  explored?: { files: StepTarget[]; searches: StepTarget[] };
+};
+
+/** "+57", or "+19 −1" once something was removed: a count of nothing is not said. */
+export const diffstat = (added: number, removed: number) =>
+  removed > 0 ? `+${added} −${removed}` : `+${added}`;
+
 export type StepWords = {
-  /** The row's words in order; `code` ones are targets, shown in mono. */
-  parts: { text: string; code?: boolean }[];
+  /**
+   * The row's words in order; `code` ones are targets, shown in mono. A `path` is a
+   * file or folder (its folder muted, its name in ink); the `command` of a command
+   * with no description is one muted line.
+   */
+  parts: { text: string; code?: boolean; path?: boolean; command?: boolean }[];
   /** At most one: an outcome word, a muted result such as "No matches", or a diffstat (12px mono). */
   suffix?: { text: string; outcome: boolean; diffstat?: boolean };
   /** The row's accessible name: "Run npm run test:limiter, Failed". */
@@ -198,12 +233,50 @@ export function targetLines(target: StepTarget): string {
   return from === to ? `line ${from}` : `lines ${from}–${to}`;
 }
 
+/** Characters of a ticketd sentence a row holds before it reads the harness's description. */
+const TICKETD_SENTENCE_LIMIT = 64;
+
+/**
+ * A command's first line, as the one muted line of its row. When the command goes on, a
+ * line that ends inside a quote or a bracket ("python3 -c \"") is cut back to before it,
+ * and a line ending in a continuation loses its backslash: it never ends open.
+ */
+export function commandLine(command: string): string {
+  const [first = command, ...more] = command.split("\n");
+  if (more.length === 0) return first;
+  const closing = new Map([
+    ["(", ")"],
+    ["[", "]"],
+    ["{", "}"],
+  ]);
+  // Where the quote or bracket still open began.
+  const open: { at: number; char: string }[] = [];
+  let quote: { at: number; char: string } | undefined;
+  for (let at = 0; at < first.length; at += 1) {
+    const char = first.charAt(at);
+    const top = open.at(-1);
+    if (quote) {
+      // A backslash escapes the next character inside double quotes.
+      if (char === "\\" && quote.char === '"') at += 1;
+      else if (char === quote.char) quote = undefined;
+    } else if (char === "'" || char === '"' || char === "`")
+      quote = { at, char };
+    else if (closing.has(char)) open.push({ at, char });
+    else if (top && closing.get(top.char) === char) open.pop();
+  }
+  const dangling = quote ?? open[0];
+  // "$(" opens a substitution: the dollar goes with it.
+  const from = dangling && first.charAt(dangling.at - 1) === "$" ? 1 : 0;
+  const kept = dangling ? first.slice(0, dangling.at - from) : first;
+  return kept.replace(/[\s\\]+$/, "") || first;
+}
+
 /**
  * Every word of a step row: `[icon] Verb target · suffix`. Only a step that succeeded
  * is in the past tense; any other outcome keeps the plain verb and says its word.
  */
 export function stepWords(
-  step: Step,
+  step: ViewStep,
   name: RecordName = () => undefined,
 ): StepWords {
   const state = step.state ?? "done";
@@ -219,9 +292,12 @@ export function stepWords(
   const verb =
     state === "running" ? running : state === "done" ? done : otherwise;
   const code = (text: string) => ({ text, code: true });
+  // The targets of these steps are files and folders.
+  const paths = ["read", "list", "edit", "create", "delete"].includes(key);
   const quoted = (text: string) => ({
     text: key === "web" ? `“${text}”` : text,
     code: key !== "web",
+    ...(paths && { path: true }),
   });
   let parts: StepWords["parts"];
   if (step.ticketd?.length) {
@@ -230,6 +306,14 @@ export function stepWords(
       state === "running" ? 0 : state === "done" ? 1 : 2,
       name,
     );
+    // A sentence too long for a row, and the harness's own shorter account of it.
+    const sentence = partsText(parts);
+    if (
+      step.description &&
+      sentence.length > TICKETD_SENTENCE_LIMIT &&
+      step.description.length < sentence.length
+    )
+      parts = [{ text: step.description }];
   } else if (step.variant === "plan") {
     // Claude Code keeps its plan in its own profile; the path says nothing more.
     parts = [
@@ -237,6 +321,16 @@ export function stepWords(
         text: `${state === "running" ? "Writing" : state === "done" ? "Wrote" : "Write"} its plan`,
       },
     ];
+  } else if (step.explored) {
+    const { files, searches } = step.explored;
+    parts = [
+      {
+        text: `Explored ${exploredCounts(files.length, searches.length)}`,
+      },
+    ];
+  } else if (step.kind === "run" && step.description) {
+    // The harness's own account of the command; opened, the row shows what ran.
+    parts = [{ text: step.description }];
   } else if (step.kind === "other" && targets.length === 0) {
     parts = [{ text: step.target }];
   } else if (step.kind === "run" && step.variant === "script") {
@@ -248,7 +342,7 @@ export function stepWords(
   } else if (step.kind === "run") {
     // `target` is the command as shown (ticketd without its path); `command` is what ran.
     const command = step.target || step.command || "";
-    parts = [{ text: verb }, code(command.split("\n")[0] ?? command)];
+    parts = [{ text: verb }, { ...code(commandLine(command)), command: true }];
   } else if (omitted) {
     const files =
       omitted.count === null
@@ -272,7 +366,13 @@ export function stepWords(
     parts = [{ text: verb }, quoted(first?.text ?? "")];
     if (second) parts.push({ text: "and" }, quoted(second.text));
     else if (first?.scope && key === "search")
-      parts.push({ text: "in" }, code(first.scope));
+      parts.push(
+        { text: "in" },
+        {
+          ...code(first.scope),
+          ...(scopeIsPath(first.scope) && { path: true }),
+        },
+      );
   }
   const suffix =
     state === "failed" && step.timed_out
@@ -288,7 +388,7 @@ export function stepWords(
               step.added_lines != null &&
               step.removed_lines != null
             ? {
-                text: `${omitted ? "At least " : ""}+${step.added_lines} −${step.removed_lines}`,
+                text: `${omitted ? "At least " : ""}${diffstat(step.added_lines, step.removed_lines)}`,
                 outcome: false,
                 diffstat: true,
               }
@@ -297,7 +397,9 @@ export function stepWords(
   const spoken = suffix?.diffstat
     ? omitted
       ? `at least ${count(step.added_lines ?? 0, "line")} added and ${count(step.removed_lines ?? 0, "line")} removed`
-      : `${step.added_lines} lines added, ${step.removed_lines} removed`
+      : step.removed_lines
+        ? `${step.added_lines} lines added, ${step.removed_lines} removed`
+        : `${step.added_lines} lines added`
     : suffix?.text;
   const single = targets.length === 1 && !step.command ? targets[0] : undefined;
   const took = step.duration_ms ? duration(step.duration_ms) : "";
@@ -324,31 +426,47 @@ export function stepWords(
 
 /**
  * Consecutive steps of the same kind and outcome as one row ("Read 6 files"), which
- * opens to its targets. Commands never merge, so each one's output stays one level
- * down. Steps with a different outcome word ("No matches", "Timed out") never merge.
+ * opens to its targets. A run of reads and searches that finished merges into one
+ * row, "Explored 6 files · 2 searches". Commands never merge, so each one's output
+ * stays one level down. Steps with a different outcome word ("No matches", "Timed
+ * out", "Failed") never merge, so the word stays on a row of its own.
  */
 const sum = (a: number | null | undefined, b: number | null | undefined) =>
   a != null && b != null ? a + b : null;
 
-export function mergeSteps(steps: Step[]): Step[] {
-  const rows: Step[] = [];
+/** A read of files, or a search that found something, which finished. */
+const exploring = (step: ViewStep) =>
+  ((step.kind === "read" && step.variant !== "list") ||
+    (step.kind === "search" && !step.no_matches)) &&
+  (step.state ?? "done") === "done" &&
+  !step.omitted_files;
+
+export function mergeSteps(steps: Step[]): ViewStep[] {
+  const rows: ViewStep[] = [];
   for (const step of steps) {
     const last = rows.at(-1);
+    const explore =
+      last &&
+      exploring(last) &&
+      exploring(step) &&
+      (last.explored !== undefined || last.kind !== step.kind);
     const same =
       last &&
-      step.kind !== "run" &&
-      last.kind === step.kind &&
-      (last.variant ?? null) === (step.variant ?? null) &&
-      (last.state ?? "done") === (step.state ?? "done") &&
-      // A different outcome word ("No matches") keeps its own row.
-      Boolean(last.no_matches) === Boolean(step.no_matches) &&
-      Boolean(last.timed_out) === Boolean(step.timed_out);
-    if (!same) {
+      (explore ||
+        (step.kind !== "run" &&
+          !last.explored &&
+          last.kind === step.kind &&
+          (last.variant ?? null) === (step.variant ?? null) &&
+          (last.state ?? "done") === (step.state ?? "done") &&
+          // A different outcome word ("No matches") keeps its own row.
+          Boolean(last.no_matches) === Boolean(step.no_matches) &&
+          Boolean(last.timed_out) === Boolean(step.timed_out)));
+    if (!last || !same) {
       rows.push(step);
       continue;
     }
     // A merged row opens to its targets, so no one step's output comes with it.
-    const merged: Step = { ...last };
+    const merged: ViewStep = { ...last };
     delete merged.output;
     delete merged.full_output;
     delete merged.result;
@@ -363,9 +481,29 @@ export function mergeSteps(steps: Step[]): Step[] {
               (step.omitted_files?.count ?? 0),
       };
     }
+    const targets = [...(last.targets ?? []), ...(step.targets ?? [])];
+    if (explore) {
+      // What each kind named, so the opened row lists files apart from searches.
+      const kindOf = (each: ViewStep) => ({
+        files: each.kind === "read" ? (each.targets ?? []) : [],
+        searches: each.kind === "search" ? (each.targets ?? []) : [],
+      });
+      const before = last.explored ?? kindOf(last);
+      const next = kindOf(step);
+      rows[rows.length - 1] = {
+        ...merged,
+        targets,
+        no_matches: false,
+        explored: {
+          files: [...before.files, ...next.files],
+          searches: [...before.searches, ...next.searches],
+        },
+      };
+      continue;
+    }
     rows[rows.length - 1] = {
       ...merged,
-      targets: [...(last.targets ?? []), ...(step.targets ?? [])],
+      targets,
       no_matches: Boolean(last.no_matches && step.no_matches),
       // Diffstats add up only when every merged step has one.
       added_lines: sum(last.added_lines, step.added_lines),
@@ -394,12 +532,17 @@ export type TurnRow =
   | {
       kind: "step";
       key: string;
-      step: Step;
+      step: ViewStep;
       /** The answered approval this step waited on: "You allowed this for this session". */
       decision?: string;
       kept?: false;
     }
-  | { kind: "response"; key: string; item: ItemOf<"response">; kept?: false }
+  /**
+   * A progress note: a response the harness wrote while the turn was still
+   * running, with more work after it (or the turn still going). It is part of the
+   * work, so it has no reply actions; the turn's `final` response is the answer.
+   */
+  | { kind: "progress"; key: string; item: ItemOf<"response">; kept?: false }
   | {
       kind: "record";
       key: string;
@@ -426,6 +569,10 @@ export type TurnRow =
  */
 export type Turn = {
   key: string;
+  /** When the turn (or, after a steer, this segment) started: an ISO time. */
+  started?: string;
+  /** When it ended; none while it runs or when the stop was not confirmed. */
+  ended?: string;
   /** Still running: nothing folds and there is no turn row. */
   live: boolean;
   /** Stop was asked for and not confirmed: the turn row shows, open. */
@@ -433,6 +580,16 @@ export type Turn = {
   /** "Worked for 2m 13s · 1 failed". */
   label: string;
   rows: TurnRow[];
+  /**
+   * What the turn changed in ticketd as its records row says it: the host's netted
+   * list. Older hosts send none, and each change is then its own sentence.
+   */
+  changes: RecordChange[];
+  /**
+   * The same rows as the turn shows them: its notes and kept rows, and its work as
+   * stretches between the notes. The last stretch of a running turn is ongoing.
+   */
+  blocks: TurnBlock[];
   /** The turn's last response, when no step follows it. */
   final?: ItemOf<"response">;
   /** Why the turn stopped: stopped, quit or failed. */
@@ -447,8 +604,19 @@ export type Turn = {
   ids: string[];
 };
 
+export type { Stretch, TurnBlock } from "@/features/chats/stretch";
+
 export type TranscriptPart =
   { kind: "item"; item: TranscriptItem } | { kind: "turn"; turn: Turn };
+
+// Fresh history skips attachment-only messages in the desktop command.
+export function canPickHistoryMessage(item: TranscriptItem): boolean {
+  return (
+    item.kind === "response" ||
+    (item.kind === "user" &&
+      (!item.attachments?.length || /\P{White_Space}/u.test(item.text)))
+  );
+}
 
 export function failureMarkerMatches(
   marker: ItemOf<"marker"> | undefined,
@@ -499,15 +667,15 @@ type Segment = {
 };
 
 /** The last element that passes `test`. */
-function lastOf<T, S extends T>(
+export function lastOf<T, S extends T>(
   list: readonly T[],
   test: (value: T) => value is S,
 ): S | undefined;
-function lastOf<T>(
+export function lastOf<T>(
   list: readonly T[],
   test: (value: T) => boolean,
 ): T | undefined;
-function lastOf<T>(list: readonly T[], test: (value: T) => boolean) {
+export function lastOf<T>(list: readonly T[], test: (value: T) => boolean) {
   for (let index = list.length - 1; index >= 0; index -= 1) {
     const value = list[index];
     if (value !== undefined && test(value)) return value;
@@ -527,14 +695,25 @@ export function receiptLine(request: ItemOf<"request">) {
   return `Answered · ${request.answer ?? subject}`;
 }
 
+/** A response before the turn knows whether it is the final answer or a progress note. */
+type DraftResponse = {
+  kind: "response";
+  key: string;
+  item: ItemOf<"response">;
+  kept?: false;
+};
+
 /**
  * A turn's rows in order, and every step as it now reads. Steps merge across the
  * items they arrived in. `running` is what a step still running reads as: running,
  * or Not finished once its turn ended, or Not confirmed after an unconfirmed stop.
  */
 function rowsOf(members: TranscriptItem[], running: Step["state"]) {
-  const rows: TurnRow[] = [];
+  const rows: (TurnRow | DraftResponse)[] = [];
   const all: Step[] = [];
+  // What the turn's records row says: the host's net list, from the turn's last
+  // records item (it holds the whole turn's).
+  let net: RecordChange[] | undefined;
   let steps: { key: string; step: Step }[] = [];
   // One line for every warning, where the first one came.
   let warnings: Extract<TurnRow, { kind: "warnings" }> | undefined;
@@ -574,7 +753,7 @@ function rowsOf(members: TranscriptItem[], running: Step["state"]) {
         rows.push({ kind: "reasoning", key: item.id, item });
     } else if (item.kind === "plan") {
       if (planFinished(item)) rows.push({ kind: "plan", key: item.id, item });
-    } else if (item.kind === "records")
+    } else if (item.kind === "records") {
       item.changes.forEach((change, index) =>
         rows.push({
           kind: "record",
@@ -582,7 +761,12 @@ function rowsOf(members: TranscriptItem[], running: Step["state"]) {
           change: { ...change, gone: item.gone?.[index] ?? null },
         }),
       );
-    else if (item.kind === "request" && item.state !== "pending")
+      if (item.net)
+        net = item.net.map((change, index) => ({
+          ...change,
+          gone: item.net_gone?.[index] ?? null,
+        }));
+    } else if (item.kind === "request" && item.state !== "pending")
       rows.push({ kind: "receipt", key: item.id, item, kept: true });
     else if (item.kind === "marker" && item.reason === "note")
       rows.push({ kind: "note", key: item.id, item, kept: true });
@@ -595,7 +779,7 @@ function rowsOf(members: TranscriptItem[], running: Step["state"]) {
     }
   }
   flush();
-  return { rows, steps: all };
+  return { rows, steps: all, net };
 }
 
 /** A wait shorter than this is not worth saying. */
@@ -718,7 +902,7 @@ export function turns(
     const cached = builtTurns.get(first);
     if (cached && sameInputs(cached.inputs, inputs))
       return [{ kind: "turn", turn: cached.turn }];
-    const { rows, steps } = rowsOf(
+    const { rows, steps, net } = rowsOf(
       part.members,
       !active ? "not_finished" : unconfirmedStop ? "unknown" : "running",
     );
@@ -752,6 +936,14 @@ export function turns(
     );
     const final =
       !ongoing && lastWork?.kind === "response" ? lastWork.item : undefined;
+    // Every other response is a progress note.
+    const turnRows = rows.flatMap((row): TurnRow[] =>
+      row.kind !== "response"
+        ? [row]
+        : row.item === final
+          ? []
+          : [{ ...row, kind: "progress" }],
+    );
     const started = time(part.steer ? part.started : timing?.started_at);
     const ended = unconfirmed
       ? now
@@ -782,12 +974,22 @@ export function turns(
       : words[1];
     const waitWords =
       waited > WAIT_SAID_FROM ? [`waited ${duration(waited)}`] : [];
+    const startedAt = part.steer ? part.started : timing?.started_at;
+    const endedAt = part.until ?? timing?.ended_at;
     const turn: Turn = {
       key: first.id,
+      ...(startedAt && time(startedAt) !== undefined && { started: startedAt }),
+      ...(!unconfirmed &&
+        endedAt &&
+        time(endedAt) !== undefined && { ended: endedAt }),
       live: ongoing && !unconfirmed,
       unconfirmed,
       label: [span, ...waitWords, ...counts].join(" · "),
-      rows: rows.filter((row) => row.kind !== "response" || row.item !== final),
+      rows: turnRows,
+      changes:
+        net ??
+        turnRows.flatMap((row) => (row.kind === "record" ? [row.change] : [])),
+      blocks: stretchesOf(turnRows, ongoing && !unconfirmed),
       ...(final && { final }),
       ...(marker && { marker }),
       ...(plan && planUnfinished(plan) && { plan }),
@@ -975,6 +1177,12 @@ export type ComposerControls = {
   effect?: string;
 };
 
+export function canSteer(chat: ChatState, hasImages = false) {
+  return (
+    chat.steering.available && !(hasImages && chat.steering.images_refused)
+  );
+}
+
 /**
  * The send button for the turn's state and what is typed. `answering` is set
  * while the message box answers an open question.
@@ -983,19 +1191,23 @@ export function composerControls(
   chat: ChatState,
   text: string,
   answering = false,
+  hasAttachments = false,
+  hasImages = false,
 ): ComposerControls {
-  const typed = text.trim() !== "";
+  const typed = text.trim() !== "" || hasAttachments;
   const blocked = blocksSend(chat.problem);
   if (!isLive(chat)) return { send: "send", enabled: typed && !blocked };
+  if (answering) return { send: "send", enabled: typed && !chat.stopping };
   // Stopping: Send waits for the turn to end; queueing stays possible.
   if (chat.stopping) return { send: "send", enabled: false, queues: typed };
-  if (answering) return { send: "send", enabled: typed, queues: typed };
-  if (!chat.steering.available)
+  if (!canSteer(chat, hasImages))
     return {
       send: "queue",
       enabled: typed,
       queues: typed,
-      effect: `${chat.harness.name} can't steer, so this waits for the turn to end.`,
+      effect: chat.steering.available
+        ? "The running turn can't take these images, so this waits for the turn to end."
+        : `${chat.harness.name} can't steer, so this waits for the turn to end.`,
     };
   return {
     send: "steer",
@@ -1023,11 +1235,17 @@ export function requestLabel(request: PendingRequest, name?: RecordName) {
 }
 
 /** What the message box says it will do with what is typed. */
-export function composerPlaceholder(chat: ChatState, answering: boolean) {
+export function composerPlaceholder(
+  chat: ChatState,
+  answering: boolean,
+  afterDeny = false,
+  hasImages = false,
+) {
   const harness = chat.harness.name;
   if (!isLive(chat) || chat.stopping) return `Message ${harness}`;
   if (answering) return "Answer, or pick above";
-  return chat.steering.available ? `Steer ${harness}` : `Queue for ${harness}`;
+  if (!canSteer(chat, hasImages)) return `Queue for ${harness}`;
+  return afterDeny ? `Tell ${harness} what to do instead` : `Steer ${harness}`;
 }
 
 export type NoticeAction =
@@ -1248,6 +1466,16 @@ function resetTime(seconds: number | null | undefined): string {
   return `on ${shortDay(at)} at ${formatTime(at)}`;
 }
 
+/**
+ * The previous local calendar day of `now`, as a date string. Not 24 hours back:
+ * a day with a clock change is 23 or 25 hours long.
+ */
+function dayBefore(now: number): string {
+  const day = new Date(now);
+  day.setDate(day.getDate() - 1);
+  return day.toDateString();
+}
+
 /** "now", "2m", "1h", "Yesterday", "Nov 8": the trailing time of a Chat row. */
 export function chatTime(timestamp: string, now = Date.now()): string {
   const then = new Date(timestamp);
@@ -1257,9 +1485,45 @@ export function chatTime(timestamp: string, now = Date.now()): string {
   if (minutes < 60) return `${minutes}m`;
   if (new Date(now).toDateString() === then.toDateString())
     return `${Math.floor(minutes / 60)}h`;
-  if (new Date(now - 86_400_000).toDateString() === then.toDateString())
-    return "Yesterday";
+  if (dayBefore(now) === then.toDateString()) return "Yesterday";
   return shortDay(then);
+}
+
+/**
+ * A turn's start on its work line: "14:03" today, "Yesterday 18:40", then the
+ * day ("Nov 24"). The clock is in the computer's own format. "" for no time.
+ */
+export function turnClock(timestamp: string, now = Date.now()): string {
+  const then = new Date(timestamp);
+  if (Number.isNaN(then.getTime())) return "";
+  const today = new Date(now).toDateString();
+  if (then.toDateString() === today) return formatTime(then);
+  if (dayBefore(now) === then.toDateString())
+    return `Yesterday ${formatTime(then)}`;
+  return shortDay(then);
+}
+
+/**
+ * The tooltip of a turn's time: its exact start and end, "Started Nov 24, 2:03 PM ·
+ * Ended 2:12 PM" (the day again only when it ended on another one, and the year
+ * only when it is not this year).
+ */
+export function turnSpanText(started: string, ended?: string): string {
+  const from = new Date(started);
+  if (Number.isNaN(from.getTime())) return "";
+  // Month, day and time; the year only when it is not this year.
+  const thisYear = new Date().getFullYear();
+  const full = (date: Date) =>
+    `${date.toLocaleDateString(undefined, {
+      month: "short",
+      day: "numeric",
+      ...(date.getFullYear() !== thisYear && { year: "numeric" }),
+    })}, ${formatTime(date)}`;
+  const to = ended ? new Date(ended) : undefined;
+  if (!to || Number.isNaN(to.getTime())) return `Started ${full(from)}`;
+  return `Started ${full(from)} · Ended ${
+    to.toDateString() === from.toDateString() ? formatTime(to) : full(to)
+  }`;
 }
 
 /** KiB or MiB to one decimal, as the truncation note states sizes. */

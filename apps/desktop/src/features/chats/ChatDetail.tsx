@@ -2,10 +2,12 @@ import {
   Fragment,
   useContext,
   useEffect,
+  useEffectEvent,
   useLayoutEffect,
   useMemo,
   useRef,
   useState,
+  useSyncExternalStore,
   type KeyboardEvent,
   type ReactNode,
 } from "react";
@@ -27,12 +29,16 @@ import {
 import { Button } from "@/components/ui/button";
 import { FailureAlert, FailureState } from "@/components/ui/failure-alert";
 import { IconButton } from "@/components/ui/icon-button";
+import { Tooltip } from "@/components/ui/tooltip";
 import {
   DropdownMenu,
   DropdownMenuContent,
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
-import { useStatusLine } from "@/components/ui/use-status-line";
+import {
+  useStatusLine,
+  useStatusLineAbove,
+} from "@/components/ui/use-status-line";
 import { DocumentNavigation } from "@/features/documents/navigation";
 import { ofTotal } from "@/lib/format";
 import { OverlayBoundary } from "@/components/ui/overlay-boundary";
@@ -53,8 +59,12 @@ import {
   useChatClient,
   type ChatSnapshot,
   type ChatState,
+  type LinkRef,
   type LinkedRecord,
   type Problem,
+  type QueueEditSave,
+  type QueueEditStatus,
+  type RequestAnswer,
   type TranscriptItem,
 } from "@/features/chats/client";
 import { ChatActionsMenu } from "@/features/chats/ChatActionsMenu";
@@ -69,17 +79,20 @@ import {
   type AskedChange,
 } from "@/features/chats/composer-settings";
 import { HarnessMark } from "@/features/chats/HarnessMark";
+import { linksOf } from "@/features/chats/composer-mentions";
 import { Composer } from "@/features/chats/Composer";
+import type { ChatAttachmentInput } from "@/features/chats/composer-attachments";
 import type { ComposerMentions } from "@/features/chats/ComposerField";
 import { ComposerQuotes } from "@/features/chats/ComposerQuote";
 import {
   arrivals,
-  drafts,
-  draftTokens,
-  tokensOf,
+  draftOf,
+  type ComposerDraft,
+  type SaveResult,
 } from "@/features/chats/drafts";
 import {
   clearQuotes,
+  quoteDraft,
   quoteLinks,
   quotedMessage,
   useQuotes,
@@ -90,6 +103,7 @@ import { lastAsk, runningPlan } from "@/features/chats/reports";
 import { PlanPill } from "@/features/chats/TurnReports";
 import { LinkPicker, RecordChip } from "@/features/chats/LinkPicker";
 import {
+  canPickHistoryMessage,
   composerControls,
   composerPlaceholder,
   firstNew,
@@ -297,6 +311,7 @@ function LinkedRecords({
               key={`${record.kind}:${record.id}`}
               record={record}
               backLabel={`Back to ${chat.title}`}
+              chatTitle={chat.title}
               onRemove={() => remove(record)}
             />
           ))}
@@ -317,6 +332,7 @@ function LinkedRecords({
                       <RecordChip
                         record={record}
                         backLabel={`Back to ${chat.title}`}
+                        chatTitle={chat.title}
                         onRemove={() => remove(record)}
                       />
                     </li>
@@ -332,6 +348,23 @@ function LinkedRecords({
   );
 }
 
+const queueRequestKey = (
+  outgoingText: string,
+  outgoingLinks: LinkRef[],
+  draft: ReturnType<ComposerDraft["snapshot"]>,
+  messageIds = draft.queueEdits,
+) =>
+  JSON.stringify({
+    outgoingText,
+    outgoingLinks,
+    // A ready attachment's item ID owns its immutable captured bytes.
+    attachmentIds: draft.items.map((item) => item.id),
+    messageIds,
+  });
+
+const previousSave =
+  "The earlier message was already saved. Your edited draft is ready to send.";
+
 const isMessage = (item: TranscriptItem) =>
   item.kind === "user" || item.kind === "response";
 
@@ -342,6 +375,19 @@ const LAYER =
 const ESC_AFTER_LAYER_MS = 1000;
 /** How long scrolling pauses before what was read through is kept. */
 const READ_THROUGH_MS = 250;
+
+function AdoptQueueEdit({ adopt }: { adopt: () => void }) {
+  const adopted = useEffectEvent(adopt);
+  useLayoutEffect(() => {
+    // Commit the entire locked draft and let the composer paint it before
+    // acknowledging custody. A pane that leaves first cannot withdraw the queue.
+    let frame = window.requestAnimationFrame(() => {
+      frame = window.requestAnimationFrame(() => adopted());
+    });
+    return () => window.cancelAnimationFrame(frame);
+  }, []);
+  return null;
+}
 
 function Conversation({
   snapshot,
@@ -383,16 +429,17 @@ function Conversation({
    * Runs a command; a refusal is said once, and the view keeps the host's
    * state. `name` says what did not happen: "send the message".
    */
-  const run = (
-    action: Promise<unknown>,
+  const run = <T,>(
+    action: Promise<T>,
     name: string,
     retry?: () => void,
     retryRequiresSend = false,
   ) =>
     action.then(
-      () => {
+      (result) => {
         setFailure(null);
         setArrival("");
+        return result;
       },
       (reason: unknown) => {
         setFailure({ ...chatFailure(reason, name, retry), retryRequiresSend });
@@ -412,6 +459,7 @@ function Conversation({
           plan: true,
         }),
       openFile: (path) => client.openFile(id, path),
+      exportAttachment: (file) => client.exportAttachment(id, file),
     }),
     [client, id],
   );
@@ -426,6 +474,10 @@ function Conversation({
   const messageBox = useRef<HTMLTextAreaElement>(null);
   const retrySend = useRef<(() => void) | null>(null);
   const dock = useRef<HTMLDivElement>(null);
+  // The pane's status line rises from the transcript, 8px above the tray, so
+  // it never covers the composer's controls (DESIGN.md section 12).
+  const [tray, setTray] = useState<HTMLDivElement | null>(null);
+  useStatusLineAbove(tray);
   // Opening a Chat whose opener left (a list row re-sorted, a pane swapped)
   // must not strand the keyboard on the page: the message box takes it.
   useEffect(() => {
@@ -488,8 +540,6 @@ function Conversation({
       harness,
     ],
   );
-  /** Remounts the composer with the draft after Edit moved a queued message into it. */
-  const [edits, setEdits] = useState(0);
   const pending = items.filter(
     (item): item is PendingRequest =>
       item.kind === "request" && item.state === "pending",
@@ -530,18 +580,44 @@ function Conversation({
   const question = pending.find(
     (item) => item.request === "question" && item.free_text,
   );
-  // A draft typed before a question arrived keeps its meaning: only a box that
-  // was empty (or emptied since) answers it.
-  const draftHeld = () => (drafts.get(id) ?? "").trim() !== "";
-  const [seenQuestion, setSeenQuestion] = useState(question?.id);
-  const [heldFor, setHeldFor] = useState(() =>
-    question && draftHeld() ? question.id : undefined,
+  const draft = draftOf(client, id);
+  const questionDrafts = draft.questions;
+  const answerDrafts = useSyncExternalStore(
+    questionDrafts.subscribe,
+    questionDrafts.snapshot,
   );
-  if (question?.id !== seenQuestion) {
-    setSeenQuestion(question?.id);
-    setHeldFor(question && draftHeld() ? question.id : undefined);
-  }
-  const answering = Boolean(question) && heldFor !== question?.id;
+  const questionDraft = question && answerDrafts.get(question.id);
+  const independentAnswer = questionDraft && !questionDraft.inComposer;
+  useEffect(() => {
+    if (!questionDrafts.snapshot().size) return;
+    for (const item of items) {
+      if (item.kind === "request" && item.state !== "pending")
+        questionDrafts.close(item.id);
+    }
+  }, [items, questionDrafts]);
+  const {
+    text: draftText,
+    items: draftFiles,
+    restored,
+    saving: savingDraft,
+    transfer,
+    queueEdits,
+  } = useSyncExternalStore(draft.subscribe, draft.snapshot);
+  const draftLocked = savingDraft || transfer !== null;
+  const hasAttachments = draftFiles.length > 0;
+  const hasImages = draftFiles.some(
+    (file) =>
+      file.state === "ready" && file.content.dataUrl.startsWith("data:image/"),
+  );
+  // A message draft stays separate while the question accepts its own text.
+  const answering =
+    Boolean(question) &&
+    !draftText.trim() &&
+    quotes.length === 0 &&
+    !hasAttachments &&
+    queueEdits.length === 0 &&
+    !independentAnswer &&
+    !restored;
   const stoppable =
     isLive(chat) && !chat.stopping && !unconfirmedStart && chat.has_composer;
   /** Stops the turn; the Stop button leaves, so the message box takes focus. */
@@ -573,13 +649,22 @@ function Conversation({
     if (target.closest(LAYER) || document.querySelector(LAYER)) return;
     if (performance.now() - layerClosedAt.current < ESC_AFTER_LAYER_MS) return;
     if (target.closest(".chat-activity")) return;
-    if ((messageBox.current?.value ?? "").trim() !== "") return;
+    if ((messageBox.current?.value ?? "").trim() !== "" || hasAttachments)
+      return;
     event.preventDefault();
     stop();
   };
-  const answer = (requestId: string, optionId: string) =>
-    client.answer(id, requestId, { option_id: optionId }).then(
-      () => setFailure(null),
+  /** Deny was answered: the box invites what to do instead, until the next send. */
+  const [denied, setDenied] = useState(false);
+  // The turn the Deny was in has ended: the next one starts from a plain box.
+  if (denied && !isLive(chat)) setDenied(false);
+  const answer = (requestId: string, response: RequestAnswer) =>
+    client.answer(id, requestId, response).then(
+      () => {
+        setFailure(null);
+        if ("option_id" in response && response.option_id === "deny")
+          setDenied(true);
+      },
       (reason: unknown) => {
         // The request left the dock; say why the pick did nothing.
         if (reason instanceof ChatError && reason.code === "stale")
@@ -596,18 +681,72 @@ function Conversation({
         if (onRequestsAnswered) throw reason;
       },
     );
-  const edit = (queued: { id: string; text: string }) =>
-    quietly(
-      client.removeQueued(id, queued.id).then(() => {
-        const draft = drafts.get(id) ?? "";
-        drafts.set(
-          id,
-          draft.trim() ? `${draft}\n\n${queued.text}` : queued.text,
-        );
-        setEdits((count) => count + 1);
-      }),
-      "edit the queued message",
+  const finishEdit = (result: boolean | undefined) => {
+    if (result === false)
+      throw new ChatError(
+        "stale",
+        "The message is no longer available to edit.",
+      );
+  };
+  const focusEdit = () => {
+    // Edit and Retry own focus only when invoked. Confirmation may finish after
+    // the person moves elsewhere, even in a different mount of the composer.
+    const box = messageBox.current;
+    box?.focus();
+    box?.setSelectionRange(box.value.length, box.value.length);
+  };
+  const applyQueueReceipts = (status: QueueEditStatus, key?: string) => {
+    const { sameDraft, acknowledgedQuotes } = draft.settleQueueEdits(
+      status,
+      key,
     );
+    if (acknowledgedQuotes.length) clearQuotes(id, acknowledgedQuotes);
+    return sameDraft;
+  };
+  const edit = (queuedId: string) => {
+    if (draft.snapshot().transfer) return;
+    focusEdit();
+    const transferId = crypto.randomUUID();
+    let notice: string | undefined;
+    void run(
+      draft.editQueued(
+        queuedId,
+        async () => {
+          const { saves, removals } = draft.queueEditsToCheck();
+          if (saves.length || removals.length) {
+            const status = await client.checkQueueEdits(id, saves, removals);
+            if (!draft.belongsToWorkspace()) return;
+            const current = draft.snapshot();
+            const currentQuotes = quoteDraft(id);
+            const sameDraft = applyQueueReceipts(
+              status,
+              queueRequestKey(
+                quotedMessage(currentQuotes, current.text.trim()),
+                [...linksOf(current.tokens), ...quoteLinks(currentQuotes)],
+                current,
+              ),
+            );
+            if (status.saved.length && !sameDraft) {
+              notice = previousSave;
+              return;
+            }
+            if (draft.queueEditsToCheck().saves.length) {
+              notice =
+                "Send the previous edit before editing another queued message.";
+              return;
+            }
+          }
+          return client.editQueued(id, queuedId);
+        },
+        () => client.confirmQueueEdit(id, queuedId, transferId),
+      ),
+      "edit the queued message",
+    )
+      .then(() => {
+        if (notice && draft.belongsToWorkspace()) setArrival(notice);
+      })
+      .catch(() => {});
+  };
   // Placed once when the Chat opens; it stays until the person sends or leaves.
   // After what the person read through, which the host keeps (#365); a Chat
   // never read here says from its unseen turn.
@@ -624,11 +763,11 @@ function Conversation({
     const pending = readThrough.current;
     return () => {
       window.clearTimeout(pending.timer);
-      if (pending.item)
+      if (pending.item && draft.belongsToWorkspace())
         void client.readThrough(id, pending.item).catch(() => {});
       pending.item = undefined;
     };
-  }, [client, id]);
+  }, [client, draft, id]);
   const { root, content, marker, following, reading, follow, onScroll } =
     useTranscriptScroll(id, (itemId) => {
       const pending = readThrough.current;
@@ -636,25 +775,105 @@ function Conversation({
       window.clearTimeout(pending.timer);
       pending.timer = window.setTimeout(() => {
         pending.item = undefined;
-        void client.readThrough(id, itemId).catch(() => {});
+        if (draft.belongsToWorkspace())
+          void client.readThrough(id, itemId).catch(() => {});
       }, READ_THROUGH_MS);
     });
   /** Sending resumes following and clears the New marker. */
   const sent = <T,>(action: Promise<T>) => {
+    setDenied(false);
     follow();
     setNewFrom(undefined);
     setAsked(null);
     return action;
   };
+  const submitMessage = (
+    action: "send" | "queue",
+    text: string,
+    links: LinkRef[],
+    attachments?: ChatAttachmentInput[],
+  ) => {
+    const outgoingText = quotedMessage(quotes, text);
+    const outgoingLinks = [...links, ...quoteLinks(quotes)];
+    const submitted = draft.snapshot();
+    const requestKey = (messageIds: string[]) =>
+      queueRequestKey(outgoingText, outgoingLinks, submitted, messageIds);
+    let queueEdit: QueueEditSave | undefined;
+    let attemptedDraft = submitted;
+    let notice: string | undefined;
+    const send = async (): Promise<SaveResult> => {
+      notice = undefined;
+      const { saves, removals } = draft.queueEditsToCheck();
+      if (saves.length || removals.length) {
+        const status = await client.checkQueueEdits(id, saves, removals);
+        if (!draft.belongsToWorkspace()) return "keep_draft";
+        const sameDraft = applyQueueReceipts(
+          status,
+          requestKey(queueEdit?.messageIds ?? submitted.queueEdits),
+        );
+        if (status.saved.length) {
+          if (!sameDraft) notice = previousSave;
+          return sameDraft ? undefined : "keep_draft";
+        }
+      }
+      const messageIds = draft.snapshot().queueEdits;
+      if (
+        queueEdit?.messageIds.some((queuedId) => !messageIds.includes(queuedId))
+      ) {
+        notice =
+          "A queued message from the earlier edit is gone. Your draft is ready to send.";
+        return "keep_draft";
+      }
+      if (!queueEdit && messageIds.length) {
+        attemptedDraft = draft.snapshot();
+        const key = requestKey(messageIds);
+        queueEdit = { commandId: draft.requestId(key), messageIds };
+        draft.rememberQueueSave(queueEdit, key, attemptedDraft, quotes);
+      }
+      if (queueEdit) {
+        await client[action](
+          id,
+          outgoingText,
+          outgoingLinks,
+          attachments,
+          queueEdit,
+        );
+        if (draft.belongsToWorkspace())
+          applyQueueReceipts({ saved: [queueEdit.commandId], removed: [] });
+      } else if (attachments) {
+        await client[action](id, outgoingText, outgoingLinks, attachments);
+      } else {
+        await client[action](id, outgoingText, outgoingLinks);
+      }
+      if (draft.belongsToWorkspace()) clearQuotes(id, quotes);
+    };
+    const save = (): Promise<SaveResult> =>
+      run(
+        sent(send()),
+        action === "send" ? "send the message" : "queue the message",
+        () => {
+          messageBox.current?.focus();
+          if (queueEdit)
+            draft.save(action, save, draft.changedSince(attemptedDraft));
+          else retrySend.current?.();
+        },
+        action === "send" && submitted.queueEdits.length === 0,
+      ).then((result) => {
+        if (notice && draft.belongsToWorkspace()) setArrival(notice);
+        return result;
+      });
+    return save();
+  };
   const messageCount = items.filter(isMessage).length;
+  const pickableMessageCount = picked
+    ? items.filter(canPickHistoryMessage).length
+    : 0;
   // Pickers and menus opened in the conversation stay below the pane header.
   const [body, setBody] = useState<HTMLDivElement | null>(null);
   const trashed = chat.retention === "trashed";
   const onNotice = (action: Exclude<ButtonAction, "copy-command">) => {
     if (action === "check") quietly(client.checkAgain(id), "check again");
     else if (action === "start-fresh") {
-      // An earlier queue edit's autofocus must expire before the box returns.
-      if (!chat.has_composer) setEdits(0);
       void run(client.resume(id, { kind: "none" }), "start a fresh session")
         .then(() => setFreshStarts((count) => count + 1))
         .catch(() => {});
@@ -772,7 +991,8 @@ function Conversation({
             <div className="chat-line">
               <span>
                 Pick the messages to give the new session ·{" "}
-                {ofTotal(picked.size, messageCount)}
+                {ofTotal(picked.size, pickableMessageCount)}. Only message text
+                is included.
               </span>
               <span className="chat-spacer" />
               <Button variant="ghost" size="sm" onClick={() => setPicked(null)}>
@@ -815,7 +1035,7 @@ function Conversation({
             // plan pill and the queue sit inside the composer's one ring, as
             // sections split by hairlines on one 16px inner edge. The top part
             // glides as one block when something arrives or leaves.
-            <div className="chat-tray">
+            <div className="chat-tray" ref={setTray}>
               <DockSlot className="chat-tray-top">
                 {problem && (
                   <ProblemNotice
@@ -836,6 +1056,9 @@ function Conversation({
                   {...(plan && { plan: <PlanPill item={plan} /> })}
                   dockRef={dock}
                   onAnswer={answer}
+                  composerQuestion={answering ? question?.id : undefined}
+                  answerDraft={pending[0] && answerDrafts.get(pending[0].id)}
+                  questionDrafts={questionDrafts}
                   {...(onRequestsAnswered && {
                     onAnswered: (requestId: string, origin: Element | null) =>
                       setAnswered({ id: requestId, origin }),
@@ -847,9 +1070,13 @@ function Conversation({
                       "send the queued message",
                     ).then(() => {})
                   }
+                  queueEdits={queueEdits}
+                  draftLocked={draftLocked}
                   onEdit={edit}
                   onRemove={(queuedId) => {
                     const remove = () => {
+                      if (draft.locked()) return;
+                      draft.rememberQueueRemoval(queuedId);
                       const origin = document.activeElement;
                       void run(
                         client.removeQueued(id, queuedId),
@@ -857,6 +1084,11 @@ function Conversation({
                         remove,
                       )
                         .then(() => {
+                          if (!draft.belongsToWorkspace()) return;
+                          draft.settleQueueEdits({
+                            saved: [],
+                            removed: [queuedId],
+                          });
                           if (
                             document.activeElement === origin ||
                             document.activeElement === document.body
@@ -874,67 +1106,94 @@ function Conversation({
               </DockSlot>
               <Composer
                 retryRef={retrySend}
-                key={`${id}:${edits}`}
+                key={id}
                 framed={false}
                 inputRef={messageBox}
-                autoFocus={edits > 0}
-                placeholder={composerPlaceholder(chat, answering)}
-                initialText={drafts.get(id) ?? ""}
-                initialTokens={tokensOf(id)}
-                onText={(text, tokens) => {
-                  drafts.set(id, text);
-                  draftTokens.set(id, { text, tokens });
-                  if (!text.trim()) setHeldFor(undefined);
-                }}
+                placeholder={composerPlaceholder(
+                  chat,
+                  answering,
+                  denied && pending.length === 0,
+                  hasImages,
+                )}
+                draft={draft}
+                answeringQuestion={answering ? question?.id : undefined}
                 mentions={mentions}
                 above={
-                  <ComposerQuotes quotes={quotes} onRemove={removeQuote} />
+                  <>
+                    {transfer === "adopting" && (
+                      <AdoptQueueEdit
+                        adopt={() =>
+                          quietly(
+                            draft.adoptTransfer()?.then(finishEdit) ??
+                              Promise.resolve(),
+                            "edit the queued message",
+                          )
+                        }
+                      />
+                    )}
+                    {transfer === "unconfirmed" && (
+                      <div
+                        className="flex items-center gap-2 px-3 py-2"
+                        role="status"
+                      >
+                        Couldn’t confirm the queued message moved into the
+                        draft.
+                        <Button
+                          type="button"
+                          variant="outline"
+                          size="compact"
+                          onClick={() => {
+                            focusEdit();
+                            quietly(
+                              draft.retryTransfer()?.then(finishEdit) ??
+                                Promise.resolve(),
+                              "edit the queued message",
+                            );
+                          }}
+                        >
+                          Retry queue edit
+                        </Button>
+                      </div>
+                    )}
+                    <ComposerQuotes quotes={quotes} onRemove={removeQuote} />
+                  </>
                 }
-                controls={(text) => composerControls(chat, text, answering)}
-                onSend={(text, links) =>
-                  run(
-                    sent(
-                      answering && question
-                        ? client.answer(id, question.id, { text })
-                        : client
-                            .send(id, quotedMessage(quotes, text), [
-                              ...links,
-                              ...quoteLinks(quotes),
-                            ])
-                            .then(() => clearQuotes(id)),
-                    ),
-                    answering && question
-                      ? "send your answer"
-                      : "send the message",
-                    answering
-                      ? undefined
-                      : () => {
-                          messageBox.current?.focus();
-                          retrySend.current?.();
-                        },
-                    true,
-                  )
+                controls={(text, hasAttachments) => {
+                  const controls = composerControls(
+                    chat,
+                    text,
+                    answering,
+                    hasAttachments,
+                    hasImages,
+                  );
+                  return answering && questionDraft?.pending
+                    ? { ...controls, enabled: false }
+                    : controls;
+                }}
+                onSend={async (text, links, attachments) => {
+                  if (!answering || !question || attachments?.length)
+                    return submitMessage("send", text, links, attachments);
+                  const response = { text };
+                  if (!questionDrafts.begin(question.id, response, true))
+                    return "keep_draft";
+                  try {
+                    await run(
+                      sent(client.answer(id, question.id, response)),
+                      "send your answer",
+                    );
+                    questionDrafts.settle(question.id, response, true);
+                  } catch (reason) {
+                    questionDrafts.settle(question.id, response, false);
+                    throw reason;
+                  }
+                }}
+                onQueue={(text, links, attachments) =>
+                  submitMessage("queue", text, links, attachments)
                 }
-                onQueue={(text, links) =>
-                  run(
-                    sent(
-                      client
-                        .queue(id, quotedMessage(quotes, text), [
-                          ...links,
-                          ...quoteLinks(quotes),
-                        ])
-                        .then(() => clearQuotes(id)),
-                    ),
-                    "queue the message",
-                    () => {
-                      messageBox.current?.focus();
-                      retrySend.current?.();
-                    },
-                  )
-                }
-                {...(pending.length > 0 && {
-                  onArrowUpFromEmpty: () => focusFirstChoice(dock.current),
-                })}
+                {...(pending.length > 0 &&
+                  !hasAttachments && {
+                    onArrowUpFromEmpty: () => focusFirstChoice(dock.current),
+                  })}
                 {...(isLive(chat) && { onStop: stop })}
                 stopping={chat.stopping || unconfirmedStart}
                 leading={
@@ -1073,9 +1332,12 @@ export function ChatDetail({
               className="chat-head-mark"
             />
           )}
-          <h2 id="chat-heading" className="chat-head-title" tabIndex={-1}>
-            {chat?.title ?? (title || "Chat")}
-          </h2>
+          {/* The full title, only while the header cuts it. */}
+          <Tooltip content={chat?.title ?? (title || "Chat")} overflowOnly>
+            <h2 id="chat-heading" className="chat-head-title" tabIndex={-1}>
+              {chat?.title ?? (title || "Chat")}
+            </h2>
+          </Tooltip>
           {chat && (
             <ChatContext chat={chat} asOf={lastAsk(snapshot?.items ?? [])} />
           )}

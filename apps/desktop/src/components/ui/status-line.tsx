@@ -92,6 +92,7 @@ export function StatusLineRegion({
   const shown =
     outcome ?? (notice && spot.claims === 0 ? { ...notice, id: 0 } : null);
   const [inset, setInset] = useState(0);
+  const [clear, setClear] = useState<HTMLElement | null>(null);
   const counter = useRef(0);
   const anchor = useRef<HTMLSpanElement>(null);
   const show = useCallback((message: StatusLineMessage) => {
@@ -106,7 +107,10 @@ export function StatusLineRegion({
       setShown((current) => (current?.id === id ? null : current)),
     [],
   );
-  const region = useMemo(() => ({ show, dismiss, setInset }), [show, dismiss]);
+  const region = useMemo(
+    () => ({ show, dismiss, setInset, setAbove: setClear }),
+    [show, dismiss],
+  );
   return (
     <StatusLineContext value={region}>
       {above ? (
@@ -123,6 +127,7 @@ export function StatusLineRegion({
             anchor={anchor}
             host={host}
             inset={inset}
+            clear={clear}
             show={show}
             dismiss={dismissLine}
           />
@@ -155,23 +160,32 @@ type LineProps = {
  * outcome swaps the words inside it (they crossfade) rather than stacking a
  * second line. While it leaves it cannot be pressed.
  */
-function LineSlot({ inset, ...props }: LineProps & { inset: number }) {
+function LineSlot({
+  inset,
+  clear,
+  ...props
+}: LineProps & { inset: number; clear: HTMLElement | null }) {
   const { shown, anchor, host: hostRef } = props;
   const present = useIsPresent();
   const [box, setBox] = useState<{
     left: number;
     bottom: number;
     width: number;
+    above: boolean;
   } | null>(null);
   useLayoutEffect(() => {
     const host = hostRef?.current ?? hostOf(anchor.current);
     if (!host) return;
     const measure = () => {
       const rect = host.getBoundingClientRect();
+      // Over an element the line clears (a Chat's tray) it sits on that
+      // element's top edge and centre; else on the pane's bottom edge.
+      const over = clear?.getBoundingClientRect();
       setBox({
-        left: rect.left + rect.width / 2,
-        bottom: window.innerHeight - rect.bottom,
-        width: rect.width,
+        left: (over ?? rect).left + (over ?? rect).width / 2,
+        bottom: window.innerHeight - (over ? over.top - 8 : rect.bottom),
+        width: (over ?? rect).width,
+        above: Boolean(over),
       });
     };
     measure();
@@ -180,12 +194,13 @@ function LineSlot({ inset, ...props }: LineProps & { inset: number }) {
         ? null
         : new ResizeObserver(measure);
     observer?.observe(host);
+    if (clear) observer?.observe(clear);
     window.addEventListener("resize", measure);
     return () => {
       observer?.disconnect();
       window.removeEventListener("resize", measure);
     };
-  }, [anchor, hostRef]);
+  }, [anchor, hostRef, clear]);
   return createPortal(
     <div
       className="ui-status-line-slot"
@@ -194,7 +209,7 @@ function LineSlot({ inset, ...props }: LineProps & { inset: number }) {
         box
           ? {
               left: box.left,
-              bottom: box.bottom + 8 + inset,
+              bottom: box.bottom + (box.above ? 0 : 8 + inset),
               maxWidth: `min(480px, ${Math.max(0, box.width - 16)}px)`,
             }
           : { visibility: "hidden" }

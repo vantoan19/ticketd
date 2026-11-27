@@ -5,30 +5,34 @@
 //! write; they never read the protocol stream themselves.
 
 use std::collections::HashMap;
+use std::io;
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex, MutexGuard, PoisonError};
 use std::time::{Duration, SystemTime};
 
 use async_trait::async_trait;
 use serde_json::{Value, json};
+use ticketd_core::ChatAttachmentContent;
 use tokio::io::BufReader;
 use tokio::sync::{Mutex as AsyncMutex, mpsc, oneshot};
 use tokio::time::timeout;
 
+use crate::attachment_input::AttachmentFiles;
 use crate::stdio::{
     ChildProcess, Io, Line, Reader, StderrTail, Writer, close_outcome, read_line, runtime_lost,
     write_bounded,
 };
 use crate::{ADAPTER_CLOSE_TIMEOUT, WRITE_TIMEOUT};
 use crate::{
-    Capabilities, CloseOutcome, DeliveryEvidence, DispatchOutcome, EVENT_BUFFER, EventKind,
-    EventStream, HarnessOptions, HarnessRuntime, Inspection, InteractionResponse, InterruptOutcome,
-    InterruptRequest, LoginState, NativeRequestId, NoticeKind, OpenRequest, OpenedRuntime, Problem,
-    ProblemKind, ProviderDetail, Refusal, RespondOutcome, RuntimeEvent, RuntimeGeneration,
-    SessionStart, SettingChange, SettingKey, SettingOutcome, StartSettings, Submission,
-    SubmissionId, SubmissionKind,
+    AutomationPromptAdmission, Capabilities, CloseOutcome, DeliveryEvidence, DispatchOutcome,
+    EVENT_BUFFER, EventKind, EventStream, HarnessOptions, HarnessRuntime, Inspection,
+    InteractionResponse, InterruptOutcome, InterruptRequest, LoginState, NativeRequestId,
+    NoticeKind, OpenRequest, OpenedRuntime, Problem, ProblemKind, ProviderDetail, Refusal,
+    RespondOutcome, RuntimeEvent, RuntimeGeneration, SessionStart, SettingChange, SettingKey,
+    SettingOutcome, StartSettings, Submission, SubmissionId, SubmissionKind,
 };
 
+use super::attachment_refusal;
 use super::session::{REOPEN_WITH, Session, unknown};
 
 /// The bridge protocol version this adapter speaks.
@@ -102,6 +106,8 @@ struct State {
     lost: bool,
     next_id: u64,
     commands: HashMap<String, Command>,
+    // Keyed by bridge command ID so a rejected repeat leaves earlier copies alone.
+    attachment_files: HashMap<String, AttachmentFiles>,
     session: Session,
 }
 
@@ -190,6 +196,7 @@ impl Connection {
                 lost: false,
                 next_id: 1,
                 commands: HashMap::new(),
+                attachment_files: HashMap::new(),
                 session: Session::default(),
             }),
             stdin: AsyncMutex::new(Some(io.stdin)),
@@ -220,7 +227,20 @@ impl Connection {
         waits: bool,
         prepare: impl FnOnce(&mut Session) -> Result<(Value, Kind), Refusal>,
     ) -> Result<(String, Option<oneshot::Receiver<Reply>>), WriteFailure> {
+        self.write_with_admission(waits, prepare, None, None).await
+    }
+
+    async fn write_with_admission(
+        &self,
+        waits: bool,
+        prepare: impl FnOnce(&mut Session) -> Result<(Value, Kind), Refusal>,
+        admission: Option<AutomationPromptAdmission>,
+        files: Option<AttachmentFiles>,
+    ) -> Result<(String, Option<oneshot::Receiver<Reply>>), WriteFailure> {
         let mut stdin = self.stdin.lock().await;
+        let _prompt = AutomationPromptAdmission::for_write(admission)
+            .await
+            .map_err(WriteFailure::Refused)?;
         let (line, id, receiver) = {
             let mut state = self.state();
             if state.closed {
@@ -240,6 +260,9 @@ impl Connection {
             if waits || !matches!(kind, Kind::Plain) {
                 state.commands.insert(id.clone(), Command { kind, waiter });
             }
+            if let Some(files) = files {
+                state.attachment_files.insert(id.clone(), files);
+            }
             (format!("{command}\n"), id, receiver)
         };
         match write_bounded(&mut stdin, &self.child, line.as_bytes(), WRITE_TIMEOUT).await {
@@ -253,13 +276,25 @@ impl Connection {
         &self,
         prepare: impl FnOnce(&mut Session) -> Result<(Value, Kind), Refusal>,
     ) -> CallOutcome {
+        self.call_with_admission(prepare, None, None).await
+    }
+
+    async fn call_with_admission(
+        &self,
+        prepare: impl FnOnce(&mut Session) -> Result<(Value, Kind), Refusal>,
+        admission: Option<AutomationPromptAdmission>,
+        files: Option<AttachmentFiles>,
+    ) -> CallOutcome {
         let mut opening = false;
         let prepare = |session: &mut Session| {
             let prepared = prepare(session);
             opening = matches!(prepared, Ok((_, Kind::Open)));
             prepared
         };
-        let (id, mut receiver) = match self.write(true, prepare).await {
+        let (id, mut receiver) = match self
+            .write_with_admission(true, prepare, admission, files)
+            .await
+        {
             Ok((id, Some(receiver))) => (id, receiver),
             Ok((_, None)) | Err(WriteFailure::Lost) => return CallOutcome::Lost,
             Err(WriteFailure::Refused(refusal)) => return CallOutcome::Refused(refusal),
@@ -705,6 +740,8 @@ fn reason(message: &Value) -> String {
 
 /// `command_rejected`: the command had no effect.
 fn rejected(state: &mut State, id: &str, event: &Value) -> Vec<EventKind> {
+    // The bridge rejects a specific write, independently of its reply waiter.
+    state.attachment_files.remove(id);
     let code = event["code"].as_str().unwrap_or("rejected");
     let reason = format!("{code}: {}", reason(&event["message"]));
     let unexpected = || {
@@ -965,6 +1002,31 @@ struct ClaudeRuntime {
     connection: Arc<Connection>,
 }
 
+fn prepare_attachments(
+    attachments: Vec<ChatAttachmentContent>,
+) -> io::Result<(Vec<Value>, Option<AttachmentFiles>)> {
+    let mut input = Vec::with_capacity(attachments.len());
+    let mut files = None;
+    for attachment in attachments {
+        if let Some(url) = attachment.image_data_url() {
+            let (media_type, data) = url
+                .strip_prefix("data:")
+                .and_then(|url| url.split_once(";base64,"))
+                .ok_or(io::ErrorKind::InvalidData)?;
+            input.push(json!({"type": "image", "media_type": media_type, "data": data}));
+        } else {
+            let files = match &files {
+                Some(files) => files,
+                None => files.insert(AttachmentFiles::new()?),
+            };
+            let path = files.materialize(&attachment)?;
+            let path = path.to_str().ok_or(io::ErrorKind::InvalidData)?;
+            input.push(json!({"type": "file", "name": attachment.name(), "path": path}));
+        }
+    }
+    Ok((input, files))
+}
+
 impl std::fmt::Debug for ClaudeRuntime {
     fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         formatter
@@ -995,6 +1057,14 @@ impl Drop for ClaudeRuntime {
 #[async_trait]
 impl HarnessRuntime for ClaudeRuntime {
     async fn submit(&self, submission: Submission) -> DispatchOutcome {
+        self.submit_with_admission(submission, None).await
+    }
+
+    async fn submit_with_admission(
+        &self,
+        submission: Submission,
+        admission: Option<AutomationPromptAdmission>,
+    ) -> DispatchOutcome {
         if let Some(refusal) = self.stale(submission.generation) {
             return DispatchOutcome::NotSent(refusal);
         }
@@ -1003,23 +1073,47 @@ impl HarnessRuntime for ClaudeRuntime {
         if matches!(submission.kind, SubmissionKind::Steer { .. }) {
             return DispatchOutcome::NotSent(Refusal::Unsupported);
         }
+        if let Some(refusal) = attachment_refusal(&submission.attachments) {
+            return DispatchOutcome::NotSent(refusal);
+        }
+        let (attachments, files) = if submission.attachments.is_empty() {
+            (Vec::new(), None)
+        } else {
+            let prepared = tokio::task::spawn_blocking(move || {
+                prepare_attachments(submission.attachments).inspect_err(|error| {
+                    tracing::warn!(error_kind = %error.kind(), "chat attachment handoff failed");
+                })
+            })
+            .await;
+            let Ok(Ok(prepared)) = prepared else {
+                return DispatchOutcome::NotSent(Refusal::AttachmentUnavailable);
+            };
+            prepared
+        };
         let generation = self.connection.generation.0;
         let outcome = self
             .connection
-            .call(|session| {
-                if let Some(active) = session.active_turn() {
-                    return Err(Refusal::TurnMismatch {
-                        active: Some(active.clone()),
+            .call_with_admission(
+                |session| {
+                    if let Some(active) = session.active_turn() {
+                        return Err(Refusal::TurnMismatch {
+                            active: Some(active.clone()),
+                        });
+                    }
+                    let mut command = json!({
+                        "cmd": "submit",
+                        "generation": generation,
+                        "submission_id": submission.submission.0,
+                        "text": submission.text,
                     });
-                }
-                let command = json!({
-                    "cmd": "submit",
-                    "generation": generation,
-                    "submission_id": submission.submission.0,
-                    "text": submission.text,
-                });
-                Ok((command, Kind::Submit(submission.submission)))
-            })
+                    if !attachments.is_empty() {
+                        command["attachments"] = Value::Array(attachments);
+                    }
+                    Ok((command, Kind::Submit(submission.submission)))
+                },
+                admission,
+                files,
+            )
             .await;
         match outcome {
             CallOutcome::Refused(refusal) => DispatchOutcome::NotSent(refusal),
@@ -1126,7 +1220,12 @@ impl HarnessRuntime for ClaudeRuntime {
     }
 
     async fn close(&self) -> CloseOutcome {
-        self.connection.close().await
+        let outcome = self.connection.close().await;
+        if matches!(outcome, CloseOutcome::Confirmed { .. }) {
+            // Claude can use accepted paths again while its session stays open.
+            self.connection.state().attachment_files.clear();
+        }
+        outcome
     }
 }
 

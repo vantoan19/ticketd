@@ -13,7 +13,7 @@ use tokio::io::{AsyncWriteExt, BufReader};
 use tokio::time::{sleep, timeout};
 
 use super::runtime::{Options, open_over, probe, probe_options};
-use super::{BRIDGE_SIDECAR_NAME, candidates, locate, verdict};
+use super::{BRIDGE_SIDECAR_NAME, ClaudeAdapter, candidates, locate, verdict};
 use crate::conformance::{NewTurn, Provider};
 use crate::install::{LaunchEnvironment, Os};
 use crate::outcome::read_end;
@@ -21,10 +21,11 @@ use crate::scripted::{Peer, brief, pipes};
 use crate::stdio::{Line, read_line, spawn};
 use crate::{
     ApprovalDecision, Capability, CloseOutcome, DeliveryEvidence, DispatchOutcome, EventKind,
-    EventStream, HarnessRuntime, Inspection, InteractionAnswer, InteractionResponse,
-    InterruptOutcome, InterruptRequest, LoginState, NativeRequestId, NativeSessionId, NativeTurnId,
-    OpenRequest, OpenedRuntime, Problem, ProblemKind, QuestionAnswer, Refusal, RespondOutcome,
-    RuntimeGeneration, SessionStart, StartSettings, Submission, SubmissionId, SubmissionKind,
+    EventStream, HarnessAdapter, HarnessRuntime, Inspection, InteractionAnswer,
+    InteractionResponse, InterruptOutcome, InterruptRequest, LoginState, NativeRequestId,
+    NativeSessionId, NativeTurnId, OpenRequest, OpenedRuntime, Problem, ProblemKind,
+    QuestionAnswer, Refusal, RespondOutcome, RuntimeGeneration, SessionStart, StartSettings,
+    Submission, SubmissionId, SubmissionKind,
 };
 
 const GENERATION: RuntimeGeneration = RuntimeGeneration(7);
@@ -84,6 +85,7 @@ fn start_turn(id: &str, text: &str) -> Submission {
         generation: GENERATION,
         kind: SubmissionKind::StartTurn,
         text: text.to_owned(),
+        attachments: Vec::new(),
     }
 }
 
@@ -123,6 +125,139 @@ async fn submit(
 ) -> DispatchOutcome {
     let (outcome, ()) = tokio::join!(runtime.submit(submission), peer.play());
     outcome
+}
+
+#[tokio::test]
+async fn a_file_only_message_keeps_the_snapshot_readable_until_claude_closes() {
+    let (mut peer, runtime, _events) = open().await;
+    let file = ticketd_core::ChatAttachmentContent::from_data_url(
+        "notes.txt",
+        "data:text/plain;base64,b3JpZ2luYWwgYnl0ZXMNCg==",
+        100,
+    )
+    .unwrap();
+    let submission = Submission {
+        attachments: vec![file],
+        ..start_turn("sub-1", "")
+    };
+    let (outcome, written) = tokio::join!(runtime.submit(submission), async {
+        let written = peer.written().await;
+        peer.send(
+            "{\"v\":1,\"event\":\"input_handed_to_sdk\",\"generation\":7,\"submission_id\":\"sub-1\"}\n",
+        )
+        .await;
+        written
+    });
+    assert_eq!(outcome, DispatchOutcome::Written);
+    assert_eq!(written["cmd"], "submit");
+    assert_eq!(written["text"], "");
+    let attachments = written["attachments"].as_array().unwrap();
+    assert_eq!(attachments.len(), 1);
+    let attachment = &attachments[0];
+    assert_eq!(attachment["type"], "file");
+    assert_eq!(attachment["name"], "notes.txt");
+    let path = Path::new(attachment["path"].as_str().unwrap());
+    assert!(path.is_absolute());
+    assert_eq!(std::fs::read(path).unwrap(), b"original bytes\r\n");
+
+    let (closed, ()) = tokio::join!(runtime.close(), async {
+        assert!(peer.stdin_closed().await);
+        assert!(path.is_file());
+        peer.exit(0);
+    });
+    assert!(matches!(closed, CloseOutcome::Confirmed { .. }));
+    assert!(!path.exists());
+}
+
+#[tokio::test(start_paused = true)]
+async fn a_rejected_submission_releases_only_its_handoff_copy() {
+    let (mut peer, runtime, mut events) = open().await;
+    let file = ticketd_core::ChatAttachmentContent::from_data_url(
+        "notes.txt",
+        "data:text/plain;base64,bm90ZXM=",
+        100,
+    )
+    .unwrap();
+    let submission = || Submission {
+        attachments: vec![file.clone()],
+        ..start_turn("sub-1", "")
+    };
+    let handoff =
+        |command: &Value| PathBuf::from(command["attachments"][0]["path"].as_str().unwrap());
+    let (accepted, accepted_copy) = tokio::join!(runtime.submit(submission()), async {
+        let path = handoff(&peer.written().await);
+        let event = json!({"v": 1, "event": "input_handed_to_sdk", "generation": 7,
+            "submission_id": "sub-1"});
+        peer.send(&format!("{event}\n")).await;
+        path
+    });
+    assert_eq!(accepted, DispatchOutcome::Written);
+
+    let refusal = |command: &Value| {
+        json!({"v": 1, "event": "command_rejected", "id": command["id"],
+            "code": "duplicate_submission", "message": "submission is unresolved"})
+    };
+    let (rejected, rejected_copy) = tokio::join!(runtime.submit(submission()), async {
+        let command = peer.written().await;
+        let path = handoff(&command);
+        assert_eq!(std::fs::read(&path).unwrap(), b"notes");
+        peer.send(&format!("{}\n", refusal(&command))).await;
+        path
+    });
+    assert!(matches!(rejected, DispatchOutcome::Rejected { .. }));
+    assert!(!rejected_copy.exists());
+    assert_eq!(std::fs::read(&accepted_copy).unwrap(), b"notes");
+
+    let (unconfirmed, command) = tokio::join!(runtime.submit(submission()), peer.written());
+    assert_eq!(unconfirmed, DispatchOutcome::Written);
+    let unconfirmed_copy = handoff(&command);
+    assert_eq!(std::fs::read(&unconfirmed_copy).unwrap(), b"notes");
+    peer.send(&format!("{}\n", refusal(&command))).await;
+    assert!(matches!(
+        events.recv().await.unwrap().kind,
+        EventKind::SubmissionEvidence {
+            evidence: DeliveryEvidence::Rejected { .. },
+            ..
+        }
+    ));
+    assert!(!unconfirmed_copy.exists());
+    assert_eq!(std::fs::read(&accepted_copy).unwrap(), b"notes");
+}
+
+#[tokio::test(start_paused = true)]
+async fn claude_checks_image_size_before_queuing_or_sending_a_chat_attachment() {
+    let adapter = ClaudeAdapter::new("ticketd-chat-bridge-claude");
+    let png = "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+ip1sAAAAASUVORK5CYII=";
+    let image = ticketd_core::ChatAttachmentContent::from_image_data_url(
+        "screenshot.png",
+        &format!("data:image/png;base64,{png}"),
+    )
+    .unwrap();
+    assert_eq!(adapter.attachment_refusal(&[image]), None);
+
+    let png_header = &png[..24];
+    let oversized = format!(
+        "data:image/png;base64,{png_header}{}",
+        "A".repeat(10_000_004 - png_header.len())
+    );
+    let image =
+        ticketd_core::ChatAttachmentContent::from_image_data_url("large.png", &oversized).unwrap();
+    assert_eq!(
+        adapter.attachment_refusal(std::slice::from_ref(&image)),
+        Some(Refusal::ImageInputTooLarge)
+    );
+    let (mut peer, runtime, _events) = open().await;
+    let outcome = runtime
+        .submit(Submission {
+            attachments: vec![image],
+            ..start_turn("sub-1", "Look at this")
+        })
+        .await;
+    assert_eq!(
+        outcome,
+        DispatchOutcome::NotSent(Refusal::ImageInputTooLarge)
+    );
+    peer.assert_nothing_written().await;
 }
 
 #[tokio::test(start_paused = true)]
@@ -1454,6 +1589,56 @@ fn completed_tool_calls_from_a_recorded_chat_have_typed_actions() {
         bash.command.as_ref().expect("recorded command").exact,
         r"printf 'capture-first\n'; sleep 2; printf 'capture-second\n'; sleep 2; printf 'capture-third\n'"
     );
+    // The harness's own account of the command comes along; the other tools have none.
+    assert_eq!(
+        bash.description.as_deref(),
+        Some("Print three lines with pauses between them")
+    );
+    assert!(
+        [read, search, edit, write]
+            .iter()
+            .all(|step| step.description.is_none())
+    );
+}
+
+#[test]
+fn a_command_carries_the_description_claude_code_gave_it() {
+    use crate::{ToolEvidence, read_claude_steps};
+    use ticketd_core::ChatToolState;
+
+    let read = |name: &str, input: &str| {
+        let steps = read_claude_steps(ToolEvidence {
+            name,
+            input,
+            output: None,
+            state: ChatToolState::Completed,
+            working_directory: "/demo",
+        });
+        assert_eq!(steps.len(), 1);
+        steps.into_iter().next().expect("one step")
+    };
+    for tool in ["Bash", "PowerShell"] {
+        let described = read(
+            tool,
+            r#"{"command":"npm test","description":"  Run the unit tests \n"}"#,
+        );
+        assert_eq!(described.description.as_deref(), Some("Run the unit tests"));
+        // The exact command stays what it was, for when the row opens.
+        assert_eq!(described.command.expect("command").exact, "npm test");
+
+        for input in [
+            r#"{"command":"npm test"}"#,
+            r#"{"command":"npm test","description":"  "}"#,
+            r#"{"command":"npm test","description":7}"#,
+        ] {
+            assert_eq!(read(tool, input).description, None, "{tool} {input}");
+        }
+    }
+    let other = read(
+        "Read",
+        r#"{"file_path":"/demo/a.txt","description":"Look"}"#,
+    );
+    assert_eq!(other.description, None);
 }
 
 #[test]

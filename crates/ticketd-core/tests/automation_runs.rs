@@ -1,7 +1,8 @@
 use ticketd_core::{
     Automation, AutomationAgentSettings, AutomationDefinition, AutomationRun, AutomationRunScope,
-    AutomationRunStatus, AutomationRunSummary, AutomationStepStatus, ChatLink, ChatLinkKind,
-    ChatListFilter, Check, Condition, NewChat, NotifyTarget, RunAction, RunAnswer, RunEnd,
+    AutomationRunStatus, AutomationRunSummary, AutomationStepStatus, ChatAttachmentContent,
+    ChatInputChange, ChatLink, ChatLinkKind, ChatListFilter, ChatSubmissionIntent, Check,
+    Condition, Error, NewChat, NotifyTarget, PreparedChatInput, RunAction, RunAnswer, RunEnd,
     RunningAutomationRuns, Step, StepAction, StepOutcome, Ticket, Trigger, Workspace,
 };
 
@@ -1189,6 +1190,425 @@ fn replying_in_the_chat_of_a_running_run_ends_it_taken_over_with_the_rest_not_ru
     );
     // The ticket is free for a new run of the Automation.
     workspace.run_automation_again(&run.id).unwrap();
+}
+
+#[test]
+fn a_takeover_reply_has_its_own_receipt_and_can_be_retried_after_takeover() {
+    let (dir, mut workspace) = workspace();
+    triage(&mut workspace);
+    let (run, chat) = on_agent_step(&mut workspace);
+    let ordinary = workspace
+        .save_chat_input(Some("ordinary"), &chat, "Same text")
+        .unwrap();
+    let replay_takeover = |workspace: &Workspace, command_id| {
+        workspace.replay_automation_chat_reply_with_change(
+            command_id,
+            &chat,
+            "Same text",
+            &[],
+            None,
+        )
+    };
+    assert_eq!(
+        workspace
+            .replay_chat_input("ordinary", &chat, "Same text", &[])
+            .unwrap(),
+        Some(ordinary.clone())
+    );
+    assert!(matches!(
+        replay_takeover(&workspace, "ordinary"),
+        Err(Error::RequestConflict(id)) if id == "ordinary"
+    ));
+    let takeover = |workspace: &mut Workspace, command_id| {
+        workspace.save_automation_chat_reply_with_change(
+            Some(command_id),
+            &chat,
+            "Same text",
+            &[],
+            None,
+        )
+    };
+    assert!(matches!(
+        takeover(&mut workspace, "ordinary"),
+        Err(Error::RequestConflict(id)) if id == "ordinary"
+    ));
+    assert_eq!(
+        workspace.automation_run(&run.id).unwrap().status,
+        AutomationRunStatus::Running
+    );
+    // A legacy receipt matches its fields but cannot stand in for a new takeover.
+    let receipts = rusqlite::Connection::open(dir.path().join("runs.sqlite3")).unwrap();
+    let remove_source = |command_id| {
+        receipts
+            .execute(
+                "UPDATE request_outcomes SET request = json_remove(request, '$.input_source') WHERE id = ?1",
+                [command_id],
+            )
+            .unwrap();
+    };
+    remove_source("ordinary");
+    assert_eq!(
+        workspace
+            .replay_chat_input("ordinary", &chat, "Same text", &[])
+            .unwrap(),
+        Some(ordinary.clone())
+    );
+    assert_eq!(
+        workspace
+            .save_chat_input(Some("ordinary"), &chat, "Same text")
+            .unwrap(),
+        ordinary
+    );
+    assert!(matches!(
+        takeover(&mut workspace, "ordinary"),
+        Err(Error::RequestConflict(id)) if id == "ordinary"
+    ));
+    assert!(matches!(
+        replay_takeover(&workspace, "ordinary"),
+        Err(Error::RequestConflict(id)) if id == "ordinary"
+    ));
+
+    let (reply, ended) = takeover(&mut workspace, "takeover").unwrap();
+    assert_eq!(ended.unwrap().status, AutomationRunStatus::TakenOver);
+    assert_eq!(
+        takeover(&mut workspace, "takeover").unwrap(),
+        (reply.clone(), None)
+    );
+    assert_eq!(
+        replay_takeover(&workspace, "takeover").unwrap(),
+        Some(reply.clone())
+    );
+    assert_eq!(
+        workspace
+            .replay_chat_input("takeover", &chat, "Same text", &[])
+            .unwrap(),
+        reply.message
+    );
+    assert_eq!(
+        workspace
+            .save_chat_input(Some("takeover"), &chat, "Same text")
+            .unwrap()
+            .id,
+        reply.id
+    );
+
+    remove_source("takeover");
+    assert_eq!(
+        replay_takeover(&workspace, "takeover").unwrap(),
+        Some(reply.clone())
+    );
+    assert_eq!(
+        takeover(&mut workspace, "takeover").unwrap(),
+        (reply.clone(), None)
+    );
+    assert_eq!(
+        workspace.chat_queue(&chat).unwrap(),
+        [ordinary, reply.into_message().unwrap()]
+    );
+}
+
+#[test]
+fn a_prepared_takeover_reply_replays_only_the_same_attachment_snapshot() {
+    let (_dir, mut workspace) = workspace();
+    triage(&mut workspace);
+    let (run, chat) = on_agent_step(&mut workspace);
+    let file = |encoded: &str| {
+        ChatAttachmentContent::from_data_url(
+            "notes.txt",
+            &format!("data:text/plain;base64,{encoded}"),
+            100,
+        )
+        .unwrap()
+    };
+    let original = [file("bm90ZQ==")];
+    let prepare =
+        |files| PreparedChatInput::new(Some("reply"), &chat, "Take over", files, None).unwrap();
+    let (reply, ended) = workspace
+        .save_prepared_automation_chat_reply(prepare(&original))
+        .unwrap();
+    let ended = ended.unwrap();
+    assert_eq!(ended.id, run.id);
+    assert_eq!(ended.status, AutomationRunStatus::TakenOver);
+
+    workspace.set_attachment_upload_limit(2).unwrap();
+    let same_bytes = [file("bm90ZQ==")];
+    assert_eq!(
+        workspace
+            .save_prepared_automation_chat_reply(prepare(&same_bytes))
+            .unwrap(),
+        (reply.clone(), None),
+    );
+    assert_eq!(
+        workspace
+            .save_automation_chat_reply_with_change(
+                Some("reply"),
+                &chat,
+                "Take over",
+                &same_bytes,
+                None
+            )
+            .unwrap(),
+        (reply.clone(), None),
+    );
+    let changed_bytes = [file("c3RvcA==")];
+    assert!(matches!(
+        workspace.save_prepared_automation_chat_reply(prepare(&changed_bytes)),
+        Err(Error::RequestConflict(id)) if id == "reply"
+    ));
+    assert_eq!(
+        workspace
+            .chat_message_attachment_contents(&chat, &reply.id)
+            .unwrap(),
+        original
+    );
+    assert_eq!(
+        workspace.chat_queue(&chat).unwrap(),
+        [reply.into_message().unwrap()]
+    );
+}
+
+#[test]
+fn a_linked_takeover_reply_keeps_its_context_requirement_through_backup_and_restore() {
+    let (dir, mut workspace) = workspace();
+    triage(&mut workspace);
+    let (run, chat) = on_agent_step(&mut workspace);
+    let ticket = workspace.create_ticket("Linked context").unwrap();
+    let change = ChatInputChange::Link(vec![ChatLink {
+        kind: ChatLinkKind::Ticket,
+        id: ticket.id,
+    }]);
+    let (receipt, ended) = workspace
+        .save_automation_chat_reply_with_change(None, &chat, "Take over", &[], Some(&change))
+        .unwrap();
+    let ended = ended.unwrap();
+    assert_eq!(ended.id, run.id);
+    assert_eq!(ended.status, AutomationRunStatus::TakenOver);
+    let saved = receipt.into_message().unwrap();
+    assert!(saved.queued && saved.requires_link_context);
+
+    let backup = dir.path().join("backup.sqlite3");
+    assert!(workspace.backup(&backup).unwrap());
+    let target = dir.path().join("restored.sqlite3");
+    Workspace::restore(&target, &backup).unwrap();
+    let mut restored = Workspace::open(&target).unwrap();
+    assert_eq!(
+        restored.chat_queue(&chat).unwrap().as_slice(),
+        std::slice::from_ref(&saved)
+    );
+
+    restored
+        .record_chat_queue_submission(&chat, &saved.id, "attempt", ChatSubmissionIntent::NewTurn)
+        .unwrap();
+    assert!(restored.chat_queue(&chat).unwrap().is_empty());
+    assert!(
+        restored
+            .chat_input_requires_link_context(&chat, &saved.id)
+            .unwrap()
+    );
+    assert!(
+        restored
+            .chat_input_requires_link_context("other-chat", &saved.id)
+            .is_err()
+    );
+}
+
+#[test]
+fn an_automation_can_record_only_its_saved_prompt() {
+    let (_dir, mut workspace) = workspace();
+    triage(&mut workspace);
+    let (run, chat) = on_agent_step(&mut workspace);
+    let queued = workspace
+        .save_chat_input(None, &chat, "Ordinary input")
+        .unwrap();
+    let otherwise = workspace
+        .create_chat(
+            None,
+            NewChat {
+                title: None,
+                harness: "codex".to_owned(),
+                execution_folder: folder(),
+                folder_managed: false,
+                links: Vec::new(),
+            },
+        )
+        .unwrap();
+    let reserved = format!("{chat}:first");
+    for target in [&chat, &otherwise.id] {
+        assert!(matches!(
+            workspace.save_chat_input(Some(&reserved), target, "Pretend Prompt"),
+            Err(ticketd_core::Error::RequestConflict(id)) if id == reserved
+        ));
+    }
+    let regular = format!("{}:first", otherwise.id);
+    let ordinary = workspace
+        .save_chat_input(Some(&regular), &otherwise.id, "Ordinary use")
+        .unwrap();
+    assert_eq!(
+        workspace
+            .save_chat_input(Some(&regular), &otherwise.id, "Ordinary use")
+            .unwrap()
+            .id,
+        ordinary.id
+    );
+
+    let prompt = workspace
+        .save_automation_chat_prompt(&chat, &run.id, "Run Prompt")
+        .unwrap();
+    assert!(matches!(
+        workspace.replay_chat_input(&reserved, &chat, "Run Prompt", &[]),
+        Err(Error::RequestConflict(id)) if id == reserved
+    ));
+    assert_eq!(
+        workspace
+            .save_automation_chat_prompt(&chat, &run.id, "Run Prompt")
+            .unwrap()
+            .id,
+        prompt.id
+    );
+    assert!(
+        workspace
+            .record_automation_chat_submission(&chat, &run.id, &queued.id, "attempt")
+            .is_err()
+    );
+    assert!(
+        workspace
+            .chat_queue(&chat)
+            .unwrap()
+            .iter()
+            .any(|message| message.id == queued.id)
+    );
+
+    let submitted = workspace
+        .record_automation_chat_submission(&chat, &run.id, &prompt.id, "attempt")
+        .unwrap()
+        .unwrap();
+    assert_eq!(
+        workspace
+            .record_automation_chat_submission(&chat, &run.id, &prompt.id, "attempt")
+            .unwrap()
+            .unwrap(),
+        submitted
+    );
+    assert_eq!(submitted.attempts.len(), 1);
+    let queue = workspace.chat_queue(&chat).unwrap();
+    assert_eq!(queue, [queued]);
+}
+
+#[test]
+fn a_legacy_reserved_receipt_replays_without_authorizing_an_automation_prompt() {
+    let (dir, mut workspace) = workspace();
+    triage(&mut workspace);
+    let (run, chat) = on_agent_step(&mut workspace);
+    let text = "Legacy input";
+    let saved = workspace.save_chat_input(None, &chat, text).unwrap();
+    let reserved = format!("{chat}:first");
+    let request =
+        serde_json::json!({"operation": "save_chat_input", "chat_id": chat, "text": text});
+    rusqlite::Connection::open(dir.path().join("runs.sqlite3"))
+        .unwrap()
+        .execute(
+            "INSERT INTO request_outcomes (id, request, outcome) VALUES (?1, ?2, ?3)",
+            [
+                &reserved,
+                &request.to_string(),
+                &serde_json::to_string(&saved.id).unwrap(),
+            ],
+        )
+        .unwrap();
+
+    assert_eq!(
+        workspace
+            .replay_chat_input(&reserved, &chat, text, &[])
+            .unwrap(),
+        Some(saved.clone())
+    );
+    assert_eq!(
+        workspace
+            .save_chat_input(Some(&reserved), &chat, text)
+            .unwrap(),
+        saved
+    );
+    assert!(matches!(
+        workspace.save_automation_chat_prompt(&chat, &run.id, text),
+        Err(Error::RequestConflict(id)) if id == reserved
+    ));
+    assert!(
+        workspace
+            .record_automation_chat_submission(&chat, &run.id, &saved.id, "prompt-attempt")
+            .is_err()
+    );
+    assert!(matches!(
+        workspace.replay_automation_chat_reply_with_change(&reserved, &chat, text, &[], None),
+        Err(Error::RequestConflict(id)) if id == reserved
+    ));
+    assert!(matches!(
+        workspace.save_automation_chat_reply_with_change(Some(&reserved), &chat, text, &[], None),
+        Err(Error::RequestConflict(id)) if id == reserved
+    ));
+    assert_eq!(
+        workspace.automation_chat_run_id(&chat).unwrap(),
+        Some(run.id)
+    );
+    assert!(!workspace.chat(&chat).unwrap().queue_paused);
+
+    let (reply, ended) = workspace
+        .save_automation_chat_reply_with_change(Some("takeover"), &chat, "Take over", &[], None)
+        .unwrap();
+    assert_eq!(ended.unwrap().status, AutomationRunStatus::TakenOver);
+    assert!(workspace.chat(&chat).unwrap().queue_paused);
+    assert_eq!(
+        workspace.chat_queue(&chat).unwrap(),
+        [saved, reply.into_message().unwrap()]
+    );
+}
+
+#[test]
+fn reserving_an_automation_prompt_does_not_break_an_older_ordinary_replay() {
+    let (dir, mut workspace) = workspace();
+    triage(&mut workspace);
+    let (run, active) = on_agent_step(&mut workspace);
+    let ordinary = workspace
+        .create_chat(
+            None,
+            NewChat {
+                title: None,
+                harness: "codex".to_owned(),
+                execution_folder: folder(),
+                folder_managed: false,
+                links: Vec::new(),
+            },
+        )
+        .unwrap();
+    let saved = workspace
+        .save_chat_input(Some("legacy"), &ordinary.id, "Earlier request")
+        .unwrap();
+    let reserved = format!("{active}:first");
+    rusqlite::Connection::open(dir.path().join("runs.sqlite3"))
+        .unwrap()
+        .execute(
+            "UPDATE request_outcomes SET id = ?1 WHERE id = 'legacy'",
+            [&reserved],
+        )
+        .unwrap();
+
+    assert_eq!(
+        workspace
+            .save_chat_input(Some(&reserved), &ordinary.id, "Earlier request")
+            .unwrap()
+            .id,
+        saved.id
+    );
+    assert_eq!(
+        workspace
+            .replay_chat_input(&reserved, &ordinary.id, "Earlier request", &[])
+            .unwrap(),
+        Some(saved.clone())
+    );
+    assert_eq!(workspace.chat_queue(&ordinary.id).unwrap(), [saved]);
+    assert_eq!(
+        workspace.automation_run(&run.id).unwrap().status,
+        AutomationRunStatus::Running
+    );
 }
 
 #[test]

@@ -8,16 +8,18 @@ use std::time::Duration;
 
 use async_trait::async_trait;
 use serde_json::{Value, json};
+use ticketd_core::ChatAttachmentContent;
 use tokio::time::timeout;
 
 use crate::{
-    ADAPTER_CLOSE_TIMEOUT, Capabilities, CloseOutcome, DispatchOutcome, EventKind, EventStream,
-    HarnessOptions, HarnessRuntime, InteractionResponse, InterruptOutcome, InterruptRequest,
-    LoginState, OpenRequest, OpenedRuntime, Problem, ProblemKind, ProviderDetail, Refusal,
-    RespondOutcome, RuntimeGeneration, SessionStart, SettingChange, SettingOutcome, Submission,
-    SubmissionKind,
+    ADAPTER_CLOSE_TIMEOUT, AutomationPromptAdmission, Capabilities, CloseOutcome, DispatchOutcome,
+    EventKind, EventStream, HarnessOptions, HarnessRuntime, InteractionResponse, InterruptOutcome,
+    InterruptRequest, LoginState, OpenRequest, OpenedRuntime, Problem, ProblemKind, ProviderDetail,
+    Refusal, RespondOutcome, RuntimeGeneration, SessionStart, SettingChange, SettingOutcome,
+    Submission, SubmissionKind,
 };
 
+use crate::attachment_input::AttachmentFiles;
 use crate::json_rpc::{
     self, CallOutcome, Connection, Incoming, MAX_FRAME_BYTES, Peer, Reply, Response, RpcError,
 };
@@ -55,6 +57,7 @@ struct CodexPeer {
     session: Session,
     /// Set for a thread that can call the ticketd CLI as its own tool.
     ticket_tool: Option<Arc<TicketTool>>,
+    attachment_files: Vec<AttachmentFiles>,
 }
 
 impl Peer for CodexPeer {
@@ -117,6 +120,7 @@ impl Peer for CodexPeer {
         if let Some(tool) = &self.ticket_tool {
             tool.close();
         }
+        self.attachment_files.clear();
         self.session.disconnected();
     }
 }
@@ -627,6 +631,36 @@ struct CodexRuntime {
     steering: bool,
 }
 
+fn attachment_input(
+    text: String,
+    attachments: Vec<ChatAttachmentContent>,
+) -> std::io::Result<(Vec<Value>, Option<AttachmentFiles>)> {
+    let mut input = Vec::new();
+    let mut files = None;
+    if !text.is_empty() || attachments.is_empty() {
+        input.push(json!({"type": "text", "text": text, "text_elements": []}));
+    }
+    for attachment in attachments {
+        if let Some(url) = attachment.image_data_url() {
+            input.push(json!({"type": "image", "url": url}));
+        } else {
+            let files = match &files {
+                Some(files) => files,
+                None => files.insert(AttachmentFiles::new()?),
+            };
+            let path = files.materialize(&attachment)?;
+            let path = path.to_str().ok_or(std::io::ErrorKind::InvalidData)?;
+            let reference = json!({"name": attachment.name(), "path": path});
+            input.push(json!({
+                "type": "text",
+                "text": format!("Read this Chat attachment snapshot: {reference}"),
+                "text_elements": []
+            }));
+        }
+    }
+    Ok((input, files))
+}
+
 impl std::fmt::Debug for CodexRuntime {
     fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         formatter
@@ -646,22 +680,74 @@ impl Drop for CodexRuntime {
 
 #[async_trait]
 impl HarnessRuntime for CodexRuntime {
+    fn supports_image_input(&self) -> Option<bool> {
+        self.connection
+            .rpc
+            .state()
+            .peer
+            .session
+            .reports
+            .supports_image_input(false)
+    }
+
+    fn supports_steer_image_input(&self) -> Option<bool> {
+        self.connection
+            .rpc
+            .state()
+            .peer
+            .session
+            .reports
+            .supports_image_input(true)
+    }
+
     async fn submit(&self, submission: Submission) -> DispatchOutcome {
+        self.submit_with_admission(submission, None).await
+    }
+
+    async fn submit_with_admission(
+        &self,
+        submission: Submission,
+        admission: Option<AutomationPromptAdmission>,
+    ) -> DispatchOutcome {
         let Submission {
             submission: id,
             generation,
             kind,
             text,
+            attachments,
         } = submission;
         let method = match kind {
             SubmissionKind::StartTurn => "turn/start",
             SubmissionKind::Steer { .. } => "turn/steer",
         };
-        let prepare = |peer: &mut CodexPeer| {
+        let has_images = attachments.iter().any(ChatAttachmentContent::is_image);
+        let prepared = if attachments.is_empty() {
+            attachment_input(text, attachments).ok()
+        } else {
+            tokio::task::spawn_blocking(move || {
+                attachment_input(text, attachments).inspect_err(|error| {
+                    tracing::warn!(error_kind = %error.kind(), "chat attachment handoff failed");
+                })
+            })
+            .await
+            .ok()
+            .and_then(Result::ok)
+        };
+        let Some((input, files)) = prepared else {
+            return DispatchOutcome::NotSent(Refusal::AttachmentUnavailable);
+        };
+        let prepare = move |peer: &mut CodexPeer| {
             let session = &mut peer.session;
             let thread = session.thread().ok_or(Refusal::RuntimeClosed)?.to_owned();
             session.runtime.check_submission(&kind, self.steering)?;
-            let input = json!([{"type": "text", "text": text, "text_elements": []}]);
+            if has_images
+                && session
+                    .reports
+                    .supports_image_input(kind != SubmissionKind::StartTurn)
+                    == Some(false)
+            {
+                return Err(Refusal::ImageInputUnsupported);
+            }
             let prepared = match kind {
                 SubmissionKind::StartTurn => {
                     let mut params =
@@ -681,6 +767,7 @@ impl HarnessRuntime for CodexRuntime {
                     if let Some(unattended) = session.turn_overrides.clone() {
                         merge(&mut params, unattended);
                     }
+                    session.reports.turn_start_written();
                     session.runtime.start_written(&id);
                     (params, Call::StartTurn(id))
                 }
@@ -697,6 +784,9 @@ impl HarnessRuntime for CodexRuntime {
                     )
                 }
             };
+            if let Some(files) = files {
+                peer.attachment_files.push(files);
+            }
             Ok(prepared)
         };
         self.connection
@@ -707,6 +797,7 @@ impl HarnessRuntime for CodexRuntime {
                 prepare,
                 acknowledged_turn,
                 rejection_reason,
+                admission,
             )
             .await
     }

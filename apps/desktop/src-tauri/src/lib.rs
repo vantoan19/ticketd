@@ -4,6 +4,8 @@ mod attachment_commands;
 mod attachment_media;
 mod automation_commands;
 mod automation_runner;
+#[cfg(target_os = "linux")]
+mod chat_clipboard;
 mod chat_commands;
 mod chat_reports;
 mod chat_ticketd;
@@ -26,7 +28,7 @@ mod workspace_session;
 
 use ticketd_core::{
     Activity, ActivityPatch, BackupInspection, BackupRecord, BatchOperation, ContextGraph,
-    ContextGraphPage, DependencyGraph, Document, DocumentPatch, DocumentSearchResult,
+    ContextGraphPage, CurrentWork, DependencyGraph, Document, DocumentPatch, DocumentSearchResult,
     DocumentSummary, Evidence, EvidenceInput, HistoryEntry, InboxEntry, LatestUpdate,
     MetadataSelection, Plan, PlanView, Project, ProjectArchiveOutcome, ProjectRemoteChange,
     SafetyBackup, SidebarCounts, Status, StatusCounts, Ticket, TicketChange, TicketFilter,
@@ -245,6 +247,39 @@ fn all_documents(
         .map_err(BridgeFailure::from)
 }
 #[tauri::command(async)]
+fn current_work_documents(include_support: bool) -> Result<CurrentWork, BridgeFailure> {
+    open_workspace()
+        .and_then(|w| w.current_work(include_support))
+        .map_err(BridgeFailure::from)
+}
+#[tauri::command(async)]
+fn finished_documents(
+    offset: u32,
+    include_support: bool,
+) -> Result<Vec<DocumentSummary>, BridgeFailure> {
+    open_workspace()
+        .and_then(|w| w.finished_documents_page(50, offset, include_support))
+        .map_err(BridgeFailure::from)
+}
+#[tauri::command(async)]
+fn unlinked_documents(
+    offset: u32,
+    include_support: bool,
+) -> Result<Vec<DocumentSummary>, BridgeFailure> {
+    open_workspace()
+        .and_then(|w| w.unlinked_documents_page(50, offset, include_support))
+        .map_err(BridgeFailure::from)
+}
+#[tauri::command(async)]
+fn documents_by_title(
+    offset: u32,
+    include_support: bool,
+) -> Result<Vec<DocumentSummary>, BridgeFailure> {
+    open_workspace()
+        .and_then(|w| w.documents_by_title_page(50, offset, include_support))
+        .map_err(BridgeFailure::from)
+}
+#[tauri::command(async)]
 fn trashed_documents(offset: u32) -> Result<Vec<DocumentSummary>, BridgeFailure> {
     open_workspace()
         .and_then(|w| w.trashed_documents_page(50, offset))
@@ -276,6 +311,12 @@ fn show_document(id: String) -> Result<Document, BridgeFailure> {
         .map_err(BridgeFailure::from)
 }
 #[tauri::command(async)]
+fn document_row(id: String) -> Result<DocumentSummary, BridgeFailure> {
+    open_workspace()
+        .and_then(|w| w.document_row(&id))
+        .map_err(BridgeFailure::from)
+}
+#[tauri::command(async)]
 fn document_version(id: String) -> Result<(String, bool), BridgeFailure> {
     open_workspace()
         .and_then(|w| w.document_version(&id))
@@ -287,6 +328,19 @@ fn open_document(id: String) -> Result<Document, BridgeFailure> {
         .and_then(|mut w| w.open_document(&id))
         .map_err(BridgeFailure::from)
 }
+/// The first save of a new Document keeps the summary typed before it.
+fn create_document_request(
+    title: Option<String>,
+    summary: Option<String>,
+    body: Option<String>,
+) -> WriteRequest {
+    WriteRequest::CreateDocument {
+        title,
+        summary,
+        body: body.unwrap_or_default(),
+    }
+}
+
 #[tauri::command(async)]
 fn save_document(
     id: Option<String>,
@@ -295,15 +349,14 @@ fn save_document(
     title_changed: bool,
     expected_updated_at: Option<String>,
     request_id: String,
+    // Absent keeps the stored summary; an empty value clears it.
+    summary: Option<String>,
 ) -> Result<Document, BridgeFailure> {
     // Autosaving an existing Document is last-write-wins and idempotent, so it skips the
     // replay record that would otherwise keep a full copy of every autosaved body forever.
     // Creating still uses the request ID, because a repeated create would duplicate.
     let Some(id) = id else {
-        let request = WriteRequest::CreateDocument {
-            title,
-            body: body.unwrap_or_default(),
-        };
+        let request = create_document_request(title, summary, body);
         return match open_workspace()
             .and_then(|mut w| w.write(Some(&request_id), request))
             .map_err(BridgeFailure::from)?
@@ -315,6 +368,7 @@ fn save_document(
     let patch = DocumentPatch {
         title: title_changed.then_some(title),
         body,
+        summary: summary.map(Some),
         expected_updated_at,
     };
     open_workspace()
@@ -2231,6 +2285,17 @@ pub fn run() -> Result<(), tauri::Error> {
             started,
         })
         .setup(move |app| {
+            #[cfg(target_os = "linux")]
+            if let Some(window) = tauri::Manager::get_webview_window(app, "main") {
+                let dev_url = if tauri::is_dev() {
+                    app.config().build.dev_url.clone()
+                } else {
+                    None
+                };
+                window.with_webview(move |webview| {
+                    chat_clipboard::install(&webview.inner(), dev_url);
+                })?;
+            }
             #[cfg(all(debug_assertions, unix))]
             ticketd_chat_host::prepare_harness_recording(|| {
                 open_workspace()?
@@ -2427,8 +2492,13 @@ pub fn run() -> Result<(), tauri::Error> {
             set_document_tag,
             all_documents,
             trashed_documents,
+            current_work_documents,
+            finished_documents,
+            unlinked_documents,
+            documents_by_title,
             set_document_trashed,
             show_document,
+            document_row,
             document_version,
             open_document,
             save_document,
@@ -2559,10 +2629,14 @@ pub fn run() -> Result<(), tauri::Error> {
             chat_commands::chat_open,
             chat_commands::chat_close,
             chat_commands::chat_send,
+            chat_commands::chat_capture_attachment,
+            chat_commands::chat_export_attachment,
             chat_commands::chat_linked_to,
             chat_commands::chat_files,
             chat_commands::chat_step_output,
             chat_commands::chat_remove_queued,
+            chat_commands::chat_confirm_queue_edit,
+            chat_commands::chat_check_queue_edits,
             chat_commands::chat_resume_queue,
             chat_commands::chat_send_queued_now,
             chat_commands::chat_stop,
@@ -2677,6 +2751,21 @@ pub fn run() -> Result<(), tauri::Error> {
 #[cfg(test)]
 mod tests {
     use super::holds_exit;
+
+    #[test]
+    fn a_new_document_keeps_the_summary_typed_before_its_first_save() {
+        let request = super::create_document_request(
+            Some("Checkout".into()),
+            Some("Why we split it".into()),
+            Some("Body".into()),
+        );
+        let value = serde_json::to_value(&request).expect("serializable");
+        assert_eq!(value["summary"], "Why we split it");
+        // A caller that omits the summary leaves it unset.
+        let without = serde_json::to_value(super::create_document_request(None, None, None))
+            .expect("serializable");
+        assert!(without.get("summary").is_none());
+    }
 
     #[test]
     fn an_exit_request_goes_through_the_window_while_one_is_open() {

@@ -19,7 +19,7 @@ import {
   screen,
   within,
 } from "@testing-library/react";
-import { afterEach, expect, test, vi } from "vitest";
+import { afterEach, expect, test, vi, beforeEach } from "vitest";
 import userEvent from "@testing-library/user-event";
 import { App } from "@/app/App";
 // The views App loads on first visit, loaded up front so a visit renders at once.
@@ -152,6 +152,14 @@ vi.mock("@uiw/react-codemirror", () => ({
     />
   ),
 }));
+
+beforeEach(() => {
+  // Most Documents tests browse the Recent list; Current work has its own tests.
+  localStorage.setItem(
+    "ticketd.preferences",
+    JSON.stringify({ documentsView: "recent" }),
+  );
+});
 
 afterEach(() => {
   cleanup();
@@ -1767,7 +1775,10 @@ test("a restore plays the launch cascade once, after the new Workspace's change 
   // The window opening played it once.
   expect(order.filter((step) => step === "launch")).toHaveLength(1);
   fireEvent.click(screen.getByRole("button", { name: "Settings" }));
-  await turn();
+  await act(async () => {
+    await vi.dynamicImportSettled();
+    await vi.advanceTimersByTimeAsync(0);
+  });
   fireEvent.click(
     within(
       screen.getByRole("navigation", { name: "Settings sections" }),
@@ -1788,6 +1799,160 @@ test("a restore plays the launch cascade once, after the new Workspace's change 
   expect(after.filter((step) => step === "launch")).toHaveLength(1);
   expect(after.indexOf("token")).toBeGreaterThanOrEqual(0);
   expect(after.indexOf("launch")).toBeGreaterThan(after.lastIndexOf("token"));
+});
+
+test("a completed Workspace restore clears Chat drafts even when recovery cannot refresh", async () => {
+  const { ChatClientContext } = await import("@/features/chats/client");
+  const { chatState, createMockChatClient } =
+    await import("@/features/chats/mock-client");
+  const { draftOf } = await import("@/features/chats/drafts");
+  const { addQuote } = await import("@/features/chats/quotes");
+  const chatId = "restored-common";
+  const client = createMockChatClient({
+    enabled: true,
+    chats: [
+      { chat: chatState({ id: chatId, title: "Common Chat" }), items: [] },
+    ],
+  });
+  vi.spyOn(client, "captureAttachment").mockResolvedValue({
+    name: "old.txt",
+    dataUrl: "data:text/plain;base64,b2xk",
+  });
+  let finish!: (value: Awaited<ReturnType<typeof client.createChat>>) => void;
+  const creating = new Promise<Awaited<ReturnType<typeof client.createChat>>>(
+    (resolve) => {
+      finish = resolve;
+    },
+  );
+  const create = vi.spyOn(client, "createChat").mockReturnValueOnce(creating);
+  const backup = "/tmp/chat-restore.ticketd-backup";
+  const summary = {
+    last_change: null,
+    tickets: 0,
+    documents: 0,
+    activities: 0,
+    evidence: 0,
+    projects: 0,
+    plans: 0,
+  };
+  let replaced = false;
+  let refreshStarted = false;
+  let failRefresh!: (reason: Error) => void;
+  const refreshing = new Promise<never>((_, reject) => {
+    failRefresh = reject;
+  });
+  const handlers: Record<string, unknown> = {
+    safety_backups: [
+      {
+        path: backup,
+        kind: "safety",
+        saved_at: "2026-11-01T00:00:00Z",
+        size_bytes: 1024,
+      },
+    ],
+    inspect_backup: {
+      path: backup,
+      current: summary,
+      check: { status: "valid", format_version: 19, summary },
+    },
+    restore_workspace: () => {
+      replaced = true;
+      return { safety_path: "/tmp/safety.sqlite3" };
+    },
+    draft_retentions: () => {
+      if (replaced) {
+        refreshStarted = true;
+        return refreshing;
+      }
+      return [];
+    },
+    draft_cutover_pending: false,
+  };
+  bridge.invoke.mockImplementation((command: string, args?: never) => {
+    if (!(command in handlers)) return bridgeDefault(command, args);
+    const handler = handlers[command];
+    return typeof handler === "function" ? handler(args) : handler;
+  });
+  render(
+    <DraftRecoveryProvider>
+      <ChatClientContext value={client}>
+        <App />
+      </ChatClientContext>
+    </DraftRecoveryProvider>,
+  );
+  const chat = () => screen.findByRole("button", { name: /^Common Chat,/ });
+  fireEvent.click(await screen.findByRole("button", { name: "Chats" }));
+  fireEvent.click(await chat());
+  const message = () => screen.findByRole("textbox", { name: /Message/ });
+  fireEvent.change(await message(), { target: { value: "Old Chat draft" } });
+  await act(async () => {
+    addQuote(chatId, {
+      source: "Old workspace",
+      text: "Old quoted words",
+      record: null,
+    });
+    fireEvent.change(screen.getByLabelText("Choose files to attach"), {
+      target: { files: [new File(["old"], "old.txt", { type: "text/plain" })] },
+    });
+  });
+  expect(screen.getByRole("button", { name: "Remove old.txt" })).toBeTruthy();
+  const oldDraft = draftOf(client, chatId);
+
+  fireEvent.click(screen.getByRole("button", { name: "New Chat" }));
+  fireEvent.change(
+    await screen.findByRole("textbox", {
+      name: "Describe a task or ask a question",
+    }),
+    {
+      target: { value: "Earlier pending create" },
+    },
+  );
+  await waitFor(() =>
+    expect(screen.getByRole("button", { name: "Send" })).toHaveProperty(
+      "disabled",
+      false,
+    ),
+  );
+  fireEvent.click(screen.getByRole("button", { name: "Send" }));
+  expect(create).toHaveBeenCalledTimes(1);
+
+  fireEvent.click(screen.getByRole("button", { name: "Settings" }));
+  fireEvent.click(
+    within(
+      await screen.findByRole("navigation", { name: "Settings sections" }),
+    ).getByRole("button", { name: "Backups" }),
+  );
+  fireEvent.click(
+    await screen.findByRole("button", { name: `Restore… ${backup}` }),
+  );
+  fireEvent.click(
+    await screen.findByRole("button", { name: "Replace workspace" }),
+  );
+  await waitFor(() => expect(refreshStarted).toBe(true));
+  expect(draftOf(client, chatId)).not.toBe(oldDraft);
+  await act(async () => finish({ chat_id: chatId, send_error: "Too late" }));
+  expect(draftOf(client, chatId).snapshot().text).toBe("");
+  await act(async () => failRefresh(new Error("Recovery refresh failed")));
+  expect(
+    await screen.findByText(
+      "The restore finished. Restart ticketd to see the restored data.",
+    ),
+  ).toBeTruthy();
+  fireEvent.click(screen.getByRole("button", { name: "Done" }));
+
+  fireEvent.click(
+    await screen.findByRole("button", { name: /Back to Chats/i }),
+  );
+  expect(
+    await screen.findByRole("textbox", {
+      name: "Describe a task or ask a question",
+    }),
+  ).toHaveProperty("value", "");
+  fireEvent.click(await chat());
+  expect(await message()).toHaveProperty("value", "");
+  expect(screen.queryByRole("button", { name: "Remove old.txt" })).toBeNull();
+  expect(screen.queryByText("Old quoted words")).toBeNull();
+  expect(screen.queryByText(/Too late/)).toBeNull();
 });
 
 test("sets an Plan in one request and shows how many selected tickets already have each", async () => {
@@ -5820,7 +5985,7 @@ test("Document sync metadata survives floating Saved feedback and waits for Driv
     name: "Document sync status",
   });
   expect(metadata.textContent).toBe("Saved on this computer");
-  const stateRow = metadata.parentElement!;
+  const stateRow = metadata.closest(".document-meta") as HTMLElement;
   fireEvent.click(screen.getByRole("button", { name: "Edit" }));
   fireEvent.change(screen.getByRole("textbox", { name: "Title" }), {
     target: { value: "Sync safety revised" },
@@ -5847,7 +6012,9 @@ test("Document sync metadata survives floating Saved feedback and waits for Driv
     timeout: 4000,
   });
   expect(
-    screen.getByRole("status", { name: "Document sync status" }).parentElement,
+    screen
+      .getByRole("status", { name: "Document sync status" })
+      .closest(".document-meta"),
   ).toBe(stateRow);
   fireEvent.click(within(bar).getByRole("button", { name: "Done editing" }));
   expect(within(stateRow).getByText("Synced to Drive")).toBeTruthy();
@@ -6709,7 +6876,7 @@ test.each([
         expect(box).toHaveProperty("value", "1j23");
         expect(answer).not.toHaveBeenCalled();
         await user.clear(box);
-        screen.getByRole("button", { name: /^Codex, model/ }).focus();
+        screen.getByRole("button", { name: /^Codex(, effort .*)?$/ }).focus();
         await user.keyboard("{Enter}");
         await screen.findByRole("dialog", { name: "Harness and model" });
         await user.keyboard("123");
@@ -7455,6 +7622,10 @@ test("filter checks stay staged until the menu closes, then the bar follows the 
 });
 
 test("Documents folds local search in its header and navigates one row stop without replacing the reader metadata", async () => {
+  localStorage.setItem(
+    "ticketd.preferences",
+    JSON.stringify({ documentsView: "recent" }),
+  );
   const docs = [
     {
       id: "guide",
@@ -7611,24 +7782,20 @@ test("Documents keeps pin grouping under keyboard focus, exposes exact times and
         return stored();
       if (command === "document_version") return [timestamp, trashed];
       if (command === "document_tags") return [];
-      if (command === "document_context_links" && args.id === summary.id)
-        return [
-          [],
-          [
+      if (command === "document_row" && args.id === summary.id)
+        return {
+          ...summary,
+          plans: [
             {
-              source_id: "guide-plan",
-              target_id: summary.id,
-              source_kind: "plan",
-              target_kind: "document",
-              passage: "",
-              source_label: "Guide launch",
-              target_label: summary.heading,
-              source_trashed: false,
-              target_trashed: trashed,
-              explicit: true,
+              id: "guide-plan",
+              name: "Guide launch",
+              archived: false,
+              spec: false,
             },
           ],
-        ];
+          tickets: [],
+          tags: [],
+        };
       if (command === "show_plan")
         return {
           plan: {
@@ -7652,7 +7819,13 @@ test("Documents keeps pin grouping under keyboard focus, exposes exact times and
   );
   render(<App />);
   fireEvent.click(await screen.findByRole("button", { name: "Documents" }));
-  fireEvent.click(screen.getByRole("radio", { name: "Trash" }));
+  const list = () =>
+    within(document.querySelector<HTMLElement>(".documents-list-view")!);
+  fireEvent.pointerDown(await list().findByRole("button", { name: "More" }), {
+    button: 0,
+    ctrlKey: false,
+  });
+  fireEvent.click(await screen.findByRole("menuitem", { name: /^Trash/ }));
   fireEvent.click(await screen.findByRole("button", { name: "Linked guide" }));
   expect(
     await screen.findByRole("heading", { name: "Linked guide" }),
@@ -7667,9 +7840,11 @@ test("Documents keeps pin grouping under keyboard focus, exposes exact times and
   const linked = within(reader).getByRole("complementary", {
     name: "Document details",
   });
-  expect(within(linked).getByRole("heading", { name: "Linked" })).toBeTruthy();
   expect(
-    await within(linked).findByRole("button", { name: "Guide launch" }),
+    await within(linked).findByRole("heading", { name: "Linked" }),
+  ).toBeTruthy();
+  expect(
+    await within(linked).findByRole("button", { name: /Guide launch/ }),
   ).toBeTruthy();
   fireEvent.click(within(reader).getByRole("button", { name: "Restore" }));
   await vi.waitFor(() =>
@@ -7678,7 +7853,8 @@ test("Documents keeps pin grouping under keyboard focus, exposes exact times and
       false,
     ),
   );
-  fireEvent.click(screen.getByRole("radio", { name: "Recent" }));
+  fireEvent.click(list().getByRole("button", { name: "Back to Documents" }));
+  fireEvent.click(await screen.findByRole("radio", { name: "Recent" }));
   const row = await screen.findByRole("button", { name: "Linked guide" });
   const navigator = row.closest(".documents-list-view") as HTMLElement;
   const order = () =>
@@ -7711,7 +7887,7 @@ test("Documents keeps pin grouping under keyboard focus, exposes exact times and
   await vi.waitFor(() =>
     expect(order()).toEqual(["Linked guide", "Other guide"]),
   );
-  fireEvent.click(within(linked).getByRole("button", { name: "Guide launch" }));
+  fireEvent.click(within(linked).getByRole("button", { name: /Guide launch/ }));
   expect(
     await screen.findByRole("heading", { name: "Guide launch" }),
   ).toBeTruthy();
@@ -7775,9 +7951,13 @@ test("Chats distinguishes an unknown list from empty and keeps known rows after 
   );
 });
 
-test.each([false, true])(
-  "New Chat Retry keeps the draft and creation identity follows payload edits (%s)",
-  async (edited) => {
+test.each([
+  { action: "Retry", edited: false },
+  { action: "Retry", edited: true },
+  { action: "Send", edited: true },
+])(
+  "New Chat $action uses the intended creation request (edited: $edited)",
+  async ({ action, edited }) => {
     const { ChatClientContext } = await import("@/features/chats/client");
     const { createMockChatClient } =
       await import("@/features/chats/mock-client");
@@ -7797,21 +7977,21 @@ test.each([false, true])(
     });
     fireEvent.change(input, { target: { value: "Keep these words" } });
     fireEvent.keyDown(input, { key: "Enter" });
-    const retry = await screen.findByRole("button", { name: "Retry" });
+    await screen.findByRole("button", { name: "Retry" });
     expect(input).toHaveProperty("value", "Keep these words");
     if (edited) {
       fireEvent.change(input, { target: { value: "Edited words" } });
       fireEvent.click(
-        screen.getByRole("button", {
-          name: "Claude Code, model Opus 5.5, effort Default",
+        await screen.findByRole("button", {
+          name: "Claude Code, model Opus 5.5",
         }),
       );
       fireEvent.click(screen.getByRole("radio", { name: "High" }));
       fireEvent.keyDown(document.body, { key: "Escape" });
     }
-    fireEvent.click(retry);
+    fireEvent.click(screen.getByRole("button", { name: action }));
     await vi.waitFor(() => expect(create).toHaveBeenCalledTimes(2));
-    if (edited) {
+    if (action === "Send") {
       expect(create.mock.calls[1]?.[0].command_id).not.toBe(
         create.mock.calls[0]?.[0].command_id,
       );
@@ -7834,7 +8014,7 @@ test("New Chat exposes its complete current pick before the first message", asyn
   );
   fireEvent.click(await screen.findByRole("button", { name: "Chats" }));
   const trigger = await screen.findByRole("button", {
-    name: "Claude Code, model Opus 5.5, effort Default",
+    name: "Claude Code, model Opus 5.5",
   });
   expect(client.created).toHaveLength(0);
   fireEvent.click(trigger);
@@ -9777,6 +9957,10 @@ test("New ticket expands without replacing the rich draft and creates once from 
 });
 
 test("Capture saves a linked Document without changing the thought and keeps it in Documents", async () => {
+  localStorage.setItem(
+    "ticketd.preferences",
+    JSON.stringify({ documentsView: "recent" }),
+  );
   await import("@/features/markdown/MarkdownEditor");
   vi.useFakeTimers();
   const ticket = bulkTicket(1);
@@ -11182,6 +11366,8 @@ test("supporting Document open failure survives an unrelated browse success and 
 test.each(["All tickets", "Plans", "Documents", "Attachments"] as const)(
   "%s retains known content and counts when a background read fails",
   async (name) => {
+    // Documents opens on Current work here, its own read.
+    localStorage.removeItem("ticketd.preferences");
     const ticket = bulkTicket(1, { title: "Cached ticket" });
     const plan = { id: "cached-plan", name: "Cached Plan", archived: false };
     const file = {
@@ -11197,7 +11383,7 @@ test.each(["All tickets", "Plans", "Documents", "Attachments"] as const)(
     const read = {
       "All tickets": "find_tickets",
       Plans: "list_plans",
-      Documents: "recent_documents",
+      Documents: "current_work_documents",
       Attachments: "search_attachments",
     }[name];
     bridge.invoke.mockImplementation((command: string, args) => {
@@ -11210,8 +11396,18 @@ test.each(["All tickets", "Plans", "Documents", "Attachments"] as const)(
       if (command === "list_plans") return [plan];
       if (command === "show_plan")
         return { plan, counts: counted({}), members: [], documents: [] };
-      if (command === "recent_documents")
-        return [{ id: "cached-doc", heading: "Cached Document" }];
+      if (command === "current_work_documents")
+        return {
+          groups: [
+            {
+              plan: null,
+              documents: [{ id: "cached-doc", heading: "Cached Document" }],
+            },
+          ],
+          finished: 0,
+          unlinked: 0,
+          trashed: 0,
+        };
       if (command === "search_attachments")
         return [
           {
@@ -14174,11 +14370,10 @@ test.each(["old first", "new first", "new focus"])(
     try {
       const user = userEvent.setup();
       render(<App />);
-      await user.click(
-        await screen.findByRole("button", { name: "Documents" }),
-      );
-      const nav = await screen.findByRole("radio", { name: "Trash" });
+      const nav = await screen.findByRole("button", { name: "Documents" });
       await user.click(nav);
+      await user.click(await screen.findByRole("button", { name: "More" }));
+      await user.click(await screen.findByRole("menuitem", { name: /^Trash/ }));
       await screen.findByRole("button", { name: "Restore Alpha" });
       version++;
       await vi.waitFor(() => expect(resolveOld).toBeTypeOf("function"), {

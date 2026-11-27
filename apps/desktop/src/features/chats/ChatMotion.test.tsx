@@ -18,7 +18,6 @@ import { ChatProvider } from "@/features/chats/ChatProvider";
 import { ChatsView } from "@/features/chats/ChatsView";
 import { MotionProvider } from "@/components/ui/motion";
 import { StatusLineRegion } from "@/components/ui/status-line";
-import { drafts } from "@/features/chats/drafts";
 import { freezeMotionClock } from "@/test/motion-clock";
 import { applyTokens, rootTokens } from "@/test/motion-tokens";
 import {
@@ -36,7 +35,6 @@ window.ResizeObserver = class {
 
 afterEach(() => {
   cleanup();
-  drafts.clear();
 });
 
 const at = "2026-11-10T10:00:00Z";

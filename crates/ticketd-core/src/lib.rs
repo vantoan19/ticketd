@@ -22,8 +22,13 @@ pub use context_graph::{
 };
 mod document_links;
 pub use document_links::{ContextLink, DocumentBacklink, derive_brief_heading, derive_heading};
+mod current_work;
+pub use current_work::{CurrentWork, CurrentWorkGroup, CurrentWorkPlan};
 mod documents;
-pub use documents::{Document, DocumentPatch, DocumentSearchResult, DocumentSummary};
+pub use documents::{
+    Document, DocumentPatch, DocumentPlanContext, DocumentSearchResult, DocumentSummary,
+    DocumentTicketContext,
+};
 mod duplicates;
 pub use duplicates::{
     DependencyChoice, DependencyDecision, DependencyEdge, DuplicateDependencyPreview,
@@ -156,12 +161,14 @@ pub use chat_suggestions::{ChatSuggestion, SuggestedTicket};
 pub use chats::{
     AGENT_CHANGES_RECORD_NAME, CHAT_AGENT_CHANGES_LIMIT, CHAT_CHANGE_TAIL,
     CHAT_EFFECTIVE_SETTINGS_LIMIT, CHAT_ID_VARIABLE, CHAT_NOTICE_LIMIT, CHAT_RESET_TIME_MAX,
-    CHAT_TOOL_OUTPUT_LIMIT, Chat, ChatAgentChange, ChatCatchUp, ChatChange, ChatDelivery,
-    ChatDeliveryDecision, ChatHistoryPage, ChatInputStanding, ChatInteraction, ChatInteractionKind,
-    ChatInteractionState, ChatItem, ChatLink, ChatLinkKind, ChatLinkedRecord, ChatListFilter,
-    ChatMessage, ChatNotice, ChatObservation, ChatRecord, ChatRole, ChatSession, ChatSessionOrigin,
-    ChatSnapshot, ChatSubmissionAttempt, ChatSubmissionIntent, ChatSummary, ChatTool,
-    ChatToolState, ChatTurn, ChatTurnReceipt, ChatTurnState, FolderChat, NewChat,
+    CHAT_TOOL_OUTPUT_LIMIT, Chat, ChatAgentChange, ChatAttachment, ChatAttachmentContent,
+    ChatCatchUp, ChatChange, ChatCreationReplay, ChatDelivery, ChatDeliveryDecision,
+    ChatHistoryPage, ChatInputChange, ChatInputReceipt, ChatInputStanding, ChatInteraction,
+    ChatInteractionKind, ChatInteractionState, ChatItem, ChatLink, ChatLinkKind, ChatLinkedRecord,
+    ChatListFilter, ChatMessage, ChatNotice, ChatObservation, ChatQueueEdit, ChatRecord, ChatRole,
+    ChatSession, ChatSessionOrigin, ChatSnapshot, ChatStartPicks, ChatSubmissionAttempt,
+    ChatSubmissionIntent, ChatSummary, ChatTool, ChatToolState, ChatTurn, ChatTurnReceipt,
+    ChatTurnState, FolderChat, NewChat, PreparedChatInput,
 };
 pub use events::{AUTOMATION_RUN_ID_VARIABLE, WorkspaceActor, WorkspaceEvent, WorkspaceEventType};
 pub use history::{HistoryEntry, Status};

@@ -1,7 +1,8 @@
 use rusqlite::Connection;
 use ticketd_core::FORMAT_VERSION;
 use ticketd_core::{
-    BackupCheck, EvidenceInput, EvidenceKind, SafetyBackupKind, Workspace, WorkspaceSummary,
+    BackupCheck, ChatAttachmentContent, ChatInputChange, ChatLink, ChatLinkKind, DocumentPatch,
+    EvidenceInput, EvidenceKind, NewChat, SafetyBackupKind, Workspace, WorkspaceSummary,
 };
 
 // Clippy only exempts #[test] functions from the unwrap lint, not their helpers.
@@ -92,6 +93,140 @@ fn document_counts_and_changes_are_visible_in_backup_review() {
     assert_eq!(inspection.current.documents, 2);
     assert!(summary.last_change.is_some());
     assert_eq!(workspace.workspace_info().unwrap().documents, 2);
+}
+
+#[test]
+fn attachment_preview_backups_inspect_and_restore_with_their_chat_data() {
+    let dir = tempfile::tempdir().unwrap();
+    let mut workspace = Workspace::open(dir.path().join("workspace.sqlite3")).unwrap();
+    let document = workspace
+        .create_document(Some("Context"), "Kept body")
+        .unwrap();
+    let chat = workspace
+        .create_chat(
+            None,
+            NewChat {
+                title: None,
+                harness: "codex".into(),
+                execution_folder: dir.path().display().to_string(),
+                folder_managed: false,
+                links: Vec::new(),
+            },
+        )
+        .unwrap();
+    let change = ChatInputChange::Link(vec![ChatLink {
+        kind: ChatLinkKind::Document,
+        id: document.id.clone(),
+    }]);
+    let file = ChatAttachmentContent::from_data_url(
+        "snapshot.bin",
+        "data:application/octet-stream;base64,AAH/",
+        100,
+    )
+    .unwrap();
+    let (queued, _) = workspace
+        .save_chat_input_with_change(None, &chat.id, "Queued", &[file], Some(&change))
+        .unwrap();
+    let held = workspace
+        .save_chat_input(None, &chat.id, "Held input")
+        .unwrap();
+    workspace
+        .confirm_chat_queue_edit(&chat.id, &held.id, "hold")
+        .unwrap();
+    let source = dir.path().join("full-backup.sqlite3");
+    assert!(workspace.backup(&source).unwrap());
+
+    for version in 101..=103 {
+        let backup = dir.path().join(format!("preview-{version}.sqlite3"));
+        std::fs::copy(&source, &backup).unwrap();
+        let fixture = Connection::open(&backup).unwrap();
+        fixture
+            .execute_batch("ALTER TABLE documents DROP COLUMN summary")
+            .unwrap();
+        if version < 103 {
+            fixture
+                .execute_batch("ALTER TABLE chat_messages DROP COLUMN requires_link_context")
+                .unwrap();
+        }
+        if version < 102 {
+            fixture
+                .execute_batch("ALTER TABLE chat_messages DROP COLUMN editing")
+                .unwrap();
+        }
+        fixture
+            .pragma_update(None, "user_version", version)
+            .unwrap();
+        drop(fixture);
+
+        let inspection = workspace.inspect_backup(&backup).unwrap();
+        assert!(
+            matches!(
+                inspection.check,
+                BackupCheck::Valid { format_version, .. } if i64::from(format_version) == version
+            ),
+            "{version}: {:?}",
+            inspection.check
+        );
+        let target = dir.path().join(format!("restored-{version}.sqlite3"));
+        Workspace::restore(&target, &backup).unwrap();
+        let mut restored = Workspace::open(&target).unwrap();
+        assert!(restored.chat(&chat.id).unwrap().queue_paused);
+        let queue = restored.chat_queue(&chat.id).unwrap();
+        assert_eq!(
+            queue
+                .iter()
+                .map(|message| message.id.as_str())
+                .collect::<Vec<_>>(),
+            [queued.id.as_str(), held.id.as_str()]
+        );
+        assert!(!queue[0].editing);
+        assert_eq!(queue[0].requires_link_context, version >= 103);
+        assert_eq!(queue[1].editing, version >= 102);
+        let file = restored
+            .chat_message_attachment_contents(&chat.id, &queued.id)
+            .unwrap();
+        assert_eq!(file[0].bytes(), &[0, 1, 255]);
+        let recovered = restored.show_document(&document.id).unwrap();
+        assert_eq!(recovered.body, document.body);
+        assert_eq!(recovered.summary, None);
+        let updated = restored
+            .change_document(
+                &document.id,
+                DocumentPatch {
+                    summary: Some(Some("Restored summary".into())),
+                    ..Default::default()
+                },
+            )
+            .unwrap();
+        assert_eq!(updated.summary.as_deref(), Some("Restored summary"));
+    }
+}
+
+#[test]
+fn a_canonical_backup_missing_its_document_summary_is_not_an_attachment_preview() {
+    let dir = tempfile::tempdir().unwrap();
+    let workspace = Workspace::open(dir.path().join("workspace.sqlite3")).unwrap();
+    for version in 101..=104 {
+        let backup = dir
+            .path()
+            .join(format!("missing-summary-{version}.sqlite3"));
+        ticketd_core::create_workspace_at_format_version(&backup, version).unwrap();
+        Connection::open(&backup)
+            .unwrap()
+            .execute_batch("ALTER TABLE documents DROP COLUMN summary")
+            .unwrap();
+        let inspection = workspace.inspect_backup(&backup).unwrap();
+        assert_eq!(
+            inspection.check,
+            BackupCheck::MissingTables {
+                tables: vec!["documents.summary".into()]
+            },
+            "format {version}",
+        );
+        let target = dir.path().join(format!("refused-{version}.sqlite3"));
+        assert!(Workspace::restore(&target, &backup).is_err());
+        assert!(!target.exists());
+    }
 }
 
 #[test]

@@ -1,6 +1,7 @@
 //! ACP v1 session and Prompt lifecycle. A Prompt's reply ends its Turn.
 use std::{
     collections::{BTreeMap, HashMap, HashSet},
+    io,
     sync::Arc,
 };
 
@@ -8,9 +9,11 @@ use agent_client_protocol_schema::{ProtocolVersion, v1 as acp};
 use async_trait::async_trait;
 use serde::Serialize;
 use serde_json::{Value, json};
+use ticketd_core::ChatAttachmentContent;
 use ticketd_core::harnesses::ANTIGRAVITY;
 use tokio::sync::mpsc;
 
+use crate::attachment_input::AttachmentFiles;
 use crate::json_rpc::{
     self, CallOutcome, Connection, Incoming, Peer, Reply, Response, WriteFailure,
 };
@@ -190,7 +193,9 @@ enum PermissionPolicy {
 struct Session {
     runtime: RuntimeState<Permission>,
     id: Option<acp::SessionId>,
+    image_input: bool,
     prompt: Option<Prompt>,
+    attachment_files: Vec<AttachmentFiles>,
     configs: Vec<acp::SessionConfigOption>,
     permission_policy: PermissionPolicy,
     settings_confirmed: bool,
@@ -620,6 +625,7 @@ impl Peer for Session {
     fn disconnected(&mut self) {
         self.runtime.disconnected();
         self.prompt = None;
+        self.attachment_files.clear();
     }
 }
 
@@ -649,6 +655,38 @@ fn params(request: impl Serialize) -> Result<Value, Problem> {
             format!("Could not encode the Antigravity request: {error}"),
         )
     })
+}
+
+fn attachment_prompt(
+    text: String,
+    attachments: Vec<ChatAttachmentContent>,
+) -> io::Result<(Vec<acp::ContentBlock>, Option<AttachmentFiles>)> {
+    let mut prompt = Vec::new();
+    let mut files = None;
+    if !text.is_empty() {
+        prompt.push(text.into());
+    }
+    for attachment in attachments {
+        if let Some(url) = attachment.image_data_url() {
+            let (mime_type, data) = url
+                .strip_prefix("data:")
+                .and_then(|url| url.split_once(";base64,"))
+                .ok_or(io::ErrorKind::InvalidData)?;
+            prompt.push(acp::ContentBlock::Image(acp::ImageContent::new(
+                data, mime_type,
+            )));
+        } else {
+            let files = match &files {
+                Some(files) => files,
+                None => files.insert(AttachmentFiles::new()?),
+            };
+            let path = files.materialize(&attachment)?;
+            let path = path.to_str().ok_or(io::ErrorKind::InvalidData)?;
+            let reference = json!({"name": attachment.name(), "path": path});
+            prompt.push(format!("Read this Chat attachment snapshot: {reference}").into());
+        }
+    }
+    Ok((prompt, files))
 }
 
 impl AcpRuntime {
@@ -706,6 +744,8 @@ impl AcpRuntime {
                 "Antigravity did not negotiate ACP v1",
             ));
         }
+        self.connection.state().peer.image_input =
+            hello.agent_capabilities.prompt_capabilities.image;
         let folder = request.working_directory;
         match &request.session {
             SessionStart::New => {
@@ -924,22 +964,54 @@ pub(super) async fn open(
 
 #[async_trait]
 impl HarnessRuntime for AcpRuntime {
+    fn supports_image_input(&self) -> Option<bool> {
+        Some(self.connection.state().peer.image_input)
+    }
+
     async fn submit(&self, submission: Submission) -> DispatchOutcome {
+        let Submission {
+            submission,
+            generation,
+            kind,
+            text,
+            attachments,
+        } = submission;
         let rpc = &self.connection;
-        if let Err(refusal) = rpc.check_generation(submission.generation) {
+        if let Err(refusal) = rpc.check_generation(generation) {
             return DispatchOutcome::NotSent(refusal);
         }
+        let (prompt, files) = if attachments.is_empty() {
+            (vec![text.into()], None)
+        } else {
+            if self.supports_image_input() == Some(false)
+                && attachments.iter().any(ChatAttachmentContent::is_image)
+            {
+                return DispatchOutcome::NotSent(Refusal::ImageInputUnsupported);
+            }
+            let prepared = tokio::task::spawn_blocking(move || {
+                attachment_prompt(text, attachments).inspect_err(|error| {
+                    tracing::warn!(error_kind = %error.kind(), "chat attachment handoff failed");
+                })
+            })
+            .await;
+            let Ok(Ok(prepared)) = prepared else {
+                return DispatchOutcome::NotSent(Refusal::AttachmentUnavailable);
+            };
+            prepared
+        };
         let result = rpc
             .send_request("session/prompt", |session| {
-                session.runtime.check_submission(&submission.kind, false)?;
+                session.runtime.check_submission(&kind, false)?;
                 let id = session.id.clone().ok_or(Refusal::RuntimeClosed)?;
-                let request =
-                    acp::PromptRequest::new(id, vec![acp::ContentBlock::from(submission.text)]);
+                let request = acp::PromptRequest::new(id, prompt);
                 let params = params(request).map_err(|_| Refusal::Unsupported)?;
+                if let Some(files) = files {
+                    session.attachment_files.push(files);
+                }
                 let turn = NativeTurnId::new(uuid::Uuid::new_v4().to_string());
                 session.runtime.turn_started(&turn);
-                session.runtime.submission_written(&submission.submission);
-                session.prompt = Some(Prompt::new(turn.clone(), submission.submission));
+                session.runtime.submission_written(&submission);
+                session.prompt = Some(Prompt::new(turn.clone(), submission));
                 Ok((params, Call::Prompt(turn)))
             })
             .await;

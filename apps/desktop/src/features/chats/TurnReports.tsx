@@ -27,13 +27,13 @@ import { useCopy } from "@/components/ui/use-copy";
 import { MarkdownDocument } from "@/features/markdown/MarkdownDocument";
 import type { ChangedFile, PlanStep, ItemOf } from "@/features/chats/client";
 import { duration } from "@/features/chats/model";
+import { PathText } from "@/features/chats/FileName";
 import {
   currentStep,
   fileCounts,
   fileKind,
   fileLabel,
   filesSummary,
-  shortenedPath,
   planCount,
   reasoningShown,
   reasoningWords,
@@ -286,7 +286,9 @@ function FileRow({
   const words = (
     <>
       <File size={16} aria-hidden />
-      <span className="chat-file-path">{shortenedPath(file.path)}</span>
+      <span className="chat-file-path">
+        <PathText path={file.path} />
+      </span>
       {kind && (
         <span
           className="chat-file-kind"
@@ -307,7 +309,9 @@ function FileRow({
     <li>
       <div className="chat-file">
         {file.kind === "deleted" ? (
-          <div className="chat-file-main">{words}</div>
+          <Tooltip content={file.path}>
+            <div className="chat-file-main">{words}</div>
+          </Tooltip>
         ) : (
           // A plain row, not a Button: the whole file row is the target.
           <Tooltip content={file.path}>

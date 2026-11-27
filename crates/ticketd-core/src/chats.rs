@@ -6,15 +6,18 @@
 //! terminal outcome are separate writes, so a saved message is never mistaken for a
 //! delivered or completed one. Nothing here dispatches work.
 
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 
 use rusqlite::{Connection, OptionalExtension, Row, params, types::Type};
 use serde::{Deserialize, Serialize, de::DeserializeOwned};
 use serde_json::{Value, json};
+use sha2::{Digest, Sha256};
 use uuid::Uuid;
 
 use crate::{Error, Workspace};
 
+pub(crate) mod attachments;
+pub use attachments::{ChatAttachment, ChatAttachmentContent};
 mod receipt;
 pub use receipt::ChatTurnReceipt;
 #[cfg(test)]
@@ -204,7 +207,7 @@ pub(crate) fn migrate_turn_ending(connection: &Connection) -> Result<(), Error> 
     Ok(())
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum ChatLinkKind {
     Project,
@@ -242,6 +245,20 @@ pub struct NewChat {
     pub folder_managed: bool,
     #[serde(default)]
     pub links: Vec<ChatLink>,
+}
+
+/// Option IDs the person requested for the first session, including explicit defaults.
+#[derive(Debug, Clone, Copy, Default, Serialize)]
+pub struct ChatStartPicks<'a> {
+    pub model: Option<&'a str>,
+    pub effort: Option<&'a str>,
+    pub permission: Option<&'a str>,
+}
+
+pub enum ChatCreationReplay {
+    Exact(Chat),
+    /// A saved request from before the requested settings were recorded.
+    Legacy(Chat),
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -393,13 +410,49 @@ pub struct ChatMessage {
     pub position: i64,
     pub role: ChatRole,
     pub text: String,
+    #[serde(default)]
+    pub attachments: Vec<ChatAttachment>,
     /// False for assistant text still streaming or cut short by a crash.
     pub complete: bool,
     pub turn_id: Option<String>,
     /// User input with no submission that may have reached the harness.
     pub queued: bool,
+    /// Kept for draft recovery and excluded from dispatch while the edit is held.
+    #[serde(default)]
+    pub editing: bool,
+    /// User input needs linked-record context before dispatch.
+    #[serde(default)]
+    pub requires_link_context: bool,
     pub attempts: Vec<ChatSubmissionAttempt>,
     pub created_at: String,
+}
+
+/// A saved request can outlive its queued message.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ChatInputReceipt {
+    pub id: String,
+    pub message: Option<ChatMessage>,
+}
+
+/// The held messages a queued edit replaces and its complete set of links.
+#[derive(Debug, Clone)]
+pub struct ChatQueueEdit {
+    pub replaces: Vec<String>,
+    pub links: Vec<ChatLink>,
+}
+
+/// Links to add when saving input, or a queued edit that also consumes held messages.
+#[derive(Debug)]
+pub enum ChatInputChange {
+    Link(Vec<ChatLink>),
+    Edit(ChatQueueEdit),
+}
+
+impl ChatInputReceipt {
+    pub fn into_message(self) -> Result<ChatMessage, Error> {
+        self.message
+            .ok_or_else(|| invalid("saved input is missing"))
+    }
 }
 
 /// Where user input stands, read from all of its attempts and the person's decisions
@@ -815,11 +868,16 @@ fn trim(connection: &Connection, chat_id: &str) -> Result<(), Error> {
             "DELETE FROM chat_changes WHERE chat_id = ?1 AND sequence <= ?2",
             params![chat_id, cut],
         )?;
-        connection.execute(
-            "UPDATE chats SET changes_trimmed_through = ?2 WHERE id = ?1",
-            params![chat_id, cut],
-        )?;
+        advance_change_floor(connection, chat_id, cut)?;
     }
+    Ok(())
+}
+
+fn advance_change_floor(connection: &Connection, chat_id: &str, cut: i64) -> Result<(), Error> {
+    connection.execute(
+        "UPDATE chats SET changes_trimmed_through = MAX(changes_trimmed_through, ?2) WHERE id = ?1",
+        params![chat_id, cut],
+    )?;
     Ok(())
 }
 
@@ -886,6 +944,14 @@ fn list_scope(filter: ChatListFilter) -> &'static str {
 const LIST_ORDER: &str =
     "(SELECT MAX(sequence) FROM chat_changes WHERE chat_id = chats.id) DESC, id";
 
+/// Saved input that can be queued, including an original held for editing.
+pub(crate) const QUEUED_CHAT_INPUT: &str = "m.role = 'user'
+    AND NOT EXISTS (
+        SELECT 1 FROM chat_submission_attempts a WHERE a.message_id = m.id
+        AND (a.delivery IN ('possible', 'acknowledged', 'uncertain')
+             OR a.turn_id IS NOT NULL OR a.decision = 'discarded')
+    )";
+
 fn read_chat(connection: &Connection, id: &str) -> Result<Chat, Error> {
     let mut chat = connection
         .prepare_cached(&format!("SELECT {CHAT_COLUMNS} FROM chats WHERE id = ?1"))?
@@ -915,7 +981,7 @@ fn read_chat(connection: &Connection, id: &str) -> Result<Chat, Error> {
 fn read_message(connection: &Connection, id: &str) -> Result<Option<ChatMessage>, Error> {
     let message = connection
         .query_row(
-            "SELECT id, position, role, text, complete, turn_id, created_at FROM chat_messages WHERE id = ?1",
+            "SELECT id, position, role, text, complete, turn_id, created_at, editing, requires_link_context FROM chat_messages WHERE id = ?1",
             [id],
             |row| {
                 Ok(ChatMessage {
@@ -923,10 +989,13 @@ fn read_message(connection: &Connection, id: &str) -> Result<Option<ChatMessage>
                     position: row.get(1)?,
                     role: named(row, 2)?,
                     text: row.get(3)?,
+                    attachments: Vec::new(),
                     complete: row.get(4)?,
                     turn_id: row.get(5)?,
                     created_at: row.get(6)?,
                     queued: false,
+                    editing: row.get(7)?,
+                    requires_link_context: row.get(8)?,
                     attempts: Vec::new(),
                 })
             },
@@ -935,6 +1004,9 @@ fn read_message(connection: &Connection, id: &str) -> Result<Option<ChatMessage>
     let Some(mut message) = message else {
         return Ok(None);
     };
+    if message.role == ChatRole::User {
+        message.attachments = attachments::list(connection, id)?;
+    }
     let mut statement = connection.prepare(
         "SELECT id, intent, delivery, turn_id, detail, recorded_at, decision FROM chat_submission_attempts WHERE message_id = ?1 ORDER BY rowid",
     )?;
@@ -1113,6 +1185,19 @@ fn add_link(connection: &Connection, chat_id: &str, link: &ChatLink) -> Result<b
     Ok(true)
 }
 
+fn add_links(connection: &Connection, id: &str, links: &[ChatLink]) -> Result<bool, Error> {
+    read_chat(connection, id)?;
+    let mut added = false;
+    for link in links {
+        added |= add_link(connection, id, link)?;
+    }
+    if added {
+        log(connection, id, "chat", id)?;
+        trim(connection, id)?;
+    }
+    Ok(added)
+}
+
 /// Runs `create` once per command ID and returns the ID of the record it created.
 /// A command ID deduplicates this ticketd write only; it promises nothing about the harness.
 /// Creates a Chat in the caller's transaction. Repeating `command_id` with the same
@@ -1122,10 +1207,19 @@ pub(crate) fn create_chat_in(
     command_id: Option<&str>,
     chat: NewChat,
 ) -> Result<Chat, Error> {
+    let request = create_chat_request(&chat);
+    create_chat_with_request(connection, command_id, chat, request)
+}
+
+fn create_chat_with_request(
+    connection: &Connection,
+    command_id: Option<&str>,
+    chat: NewChat,
+    request: Value,
+) -> Result<Chat, Error> {
     if chat.harness.trim().is_empty() || chat.execution_folder.trim().is_empty() {
         return Err(invalid("a Chat needs a harness and an execution folder"));
     }
-    let request = json!({"operation": "create_chat", "chat": &chat});
     let id = once(connection, command_id, request, || {
         let id = Uuid::new_v4().to_string();
         let title = chat
@@ -1146,6 +1240,64 @@ pub(crate) fn create_chat_in(
     read_chat(connection, &id)
 }
 
+fn create_chat_request(chat: &NewChat) -> Value {
+    json!({"operation": "create_chat", "chat": chat})
+}
+
+fn creation_requests(
+    chat: &NewChat,
+    picks: ChatStartPicks<'_>,
+    text: &str,
+    files: &[ChatAttachmentContent],
+) -> (Value, Value, Value) {
+    let legacy = create_chat_request(chat);
+    let mut settings_only = legacy.clone();
+    settings_only["start_picks"] = json!(picks);
+    let mut request = settings_only.clone();
+    request["first_message"] = json!({
+        "text_sha256": format!("{:x}", Sha256::digest(text.as_bytes())),
+        "attachments": files.iter().map(ChatAttachmentContent::identity).collect::<Vec<_>>(),
+    });
+    (request, settings_only, legacy)
+}
+
+fn replay_chat_creation(
+    connection: &Connection,
+    command_id: &str,
+    request: &Value,
+    settings_only: &Value,
+    legacy: &Value,
+) -> Result<Option<ChatCreationReplay>, Error> {
+    let Some((stored, outcome)) = request_outcome(connection, command_id)? else {
+        return Ok(None);
+    };
+    let request = request.to_string();
+    let settings_only = settings_only.to_string();
+    let legacy = legacy.to_string();
+    let replay = if stored == request || stored == settings_only {
+        ChatCreationReplay::Exact
+    } else if stored == legacy {
+        ChatCreationReplay::Legacy
+    } else {
+        return Err(Error::RequestConflict(command_id.to_owned()));
+    };
+    let id: String = serde_json::from_str(&outcome)?;
+    Ok(Some(replay(read_chat(connection, &id)?)))
+}
+
+fn request_outcome(
+    connection: &Connection,
+    command_id: &str,
+) -> Result<Option<(String, String)>, Error> {
+    Ok(connection
+        .query_row(
+            "SELECT request, outcome FROM request_outcomes WHERE id = ?1",
+            [command_id],
+            |row| Ok((row.get(0)?, row.get(1)?)),
+        )
+        .optional()?)
+}
+
 fn once(
     connection: &Connection,
     command_id: Option<&str>,
@@ -1156,25 +1308,301 @@ fn once(
         return create();
     };
     let request = request.to_string();
-    let stored: Option<(String, String)> = connection
-        .query_row(
-            "SELECT request, outcome FROM request_outcomes WHERE id = ?1",
-            [command_id],
-            |row| Ok((row.get(0)?, row.get(1)?)),
-        )
-        .optional()?;
-    if let Some((previous, outcome)) = stored {
+    if let Some(id) = previous_outcome(connection, command_id, &request)? {
+        return Ok(id);
+    }
+    let id = create()?;
+    save_outcome(connection, command_id, &request, &id)?;
+    Ok(id)
+}
+
+fn save_outcome(
+    connection: &Connection,
+    command_id: &str,
+    request: &str,
+    outcome: &str,
+) -> Result<(), Error> {
+    connection.execute(
+        "INSERT INTO request_outcomes (id, request, outcome) VALUES (?1, ?2, ?3)",
+        params![command_id, request, serde_json::to_string(outcome)?],
+    )?;
+    Ok(())
+}
+
+fn previous_outcome(
+    connection: &Connection,
+    command_id: &str,
+    request: &str,
+) -> Result<Option<String>, Error> {
+    if let Some((previous, outcome)) = request_outcome(connection, command_id)? {
         if previous != request {
             return Err(Error::RequestConflict(command_id.to_owned()));
         }
-        return Ok(serde_json::from_str(&outcome)?);
+        return Ok(Some(serde_json::from_str(&outcome)?));
     }
-    let id = create()?;
+    Ok(None)
+}
+
+const AUTOMATION_PROMPT_REQUEST_SUFFIX: &str = ":first";
+
+fn automation_prompt_command_id(chat_id: &str) -> String {
+    format!("{chat_id}{AUTOMATION_PROMPT_REQUEST_SUFFIX}")
+}
+
+enum AutomationPromptReceipt {
+    Marked(String),
+    Unmarked(String),
+}
+
+fn automation_prompt_receipt(
+    connection: &Connection,
+    chat_id: &str,
+) -> Result<Option<AutomationPromptReceipt>, Error> {
+    Ok(connection
+        .query_row(
+            "SELECT json_extract(outcome, '$'), json_type(request, '$.input_source') IS NOT NULL
+             FROM request_outcomes
+             WHERE id = ?1 AND json_extract(request, '$.operation') = 'save_chat_input'
+                 AND json_extract(request, '$.chat_id') = ?2
+                 AND (json_type(request, '$.input_source') IS NULL
+                      OR json_extract(request, '$.input_source') = 'automation_prompt')",
+            params![automation_prompt_command_id(chat_id), chat_id],
+            |row| {
+                let id = row.get(0)?;
+                Ok(if row.get(1)? {
+                    AutomationPromptReceipt::Marked(id)
+                } else {
+                    AutomationPromptReceipt::Unmarked(id)
+                })
+            },
+        )
+        .optional()?)
+}
+
+#[derive(Clone, Copy, Default)]
+struct InputReplacement<'a> {
+    replaces: &'a [String],
+    links: &'a [ChatLink],
+}
+
+impl<'a> InputReplacement<'a> {
+    fn for_edit(edit: Option<&'a ChatQueueEdit>) -> Result<Self, Error> {
+        match edit {
+            Some(edit) if edit.replaces.is_empty() => {
+                Err(invalid("choose a queued message to edit"))
+            }
+            Some(edit) => Ok(Self {
+                replaces: &edit.replaces,
+                links: &edit.links,
+            }),
+            None => Ok(Self::default()),
+        }
+    }
+
+    fn for_change(change: Option<&'a ChatInputChange>) -> Result<Self, Error> {
+        match change {
+            Some(ChatInputChange::Link(links)) => Ok(Self {
+                links,
+                ..Self::default()
+            }),
+            Some(ChatInputChange::Edit(edit)) => Self::for_edit(Some(edit)),
+            None => Ok(Self::default()),
+        }
+    }
+}
+
+/// Input and its receipt identity, prepared together before the durable write.
+/// The borrowed input cannot change between preparation and save.
+pub struct PreparedChatInput<'a> {
+    chat_id: &'a str,
+    text: &'a str,
+    files: &'a [ChatAttachmentContent],
+    replacement: InputReplacement<'a>,
+    request: Option<(&'a str, Value)>,
+}
+
+impl<'a> PreparedChatInput<'a> {
+    pub fn new(
+        command_id: Option<&'a str>,
+        chat_id: &'a str,
+        text: &'a str,
+        files: &'a [ChatAttachmentContent],
+        change: Option<&'a ChatInputChange>,
+    ) -> Result<Self, Error> {
+        Self::for_replacement(
+            command_id,
+            chat_id,
+            text,
+            files,
+            InputReplacement::for_change(change)?,
+        )
+    }
+
+    fn for_replacement(
+        command_id: Option<&'a str>,
+        chat_id: &'a str,
+        text: &'a str,
+        files: &'a [ChatAttachmentContent],
+        replacement: InputReplacement<'a>,
+    ) -> Result<Self, Error> {
+        if !replacement.replaces.is_empty() && command_id.is_none() {
+            return Err(invalid("Editing queued input requires a command ID"));
+        }
+        let request = command_id
+            .map(|id| {
+                save_input_request(chat_id, text, files, replacement).map(|request| (id, request))
+            })
+            .transpose()?;
+        Ok(Self {
+            chat_id,
+            text,
+            files,
+            replacement,
+            request,
+        })
+    }
+}
+
+fn validate_legacy_input_links(
+    connection: &Connection,
+    command_id: &str,
+    request: &Value,
+) -> Result<bool, Error> {
+    let key = format!("chat_queue_edit_links:{command_id}");
+    if let Some((previous, _)) = request_outcome(connection, &key)? {
+        let previous: Value = serde_json::from_str(&previous)?;
+        // A public request could use this ID even before the prefix was used for links.
+        if previous["operation"] == "chat_queue_edit_links" {
+            if previous["chat_id"] != request["chat_id"]
+                || previous["links"] != sorted_input_links(request)
+            {
+                return Err(Error::RequestConflict(command_id.to_owned()));
+            }
+            return Ok(true);
+        }
+    }
+    Ok(false)
+}
+
+fn read_input_receipt(
+    connection: &Connection,
+    command_id: &str,
+    request: &Value,
+    chat_id: &str,
+    source: InputSource<'_>,
+) -> Result<Option<ChatInputReceipt>, Error> {
+    let Some((previous, outcome)) = request_outcome(connection, command_id)? else {
+        // Some older versions could save links before saving the input.
+        validate_legacy_input_links(connection, command_id, request)?;
+        return Ok(None);
+    };
+    let mut previous: Value = serde_json::from_str(&previous)?;
+    let Some(fields) = previous.as_object_mut() else {
+        return Err(Error::RequestConflict(command_id.to_owned()));
+    };
+    let saved_source = fields.remove("input_source");
+    let links_ordered = fields.remove("links_ordered") == Some(Value::Bool(true));
+    let split_links_receipt = !fields.contains_key("links");
+    if !links_ordered {
+        // Older receipts remembered the set of links, discarding their insertion order.
+        if !split_links_receipt && fields.get("links") != Some(&sorted_input_links(request)) {
+            return Err(Error::RequestConflict(command_id.to_owned()));
+        }
+        fields.insert("links".to_owned(), request["links"].clone());
+    }
+    if previous != *request {
+        return Err(Error::RequestConflict(command_id.to_owned()));
+    }
+    if split_links_receipt
+        && !validate_legacy_input_links(connection, command_id, request)?
+        && request["links"] != json!([])
+    {
+        return Err(Error::RequestConflict(command_id.to_owned()));
+    }
+    let same_source = match (saved_source.as_ref(), source) {
+        // Old receipts cannot prove a takeover. While the Chat still has an owner,
+        // let only a new command ID initiate one.
+        (None, InputSource::AutomationReply) => {
+            crate::automation_runs::chat_owner(connection, chat_id)?.is_none()
+        }
+        // A historical receipt can recover ordinary input but cannot authorize a Prompt.
+        (None, InputSource::AutomationPrompt(_)) => false,
+        (None, InputSource::Person) => true,
+        // A lost takeover reply can be retried through the now ordinary Chat.
+        (Some(saved), InputSource::Person) if saved == "automation_reply" => {
+            crate::automation_runs::chat_owner(connection, chat_id)?.is_none()
+        }
+        (Some(saved), _) => saved == source.receipt_name(),
+    };
+    if !same_source {
+        return Err(Error::RequestConflict(command_id.to_owned()));
+    }
+    let id: String = serde_json::from_str(&outcome)?;
+    let message = read_message(connection, &id)?;
+    Ok(Some(ChatInputReceipt { id, message }))
+}
+
+fn sorted_input_links(request: &Value) -> Value {
+    let mut links = request["links"].as_array().cloned().unwrap_or_default();
+    links.sort_unstable_by(|left, right| {
+        [left[0].as_str(), left[1].as_str()].cmp(&[right[0].as_str(), right[1].as_str()])
+    });
+    Value::Array(links)
+}
+
+#[derive(Clone, Copy)]
+enum InputSource<'a> {
+    Person,
+    AutomationReply,
+    AutomationPrompt(&'a str),
+}
+
+impl InputSource<'_> {
+    fn receipt_name(self) -> &'static str {
+        match self {
+            Self::Person => "person",
+            Self::AutomationReply => "automation_reply",
+            Self::AutomationPrompt(_) => "automation_prompt",
+        }
+    }
+}
+
+fn save_input_request(
+    chat_id: &str,
+    text: &str,
+    files: &[ChatAttachmentContent],
+    replacement: InputReplacement<'_>,
+) -> Result<Value, Error> {
+    let InputReplacement { links, replaces } = replacement;
+    let mut seen = HashSet::new();
+    let links = links
+        .iter()
+        .filter(|link| seen.insert((link.kind, link.id.as_str())))
+        .map(|link| Ok((name(link.kind)?, link.id.as_str())))
+        .collect::<Result<Vec<_>, Error>>()?;
+    let mut request = json!({
+        "operation": "save_chat_input",
+        "chat_id": chat_id,
+        "text": text,
+        "links": links,
+    });
+    if !files.is_empty() {
+        request["attachments"] =
+            Value::Array(files.iter().map(ChatAttachmentContent::identity).collect());
+    }
+    if !replaces.is_empty() {
+        request["replaces"] = json!(replaces);
+    }
+    Ok(request)
+}
+
+fn delete_queued_input(connection: &Connection, message_id: &str) -> Result<(), Error> {
     connection.execute(
-        "INSERT INTO request_outcomes (id, request, outcome) VALUES (?1, ?2, ?3)",
-        params![command_id, request, serde_json::to_string(&id)?],
+        "DELETE FROM chat_submission_attempts WHERE message_id = ?1",
+        [message_id],
     )?;
-    Ok(id)
+    connection.execute("DELETE FROM chat_messages WHERE id = ?1", [message_id])?;
+    Ok(())
 }
 
 /// The last `CHAT_TOOL_OUTPUT_LIMIT` bytes of `output`, and whether its start was dropped.
@@ -1589,6 +2017,89 @@ fn require_input(
         .ok_or_else(not_input)
 }
 
+fn owns_running_chat(connection: &Connection, chat_id: &str, run_id: &str) -> Result<bool, Error> {
+    Ok(connection.query_row(
+        "SELECT EXISTS(SELECT 1 FROM chats JOIN automation_runs
+              ON automation_runs.id = chats.automation_run_id
+              WHERE chats.id = ?1 AND automation_runs.id = ?2
+              AND automation_runs.status = 'running')",
+        params![chat_id, run_id],
+        |row| row.get(0),
+    )?)
+}
+
+fn set_aside_input(
+    connection: &Connection,
+    chat_id: &str,
+    message_id: &str,
+    move_from_queue: bool,
+) -> Result<(), Error> {
+    connection.execute(
+        "INSERT INTO chat_submission_attempts (id, chat_id, message_id, intent, delivery, decision) VALUES (?1, ?2, ?3, ?4, 'not_delivered', 'discarded')",
+        params![
+            uuid::Uuid::new_v4().to_string(),
+            chat_id,
+            message_id,
+            name(ChatSubmissionIntent::NewTurn)?
+        ],
+    )?;
+    let sequence = log(connection, chat_id, "message", message_id)?;
+    if move_from_queue {
+        connection.execute(
+            "UPDATE chat_messages SET position = ?1 WHERE id = ?2",
+            params![sequence, message_id],
+        )?;
+    }
+    Ok(())
+}
+
+/// The marked receipt identifies the Prompt before its supervisor returns the save
+/// outcome. Late delivery evidence still takes precedence.
+pub(crate) fn set_aside_taken_over_prompt(
+    connection: &Connection,
+    chat_id: &str,
+) -> Result<(), Error> {
+    let id = match automation_prompt_receipt(connection, chat_id)? {
+        Some(AutomationPromptReceipt::Marked(id)) => id,
+        Some(AutomationPromptReceipt::Unmarked(id)) => {
+            // The ID alone cannot distinguish the person's input from an old Prompt.
+            // Keep the row for review without automatically dispatching it on takeover.
+            if read_message(connection, &id)?.is_some_and(|message| message.queued) {
+                connection.execute("UPDATE chats SET queue_paused = 1 WHERE id = ?1", [chat_id])?;
+            }
+            return Ok(());
+        }
+        None => return Ok(()),
+    };
+    let Some(message) = read_message(connection, &id)? else {
+        return Ok(());
+    };
+    match message.standing() {
+        ChatInputStanding::Delivered | ChatInputStanding::SetAside => return Ok(()),
+        ChatInputStanding::AwaitsDecision => {
+            decide(
+                connection,
+                chat_id,
+                &message,
+                ChatDeliveryDecision::Discarded,
+            )?;
+        }
+        ChatInputStanding::Queued => set_aside_input(connection, chat_id, &id, true)?,
+        ChatInputStanding::Sending => set_aside_input(connection, chat_id, &id, false)?,
+    }
+    observe(
+        connection,
+        chat_id,
+        ChatObservation::Notice {
+            notice_id: Uuid::new_v4().to_string(),
+            text: "You took this run over.".to_owned(),
+            from_harness: false,
+        },
+        None,
+    )?;
+    trim(connection, chat_id)
+}
+
 /// Records the person's decision on the submission of `message` whose delivery is
 /// still unknown. A later decision replaces an earlier one that was not carried out.
 fn decide(
@@ -1724,6 +2235,61 @@ impl Workspace {
     /// Create a Chat. Repeating `command_id` with the same content returns the first Chat.
     pub fn create_chat(&mut self, command_id: Option<&str>, chat: NewChat) -> Result<Chat, Error> {
         self.chat_write(|connection| create_chat_in(connection, command_id, chat))
+    }
+
+    /// Whether the command already has a receipt, so a replay can decode attachments
+    /// against the backup limit even if the Workspace upload limit has since fallen.
+    pub fn has_chat_creation_receipt(&self, command_id: &str) -> Result<bool, Error> {
+        Ok(self.connection.query_row(
+            "SELECT EXISTS(SELECT 1 FROM request_outcomes WHERE id = ?1)",
+            [command_id],
+            |row| row.get(0),
+        )?)
+    }
+
+    /// Finds the Chat created by this request without starting a new write.
+    pub fn replay_chat_creation(
+        &self,
+        command_id: &str,
+        chat: &NewChat,
+        picks: ChatStartPicks<'_>,
+        text: &str,
+        files: &[ChatAttachmentContent],
+    ) -> Result<Option<ChatCreationReplay>, Error> {
+        let (request, settings_only, legacy) = creation_requests(chat, picks, text, files);
+        crate::read_scope::run(&self.connection, |connection| {
+            replay_chat_creation(connection, command_id, &request, &settings_only, &legacy)
+        })
+    }
+
+    /// Binds the selected settings and first input before the host prepares the
+    /// execution folder and saves the input itself.
+    pub fn create_chat_for_first_message(
+        &mut self,
+        command_id: &str,
+        chat: NewChat,
+        picks: ChatStartPicks<'_>,
+        text: &str,
+        files: &[ChatAttachmentContent],
+    ) -> Result<Chat, Error> {
+        let (request, settings_only, legacy) = creation_requests(&chat, picks, text, files);
+        self.chat_write(|connection| {
+            if let Some(ChatCreationReplay::Exact(chat) | ChatCreationReplay::Legacy(chat)) =
+                replay_chat_creation(connection, command_id, &request, &settings_only, &legacy)?
+            {
+                return Ok(chat);
+            }
+            if text.trim().is_empty() && files.is_empty() {
+                return Err(invalid("Chat input must not be empty"));
+            }
+            if !files.is_empty() {
+                let limit = crate::attachments::upload_limit(connection)?;
+                for file in files {
+                    file.ensure_fits(limit)?;
+                }
+            }
+            create_chat_with_request(connection, Some(command_id), chat, request)
+        })
     }
 
     pub fn chat(&self, id: &str) -> Result<Chat, Error> {
@@ -1939,18 +2505,7 @@ impl Workspace {
     /// Adds a message's new links together. Existing links are allowed, including
     /// those to Projects archived since they were linked.
     pub fn add_chat_links(&mut self, id: &str, links: &[ChatLink]) -> Result<bool, Error> {
-        self.chat_write(|connection| {
-            read_chat(connection, id)?;
-            let mut added = false;
-            for link in links {
-                added |= add_link(connection, id, link)?;
-            }
-            if added {
-                log(connection, id, "chat", id)?;
-                trim(connection, id)?;
-            }
-            Ok(added)
-        })
+        self.chat_write(|connection| add_links(connection, id, links))
     }
 
     /// Archive hides a Chat; it does not stop its work or change its queue.
@@ -2107,43 +2662,446 @@ impl Workspace {
         chat_id: &str,
         text: &str,
     ) -> Result<ChatMessage, Error> {
-        if text.trim().is_empty() {
-            return Err(invalid("Chat input must not be empty"));
-        }
+        self.save_chat_input_with_attachments(command_id, chat_id, text, &[])
+    }
+
+    pub fn save_chat_input_with_attachments(
+        &mut self,
+        command_id: Option<&str>,
+        chat_id: &str,
+        text: &str,
+        files: &[ChatAttachmentContent],
+    ) -> Result<ChatMessage, Error> {
+        self.save_chat_input_replacing(command_id, chat_id, text, files, &[])?
+            .into_message()
+    }
+
+    /// Save edited input and consume its held originals in the same transaction.
+    pub fn save_chat_input_replacing(
+        &mut self,
+        command_id: Option<&str>,
+        chat_id: &str,
+        text: &str,
+        files: &[ChatAttachmentContent],
+        replaces: &[String],
+    ) -> Result<ChatInputReceipt, Error> {
+        let (receipt, _, _) = self.save_input(
+            command_id,
+            chat_id,
+            text,
+            files,
+            InputReplacement {
+                replaces,
+                ..InputReplacement::default()
+            },
+            InputSource::Person,
+        )?;
+        Ok(receipt)
+    }
+
+    /// Applies the edited links and saves the input in the same write. Returns
+    /// whether new links were added so the host can refresh a running session.
+    pub fn save_chat_input_with_edit(
+        &mut self,
+        command_id: Option<&str>,
+        chat_id: &str,
+        text: &str,
+        files: &[ChatAttachmentContent],
+        edit: Option<&ChatQueueEdit>,
+    ) -> Result<(ChatInputReceipt, bool), Error> {
+        let (receipt, _, links_changed) = self.save_input(
+            command_id,
+            chat_id,
+            text,
+            files,
+            InputReplacement::for_edit(edit)?,
+            InputSource::Person,
+        )?;
+        Ok((receipt, links_changed))
+    }
+
+    /// Saves a message and its links together, including queued edits.
+    pub fn save_chat_input_with_change(
+        &mut self,
+        command_id: Option<&str>,
+        chat_id: &str,
+        text: &str,
+        files: &[ChatAttachmentContent],
+        change: Option<&ChatInputChange>,
+    ) -> Result<(ChatInputReceipt, bool), Error> {
+        let (receipt, _, links_changed) = self.save_input(
+            command_id,
+            chat_id,
+            text,
+            files,
+            InputReplacement::for_change(change)?,
+            InputSource::Person,
+        )?;
+        Ok((receipt, links_changed))
+    }
+
+    /// Saves a person's reply with the takeover of the run that owns the Chat.
+    /// Both writes succeed together. Replaying an existing save leaves ownership alone.
+    pub fn save_automation_chat_reply(
+        &mut self,
+        command_id: Option<&str>,
+        chat_id: &str,
+        text: &str,
+        files: &[ChatAttachmentContent],
+        edit: Option<&ChatQueueEdit>,
+    ) -> Result<(ChatInputReceipt, Option<crate::AutomationRun>), Error> {
+        let (receipt, run, _) = self.save_input(
+            command_id,
+            chat_id,
+            text,
+            files,
+            InputReplacement::for_edit(edit)?,
+            InputSource::AutomationReply,
+        )?;
+        Ok((receipt, run))
+    }
+
+    pub fn save_automation_chat_reply_with_change(
+        &mut self,
+        command_id: Option<&str>,
+        chat_id: &str,
+        text: &str,
+        files: &[ChatAttachmentContent],
+        change: Option<&ChatInputChange>,
+    ) -> Result<(ChatInputReceipt, Option<crate::AutomationRun>), Error> {
+        self.save_prepared_automation_chat_reply(PreparedChatInput::new(
+            command_id, chat_id, text, files, change,
+        )?)
+    }
+
+    /// Saves the prepared reply and takes over the run in the same transaction.
+    pub fn save_prepared_automation_chat_reply(
+        &mut self,
+        reply: PreparedChatInput<'_>,
+    ) -> Result<(ChatInputReceipt, Option<crate::AutomationRun>), Error> {
+        let (receipt, run, _) = self.save_prepared_input(reply, InputSource::AutomationReply)?;
+        Ok((receipt, run))
+    }
+
+    /// The run's first Prompt may only be created while it still owns this Chat.
+    pub fn save_automation_chat_prompt(
+        &mut self,
+        chat_id: &str,
+        run_id: &str,
+        text: &str,
+    ) -> Result<ChatMessage, Error> {
+        let command_id = automation_prompt_command_id(chat_id);
+        self.save_input(
+            Some(&command_id),
+            chat_id,
+            text,
+            &[],
+            InputReplacement::default(),
+            InputSource::AutomationPrompt(run_id),
+        )?
+        .0
+        .into_message()
+    }
+
+    /// Whether the Prompt can still be dispatched for this running owner.
+    pub fn automation_chat_owned_by_run(&self, chat_id: &str, run_id: &str) -> Result<bool, Error> {
+        owns_running_chat(&self.connection, chat_id, run_id)
+    }
+
+    fn save_input(
+        &mut self,
+        command_id: Option<&str>,
+        chat_id: &str,
+        text: &str,
+        files: &[ChatAttachmentContent],
+        replacement: InputReplacement<'_>,
+        source: InputSource<'_>,
+    ) -> Result<(ChatInputReceipt, Option<crate::AutomationRun>, bool), Error> {
+        let input =
+            PreparedChatInput::for_replacement(command_id, chat_id, text, files, replacement)?;
+        self.save_prepared_input(input, source)
+    }
+
+    fn save_prepared_input(
+        &mut self,
+        input: PreparedChatInput<'_>,
+        source: InputSource<'_>,
+    ) -> Result<(ChatInputReceipt, Option<crate::AutomationRun>, bool), Error> {
+        let PreparedChatInput {
+            chat_id,
+            text,
+            files,
+            replacement,
+            request,
+        } = input;
+        let InputReplacement { replaces, links } = replacement;
+        let command_id = request.as_ref().map(|(id, _)| *id);
         self.chat_write(|connection| {
-            let request = json!({"operation": "save_chat_input", "chat_id": chat_id, "text": text});
-            let id = once(connection, command_id, request, || {
-                if read_chat(connection, chat_id)?.trashed {
-                    return Err(Error::ChatTrashed(chat_id.to_owned()));
+            if let InputSource::AutomationPrompt(run_id) = source
+                && !owns_running_chat(connection, chat_id, run_id)?
+            {
+                return Err(invalid("the run no longer owns this Chat"));
+            }
+            if let Some((command_id, request)) = &request
+                && let Some(receipt) = read_input_receipt(connection, command_id, request, chat_id, source)?
+            {
+                return Ok((receipt, None, false));
+            }
+            if !matches!(source, InputSource::AutomationPrompt(_))
+                && let Some(command_id) = command_id
+                && let Some(prompt_chat_id) = command_id.strip_suffix(AUTOMATION_PROMPT_REQUEST_SUFFIX)
+                && connection.query_row(
+                    "SELECT EXISTS(SELECT 1 FROM chats JOIN automation_runs
+                      ON automation_runs.id = chats.automation_run_id
+                      WHERE chats.id = ?1 AND automation_runs.status = 'running')",
+                    [prompt_chat_id],
+                    |row| row.get(0),
+                )?
+            {
+                return Err(Error::RequestConflict(command_id.to_owned()));
+            }
+            if text.trim().is_empty() && files.is_empty() {
+                return Err(invalid("Chat input must not be empty"));
+            }
+            if !files.is_empty() {
+                let limit = crate::attachments::upload_limit(connection)?;
+                for file in files {
+                    file.ensure_fits(limit)?;
                 }
-                let id = Uuid::new_v4().to_string();
-                let position = log(connection, chat_id, "message", &id)?;
-                connection.execute(
-                    "INSERT INTO chat_messages (id, chat_id, position, role, text, complete) VALUES (?1, ?2, ?3, 'user', ?4, 1)",
-                    params![id, chat_id, position, text],
-                )?;
-                trim(connection, chat_id)?;
-                Ok(id)
-            })?;
-            read_message(connection, &id)?.ok_or_else(|| invalid("saved input is missing"))
+            }
+            if read_chat(connection, chat_id)?.trashed {
+                return Err(Error::ChatTrashed(chat_id.to_owned()));
+            }
+            let mut requires_link_context = !links.is_empty();
+            for original in replaces {
+                let message = require_input(connection, chat_id, original)?;
+                if !message.queued || !message.editing {
+                    return Err(invalid("the original message is no longer held for editing"));
+                }
+                requires_link_context |= message.requires_link_context;
+                delete_queued_input(connection, original)?;
+            }
+            let links_changed = !links.is_empty() && add_links(connection, chat_id, links)?;
+            let run = if matches!(source, InputSource::AutomationReply) {
+                crate::automation_runs::take_over_chat(connection, chat_id, true)?
+            } else {
+                None
+            };
+            let id = Uuid::new_v4().to_string();
+            let position = log(connection, chat_id, "message", &id)?;
+            connection.execute(
+                "INSERT INTO chat_messages (id, chat_id, position, role, text, complete, requires_link_context) VALUES (?1, ?2, ?3, 'user', ?4, 1, ?5)",
+                params![id, chat_id, position, text, requires_link_context],
+            )?;
+            if !files.is_empty() {
+                attachments::save(connection, &id, files)?;
+            }
+            if !replaces.is_empty() {
+                // Older cursors may already contain a row just replaced.
+                advance_change_floor(connection, chat_id, position)?;
+            }
+            trim(connection, chat_id)?;
+            if let Some((command_id, mut request)) = request {
+                request["input_source"] = json!(source.receipt_name());
+                request["links_ordered"] = Value::Bool(true);
+                save_outcome(connection, command_id, &request.to_string(), &id)?;
+            }
+            let message = read_message(connection, &id)?;
+            Ok((ChatInputReceipt { id, message }, run, links_changed))
+        })
+    }
+
+    /// Reads the outcome of a person's previously saved input. A retry can succeed even
+    /// when the Chat has since become busy and would refuse new attachments.
+    pub fn replay_chat_input(
+        &self,
+        command_id: &str,
+        chat_id: &str,
+        text: &str,
+        files: &[ChatAttachmentContent],
+    ) -> Result<Option<ChatMessage>, Error> {
+        self.replay_chat_input_replacing(command_id, chat_id, text, files, &[])?
+            .map(ChatInputReceipt::into_message)
+            .transpose()
+    }
+
+    /// Whether an edited input was durably saved. This reads the receipt only, even
+    /// if the replacement message itself was later edited or removed.
+    pub fn chat_queue_edit_saved(&self, chat_id: &str, command_id: &str) -> Result<bool, Error> {
+        Ok(self.connection.query_row(
+            "SELECT EXISTS(SELECT 1 FROM request_outcomes WHERE id = ?1
+              AND json_extract(request, '$.operation') = 'save_chat_input'
+              AND json_extract(request, '$.chat_id') = ?2
+              AND json_array_length(request, '$.replaces') > 0)",
+            params![command_id, chat_id],
+            |row| row.get(0),
+        )?)
+    }
+
+    /// Confirms an exact edited send even if its saved replacement was later removed.
+    pub fn replay_chat_queue_edit(
+        &self,
+        command_id: &str,
+        chat_id: &str,
+        text: &str,
+        files: &[ChatAttachmentContent],
+        replaces: &[String],
+    ) -> Result<bool, Error> {
+        if replaces.is_empty() {
+            return Ok(false);
+        }
+        Ok(self
+            .replay_chat_input_replacing(command_id, chat_id, text, files, replaces)?
+            .is_some())
+    }
+
+    /// Reads the exact saved receipt even after its replacement row was withdrawn.
+    pub fn replay_chat_input_replacing(
+        &self,
+        command_id: &str,
+        chat_id: &str,
+        text: &str,
+        files: &[ChatAttachmentContent],
+        replaces: &[String],
+    ) -> Result<Option<ChatInputReceipt>, Error> {
+        self.replay_input(
+            command_id,
+            chat_id,
+            text,
+            files,
+            InputReplacement {
+                replaces,
+                ..InputReplacement::default()
+            },
+            InputSource::Person,
+        )
+    }
+
+    /// Validates a saved edit without taking the writer or reapplying links.
+    /// A historical save with no link receipt still replays its original outcome.
+    pub fn replay_chat_input_with_edit(
+        &self,
+        command_id: &str,
+        chat_id: &str,
+        text: &str,
+        files: &[ChatAttachmentContent],
+        edit: Option<&ChatQueueEdit>,
+    ) -> Result<Option<ChatInputReceipt>, Error> {
+        self.replay_input(
+            command_id,
+            chat_id,
+            text,
+            files,
+            InputReplacement::for_edit(edit)?,
+            InputSource::Person,
+        )
+    }
+
+    pub fn replay_chat_input_with_change(
+        &self,
+        command_id: &str,
+        chat_id: &str,
+        text: &str,
+        files: &[ChatAttachmentContent],
+        change: Option<&ChatInputChange>,
+    ) -> Result<Option<ChatInputReceipt>, Error> {
+        self.replay_input(
+            command_id,
+            chat_id,
+            text,
+            files,
+            InputReplacement::for_change(change)?,
+            InputSource::Person,
+        )
+    }
+
+    /// Replays an Automation takeover reply without taking over the run.
+    pub fn replay_automation_chat_reply_with_change(
+        &self,
+        command_id: &str,
+        chat_id: &str,
+        text: &str,
+        files: &[ChatAttachmentContent],
+        change: Option<&ChatInputChange>,
+    ) -> Result<Option<ChatInputReceipt>, Error> {
+        self.replay_input(
+            command_id,
+            chat_id,
+            text,
+            files,
+            InputReplacement::for_change(change)?,
+            InputSource::AutomationReply,
+        )
+    }
+
+    fn replay_input(
+        &self,
+        command_id: &str,
+        chat_id: &str,
+        text: &str,
+        files: &[ChatAttachmentContent],
+        replacement: InputReplacement<'_>,
+        source: InputSource<'_>,
+    ) -> Result<Option<ChatInputReceipt>, Error> {
+        let request = save_input_request(chat_id, text, files, replacement)?;
+        crate::read_scope::run(&self.connection, |connection| {
+            read_input_receipt(connection, command_id, &request, chat_id, source)
         })
     }
 
     /// Withdraw queued input the person no longer wants sent. Refused once a submission
     /// may have reached the harness: that input is history, not queue.
     pub fn withdraw_chat_input(&mut self, chat_id: &str, message_id: &str) -> Result<Chat, Error> {
-        self.update_chat(chat_id, |connection| {
-            let queued = owned(connection, "chat_messages", chat_id, message_id)?
-                && read_message(connection, message_id)?.is_some_and(|message| message.queued);
-            if !queued {
+        self.chat_write(|connection| {
+            read_chat(connection, chat_id)?;
+            let message = if owned(connection, "chat_messages", chat_id, message_id)? {
+                read_message(connection, message_id)?
+            } else {
+                None
+            };
+            let Some(message) = message.filter(|message| message.queued) else {
                 return Err(invalid("this input is not in the queue"));
+            };
+            delete_queued_input(connection, message_id)?;
+            let position = log(connection, chat_id, "chat", chat_id)?;
+            if message.editing {
+                advance_change_floor(connection, chat_id, position)?;
             }
-            connection.execute(
-                "DELETE FROM chat_submission_attempts WHERE message_id = ?1",
-                [message_id],
-            )?;
-            connection.execute("DELETE FROM chat_messages WHERE id = ?1", [message_id])?;
-            Ok(())
+            trim(connection, chat_id)?;
+            read_chat(connection, chat_id)
+        })
+    }
+
+    /// Holds queued input for editing without withdrawing its text and snapshots.
+    /// A retry returns the same outcome after a lost acknowledgement.
+    pub fn confirm_chat_queue_edit(
+        &mut self,
+        chat_id: &str,
+        message_id: &str,
+        transfer_id: &str,
+    ) -> Result<bool, Error> {
+        self.chat_write(|connection| {
+            let request = json!({
+                "operation": "confirm_chat_queue_edit",
+                "chat_id": chat_id,
+                "message_id": message_id,
+            });
+            let outcome = once(connection, Some(transfer_id), request, || {
+                let queued = owned(connection, "chat_messages", chat_id, message_id)?
+                    && read_message(connection, message_id)?.is_some_and(|message| message.queued);
+                if !queued {
+                    return Ok(String::new());
+                }
+                connection.execute(
+                    "UPDATE chat_messages SET editing = 1 WHERE id = ?1",
+                    [message_id],
+                )?;
+                log(connection, chat_id, "message", message_id)?;
+                log(connection, chat_id, "chat", chat_id)?;
+                trim(connection, chat_id)?;
+                Ok(message_id.to_owned())
+            })?;
+            Ok(!outcome.is_empty())
         })
     }
 
@@ -2157,45 +3115,60 @@ impl Workspace {
     ) -> Result<ChatMessage, Error> {
         self.chat_write(|connection| {
             let message = require_input(connection, chat_id, message_id)?;
-            if !message.queued {
+            if !message.queued || message.editing {
                 return Err(invalid("this input is not in the queue"));
             }
-            connection.execute(
-                "INSERT INTO chat_submission_attempts (id, chat_id, message_id, intent, delivery, decision) VALUES (?1, ?2, ?3, ?4, 'not_delivered', 'discarded')",
-                params![
-                    uuid::Uuid::new_v4().to_string(),
-                    chat_id,
-                    message_id,
-                    name(ChatSubmissionIntent::NewTurn)?
-                ],
-            )?;
-            let sequence = log(connection, chat_id, "message", message_id)?;
-            connection.execute(
-                "UPDATE chat_messages SET position = ?1 WHERE id = ?2",
-                params![sequence, message_id],
-            )?;
+            set_aside_input(connection, chat_id, message_id, true)?;
             trim(connection, chat_id)?;
             read_message(connection, message_id)?.ok_or_else(|| invalid("saved input is missing"))
         })
     }
 
-    /// Queued input in the order it was saved.
-    pub fn chat_queue(&self, chat_id: &str) -> Result<Vec<ChatMessage>, Error> {
+    /// The text of the Chat's first message from the person, which its title was cut
+    /// from; `None` while it has none. Read on its own, because a snapshot holds
+    /// only the latest items. First means first saved (insertion order), not first
+    /// in the transcript: sending queued input moves its position.
+    pub fn chat_first_input_text(&self, chat_id: &str) -> Result<Option<String>, Error> {
         read_chat(&self.connection, chat_id)?;
-        let mut statement = self.connection.prepare(
-            "SELECT id FROM chat_messages m WHERE chat_id = ?1 AND role = 'user'
-               AND NOT EXISTS (SELECT 1 FROM chat_submission_attempts a WHERE a.message_id = m.id AND a.delivery IN ('possible', 'acknowledged', 'uncertain'))
-             ORDER BY position",
-        )?;
-        let ids = statement
-            .query_map([chat_id], |row| row.get::<_, String>(0))?
-            .collect::<Result<Vec<_>, _>>()?;
-        // The query narrows; `queued` is the rule, with the person's decisions in view.
-        let mut queue = Vec::with_capacity(ids.len());
-        for id in ids {
-            queue.extend(read_message(&self.connection, &id)?.filter(|message| message.queued));
-        }
-        Ok(queue)
+        Ok(self
+            .connection
+            .query_row(
+                "SELECT text FROM chat_messages WHERE chat_id = ?1 AND role = 'user'
+                 ORDER BY rowid LIMIT 1",
+                [chat_id],
+                |row| row.get(0),
+            )
+            .optional()?)
+    }
+
+    /// Queued input in the order it was saved, including originals held for editing.
+    pub fn chat_queue(&self, chat_id: &str) -> Result<Vec<ChatMessage>, Error> {
+        crate::read_scope::run(&self.connection, |connection| {
+            read_chat(connection, chat_id)?;
+            let mut statement = connection.prepare(&format!(
+                "SELECT id FROM chat_messages m WHERE chat_id = ?1 AND {QUEUED_CHAT_INPUT}
+                 ORDER BY position"
+            ))?;
+            let ids = statement
+                .query_map([chat_id], |row| row.get::<_, String>(0))?
+                .collect::<Result<Vec<_>, _>>()?;
+            let mut queue = Vec::with_capacity(ids.len());
+            for id in ids {
+                queue.extend(read_message(connection, &id)?.filter(|message| message.queued));
+            }
+            Ok(queue)
+        })
+    }
+
+    /// Whether saved input needs linked-record context, including input awaiting resend.
+    pub fn chat_input_requires_link_context(
+        &self,
+        chat_id: &str,
+        message_id: &str,
+    ) -> Result<bool, Error> {
+        crate::read_scope::run(&self.connection, |connection| {
+            Ok(require_input(connection, chat_id, message_id)?.requires_link_context)
+        })
     }
 
     /// Record, before handing input to the harness, that it may be about to receive it.
@@ -2209,7 +3182,8 @@ impl Workspace {
         attempt_id: &str,
         intent: ChatSubmissionIntent,
     ) -> Result<ChatMessage, Error> {
-        self.submit_input(chat_id, message_id, attempt_id, intent, false)
+        self.submit_input(chat_id, message_id, attempt_id, intent, false, None)?
+            .ok_or_else(|| invalid("saved input is missing"))
     }
 
     /// `record_chat_submission` for input sent from the queue. Queued input has no place
@@ -2222,7 +3196,26 @@ impl Workspace {
         attempt_id: &str,
         intent: ChatSubmissionIntent,
     ) -> Result<ChatMessage, Error> {
-        self.submit_input(chat_id, message_id, attempt_id, intent, true)
+        self.submit_input(chat_id, message_id, attempt_id, intent, true, None)?
+            .ok_or_else(|| invalid("saved input is missing"))
+    }
+
+    /// Records the run's Prompt only while that run still owns the Chat.
+    pub fn record_automation_chat_submission(
+        &mut self,
+        chat_id: &str,
+        run_id: &str,
+        message_id: &str,
+        attempt_id: &str,
+    ) -> Result<Option<ChatMessage>, Error> {
+        self.submit_input(
+            chat_id,
+            message_id,
+            attempt_id,
+            ChatSubmissionIntent::NewTurn,
+            false,
+            Some(run_id),
+        )
     }
 
     fn submit_input(
@@ -2232,8 +3225,20 @@ impl Workspace {
         attempt_id: &str,
         intent: ChatSubmissionIntent,
         from_queue: bool,
-    ) -> Result<ChatMessage, Error> {
+        run_id: Option<&str>,
+    ) -> Result<Option<ChatMessage>, Error> {
         self.chat_write(|connection| {
+            if let Some(run_id) = run_id {
+                if !owns_running_chat(connection, chat_id, run_id)? {
+                    return Ok(None);
+                }
+                if !matches!(
+                    automation_prompt_receipt(connection, chat_id)?,
+                    Some(AutomationPromptReceipt::Marked(id)) if id == message_id
+                ) {
+                    return Err(invalid("only the Automation Prompt can be submitted"));
+                }
+            }
             if read_chat(connection, chat_id)?.trashed {
                 return Err(Error::ChatTrashed(chat_id.to_owned()));
             }
@@ -2246,9 +3251,12 @@ impl Workspace {
                 )
                 .optional()?;
             match recorded {
-                Some(recorded) if recorded == message_id => return Ok(message),
+                Some(recorded) if recorded == message_id => return Ok(Some(message)),
                 Some(_) => return Err(Error::RequestConflict(attempt_id.to_owned())),
                 None => {}
+            }
+            if message.editing {
+                return Err(invalid("this input is held for editing"));
             }
             if !message.queued {
                 return Err(Error::ChatSubmissionUnresolved(message_id.to_owned()));
@@ -2272,7 +3280,10 @@ impl Workspace {
                 )?;
             }
             trim(connection, chat_id)?;
-            read_message(connection, message_id)?.ok_or_else(|| invalid("saved input is missing"))
+            Ok(Some(
+                read_message(connection, message_id)?
+                    .ok_or_else(|| invalid("saved input is missing"))?,
+            ))
         })
     }
 

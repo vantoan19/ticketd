@@ -120,12 +120,7 @@ impl Workspace {
     /// The per-file upload limit in force. A larger value saved by an earlier version is
     /// held to [`MAX_BACKUP_FILE_BYTES`], so no file is accepted that a backup cannot hold.
     pub fn attachment_upload_limit(&self) -> Result<u64, Error> {
-        let stored: u64 = self.connection.query_row(
-            "SELECT limit_bytes FROM attachment_upload_settings WHERE id=1",
-            [],
-            |row| row.get(0),
-        )?;
-        Ok(stored.min(MAX_BACKUP_FILE_BYTES))
+        upload_limit(&self.connection)
     }
 
     /// Applies to future copies, not completed outcomes replayed by request ID.
@@ -612,6 +607,15 @@ impl Workspace {
 /// A file name that stays inside its Attachment's own directory.
 pub(crate) fn valid_filename(name: &str) -> bool {
     !matches!(name, "" | "." | "..") && !name.contains(['/', '\\', ':', '\0'])
+}
+
+pub(crate) fn upload_limit(connection: &Connection) -> Result<u64, Error> {
+    let stored: u64 = connection.query_row(
+        "SELECT limit_bytes FROM attachment_upload_settings WHERE id=1",
+        [],
+        |row| row.get(0),
+    )?;
+    Ok(stored.min(MAX_BACKUP_FILE_BYTES))
 }
 
 fn upload_limit_error(limit: u64) -> Error {

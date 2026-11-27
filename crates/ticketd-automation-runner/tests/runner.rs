@@ -9,16 +9,16 @@ use std::time::Duration;
 use ticketd_automation_runner::Runner;
 use ticketd_chat_host::testing::{FakeAdapter, Written};
 use ticketd_chat_host::{
-    ApprovalDecision, Capabilities, Capability, ChatHost, EventKind, HarnessAdapter, HostError,
-    InteractionKind, InteractionRequest, NativeItemId, NativeRequestId, NativeSessionId,
-    NativeTurnId, Problem, ProblemKind, SendMode, SessionStart, SettingChangeState, SettingKey,
-    SettingOutcome, StopReason, TurnEnding, TurnOutcome, WorkspaceOpener,
+    ApprovalDecision, Capabilities, Capability, ChatHost, CloseOutcome, EventKind, HarnessAdapter,
+    HostError, InteractionKind, InteractionRequest, NativeItemId, NativeRequestId, NativeSessionId,
+    NativeTurnId, Problem, ProblemKind, Refusal, SendMode, SessionStart, SettingChangeState,
+    SettingKey, SettingOutcome, StopReason, TurnEnding, TurnOutcome, WorkspaceOpener,
 };
 use ticketd_core::{
     AgentHarness, Automation, AutomationAgentSettings, AutomationAgentTools, AutomationDefinition,
-    AutomationRun, AutomationRunStatus, AutomationStepStatus, ChatInputStanding, ChatItem,
-    ChatLinkKind, ChatListFilter, NotifyTarget, Schedule, Step, StepAction, Ticket, Trigger,
-    Workspace, WorkspaceSession,
+    AutomationRun, AutomationRunStatus, AutomationStepStatus, ChatAttachmentContent, ChatDelivery,
+    ChatInputStanding, ChatItem, ChatLink, ChatLinkKind, ChatListFilter, ChatQueueEdit, Error,
+    NotifyTarget, Schedule, Step, StepAction, Ticket, Trigger, Workspace, WorkspaceSession,
     sync::{
         AttachmentDownload,
         remote::{FakeRemote, RemoteStorage},
@@ -42,7 +42,7 @@ struct Fixture {
     as_the_host_looks: HostLooks,
 }
 
-type HostLooks = Arc<Mutex<Option<Box<dyn Fn(&mut Workspace) + Send>>>>;
+type HostLooks = Arc<Mutex<Option<Box<dyn Fn(&mut Workspace) -> Result<(), Error> + Send>>>>;
 
 fn opener(path: &Path) -> WorkspaceOpener {
     let path = path.to_owned();
@@ -126,7 +126,7 @@ impl Fixture {
             Arc::new(move || {
                 let mut workspace = WorkspaceSession::for_file(&path)?.workspace()?;
                 if let Some(happens) = looks.lock().unwrap().as_ref() {
-                    happens(&mut workspace);
+                    happens(&mut workspace)?;
                 }
                 Ok(workspace)
             })
@@ -859,11 +859,407 @@ async fn a_chat_taken_over_mid_run_goes_on_as_an_ordinary_chat_past_the_agents_l
     assert_eq!(f.runs()[0].status, AutomationRunStatus::TakenOver);
 }
 
-/// #387 M2: with a harness that cannot steer, the composer sends a reply to a going
-/// run as "Queue". The turn it would wait for ends with the take-over, so the reply
-/// is the resumed Chat's first turn at once, sent once, and nothing is left paused.
 #[tokio::test(start_paused = true)]
-async fn a_reply_queued_behind_the_agents_turn_is_sent_when_it_takes_the_run_over() {
+async fn a_refused_attachment_or_conflicting_receipt_does_not_take_over_an_automation() {
+    let f = Fixture::new();
+    f.agent_working().await;
+    let chat = f.chat();
+    let files = vec![
+        ChatAttachmentContent::from_data_url(
+            "notes.txt",
+            "data:text/plain;base64,c25hcHNob3Q=",
+            100,
+        )
+        .unwrap(),
+    ];
+    let saved = f
+        .core()
+        .save_chat_input_with_attachments(Some("saved"), &chat, "Earlier reply", &files)
+        .unwrap();
+    f.fake.set_attachment_refusal(Refusal::Unsupported);
+    let before = written(&f);
+
+    assert!(
+        f.host
+            .send_with_attachments(&chat, None, "New reply", SendMode::Auto, files.clone())
+            .await
+            .is_err()
+    );
+    assert!(matches!(
+        f.host
+            .send_with_attachments(&chat, Some("saved"), "Earlier reply", SendMode::Auto, files)
+            .await,
+        Err(HostError::Core(Error::RequestConflict(id))) if id == "saved"
+    ));
+    settle().await;
+
+    assert_eq!(f.core().chat_queue(&chat).unwrap(), [saved]);
+    assert_eq!(f.runs()[0].status, AutomationRunStatus::Running);
+    assert_eq!(written(&f), before);
+    assert_eq!(f.fake.opens().len(), 1);
+}
+
+#[tokio::test(start_paused = true)]
+async fn an_invalid_reply_leaves_the_run_live_and_a_saved_reply_waits_for_cleanup() {
+    let f = Fixture::new();
+    f.agent_working().await;
+    let chat = f.chat();
+    let file = ChatAttachmentContent::from_data_url(
+        "notes.txt",
+        "data:text/plain;base64,c25hcHNob3Q=",
+        100,
+    )
+    .unwrap();
+
+    f.core().set_attachment_upload_limit(1).unwrap();
+    let before = written(&f);
+    assert!(matches!(
+        f.host
+            .send_with_attachments(
+                &chat,
+                Some("reply"),
+                "Valid once the limit is raised",
+                SendMode::Auto,
+                vec![file.clone()],
+            )
+            .await,
+        Err(HostError::Core(Error::UploadLimit { limit: 1 }))
+    ));
+    assert!(
+        f.host
+            .send_replacing(
+                &chat,
+                Some("invalid-replacement"),
+                "A stale edit",
+                SendMode::Auto,
+                Vec::new(),
+                vec!["missing-source".to_owned()],
+            )
+            .await
+            .is_err()
+    );
+    assert_eq!(f.runs()[0].status, AutomationRunStatus::Running);
+    assert_eq!(written(&f), before);
+    assert!(f.core().chat_queue(&chat).unwrap().is_empty());
+
+    f.core().set_attachment_upload_limit(100).unwrap();
+    let close = f.fake.hold_next_close();
+    let host = f.host.clone();
+    let reply_chat = chat.clone();
+    let reply_file = file.clone();
+    let sending = tokio::spawn(async move {
+        host.send_with_attachments(
+            &reply_chat,
+            Some("reply"),
+            "Valid once the limit is raised",
+            SendMode::Auto,
+            vec![reply_file],
+        )
+        .await
+        .unwrap()
+    });
+    settle().await;
+    f.end_turn(TurnOutcome::Interrupted).await;
+    let queue = f.core().chat_queue(&chat).unwrap();
+    assert_eq!(f.runs()[0].status, AutomationRunStatus::TakenOver);
+    assert_eq!(queue.len(), 1, "the reply was saved before cleanup");
+    assert!(queue[0].attempts.is_empty());
+    assert_eq!(
+        f.core()
+            .chat_message_attachment_contents(&chat, &queue[0].id)
+            .unwrap()
+            .as_slice(),
+        std::slice::from_ref(&file)
+    );
+    assert_eq!(f.fake.opens().len(), 1);
+    assert!(matches!(
+        f.host
+            .send(&chat, None, "Later reply", SendMode::Auto)
+            .await,
+        Err(HostError::Working)
+    ));
+    let receipt = f
+        .host
+        .send_with_attachments(
+            &chat,
+            Some("reply"),
+            "Valid once the limit is raised",
+            SendMode::Auto,
+            vec![file.clone()],
+        )
+        .await
+        .unwrap();
+    assert_eq!(receipt.id, queue[0].id);
+    assert_eq!(written(&f).last().unwrap(), "close");
+
+    close.send(()).unwrap();
+    let saved = sending.await.unwrap();
+    assert_eq!(saved.id, receipt.id);
+    settle().await;
+    let opens = f.fake.opens();
+    assert_eq!(opens.len(), 2);
+    assert!(opens[1].unattended.is_none());
+    assert_eq!(
+        written(&f)[1..],
+        [
+            "interrupt",
+            "close",
+            "submit: Valid once the limit is raised"
+        ]
+    );
+    assert!(matches!(
+        f.fake.written().last(),
+        Some(Written::Submit(submission))
+            if submission.attachments.as_slice() == std::slice::from_ref(&file)
+    ));
+}
+
+#[tokio::test(start_paused = true)]
+async fn an_ordinary_linked_attachment_reply_takes_over_only_when_committed() {
+    let f = Fixture::new();
+    f.agent_working().await;
+    let chat = f.chat();
+    let existing_links = f.core().chat(&chat).unwrap().links;
+    let file =
+        ChatAttachmentContent::from_data_url("notes.txt", "data:text/plain;base64,bm90ZXM=", 100)
+            .unwrap();
+    let link = ChatLink {
+        kind: ChatLinkKind::Ticket,
+        id: f.core().create_ticket("New context").unwrap().id,
+    };
+    let send = || {
+        f.host.send_linking(
+            &chat,
+            "Reply",
+            SendMode::Queue,
+            vec![file.clone()],
+            vec![link.clone()],
+        )
+    };
+    f.core().set_attachment_upload_limit(1).unwrap();
+    assert!(matches!(
+        send().await,
+        Err(HostError::Core(Error::UploadLimit { limit: 1 }))
+    ));
+    assert_eq!(f.runs()[0].status, AutomationRunStatus::Running);
+    assert_eq!(f.core().chat(&chat).unwrap().links, existing_links);
+    assert!(f.core().chat_queue(&chat).unwrap().is_empty());
+
+    f.core().set_attachment_upload_limit(100).unwrap();
+    let saved = send().await.unwrap();
+    assert_eq!(f.runs()[0].status, AutomationRunStatus::TakenOver);
+    assert!(f.core().chat(&chat).unwrap().links.contains(&link));
+    assert_eq!(
+        f.core().chat_queue(&chat).unwrap().as_slice(),
+        std::slice::from_ref(&saved)
+    );
+    assert_eq!(
+        f.core()
+            .chat_message_attachment_contents(&chat, &saved.id)
+            .unwrap(),
+        [file]
+    );
+}
+
+#[tokio::test(start_paused = true)]
+async fn an_automation_edit_commits_its_links_and_takeover_only_with_the_saved_reply() {
+    let f = Fixture::new();
+    f.agent_working().await;
+    let chat = f.chat();
+    let existing_links = f.core().chat(&chat).unwrap().links;
+    let original = f.core().save_chat_input(None, &chat, "Held draft").unwrap();
+    f.core()
+        .confirm_chat_queue_edit(&chat, &original.id, "hold")
+        .unwrap();
+    let file =
+        ChatAttachmentContent::from_data_url("notes.txt", "data:text/plain;base64,bm90ZXM=", 100)
+            .unwrap();
+    let link = ChatLink {
+        kind: ChatLinkKind::Ticket,
+        id: f.core().create_ticket("New context").unwrap().id,
+    };
+    let edit = ChatQueueEdit {
+        replaces: vec![original.id.clone()],
+        links: vec![link.clone()],
+    };
+    f.core().set_attachment_upload_limit(1).unwrap();
+
+    let send = |file, edit| {
+        f.host.send_with_edit(
+            &chat,
+            Some("edit"),
+            "Edited",
+            SendMode::Queue,
+            vec![file],
+            Some(edit),
+        )
+    };
+    assert!(matches!(
+        send(file.clone(), edit.clone()).await,
+        Err(HostError::Core(Error::UploadLimit { limit: 1 }))
+    ));
+    assert_eq!(f.runs()[0].status, AutomationRunStatus::Running);
+    assert_eq!(f.core().chat(&chat).unwrap().links, existing_links);
+    let waiting = f.core().chat_queue(&chat).unwrap();
+    assert_eq!(waiting[0].id, original.id);
+    assert!(waiting[0].editing);
+
+    f.core().set_attachment_upload_limit(100).unwrap();
+    let saved = send(file.clone(), edit).await.unwrap();
+    settle().await;
+    assert_eq!(f.runs()[0].status, AutomationRunStatus::TakenOver);
+    let links = f.core().chat(&chat).unwrap().links;
+    assert_eq!(links.len(), existing_links.len() + 1);
+    assert!(links.contains(&link));
+    let queue = f.core().chat_queue(&chat).unwrap();
+    assert_eq!(queue.len(), 1);
+    assert_eq!(queue[0].id, saved.id);
+    assert_ne!(queue[0].id, original.id);
+    assert_eq!(
+        f.core()
+            .chat_message_attachment_contents(&chat, &saved.id)
+            .unwrap(),
+        [file]
+    );
+    assert_eq!(f.fake.opens().len(), 1);
+}
+
+#[tokio::test(start_paused = true)]
+async fn taking_over_a_slow_start_holds_the_reply_until_the_late_runtime_closes() {
+    let f = Fixture::new();
+    let open = f.fake.hold_next_open();
+    f.agent_working().await;
+    tokio::time::timeout(Duration::from_secs(10), f.fake.wait_for_open_attempts(1))
+        .await
+        .unwrap();
+    let chat = f.chat();
+
+    let reply = f
+        .host
+        .send(&chat, Some("reply"), "Hello", SendMode::Auto)
+        .await
+        .unwrap();
+    assert_eq!(f.runs()[0].status, AutomationRunStatus::TakenOver);
+    assert!(f.fake.opens().is_empty());
+    assert_eq!(f.core().chat_queue(&chat).unwrap()[0].id, reply.id);
+
+    assert!(matches!(
+        f.host
+            .send(&chat, None, "Later reply", SendMode::Auto)
+            .await,
+        Err(HostError::PermissionRestartCleanupUnconfirmed)
+    ));
+    assert_eq!(f.host.begin_restore().await.unwrap_err().chat_id, chat);
+    f.host.finish_restore();
+
+    let close = f.fake.hold_next_close();
+    open.send(()).unwrap();
+    settle().await;
+    assert_eq!(f.fake.opens().len(), 1);
+    assert_eq!(written(&f), ["close"]);
+    assert!(matches!(
+        f.host.resume_queue(&chat).await,
+        Err(HostError::PermissionRestartCleanupUnconfirmed)
+    ));
+
+    close.send(()).unwrap();
+    settle().await;
+    assert_eq!(written(&f), ["close"]);
+    f.host.resume_queue(&chat).await.unwrap();
+    settle().await;
+    let opens = f.fake.opens();
+    assert_eq!(opens.len(), 2);
+    assert!(opens[0].unattended.is_some());
+    assert!(opens[1].unattended.is_none());
+    assert_eq!(written(&f), ["close", "submit: Hello"]);
+}
+
+#[tokio::test(start_paused = true)]
+async fn restore_waits_for_a_detached_takeover_close() {
+    let f = Fixture::new();
+    f.agent_working().await;
+    let chat = f.chat();
+    let close = f.fake.hold_next_close();
+    let host = f.host.clone();
+    let reply_chat = chat.clone();
+    let sending = tokio::spawn(async move {
+        host.send(&reply_chat, None, "Hello", SendMode::Auto)
+            .await
+            .unwrap()
+    });
+    settle().await;
+    f.end_turn(TurnOutcome::Interrupted).await;
+    assert_eq!(written(&f).last().unwrap(), "close");
+
+    let mut restoring = Box::pin(f.host.begin_restore());
+    tokio::select! {
+        result = &mut restoring => panic!("restore returned before detached close: {result:?}"),
+        () = settle() => {}
+    }
+    assert!(matches!(
+        f.host
+            .send(&chat, None, "During restore", SendMode::Auto)
+            .await,
+        Err(HostError::Restoring)
+    ));
+    close.send(()).unwrap();
+    assert!(restoring.await.unwrap().is_empty());
+    let reply = sending.await.unwrap();
+    assert_eq!(f.core().chat_queue(&chat).unwrap()[0].id, reply.id);
+    assert_eq!(f.fake.opens().len(), 1);
+    f.host.finish_restore();
+}
+
+#[tokio::test(start_paused = true)]
+async fn event_loss_before_or_during_takeover_still_requires_confirmed_harness_exit() {
+    for before_shutdown in [false, true] {
+        let f = Fixture::new();
+        f.agent_working().await;
+        let chat = f.chat();
+        f.fake.set_close_outcome(CloseOutcome::Unconfirmed {
+            reason: "the old runtime is still running".to_owned(),
+        });
+        if before_shutdown {
+            f.fake.lose_process().await;
+            settle().await;
+        }
+        let host = f.host.clone();
+        let reply_chat = chat.clone();
+        let sending = tokio::spawn(async move {
+            host.send(&reply_chat, None, "Hello", SendMode::Auto)
+                .await
+                .unwrap()
+        });
+        if !before_shutdown {
+            settle().await;
+            assert_eq!(written(&f).last().unwrap(), "interrupt");
+            f.fake.lose_process().await;
+        }
+        let reply = sending.await.unwrap();
+        assert_eq!(written(&f).last().unwrap(), "close");
+        assert_eq!(f.fake.opens().len(), 1);
+        assert_eq!(f.core().chat_queue(&chat).unwrap()[0].id, reply.id);
+
+        assert_eq!(f.host.begin_restore().await.unwrap_err().chat_id, chat);
+        f.host.finish_restore();
+        assert!(matches!(
+            f.host.resume_queue(&chat).await,
+            Err(HostError::PermissionRestartCleanupUnconfirmed)
+        ));
+        assert_eq!(f.fake.opens().len(), 1);
+        f.fake
+            .set_close_outcome(CloseOutcome::Confirmed { exit_code: Some(0) });
+        assert!(f.host.begin_restore().await.unwrap().is_empty());
+        f.host.finish_restore();
+        f.host.resume_queue(&chat).await.unwrap();
+        settle().await;
+        assert_eq!(f.fake.opens().len(), 2);
+        assert_eq!(written(&f).last().unwrap(), "submit: Hello");
+    }
+}
+
+#[tokio::test(start_paused = true)]
+async fn a_queued_reply_takes_the_run_over_and_waits_for_explicit_dispatch() {
     let f = Fixture::on(AgentHarness::ClaudeCode);
     f.agent_working().await;
     let chat = f.chat();
@@ -874,13 +1270,23 @@ async fn a_reply_queued_behind_the_agents_turn_is_sent_when_it_takes_the_run_ove
         .await;
     settle().await;
 
-    f.host
+    let reply = f
+        .host
         .send(&chat, None, "Reply with hello", SendMode::Queue)
         .await
         .unwrap();
     settle().await;
 
     assert_eq!(f.runs()[0].status, AutomationRunStatus::TakenOver);
+    assert_eq!(written(&f)[1..], ["interrupt", "close"]);
+    assert_eq!(f.fake.opens().len(), 1);
+    let queue = f.core().chat_queue(&chat).unwrap();
+    assert_eq!(queue.len(), 1);
+    assert_eq!(queue[0].id, reply.id);
+    assert!(queue[0].attempts.is_empty());
+
+    f.host.resume_queue(&chat).await.unwrap();
+    settle().await;
     assert_eq!(
         written(&f)[1..],
         ["interrupt", "close", "submit: Reply with hello"]
@@ -952,6 +1358,44 @@ async fn taking_a_run_over_stops_the_agent_of_the_step_it_was_on() {
     assert_eq!(run.steps.len(), 2);
 }
 
+#[tokio::test(start_paused = true)]
+async fn stop_pauses_its_chat_when_a_sibling_automation_harness_cannot_close() {
+    let f = Fixture::new();
+    let mut definition = f.automation.definition.clone();
+    let mut second = definition.steps[0].clone();
+    second.id = "second".into();
+    definition.steps.push(second);
+    f.core()
+        .update_automation(&f.automation.id, definition)
+        .unwrap();
+    f.agent_working().await;
+    f.end_turn(TurnOutcome::Completed).await;
+    let run = f.runs().remove(0);
+    let [first, second] = &run.steps[..] else {
+        panic!("the run should be on its second step");
+    };
+    assert_eq!(second.status, AutomationStepStatus::Running);
+    let first = first.chat_id.as_deref().unwrap();
+    let second = second.chat_id.as_deref().unwrap();
+    let queued = f
+        .core()
+        .save_chat_input(None, first, "Leave queued")
+        .unwrap();
+    assert!(!f.core().chat(first).unwrap().queue_paused);
+    f.fake.set_close_outcome(CloseOutcome::Unconfirmed {
+        reason: "the sibling harness did not exit".to_owned(),
+    });
+
+    assert!(matches!(
+        f.host.stop(first).await,
+        Err(HostError::PermissionRestartCleanupUnconfirmed)
+    ));
+    assert!(f.core().chat(first).unwrap().queue_paused);
+    assert_eq!(f.core().chat_queue(first).unwrap()[0].id, queued.id);
+    assert_eq!(f.fake.opens().len(), 2);
+    assert_eq!(f.host.quit().await[0].chat_id, second);
+}
+
 /// The person replies in step 1's Chat just after the runner created step 2's Chat
 /// and before its agent is known to the host: the take-over finds no agent to stop
 /// there, so the runner must not start one afterwards.
@@ -974,6 +1418,7 @@ async fn a_run_taken_over_just_as_its_next_agent_would_start_starts_no_agent() {
         if run.status == AutomationRunStatus::Running && second_has_chat {
             workspace.take_over_automation_run(&first, true).unwrap();
         }
+        Ok(())
     }));
 
     f.end_turn(TurnOutcome::Completed).await;
@@ -981,7 +1426,14 @@ async fn a_run_taken_over_just_as_its_next_agent_would_start_starts_no_agent() {
 
     let run = f.runs().remove(0);
     assert_eq!(run.status, AutomationRunStatus::TakenOver);
-    assert!(run.steps[1].chat_id.is_some());
+    let second_chat = run.steps[1].chat_id.as_deref().unwrap();
+    let mut workspace = f.core();
+    assert!(
+        workspace
+            .save_automation_chat_prompt(second_chat, &run.id, "Late Prompt")
+            .is_err()
+    );
+    assert!(workspace.chat_queue(second_chat).unwrap().is_empty());
     // Only step 1's agent was ever started.
     let opens = f.fake.opens();
     assert_eq!(opens.len(), 1, "{opens:?}");
@@ -1326,6 +1778,9 @@ async fn a_run_stopped_while_its_agent_is_opening_closes_the_agent() {
     let open = f.fake.hold_next_open();
     f.tag("Fix login");
     f.tick().await;
+    tokio::time::timeout(Duration::from_secs(10), f.fake.wait_for_open_attempts(1))
+        .await
+        .unwrap();
     let run = f.runs().remove(0);
     assert_eq!(run.status, AutomationRunStatus::Running);
     let chat = f.chat();
@@ -1369,6 +1824,9 @@ async fn a_run_ended_before_its_agent_took_the_first_message_leaves_nothing_queu
         let run = f.runs().remove(0);
         let chat = f.chat();
         assert_eq!(f.core().chat_queue(&chat).unwrap().len(), 1, "{how}");
+        tokio::time::timeout(Duration::from_secs(10), f.fake.wait_for_open_attempts(1))
+            .await
+            .unwrap();
 
         let ending = async {
             match how {
@@ -1472,6 +1930,338 @@ async fn a_run_ended_with_its_first_message_unconfirmed_does_not_offer_to_send_i
     }
 }
 
+#[tokio::test(start_paused = true)]
+async fn reply_and_stop_takeover_wait_for_an_admitted_prompt_write() {
+    for stop in [false, true] {
+        let f = Fixture::new();
+        let (admitted, release) = f.fake.hold_next_submit_write();
+        f.tag("Fix login");
+        f.tick().await;
+        tokio::time::timeout(Duration::from_secs(10), admitted)
+            .await
+            .unwrap()
+            .unwrap();
+        let run = f.runs().remove(0);
+        let chat = f.chat();
+        assert!(f.fake.written().is_empty());
+        assert!(f.core().chat_snapshot(&chat, 20).unwrap().items.iter().any(|item| {
+            matches!(item, ChatItem::Message(message)
+                if message.attempts.iter().any(|attempt| attempt.delivery == ChatDelivery::Possible))
+        }));
+
+        let mut takeover = Box::pin(async {
+            if stop {
+                f.host.stop(&chat).await
+            } else {
+                f.host
+                    .send(&chat, None, "Wait to take over", SendMode::Queue)
+                    .await
+                    .map(|_| ())
+            }
+        });
+        std::future::poll_fn(|cx| {
+            assert!(takeover.as_mut().poll(cx).is_pending());
+            std::task::Poll::Ready(())
+        })
+        .await;
+        assert_eq!(
+            f.core().automation_run(&run.id).unwrap().status,
+            AutomationRunStatus::Running
+        );
+        assert!(f.core().chat_queue(&chat).unwrap().is_empty());
+        assert!(f.fake.written().is_empty());
+
+        release.send(()).unwrap();
+        takeover.await.unwrap();
+        assert_eq!(
+            f.core().automation_run(&run.id).unwrap().status,
+            AutomationRunStatus::TakenOver
+        );
+        assert!(matches!(f.fake.written().first(), Some(Written::Submit(_))));
+        assert_eq!(
+            f.core().chat_queue(&chat).unwrap().len(),
+            usize::from(!stop)
+        );
+    }
+}
+
+#[tokio::test(start_paused = true)]
+async fn an_independent_run_stop_refuses_the_pending_prompt_at_the_write_boundary() {
+    let f = Fixture::new();
+    let (admitted, release) = f.fake.hold_next_submit_write();
+    f.tag("Fix login");
+    f.tick().await;
+    tokio::time::timeout(Duration::from_secs(10), admitted)
+        .await
+        .unwrap()
+        .unwrap();
+    let run = f.runs().remove(0);
+    let chat = f.chat();
+    assert!(f.fake.written().is_empty());
+    f.core().stop_automation_run(&run.id).unwrap();
+    release.send(()).unwrap();
+
+    tokio::time::timeout(Duration::from_secs(10), async {
+        loop {
+            if f.core().chat_snapshot(&chat, 20).unwrap().items.iter().any(|item| {
+                matches!(item, ChatItem::Message(message)
+                    if message.attempts.iter().any(|attempt| attempt.delivery == ChatDelivery::NotDelivered
+                        && attempt.detail.as_deref() == Some(Refusal::AutomationPromptNotAllowed.reason())))
+            }) {
+                break;
+            }
+            settle().await;
+        }
+    }).await.unwrap();
+    assert!(
+        !f.fake
+            .written()
+            .iter()
+            .any(|event| matches!(event, Written::Submit(_)))
+    );
+}
+
+#[tokio::test(start_paused = true)]
+async fn takeover_in_a_sibling_chat_is_bounded_while_the_run_has_an_admitted_write() {
+    let f = Fixture::new();
+    let mut definition = f.automation.definition.clone();
+    let mut second = definition.steps[0].clone();
+    second.id = "second".into();
+    definition.steps.push(second);
+    f.core()
+        .update_automation(&f.automation.id, definition)
+        .unwrap();
+    f.agent_working().await;
+    let (admitted, release) = f.fake.hold_next_submit_write();
+    f.end_turn(TurnOutcome::Completed).await;
+    tokio::time::timeout(Duration::from_secs(10), admitted)
+        .await
+        .unwrap()
+        .unwrap();
+    let run = f.runs().remove(0);
+    let first_chat = run.steps[0].chat_id.as_deref().unwrap();
+    let second_chat = run.steps[1].chat_id.as_deref().unwrap();
+    assert_ne!(first_chat, second_chat);
+    let reply = || {
+        f.host.send(
+            first_chat,
+            Some("sibling-reply"),
+            "Take over",
+            SendMode::Queue,
+        )
+    };
+
+    assert!(matches!(
+        tokio::time::timeout(
+            ticketd_chat_host::CLOSE_TIMEOUT + Duration::from_secs(1),
+            reply()
+        )
+        .await
+        .unwrap(),
+        Err(HostError::Working)
+    ));
+    assert_eq!(
+        f.core().automation_run(&run.id).unwrap().status,
+        AutomationRunStatus::Running
+    );
+    assert!(f.core().chat_queue(first_chat).unwrap().is_empty());
+
+    release.send(()).unwrap();
+    tokio::time::timeout(Duration::from_secs(10), f.fake.wait_for_submissions(2))
+        .await
+        .unwrap();
+    let saved = reply().await.unwrap();
+    assert_eq!(
+        f.core().automation_run(&run.id).unwrap().status,
+        AutomationRunStatus::TakenOver
+    );
+    assert_eq!(f.core().chat_queue(first_chat).unwrap(), [saved]);
+}
+
+#[tokio::test(start_paused = true)]
+async fn an_unreadable_workspace_refuses_prompt_delivery_with_the_storage_diagnostic() {
+    use std::sync::atomic::{AtomicBool, Ordering};
+
+    let f = Fixture::new();
+    f.notify_when_the_agent_fails();
+    let (runner, told) = f.counting_runner(f.host.clone());
+    let (at_write, check_ownership) = f.fake.hold_next_submit_write();
+    f.tag("Fix login");
+    runner.tick().unwrap();
+    tokio::time::timeout(Duration::from_secs(10), at_write)
+        .await
+        .unwrap()
+        .unwrap();
+    let chat = f.chat();
+    let fail = AtomicBool::new(true);
+    *f.as_the_host_looks.lock().unwrap() = Some(Box::new(move |_| {
+        if fail.swap(false, Ordering::SeqCst) {
+            return Err(Error::Directory(std::io::Error::other(
+                "workspace read failed",
+            )));
+        }
+        Ok(())
+    }));
+
+    check_ownership.send(()).unwrap();
+    settle().await;
+
+    let detail = Refusal::AutomationPromptOwnershipUnavailable.reason();
+    assert!(f.needs_attention().contains(detail));
+    assert_eq!(*told.lock().unwrap(), 0);
+    assert!(f.core().automation_chat_run_id(&chat).unwrap().is_some());
+    assert!(
+        f.core()
+            .chat_snapshot(&chat, 20)
+            .unwrap()
+            .items
+            .iter()
+            .any(|item| {
+                matches!(item, ChatItem::Message(message) if message.attempts.iter().any(|attempt|
+            attempt.delivery == ChatDelivery::NotDelivered
+                && attempt.detail.as_deref() == Some(detail)))
+            })
+    );
+    assert!(
+        !f.fake
+            .written()
+            .iter()
+            .any(|event| matches!(event, Written::Submit(_)))
+    );
+}
+
+#[tokio::test(start_paused = true)]
+async fn a_held_prompt_refusal_does_not_keep_stop_from_taking_over() {
+    use std::sync::atomic::{AtomicBool, Ordering};
+
+    let f = Fixture::new();
+    let (at_write, check_ownership) = f.fake.hold_next_submit_write();
+    let (refused, finish_refusal) = f.fake.hold_next_prompt_refusal();
+    f.tag("Fix login");
+    f.tick().await;
+    tokio::time::timeout(Duration::from_secs(10), at_write)
+        .await
+        .unwrap()
+        .unwrap();
+    let fail = AtomicBool::new(true);
+    *f.as_the_host_looks.lock().unwrap() = Some(Box::new(move |_| {
+        if fail.swap(false, Ordering::SeqCst) {
+            return Err(Error::NoDataDirectory);
+        }
+        Ok(())
+    }));
+    check_ownership.send(()).unwrap();
+    assert_eq!(
+        tokio::time::timeout(Duration::from_secs(10), refused)
+            .await
+            .unwrap()
+            .unwrap(),
+        Refusal::AutomationPromptOwnershipUnavailable
+    );
+
+    f.host.stop(&f.chat()).await.unwrap();
+    finish_refusal.send(()).unwrap();
+    assert_eq!(f.runs()[0].status, AutomationRunStatus::TakenOver);
+    assert!(
+        !f.fake
+            .written()
+            .iter()
+            .any(|event| matches!(event, Written::Submit(_)))
+    );
+}
+
+#[tokio::test(start_paused = true)]
+async fn a_prompt_waiting_to_check_ownership_cannot_admit_on_a_restored_workspace() {
+    prompt_does_not_outlive_its_workspace(false).await;
+}
+
+#[tokio::test(start_paused = true)]
+async fn an_old_prompt_refusal_cannot_update_the_same_attempt_in_a_restored_workspace() {
+    prompt_does_not_outlive_its_workspace(true).await;
+}
+
+#[allow(clippy::unwrap_used)] // The shared fixture fails the test if setup or synchronization fails.
+async fn prompt_does_not_outlive_its_workspace(refuse_before_restore: bool) {
+    let f = Fixture::new();
+    let (admitted, admit) = f.fake.hold_next_submit_write();
+    let (refused, finish_refusal) = f.fake.hold_next_prompt_refusal();
+    let mut runtime_dropped = f.fake.runtime_dropped();
+    f.tag("Fix login");
+    f.tick().await;
+    tokio::time::timeout(Duration::from_secs(10), admitted)
+        .await
+        .unwrap()
+        .unwrap();
+    let run = f.runs().remove(0);
+    let chat = f.chat();
+    let backup = f._dir.path().join("same-attempt.sqlite3");
+    let mut pending_admission = Some(admit);
+    let mut pending_refusal = Some(refused);
+    if refuse_before_restore {
+        f.core().stop_automation_run(&run.id).unwrap();
+        pending_admission.take().unwrap().send(()).unwrap();
+        assert_eq!(
+            tokio::time::timeout(Duration::from_secs(10), pending_refusal.take().unwrap())
+                .await
+                .unwrap()
+                .unwrap(),
+            Refusal::AutomationPromptNotAllowed
+        );
+    }
+    assert!(f.core().backup(&backup).unwrap());
+    assert!(f.host.begin_restore().await.unwrap().is_empty());
+    let session = WorkspaceSession::for_file(&f.path).unwrap();
+    session
+        .exclusive(|path| Workspace::restore(path, &backup))
+        .unwrap();
+    f.host.finish_restore();
+    let saved_attempt = || {
+        f.core()
+            .chat_snapshot(&chat, 20)
+            .unwrap()
+            .items
+            .into_iter()
+            .find_map(|item| {
+                if let ChatItem::Message(message) = item {
+                    message.attempts.into_iter().next()
+                } else {
+                    None
+                }
+            })
+            .unwrap()
+    };
+    let before = saved_attempt();
+    assert!(matches!(
+        before.delivery,
+        ChatDelivery::Possible | ChatDelivery::Uncertain
+    ));
+
+    if !refuse_before_restore {
+        pending_admission.take().unwrap().send(()).unwrap();
+        assert_eq!(
+            tokio::time::timeout(Duration::from_secs(10), pending_refusal.take().unwrap())
+                .await
+                .unwrap()
+                .unwrap(),
+            Refusal::RuntimeClosed
+        );
+    }
+    finish_refusal.send(()).unwrap();
+    // After restore the detached dispatch owns the last runtime reference.
+    // Its drop follows handling the stale result, including any storage work.
+    tokio::time::timeout(Duration::from_secs(10), runtime_dropped.changed())
+        .await
+        .unwrap()
+        .unwrap();
+    assert_eq!(saved_attempt(), before);
+    assert!(
+        !f.fake
+            .written()
+            .iter()
+            .any(|event| matches!(event, Written::Submit(_)))
+    );
+}
+
 /// #387 5A1: a run taken over before its agent had a harness session (so there is no
 /// native session to resume) still becomes an ordinary Chat, opened as one: the open is
 /// marked as a take-over, so the adapter sends New Chat's defaults, not Claude Code's
@@ -1483,6 +2273,9 @@ async fn a_run_taken_over_before_its_session_exists_opens_as_an_ordinary_chat() 
         let open = f.fake.hold_next_open();
         f.tag("Fix login");
         f.tick().await;
+        tokio::time::timeout(Duration::from_secs(10), f.fake.wait_for_open_attempts(1))
+            .await
+            .unwrap();
         let chat = f.chat();
 
         let taking = async {
@@ -1559,6 +2352,9 @@ async fn a_run_taken_over_while_starting_keeps_its_instructions_set_aside() {
             let open = f.fake.hold_next_open();
             f.tag("Fix login");
             f.tick().await;
+            tokio::time::timeout(Duration::from_secs(10), f.fake.wait_for_open_attempts(1))
+                .await
+                .unwrap();
             let chat = f.chat();
 
             let taking = async {
@@ -1573,6 +2369,24 @@ async fn a_run_taken_over_while_starting_keeps_its_instructions_set_aside() {
             };
             tokio::join!(taking, async {
                 settle().await;
+                let core = f.core();
+                let prompt = core
+                    .chat_snapshot(&chat, 5_000)
+                    .unwrap()
+                    .items
+                    .into_iter()
+                    .find_map(|item| match item {
+                        ChatItem::Message(message) if message.text.contains(INSTRUCTIONS) => {
+                            Some(message)
+                        }
+                        _ => None,
+                    })
+                    .unwrap();
+                assert_eq!(prompt.standing(), ChatInputStanding::SetAside);
+                assert!(
+                    f.fake.opens().is_empty(),
+                    "storage changed before old harness cleanup"
+                );
                 let _ = open.send(());
             });
             settle().await;

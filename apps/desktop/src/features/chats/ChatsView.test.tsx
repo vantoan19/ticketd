@@ -19,10 +19,10 @@ import {
   type TranscriptItem,
 } from "@/features/chats/client";
 import { ChatProvider } from "@/features/chats/ChatProvider";
+import { addQuote, clearQuotes } from "@/features/chats/quotes";
 import { ChatsView } from "@/features/chats/ChatsView";
 import { StatusLineRegion } from "@/components/ui/status-line";
 import { ProjectNavigation } from "@/features/documents/navigation";
-import { drafts } from "@/features/chats/drafts";
 import {
   chatState,
   createMockChatClient,
@@ -39,11 +39,14 @@ window.ResizeObserver = class {
 afterEach(() => {
   cleanup();
   vi.useRealTimers();
-  // What was typed in one test is not a draft in the next.
-  drafts.clear();
 });
 
 const at = "2026-11-10T10:00:00Z";
+const png =
+  "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR4nGPY2BLxHwAGBAKNbLAvQQAAAABJRU5ErkJggg==";
+const screenshotBytes = Uint8Array.from(atob(png), (byte) =>
+  byte.charCodeAt(0),
+);
 const reply = (id: string, text: string): TranscriptItem => ({
   id,
   at,
@@ -306,7 +309,7 @@ test("Stop waits while stopping and is the retry once the stop is not confirmed"
   expect(button("Stop")).toHaveProperty("disabled", false);
 });
 
-test("a queued message can be sent now, alone, or moved back into the message box", async () => {
+test("Send now sends one queued message and keeps the other held for editing", async () => {
   const client = await open(
     one({
       id: "c1",
@@ -330,17 +333,843 @@ test("a queued message can be sent now, alone, or moved back into the message bo
       "draft\n\nand a changelog entry",
     ),
   );
-  expect(
-    screen.queryByText("and a changelog entry", { selector: "li *" }),
-  ).toBeNull();
+  expect(await within(second).findByText("Editing")).toBeTruthy();
+  expect(within(second).queryByRole("button", { name: "Send now" })).toBeNull();
 
   fireEvent.click(button("Send now"));
   expect(
     await screen.findByText("then add tests", { selector: ".chat-you *" }),
   ).toBeTruthy();
   const { chat } = await client.openChat("c1");
-  expect(chat.queue).toEqual([]);
+  expect(chat.queue).toEqual([
+    { id: "q2", text: "and a changelog entry", editing: true },
+  ]);
   expect(chat.queue_paused).toBe(true);
+});
+
+test("editing a queued message appends its text and saved files to the current draft", async () => {
+  const client = await open(
+    one({ id: "c1", title: "Limiter", activity: "working" }),
+  );
+  const file = new File(["saved"], "notes.txt", { type: "text/plain" });
+  const snapshot = {
+    name: "notes.txt",
+    dataUrl: "data:text/plain;base64,c2F2ZWQ=",
+  };
+  const draft = new File(["draft"], "draft.txt", { type: "text/plain" });
+  const box = () => composer("Steer Codex");
+  fireEvent.change(screen.getByLabelText("Choose files to attach"), {
+    target: { files: [file] },
+  });
+  type("Queued text", "Steer Codex");
+  await waitFor(() =>
+    expect(button("Steer")).toHaveProperty("disabled", false),
+  );
+  fireEvent.keyDown(box(), { key: "Enter", ctrlKey: true });
+  const queue = await screen.findByRole("list", { name: "Queued messages" });
+  expect(within(queue).getByText("Queued text · notes.txt")).toBeTruthy();
+  const queuedId = (await client.openChat("c1")).chat.queue[0]?.id;
+  type("Existing draft", "Steer Codex");
+  fireEvent.change(screen.getByLabelText("Choose files to attach"), {
+    target: { files: [draft] },
+  });
+  fireEvent.click(
+    within(queue).getByRole("button", { name: "Edit in the message box" }),
+  );
+  await screen.findByRole("button", { name: "Remove notes.txt" });
+  expect(box()).toHaveProperty("value", "Existing draft\n\nQueued text");
+  const send = vi.spyOn(client, "send");
+  await waitFor(() =>
+    expect(button("Steer")).toHaveProperty("disabled", false),
+  );
+  const edited = box();
+  expect(document.activeElement).toBe(edited);
+  expect(edited).toHaveProperty(
+    "selectionStart",
+    "Existing draft\n\nQueued text".length,
+  );
+  expect(edited).toHaveProperty(
+    "selectionEnd",
+    "Existing draft\n\nQueued text".length,
+  );
+  fireEvent.click(button("Steer"));
+  expect(send).toHaveBeenCalledWith(
+    "c1",
+    "Existing draft\n\nQueued text",
+    [],
+    [
+      { name: "draft.txt", dataUrl: "data:text/plain;base64,ZHJhZnQ=" },
+      snapshot,
+    ],
+    { messageIds: [queuedId], commandId: expect.any(String) },
+  );
+  await waitFor(async () =>
+    expect((await client.openChat("c1")).chat.queue).toEqual([]),
+  );
+});
+
+test("editing queued input waits for the draft submission that is still saving", async () => {
+  const client = await open(
+    one({
+      id: "c1",
+      title: "Limiter",
+      queue: [{ id: "q1", text: "Edit this message" }],
+      queue_paused: true,
+    }),
+  );
+  let finishSaving!: () => void;
+  const saving = new Promise<void>((resolve) => {
+    finishSaving = resolve;
+  });
+  vi.spyOn(client, "send").mockReturnValueOnce(saving);
+  type("Sending this draft");
+  fireEvent.click(button("Send"));
+  await act(async () => {
+    fireEvent.click(button("Edit in the message box"));
+  });
+  expect(composer()).toHaveProperty("value", "Sending this draft");
+  await act(async () => finishSaving());
+  expect(composer()).toHaveProperty("value", "Edit this message");
+});
+
+test("a queued edit is recovered after navigation and a lost acknowledgement", async () => {
+  const client = await open([
+    ...one({ id: "c1", title: "Limiter", queue_paused: true }),
+    ...one({ id: "c2", title: "Other" }),
+  ]);
+  const files = [
+    { name: "notes.txt", dataUrl: "data:text/plain;base64,c2F2ZWQ=" },
+  ];
+  await act(async () => client.queue("c1", "Queued caption", [], files));
+  const prepare = client.editQueued;
+  let finishPreparing!: () => void;
+  const preparing = new Promise<void>((resolve) => {
+    finishPreparing = resolve;
+  });
+  vi.spyOn(client, "editQueued").mockImplementationOnce(async (...args) => {
+    const payload = await prepare(...args);
+    await preparing;
+    return payload;
+  });
+  const acknowledge = client.confirmQueueEdit;
+  let confirmation:
+    | {
+        caption: string | undefined;
+        removalDisabled: boolean | undefined;
+        accepted: boolean;
+      }
+    | undefined;
+  const confirm = vi
+    .spyOn(client, "confirmQueueEdit")
+    .mockImplementationOnce(async (...args) => {
+      const caption =
+        screen.queryAllByLabelText<HTMLTextAreaElement>("Message Codex")[0]
+          ?.value;
+      const removalDisabled = screen
+        .queryAllByRole("button", { name: "Remove notes.txt" })[0]
+        ?.matches(":disabled");
+      const accepted = await acknowledge(...args);
+      confirmation = { caption, removalDisabled, accepted };
+      throw new Error("Acknowledgement lost");
+    });
+  type("Draft caption");
+  fireEvent.click(button("Edit in the message box"));
+  fireEvent.click(button(/^Other/));
+  await screen.findByRole("heading", { name: "Other" });
+  await act(async () => finishPreparing());
+  expect((await client.openChat("c1")).chat.queue).toHaveLength(1);
+  expect(confirm).not.toHaveBeenCalled();
+  fireEvent.click(button(/^Limiter/));
+  await screen.findByRole("heading", { name: "Limiter" });
+
+  const retry = await screen.findByRole("button", { name: "Retry queue edit" });
+  expect(confirmation).toEqual({
+    caption: "Draft caption\n\nQueued caption",
+    removalDisabled: true,
+    accepted: true,
+  });
+  const held = (await client.openChat("c1")).chat.queue;
+  expect(held).toEqual([
+    expect.objectContaining({ text: "Queued caption", editing: true }),
+  ]);
+  expect(composer()).toHaveProperty("value", "Draft caption\n\nQueued caption");
+  expect(composer()).toHaveProperty("readOnly", true);
+  expect(button("Send")).toHaveProperty("disabled", true);
+  act(() => retry.focus());
+  fireEvent.click(retry);
+
+  await waitFor(() => {
+    expect(composer()).toHaveProperty(
+      "value",
+      "Draft caption\n\nQueued caption",
+    );
+    expect(button("Remove notes.txt")).toBeTruthy();
+    expect(button("Send")).toHaveProperty("disabled", false);
+  });
+  expect(document.activeElement).toBe(composer());
+  expect(confirm.mock.calls[1]).toEqual(confirm.mock.calls[0]);
+  expect(
+    (await client.openChat("c1")).items.filter((item) => item.kind === "user"),
+  ).toHaveLength(0);
+  const save = client.send;
+  const send = vi
+    .spyOn(client, "send")
+    .mockImplementationOnce(async (...args) => {
+      await save(...args);
+      throw new Error("Save acknowledgement lost");
+    });
+  fireEvent.click(button("Send"));
+  expect(send).toHaveBeenCalledWith(
+    "c1",
+    "Draft caption\n\nQueued caption",
+    [],
+    files,
+    { messageIds: [held[0]?.id], commandId: expect.any(String) },
+  );
+  const check = vi.spyOn(client, "checkQueueEdits");
+  fireEvent.click(await screen.findByRole("button", { name: "Retry" }));
+  await waitFor(() =>
+    expect(composer("Steer Codex")).toHaveProperty("value", ""),
+  );
+  expect(check).toHaveBeenCalledWith(
+    "c1",
+    [send.mock.calls[0]?.[4]?.commandId],
+    [],
+  );
+  expect(send).toHaveBeenCalledTimes(1);
+  const { chat, items } = await client.openChat("c1");
+  expect(chat.queue).toEqual([]);
+  expect(items.filter((item) => item.kind === "user")).toHaveLength(1);
+});
+
+test.each([false, true])(
+  "a changed draft reconciles a lost queue save after navigation (late receipt: %s)",
+  async (lateReceipt) => {
+    const client = await open([
+      ...one({ id: "c1", title: "Limiter", queue_paused: true }),
+      ...one({ id: "c2", title: "Other" }),
+    ]);
+    await act(async () => client.queue("c1", "Original text"));
+    fireEvent.click(button("Edit in the message box"));
+    await waitFor(() =>
+      expect(composer()).toHaveProperty("value", "Original text"),
+    );
+    await waitFor(() =>
+      expect(button("Send")).toHaveProperty("disabled", false),
+    );
+    const save = client.send;
+    const send = vi
+      .spyOn(client, "send")
+      .mockImplementationOnce(async (...args) => {
+        await save(...args);
+        throw new Error("Save acknowledgement lost");
+      });
+    fireEvent.click(button("Send"));
+    await screen.findByRole("button", { name: "Retry" });
+    fireEvent.click(button(/^Other/));
+    await screen.findByRole("heading", { name: "Other" });
+    fireEvent.click(button(/^Limiter/));
+    await screen.findByRole("heading", { name: "Limiter" });
+
+    type("New wording", "Steer Codex");
+    if (lateReceipt) {
+      vi.spyOn(client, "checkQueueEdits").mockResolvedValueOnce({
+        saved: [],
+        removed: [],
+      });
+      fireEvent.click(button("Steer"));
+      const retry = await screen.findByRole("button", { name: "Retry" });
+      expect(send).toHaveBeenCalledTimes(2);
+      fireEvent.click(retry);
+    } else {
+      fireEvent.click(button("Steer"));
+    }
+    expect(
+      await screen.findByText(
+        "The earlier message was already saved. Your edited draft is ready to send.",
+      ),
+    ).toBeTruthy();
+    const sentAttempts = lateReceipt ? 2 : 1;
+    expect(send).toHaveBeenCalledTimes(sentAttempts);
+    const box = composer("Steer Codex");
+    expect(box).toHaveProperty("value", "New wording");
+    await waitFor(() =>
+      expect(button("Steer")).toHaveProperty("disabled", false),
+    );
+    fireEvent.click(button("Steer"));
+    expect(send.mock.calls[sentAttempts]).toEqual(["c1", "New wording", []]);
+  },
+);
+
+test.each([false, true])(
+  "editing the next queued message reconciles a committed save first (later edits: %s)",
+  async (edited) => {
+    const client = await open(
+      one({ id: "c1", title: "Limiter", queue_paused: true }),
+    );
+    const firstFile = {
+      name: "first.txt",
+      dataUrl: "data:text/plain;base64,b25l",
+    };
+    const nextFile = {
+      name: "next.txt",
+      dataUrl: "data:text/plain;base64,dHdv",
+    };
+    await act(async () => {
+      await client.queue("c1", "First caption", [], [firstFile]);
+      await client.queue("c1", "Next caption", [], [nextFile]);
+    });
+    const [editFirst] = screen.getAllByRole("button", {
+      name: "Edit in the message box",
+    });
+    if (!editFirst) throw new Error("Missing first queue edit.");
+    fireEvent.click(editFirst);
+    await waitFor(() =>
+      expect(button("Send")).toHaveProperty("disabled", false),
+    );
+    const save = client.send;
+    const send = vi
+      .spyOn(client, "send")
+      .mockImplementationOnce(async (...args) => {
+        await save(...args);
+        throw new Error("Save acknowledgement lost");
+      });
+    fireEvent.click(button("Send"));
+    await screen.findByRole("button", { name: "Retry" });
+    if (edited) type("Revised caption", "Steer Codex");
+
+    const check = client.checkQueueEdits;
+    const checkReceipts = vi.spyOn(client, "checkQueueEdits");
+    if (!edited) {
+      checkReceipts.mockResolvedValueOnce({ saved: [], removed: [] });
+      fireEvent.click(button("Edit in the message box"));
+      expect(
+        await screen.findByText(
+          "Send the previous edit before editing another queued message.",
+        ),
+      ).toBeTruthy();
+      expect(composer("Steer Codex")).toHaveProperty("value", "First caption");
+    }
+    let finish!: () => void;
+    const checking = new Promise<void>((resolve) => {
+      finish = resolve;
+    });
+    checkReceipts.mockImplementationOnce(async (...args) => {
+      await checking;
+      return check(...args);
+    });
+    fireEvent.click(button("Edit in the message box"));
+    expect(button("Remove from queue")).toHaveProperty("disabled", true);
+    await act(async () => finish());
+    expect(send).toHaveBeenCalledTimes(1);
+    expect(
+      screen.queryByRole("button", { name: "Remove first.txt" }),
+    ).toBeNull();
+
+    if (edited) {
+      expect(
+        await screen.findByText(
+          "The earlier message was already saved. Your edited draft is ready to send.",
+        ),
+      ).toBeTruthy();
+      expect(composer("Steer Codex")).toHaveProperty(
+        "value",
+        "Revised caption",
+      );
+      const [next] = (await client.openChat("c1")).chat.queue;
+      expect(next?.text).toBe("Next caption");
+      expect(next?.editing).toBeFalsy();
+      fireEvent.click(button("Edit in the message box"));
+    }
+    const nextText = edited
+      ? "Revised caption\n\nNext caption"
+      : "Next caption";
+    await waitFor(() =>
+      expect(composer("Steer Codex")).toHaveProperty("value", nextText),
+    );
+    await waitFor(() =>
+      expect(button("Steer")).toHaveProperty("disabled", false),
+    );
+    expect(button("Remove from queue")).toHaveProperty("disabled", false);
+    fireEvent.click(button("Steer"));
+    await waitFor(() => expect(send).toHaveBeenCalledTimes(2));
+    expect(send.mock.calls[1]?.[1]).toBe(nextText);
+    expect(send.mock.calls[1]?.[3]).toEqual([nextFile]);
+  },
+);
+
+test("a saved queue edit reopens and a lost Remove reply leaves its draft usable", async () => {
+  const client = await open(one({ id: "c1", title: "Limiter" }));
+  const file = {
+    name: "notes.txt",
+    dataUrl: "data:text/plain;base64,c2F2ZWQ=",
+  };
+  await act(async () => {
+    await client.queue("c1", "Original text", [], [file]);
+    const held = (await client.openChat("c1")).chat.queue[0];
+    if (!held) throw new Error("The queued input is missing.");
+    await client.confirmQueueEdit("c1", held.id, "earlier-edit");
+  });
+  const queue = await screen.findByRole("list", { name: "Queued messages" });
+  expect(within(queue).getByText("Editing")).toBeTruthy();
+  expect(within(queue).getByText("Original text · notes.txt")).toBeTruthy();
+  expect(within(queue).queryByRole("button", { name: "Send now" })).toBeNull();
+  expect(composer()).toHaveProperty("value", "");
+  fireEvent.click(
+    within(queue).getByRole("button", { name: "Edit in the message box" }),
+  );
+  await waitFor(() => expect(composer()).toHaveProperty("readOnly", false));
+  expect(composer()).toHaveProperty("value", "Original text");
+  expect(button("Remove notes.txt")).toBeTruthy();
+  const remove = client.removeQueued;
+  const removeQueued = vi
+    .spyOn(client, "removeQueued")
+    .mockImplementationOnce(async (...args) => {
+      await remove(...args);
+      throw new Error("Remove acknowledgement lost");
+    });
+  fireEvent.click(
+    within(queue).getByRole("button", { name: "Remove from queue" }),
+  );
+  await screen.findByRole("button", { name: "Retry" });
+  expect((await client.openChat("c1")).chat.queue).toEqual([]);
+
+  const send = vi.spyOn(client, "send");
+  fireEvent.click(button("Send"));
+  await waitFor(() =>
+    expect(send).toHaveBeenCalledWith("c1", "Original text", [], [file]),
+  );
+  expect(removeQueued).toHaveBeenCalledTimes(1);
+});
+
+test("a pending queue edit does not duplicate a queued message sent before confirmation", async () => {
+  const client = await open(
+    one({ id: "c1", title: "Limiter", queue_paused: true }),
+  );
+  const file = {
+    name: "notes.txt",
+    dataUrl: "data:text/plain;base64,c2F2ZWQ=",
+  };
+  await act(async () => client.queue("c1", "Queued caption", [], [file]));
+  const confirm = client.confirmQueueEdit;
+  let finishConfirming!: () => void;
+  const waiting = new Promise<void>((resolve) => {
+    finishConfirming = resolve;
+  });
+  const pending = vi
+    .spyOn(client, "confirmQueueEdit")
+    .mockImplementationOnce(async (...args) => {
+      await waiting;
+      return confirm(...args);
+    });
+  type("Draft caption");
+  fireEvent.click(button("Edit in the message box"));
+  await waitFor(() => expect(pending).toHaveBeenCalledOnce());
+  fireEvent.click(button("Send now"));
+  await screen.findByText("Queued caption", { selector: ".chat-you *" });
+  await act(async () => finishConfirming());
+  expect(composer("Steer Codex")).toHaveProperty("value", "Draft caption");
+  noButton("Remove notes.txt");
+  expect(
+    (await client.openChat("c1")).items.filter((item) => item.kind === "user"),
+  ).toHaveLength(1);
+});
+
+test.each(["send", "queue"] as const)(
+  "a pending %s keeps one locked draft across Chat navigation and clears it together",
+  async (submit) => {
+    const client = await open([
+      ...one({ id: "c1", title: "Limiter", activity: "working" }),
+      ...one({ id: "c2", title: "Other" }),
+    ]);
+    let finishSaving!: () => void;
+    const saving = new Promise<void>((resolve) => {
+      finishSaving = resolve;
+    });
+    const save = vi.spyOn(client, submit).mockReturnValue(saving);
+    const box = () => composer("Steer Codex");
+    type("Original caption", "Steer Codex");
+    fireEvent.change(screen.getByLabelText("Choose files to attach"), {
+      target: {
+        files: [new File(["one"], "original.txt", { type: "text/plain" })],
+      },
+    });
+    await waitFor(() =>
+      expect(button("Steer")).toHaveProperty("disabled", false),
+    );
+    fireEvent.keyDown(box(), { key: "Enter", ctrlKey: submit === "queue" });
+    expect(save).toHaveBeenCalledTimes(1);
+
+    fireEvent.click(button(/^Other/));
+    await screen.findByRole("heading", { name: "Other" });
+    fireEvent.click(button(/^Limiter/));
+    await screen.findByRole("heading", { name: "Limiter" });
+    expect(box()).toHaveProperty("readOnly", true);
+    expect(box()).toHaveProperty("value", "Original caption");
+    type("Late edit", "Steer Codex");
+    fireEvent.paste(box(), {
+      clipboardData: {
+        files: [new File(["two"], "late.txt", { type: "text/plain" })],
+      },
+    });
+    fireEvent.keyDown(box(), { key: "Enter", ctrlKey: submit === "queue" });
+    expect(save).toHaveBeenCalledTimes(1);
+    expect(screen.queryByText("late.txt")).toBeNull();
+    expect(box()).toHaveProperty("value", "Original caption");
+    expect(button("Remove original.txt")).toHaveProperty("disabled", true);
+
+    await act(async () => finishSaving());
+    expect(box()).toHaveProperty("readOnly", false);
+    expect(box()).toHaveProperty("value", "");
+    expect(screen.queryByText("original.txt")).toBeNull();
+  },
+);
+
+test("New Chat keeps a pending first message and its retry identity across navigation", async () => {
+  const client = await open(one({ id: "c1", title: "Limiter" }));
+  client.projectCheckouts = [
+    { project: { id: "p1", title: "Storefront" }, path: "/work/storefront" },
+  ];
+  let rejectCreate!: (reason: Error) => void;
+  const creating = new Promise<never>((_, reject) => {
+    rejectCreate = reject;
+  });
+  const create = vi.spyOn(client, "createChat").mockReturnValueOnce(creating);
+  fireEvent.click(button("New Chat"));
+  fireEvent.keyDown(button("Scratch folder"), { key: "Enter" });
+  fireEvent.click(
+    await screen.findByRole("menuitem", {
+      name: "Storefront /work/storefront",
+    }),
+  );
+  expect(button("Folder: /work/storefront")).toBeTruthy();
+  const description = "Describe a task or ask a question";
+  const box = () => composer(description);
+  type("First caption", description);
+  fireEvent.change(screen.getByLabelText("Choose files to attach"), {
+    target: { files: [new File(["one"], "first.txt", { type: "text/plain" })] },
+  });
+  await waitFor(() => expect(button("Send")).toHaveProperty("disabled", false));
+  fireEvent.keyDown(box(), { key: "Enter" });
+  expect(create).toHaveBeenCalledTimes(1);
+  expect(create.mock.calls[0]?.[0].folder).toBe("/work/storefront");
+
+  fireEvent.click(button(/^Limiter/));
+  await screen.findByRole("heading", { name: "Limiter" });
+  fireEvent.click(button("New Chat"));
+  await screen.findByRole("heading", { name: "What should we work on?" });
+  expect(box()).toHaveProperty("readOnly", true);
+  expect(button("Folder: /work/storefront")).toBeTruthy();
+  expect(box()).toHaveProperty("value", "First caption");
+  expect(button("Remove first.txt")).toHaveProperty("disabled", true);
+  fireEvent.keyDown(box(), { key: "Enter" });
+  expect(create).toHaveBeenCalledTimes(1);
+  await act(async () => rejectCreate(new Error("The first reply was lost")));
+
+  await waitFor(() => expect(button("Send")).toHaveProperty("disabled", false));
+  fireEvent.keyDown(box(), { key: "Enter" });
+  expect(create.mock.calls[1]).toEqual(create.mock.calls[0]);
+  await screen.findByRole("heading", { name: "First caption" });
+  fireEvent.click(button("New Chat"));
+  expect(box()).toHaveProperty("value", "");
+  noButton("Remove first.txt");
+});
+
+test("an edited New Chat uses current harness picks after reopening the draft", async () => {
+  const client = await open(one({ id: "c1", title: "Limiter" }));
+  const harness = (await client.harnesses()).find((item) => item.usable);
+  if (!harness) throw new Error("Missing a usable harness.");
+  const initialOptions = client.harnessOptions;
+  const { models } = await initialOptions(harness.id);
+  const firstModel = models.find((model) => model.is_default);
+  if (!firstModel) throw new Error("Missing the starting model.");
+  let modelChanged = false;
+  let freshOptionsRead = false;
+  vi.spyOn(client, "harnessOptions").mockImplementation(async (harness) => {
+    const original = await initialOptions(harness);
+    freshOptionsRead ||= modelChanged;
+    return modelChanged
+      ? {
+          ...original,
+          models: [{ ...firstModel, id: "updated", label: "Updated model" }],
+        }
+      : original;
+  });
+  const create = vi
+    .spyOn(client, "createChat")
+    .mockRejectedValueOnce(new Error("Create failed"));
+  fireEvent.click(button("New Chat"));
+  await screen.findByRole("button", {
+    name: new RegExp(harness.name + ", model"),
+  });
+  type("First attempt", "Describe a task or ask a question");
+  fireEvent.click(button("Send"));
+  await screen.findByRole("button", { name: "Retry" });
+  expect(create.mock.calls[0]?.[0].model).toBe(firstModel.id);
+
+  modelChanged = true;
+  fireEvent.click(button(/^Limiter/));
+  await screen.findByRole("heading", { name: "Limiter" });
+  fireEvent.click(button("New Chat"));
+  await waitFor(() => expect(freshOptionsRead).toBe(true));
+  await act(async () => {});
+  type("Edited attempt", "Describe a task or ask a question");
+  fireEvent.click(button("Send"));
+  expect(create.mock.calls[1]?.[0].model).toBe("updated");
+  expect(create.mock.calls[1]?.[0].command_id).not.toBe(
+    create.mock.calls[0]?.[0].command_id,
+  );
+});
+
+test.each(["unchanged", "model changed", "harness changed"])(
+  "ordinary Send after a lost New Chat reply and a probe (%s)",
+  async (choice) => {
+    localStorage.clear();
+    const client = await open(one({ id: "c1", title: "Limiter" }));
+    client.setHarnesses([{ id: "codex", name: "Codex", status: "ready" }]);
+    const probe = vi.spyOn(client, "harnesses");
+    const initialOptions = client.harnessOptions;
+    let finishOptions!: () => void;
+    const loading = new Promise<void>((resolve) => {
+      finishOptions = resolve;
+    });
+    vi.spyOn(client, "harnessOptions").mockImplementation(async (harness) => {
+      await loading;
+      return initialOptions(harness);
+    });
+    const save = client.createChat;
+    const create = vi
+      .spyOn(client, "createChat")
+      .mockImplementationOnce(async (request) => {
+        await save(request);
+        throw new Error("The first reply was lost");
+      });
+
+    fireEvent.click(button("New Chat"));
+    fireEvent.change(screen.getByLabelText("Choose files to attach"), {
+      target: {
+        files: [new File(["one"], "first.txt", { type: "text/plain" })],
+      },
+    });
+    await waitFor(() =>
+      expect(button("Send")).toHaveProperty("disabled", false),
+    );
+    fireEvent.click(button("Send"));
+    await screen.findByRole("button", { name: "Retry" });
+    const first = create.mock.calls[0]?.[0];
+    expect(first?.model).toBeUndefined();
+    expect(first?.attachments).toHaveLength(1);
+
+    client.setHarnesses([
+      { id: "claude-code", name: "Claude Code", status: "ready" },
+      { id: "codex", name: "Codex", status: "ready" },
+    ]);
+    const previousProbes = probe.mock.calls.length;
+    fireEvent.click(button("New Chat"));
+    await waitFor(() =>
+      expect(probe.mock.calls.length).toBeGreaterThan(previousProbes),
+    );
+    await act(async () => finishOptions());
+    const modelPicker = await screen.findByRole("button", {
+      name: "Codex, model GPT-5.5 Codex, effort Medium",
+    });
+    if (choice === "model changed") {
+      fireEvent.click(modelPicker);
+      fireEvent.click(
+        await screen.findByRole("radio", { name: /Broad world knowledge/ }),
+      );
+    } else if (choice === "harness changed") {
+      fireEvent.click(modelPicker);
+      fireEvent.click(await screen.findByRole("tab", { name: "Claude Code" }));
+    }
+    fireEvent.click(button("Send"));
+
+    await screen.findByRole("heading", { name: "first.txt" });
+    const second = create.mock.calls[1]?.[0];
+    if (choice === "unchanged") {
+      expect(second).toEqual(first);
+      expect(client.created).toHaveLength(1);
+    } else {
+      expect(second?.command_id).not.toBe(first?.command_id);
+      expect(client.created).toHaveLength(2);
+      if (choice === "model changed") expect(second?.model).toBe("gpt-5.5");
+      else expect(second?.harness_id).toBe("claude-code");
+    }
+  },
+);
+
+test.each(["another Chat", "narrow list"])(
+  "a late New Chat success leaves the current pane alone (%s)",
+  async (target) => {
+    const measure =
+      target === "narrow list"
+        ? vi
+            .spyOn(HTMLElement.prototype, "clientWidth", "get")
+            .mockReturnValue(600)
+        : undefined;
+    const client = await open(
+      target === "narrow list" ? [] : one({ id: "c1", title: "Limiter" }),
+    );
+    measure?.mockRestore();
+    const save = client.createChat;
+    let finish!: () => void;
+    const creating = new Promise<void>((resolve) => {
+      finish = resolve;
+    });
+    vi.spyOn(client, "createChat").mockImplementationOnce(async (request) => {
+      await creating;
+      return save(request);
+    });
+    fireEvent.click(await screen.findByRole("button", { name: "New Chat" }));
+    type("Create later", "Describe a task or ask a question");
+    await waitFor(() =>
+      expect(button("Send")).toHaveProperty("disabled", false),
+    );
+    fireEvent.click(button("Send"));
+    if (target === "narrow list") fireEvent.click(button("Back to Chats"));
+    else {
+      fireEvent.click(button(/^Limiter/));
+      await screen.findByRole("heading", { name: "Limiter" });
+    }
+    await act(async () => finish());
+    expect(
+      await screen.findByRole("button", { name: /^Create later/ }),
+    ).toBeTruthy();
+    if (target === "narrow list")
+      expect(
+        document.querySelector(".chats-workspace")?.getAttribute("data-single"),
+      ).toBe("list");
+    else expect(screen.getByRole("heading", { name: "Limiter" })).toBeTruthy();
+  },
+);
+
+test.each([false, true])(
+  "Retry after navigation opens the Chat whose create reply was lost (revised caption: %s)",
+  async (revisedCaption) => {
+    const client = await open(one({ id: "c1", title: "Limiter" }));
+    client.projectCheckouts = [
+      { project: { id: "p1", title: "Storefront" }, path: "/work/storefront" },
+    ];
+    const saved = client.createChat;
+    const create = vi
+      .spyOn(client, "createChat")
+      .mockImplementationOnce(async (request) => {
+        await saved(request);
+        throw new Error("The first reply was lost");
+      });
+    fireEvent.click(button("New Chat"));
+    fireEvent.keyDown(button("Scratch folder"), { key: "Enter" });
+    fireEvent.click(
+      await screen.findByRole("menuitem", {
+        name: "Storefront /work/storefront",
+      }),
+    );
+    expect(button("Folder: /work/storefront")).toBeTruthy();
+    const description = "Describe a task or ask a question";
+    type("First caption", description);
+    fireEvent.change(screen.getByLabelText("Choose files to attach"), {
+      target: {
+        files: [new File(["one"], "first.txt", { type: "text/plain" })],
+      },
+    });
+    await waitFor(() =>
+      expect(button("Send")).toHaveProperty("disabled", false),
+    );
+    fireEvent.click(button("Send"));
+    await screen.findByRole("button", { name: "Retry" });
+    expect(create.mock.calls[0]?.[0].folder).toBe("/work/storefront");
+    const nextCaption = revisedCaption ? "New work after the failed reply" : "";
+    if (revisedCaption) type(nextCaption, description);
+    fireEvent.change(screen.getByLabelText("Choose files to attach"), {
+      target: {
+        files: [new File(["two"], "next.txt", { type: "text/plain" })],
+      },
+    });
+    await waitFor(() =>
+      expect(button("Send")).toHaveProperty("disabled", false),
+    );
+
+    fireEvent.click(button(/^Limiter/));
+    await screen.findByRole("heading", { name: "Limiter" });
+    fireEvent.click(button("New Chat"));
+    expect(
+      await screen.findByRole("button", { name: "Folder: /work/storefront" }),
+    ).toBeTruthy();
+    fireEvent.click(await screen.findByRole("button", { name: "Retry" }));
+    expect(create.mock.calls[1]).toEqual(create.mock.calls[0]);
+    await screen.findByRole("heading", { name: "First caption" });
+    const matches = within(
+      screen.getByRole("list", { name: "Chats" }),
+    ).getAllByText("First caption");
+    expect(matches).toHaveLength(1);
+    fireEvent.click(button("New Chat"));
+    expect(composer(description)).toHaveProperty("value", nextCaption);
+    expect(button("Remove next.txt")).toBeTruthy();
+    noButton("Remove first.txt");
+    await waitFor(() =>
+      expect(button("Send")).toHaveProperty("disabled", false),
+    );
+    fireEvent.click(button("Send"));
+    expect(create.mock.calls[2]?.[0].message).toBe(nextCaption);
+    expect(create.mock.calls[2]?.[0].attachments).toEqual([
+      { name: "next.txt", dataUrl: "data:text/plain;base64,dHdv" },
+    ]);
+    expect(create.mock.calls[2]?.[0].command_id).not.toBe(
+      create.mock.calls[0]?.[0].command_id,
+    );
+  },
+);
+
+test("post-Deny guidance gives way to Queue for an image that cannot steer", async () => {
+  await open(
+    one(
+      {
+        id: "c1",
+        title: "Limiter",
+        activity: "waiting",
+        steering: { available: true, images_refused: true },
+      },
+      [approval],
+    ),
+  );
+  fireEvent.click(button("Deny"));
+  const guidance = "Tell Codex what to do instead";
+  const box = await screen.findByLabelText(guidance);
+  fireEvent.change(box, { target: { value: "Use what you have" } });
+  expect(button("Steer")).toHaveProperty("disabled", false);
+
+  const file = new File([screenshotBytes], "Screen.png", { type: "image/png" });
+  fireEvent.paste(box, { clipboardData: { files: [file] } });
+  expect(await screen.findByLabelText("Queue for Codex")).toBe(box);
+  expect(button("Queue")).toHaveProperty("disabled", false);
+  expect(box).toHaveProperty("value", "Use what you have");
+
+  fireEvent.click(button("Remove Screen.png"));
+  expect(await screen.findByLabelText(guidance)).toBe(box);
+  expect(button("Steer")).toHaveProperty("disabled", false);
+});
+
+test("an image that the running turn cannot take can be queued for the next turn", async () => {
+  await open(
+    one({
+      id: "c1",
+      title: "Limiter",
+      activity: "working",
+      steering: { available: true, images_refused: true },
+    }),
+  );
+  const file = new File([screenshotBytes], "Screen.png", { type: "image/png" });
+  fireEvent.paste(composer("Steer Codex"), {
+    clipboardData: { files: [file] },
+  });
+  await waitFor(() =>
+    expect(button("Queue")).toHaveProperty("disabled", false),
+  );
+  expect(composer("Queue for Codex")).toHaveProperty("value", "");
+  fireEvent.click(button("Queue"));
+  const queue = await screen.findByRole("list", { name: "Queued messages" });
+  expect(within(queue).getByText("Screen.png")).toBeTruthy();
+  expect(within(queue).queryByRole("button", { name: "Send now" })).toBeNull();
 });
 
 test("an approval's reason sets its `code spans` in mono, without the backticks", async () => {
@@ -542,6 +1371,92 @@ test("a question takes an option by key inside the request, or a typed answer", 
   expect(items.filter((item) => item.kind === "user")).toEqual([]);
 });
 
+test.each([false, true])(
+  "Chat navigation keeps text on its original answer or message route (typed before the question: %s)",
+  async (beforeQuestion) => {
+    const client = await open([
+      ...one(
+        {
+          id: "c1",
+          title: "Limiter",
+          activity: beforeQuestion ? "idle" : "waiting",
+        },
+        beforeQuestion ? [] : [question],
+      ),
+      ...one({ id: "c2", title: "Other" }),
+    ]);
+    const answer = vi.spyOn(client, "answer");
+    const send = vi.spyOn(client, "send");
+    const text = "Keep these words";
+    type(text, beforeQuestion ? "Message Codex" : "Answer, or pick above");
+    if (beforeQuestion) {
+      act(() => {
+        client.push("c1", question);
+        client.patch("c1", { activity: "waiting" });
+      });
+    }
+    fireEvent.click(button(/^Other/));
+    await screen.findByRole("heading", { name: "Other" });
+    fireEvent.click(button(/^Limiter/));
+    await screen.findByRole("heading", { name: "Limiter" });
+
+    if (beforeQuestion) {
+      expect(composer("Steer Codex")).toHaveProperty("value", text);
+      expect(screen.getByRole("textbox", { name: "Answer" })).toBeTruthy();
+      fireEvent.click(button("Steer"));
+      expect(send).toHaveBeenCalledWith("c1", text, []);
+      expect(answer).not.toHaveBeenCalled();
+    } else {
+      expect(composer("Answer, or pick above")).toHaveProperty("value", text);
+      fireEvent.click(button("Send"));
+      expect(await screen.findByText(`Answered · ${text}`)).toBeTruthy();
+      expect(answer).toHaveBeenCalledWith("c1", question.id, { text });
+      expect(send).not.toHaveBeenCalled();
+    }
+  },
+);
+
+test.each(["composer", "dock"])(
+  "composer and dock share one in-flight answer (started in %s)",
+  async (from) => {
+    const client = await open(
+      one({ id: "c1", title: "Limiter", activity: "waiting" }, [question]),
+    );
+    const answer = client.answer;
+    const send = vi.spyOn(client, "send");
+    let finish!: () => void;
+    const pending = new Promise<void>((resolve) => {
+      finish = resolve;
+    });
+    const submit = vi
+      .spyOn(client, "answer")
+      .mockImplementationOnce(async (...args) => {
+        await pending;
+        return answer(...args);
+      });
+    type("Fail open for five minutes", "Answer, or pick above");
+    const choice = button("Fail closed");
+    fireEvent.click(from === "dock" ? choice : button("Send"));
+    const box = composer("Answer, or pick above");
+    expect(box).toHaveProperty("value", "Fail open for five minutes");
+    expect(button("Send")).toHaveProperty("disabled", true);
+    expect(choice).toHaveProperty("disabled", true);
+    fireEvent.keyDown(box, { key: "Enter" });
+    fireEvent.click(choice);
+    fireEvent.keyDown(choice, { key: "2" });
+    expect(submit).toHaveBeenCalledTimes(1);
+    expect(send).not.toHaveBeenCalled();
+    await act(async () => finish());
+    expect(
+      await screen.findByText(
+        from === "dock"
+          ? "Answered · Fail closed"
+          : "Answered · Fail open for five minutes",
+      ),
+    ).toBeTruthy();
+  },
+);
+
 test("digits pick a question's option only while focus is inside the request", async () => {
   await open(
     one({ id: "c1", title: "Limiter", activity: "waiting" }, [question]),
@@ -552,6 +1467,309 @@ test("digits pick a question's option only while focus is inside the request", a
   ).toBeTruthy();
   fireEvent.keyDown(button(/Fail open/), { key: "2" });
   expect(await screen.findByText("Answered · Fail closed")).toBeTruthy();
+});
+
+test.each(["before", "after"])(
+  "a native free-text question can be answered separately from a file attached %s it",
+  async (when) => {
+    const client = await open(
+      one({ id: "c1", title: "Limiter", activity: "working" }),
+    );
+    const ask = () =>
+      act(() => {
+        client.push("c1", { ...question, options: [] });
+        client.patch("c1", { activity: "waiting" });
+      });
+    if (when === "after") {
+      ask();
+      expect(composer("Answer, or pick above")).toBeTruthy();
+    }
+    const file = new File(["notes"], "notes.txt", { type: "text/plain" });
+    fireEvent.change(screen.getByLabelText("Choose files to attach"), {
+      target: { files: [file] },
+    });
+    if (when === "before") ask();
+    type("Keep this caption", "Steer Codex");
+    const request = await screen.findByRole("group", {
+      name: /Redis is unreachable/,
+    });
+    fireEvent.change(within(request).getByRole("textbox", { name: "Answer" }), {
+      target: { value: "Fail open for five minutes" },
+    });
+    fireEvent.click(
+      within(request).getByRole("button", { name: "Send answer" }),
+    );
+    expect(
+      await screen.findByText("Answered · Fail open for five minutes"),
+    ).toBeTruthy();
+    expect(composer("Steer Codex")).toHaveProperty(
+      "value",
+      "Keep this caption",
+    );
+    expect(screen.getByText("notes.txt")).toBeTruthy();
+    expect(
+      (await client.openChat("c1")).items.filter(
+        (item) => item.kind === "user",
+      ),
+    ).toEqual([]);
+  },
+);
+
+test("a quote stays on the message route while the dock holds the unsent answer", async () => {
+  const id = "quoted-question";
+  const client = await open(
+    one({ id, title: "Limiter", activity: "waiting" }, [question]),
+  );
+  const send = vi.spyOn(client, "send").mockResolvedValue(undefined);
+  const reply = vi.spyOn(client, "answer");
+  type("Use the fallback", "Answer, or pick above");
+  const record = { kind: "ticket", id: "t14" } as const;
+  try {
+    act(() =>
+      addQuote(id, {
+        source: "T-14 · Description",
+        text: "Record both outcomes.",
+        record,
+      }),
+    );
+    expect(composer("Steer Codex")).toHaveProperty("value", "");
+    expect(screen.getByRole("textbox", { name: "Answer" })).toHaveProperty(
+      "value",
+      "Use the fallback",
+    );
+    type("Send this context", "Steer Codex");
+    fireEvent.keyDown(composer("Steer Codex"), { key: "Enter" });
+    expect(send).toHaveBeenCalledWith(
+      id,
+      "> From T-14 · Description:\n> Record both outcomes.\n\nSend this context",
+      [record],
+    );
+    expect(reply).not.toHaveBeenCalled();
+  } finally {
+    act(() => clearQuotes(id));
+  }
+});
+
+test("an answer has a plain Enter action and no queue shortcut", async () => {
+  const client = await open(
+    one({ id: "c1", title: "Limiter", activity: "waiting" }, [question]),
+  );
+  const answer = vi.spyOn(client, "answer");
+  const queue = vi.spyOn(client, "queue");
+  const box = composer("Answer, or pick above");
+  type("Answer this request", "Answer, or pick above");
+  expect(button("Send").getAttribute("aria-description")).toBeNull();
+  expect(button("Send").getAttribute("aria-keyshortcuts")).toBe("Enter");
+  expect(fireEvent.keyDown(box, { key: "Enter", ctrlKey: true })).toBe(true);
+  expect(fireEvent.keyDown(box, { key: "Enter", metaKey: true })).toBe(true);
+  expect(answer).not.toHaveBeenCalled();
+  expect(queue).not.toHaveBeenCalled();
+  expect(box).toHaveProperty("value", "Answer this request");
+  fireEvent.keyDown(box, { key: "Enter" });
+  expect(
+    await screen.findByText("Answered · Answer this request"),
+  ).toBeTruthy();
+  expect(answer).toHaveBeenCalledWith("c1", question.id, {
+    text: "Answer this request",
+  });
+});
+
+test("adding a file moves an unsent answer to its question and sends only the file", async () => {
+  const client = await open(
+    one({ id: "c1", title: "Limiter", activity: "waiting" }, [
+      { ...question, options: [] },
+    ]),
+  );
+  const send = vi.spyOn(client, "send").mockResolvedValue(undefined);
+  const reply = vi.spyOn(client, "answer");
+  type("Ask the operator", "Answer, or pick above");
+  fireEvent.change(screen.getByLabelText("Choose files to attach"), {
+    target: {
+      files: [new File(["notes"], "notes.txt", { type: "text/plain" })],
+    },
+  });
+  expect(screen.getByRole("textbox", { name: "Answer" })).toHaveProperty(
+    "value",
+    "Ask the operator",
+  );
+  const message = composer("Steer Codex");
+  expect(message).toHaveProperty("value", "");
+  await waitFor(() =>
+    expect(button("Steer")).toHaveProperty("disabled", false),
+  );
+  fireEvent.keyDown(message, { key: "Enter" });
+  expect(send).toHaveBeenCalledWith(
+    "c1",
+    "",
+    [],
+    [{ name: "notes.txt", dataUrl: "data:text/plain;base64,bm90ZXM=" }],
+  );
+  expect(reply).not.toHaveBeenCalled();
+  await waitFor(() =>
+    expect(composer("Answer, or pick above")).toHaveProperty(
+      "value",
+      "Ask the operator",
+    ),
+  );
+  fireEvent.click(button("Send"));
+  expect(reply).toHaveBeenCalledWith("c1", question.id, {
+    text: "Ask the operator",
+  });
+});
+
+test("an ended question does not turn its unsent answer into a message", async () => {
+  const client = await open(
+    one({ id: "c1", title: "Limiter", activity: "waiting" }, [question]),
+  );
+  const send = vi.spyOn(client, "send");
+  const reply = vi.spyOn(client, "answer");
+  const box = composer("Answer, or pick above");
+  box.focus();
+  type("Earlier answer", "Answer, or pick above");
+  act(() => {
+    client.push("c1", { ...question, state: "expired" });
+    client.patch("c1", { activity: "working" });
+  });
+  const message = composer("Steer Codex");
+  expect(message).toHaveProperty("value", "");
+  expect(document.activeElement).toBe(message);
+  fireEvent.keyDown(message, { key: "Enter" });
+  expect(send).not.toHaveBeenCalled();
+  expect(reply).not.toHaveBeenCalled();
+  type("A separate message", "Steer Codex");
+  fireEvent.keyDown(message, { key: "Enter" });
+  expect(send).toHaveBeenCalledWith("c1", "A separate message", []);
+});
+
+test("queue Edit keeps an unsent answer separate from the adopted message", async () => {
+  const client = await open(
+    one(
+      {
+        id: "c1",
+        title: "Limiter",
+        activity: "waiting",
+        queue_paused: true,
+        queue: [{ id: "q1", text: "Queued wording" }],
+      },
+      [{ ...question, options: [] }],
+    ),
+  );
+  const send = vi.spyOn(client, "send");
+  const reply = vi.spyOn(client, "answer");
+  type("Earlier answer", "Answer, or pick above");
+  fireEvent.click(button("Edit in the message box"));
+  await waitFor(() =>
+    expect(button("Steer")).toHaveProperty("disabled", false),
+  );
+  const message = composer("Steer Codex");
+  expect(message).toHaveProperty("value", "Queued wording");
+  expect(screen.getByRole("textbox", { name: "Answer" })).toHaveProperty(
+    "value",
+    "Earlier answer",
+  );
+  expect(document.activeElement).toBe(message);
+  fireEvent.keyDown(message, { key: "Enter" });
+  expect(send).toHaveBeenCalledWith("c1", "Queued wording", [], undefined, {
+    messageIds: ["q1"],
+    commandId: expect.any(String),
+  });
+  expect(reply).not.toHaveBeenCalled();
+});
+
+test("an independent answer survives removing the last file and navigating during its submission", async () => {
+  const client = await open([
+    ...one({ id: "c1", title: "Limiter", activity: "waiting" }, [
+      { ...question, options: [] },
+    ]),
+    ...one({ id: "c2", title: "Other" }),
+  ]);
+  const answer = () => screen.getByRole("textbox", { name: "Answer" });
+  const navigateAwayAndBack = async () => {
+    fireEvent.click(button(/^Other/));
+    await screen.findByRole("heading", { name: "Other" });
+    fireEvent.click(button(/^Limiter/));
+    await screen.findByRole("heading", { name: "Limiter" });
+  };
+  fireEvent.change(screen.getByLabelText("Choose files to attach"), {
+    target: {
+      files: [new File(["notes"], "notes.txt", { type: "text/plain" })],
+    },
+  });
+  fireEvent.change(answer(), {
+    target: { value: "Fail open for five minutes" },
+  });
+  fireEvent.click(button("Remove notes.txt"));
+  expect(composer("Steer Codex")).toHaveProperty("value", "");
+  expect(answer()).toHaveProperty("value", "Fail open for five minutes");
+  type("Independent message", "Steer Codex");
+  await navigateAwayAndBack();
+  expect(answer()).toHaveProperty("value", "Fail open for five minutes");
+
+  const sendAnswer = client.answer;
+  let finish!: () => void;
+  const pending = new Promise<void>((resolve) => {
+    finish = resolve;
+  });
+  const save = vi
+    .spyOn(client, "answer")
+    .mockImplementationOnce(async (...args) => {
+      await pending;
+      return sendAnswer(...args);
+    });
+  fireEvent.click(button("Send answer"));
+  await navigateAwayAndBack();
+  expect(answer()).toHaveProperty("readOnly", true);
+  expect(answer()).toHaveProperty("value", "Fail open for five minutes");
+  expect(button("Send answer")).toHaveProperty("disabled", true);
+  fireEvent.submit(answer().closest("form")!);
+  expect(save).toHaveBeenCalledTimes(1);
+
+  await act(async () => finish());
+  expect(
+    await screen.findByText("Answered · Fail open for five minutes"),
+  ).toBeTruthy();
+  await waitFor(() =>
+    expect(screen.queryByRole("textbox", { name: "Answer" })).toBeNull(),
+  );
+  expect(composer("Steer Codex")).toHaveProperty(
+    "value",
+    "Independent message",
+  );
+});
+
+test("an expired independent question keeps the message draft and forgets the old answer", async () => {
+  const client = await open(
+    one({ id: "c1", title: "Limiter", activity: "waiting" }, [
+      { ...question, options: [] },
+    ]),
+  );
+  const answer = () => screen.getByRole("textbox", { name: "Answer" });
+  fireEvent.change(screen.getByLabelText("Choose files to attach"), {
+    target: {
+      files: [new File(["notes"], "notes.txt", { type: "text/plain" })],
+    },
+  });
+  fireEvent.change(answer(), { target: { value: "Old answer" } });
+  type("Keep this message", "Steer Codex");
+  fireEvent.click(button("Remove notes.txt"));
+  let fail!: (reason: Error) => void;
+  vi.spyOn(client, "answer").mockReturnValueOnce(
+    new Promise<void>((_, reject) => {
+      fail = reject;
+    }),
+  );
+  fireEvent.click(button("Send answer"));
+  act(() => client.push("c1", { ...question, options: [], state: "expired" }));
+  await waitFor(() =>
+    expect(screen.queryByRole("textbox", { name: "Answer" })).toBeNull(),
+  );
+  await act(async () => fail(new Error("Closed while submitting")));
+  act(() => client.push("c1", { ...question, id: "next", options: [] }));
+  expect(await screen.findByRole("textbox", { name: "Answer" })).toHaveProperty(
+    "value",
+    "",
+  );
+  expect(composer("Steer Codex")).toHaveProperty("value", "Keep this message");
 });
 
 test("a request arriving mid-draft takes no focus, and the draft keeps its meaning", async () => {
@@ -573,6 +1791,43 @@ test("a request arriving mid-draft takes no focus, and the draft keeps its meani
   type("", "Steer Codex");
   expect(composer("Answer, or pick above")).toBeTruthy();
 });
+
+test.each(["before", "after"])(
+  "a file-only draft attached %s a question stays a message",
+  async (when) => {
+    const client = await open(
+      one({ id: "c1", title: "Limiter", activity: "working" }),
+    );
+    const ask = () =>
+      act(() => {
+        client.push("c1", question);
+        client.patch("c1", { activity: "waiting" });
+      });
+    if (when === "after") ask();
+    const file = new File(["notes"], "question.txt", { type: "text/plain" });
+    fireEvent.change(screen.getByLabelText("Choose files to attach"), {
+      target: { files: [file] },
+    });
+    if (when === "before") ask();
+    expect(composer("Steer Codex")).toHaveProperty("value", "");
+    expect(
+      screen.getByRole("group", { name: /Redis is unreachable/ }),
+    ).toBeTruthy();
+    await waitFor(() =>
+      expect(button("Steer")).toHaveProperty("disabled", false),
+    );
+    const send = vi.spyOn(client, "send");
+    const answer = vi.spyOn(client, "answer");
+    fireEvent.click(button("Steer"));
+    expect(send).toHaveBeenCalledWith(
+      "c1",
+      "",
+      [],
+      [{ name: "question.txt", dataUrl: "data:text/plain;base64,bm90ZXM=" }],
+    );
+    expect(answer).not.toHaveBeenCalled();
+  },
+);
 
 test("an uncertain delivery is never resent unless the person says so", async () => {
   const client = await open(
@@ -879,13 +2134,16 @@ test.each([
     const dialog = await screen.findByRole("dialog", {
       name: "Resume in a fresh session",
     });
+    expect(
+      within(dialog).getByText(/Selected history includes message text only/),
+    ).toBeTruthy();
     const choices = within(dialog).getByRole("radiogroup", {
       name: "History to give the new session",
     });
     expect(
       within(choices).getByRole("radio", { name: /The last response/ }),
     ).toHaveProperty("checked", true);
-    expect(within(choices).getByText("2 messages")).toBeTruthy();
+    expect(within(choices).getByText("2 messages in this Chat")).toBeTruthy();
     fireEvent.click(within(dialog).getByRole("button", { name: "Resume" }));
     expect(
       await screen.findByText("Fresh session · started with the last response"),
@@ -916,21 +2174,36 @@ test("picking messages turns the transcript into the history picker", async () =
           text: "Add a limiter",
           delivery: "delivered",
         },
+        {
+          id: "u2",
+          at,
+          kind: "user",
+          text: "",
+          delivery: "delivered",
+          attachments: [
+            { id: "file1", name: "notes.txt", media_type: "text/plain" },
+          ],
+        },
         reply("r1", "Added the limiter."),
       ],
     ),
   );
   fireEvent.click(button("Resume in a fresh session…"));
   const dialog = await screen.findByRole("dialog");
+  expect(
+    within(dialog).getByText(/Attachment-only messages are skipped/),
+  ).toBeTruthy();
   fireEvent.click(
     within(dialog).getByRole("radio", { name: "Let me pick messages…" }),
   );
   fireEvent.click(within(dialog).getByRole("button", { name: "Resume" }));
   expect(
     await screen.findByText(
-      "Pick the messages to give the new session · 0 of 2",
+      "Pick the messages to give the new session · 0 of 2. Only message text is included.",
     ),
   ).toBeTruthy();
+  expect(button("Save notes.txt")).toBeTruthy();
+  expect(screen.getAllByRole("checkbox")).toHaveLength(2);
   expect(button("Resume")).toHaveProperty("disabled", true);
   fireEvent.click(
     screen.getByRole("checkbox", {
@@ -938,7 +2211,7 @@ test("picking messages turns the transcript into the history picker", async () =
     }),
   );
   expect(
-    screen.getByText("Pick the messages to give the new session · 1 of 2"),
+    screen.getByText(/Pick the messages to give the new session · 1 of 2/),
   ).toBeTruthy();
   fireEvent.click(button("Resume"));
   expect(
@@ -1018,6 +2291,67 @@ test("the list says which Chats need the person, in words as well as the dot", a
   const working = rows.getByRole("button", { name: /^Limiter/ });
   expect(working.textContent).toContain("Working");
   expect(working.hasAttribute("data-attention")).toBe(false);
+});
+
+const demoTicket = {
+  kind: "ticket" as const,
+  id: "t12",
+  reference: "T-12",
+  title: "Design the attachment review",
+  status: "In progress",
+};
+
+test("a linked ticket whose title is the Chat's title shows its reference alone", async () => {
+  await open(
+    one({
+      id: "c1",
+      title: "Design the attachment review",
+      links: [demoTicket],
+    }),
+  );
+  const linked = within(screen.getByRole("group", { name: "Linked records" }));
+  const chip = linked.getByRole("button", { name: /^Open T-12/ });
+  expect(chip.textContent).toBe("T-12");
+});
+
+test("a linked ticket with another title keeps its title on the chip", async () => {
+  await open(one({ id: "c1", title: "Limiter", links: [demoTicket] }));
+  const chip = within(
+    screen.getByRole("group", { name: "Linked records" }),
+  ).getByRole("button", { name: /^Open T-12/ });
+  expect(chip.textContent).toBe("T-12Design the attachment review");
+});
+
+test("the header says the full title in a tooltip only while the title is cut", async () => {
+  const title = "A title long enough that the header has to cut it short";
+  await open(one({ id: "c1", title }));
+  const heading = screen.getByRole("heading", { name: title });
+  const measure = (cut: boolean) => {
+    Object.defineProperty(heading, "scrollWidth", {
+      configurable: true,
+      value: cut ? 400 : 100,
+    });
+    Object.defineProperty(heading, "clientWidth", {
+      configurable: true,
+      value: 200,
+    });
+    Object.defineProperty(heading, "scrollHeight", {
+      configurable: true,
+      value: 20,
+    });
+    Object.defineProperty(heading, "clientHeight", {
+      configurable: true,
+      value: 20,
+    });
+  };
+  measure(false);
+  await userEvent.hover(heading);
+  expect(await screen.queryByRole("tooltip")).toBeNull();
+  await userEvent.unhover(heading);
+  measure(true);
+  await userEvent.hover(heading);
+  const tip = await screen.findByRole("tooltip");
+  expect(tip.textContent).toBe(title);
 });
 
 test("a row's actions mark it unread or read and mute it, and say a refusal", async () => {
@@ -1304,9 +2638,125 @@ const failedRun: Step = {
   truncated: { kept_bytes: 1_048_576, total_bytes: 3_565_158 },
 };
 
-test("a finished turn folds under one row, its final response outside, and opens to each step's output", async () => {
+const readFile = (id: string): TranscriptItem =>
+  inTurn({
+    id,
+    at,
+    kind: "steps",
+    steps: [
+      {
+        kind: "read",
+        target: "src/auth/limiter.ts",
+        targets: [{ text: "src/auth/limiter.ts" }],
+      },
+    ],
+  });
+
+test("a finished turn with only an answer still shows its time, on a quiet line where a work line would be", async () => {
+  vi.useFakeTimers({ toFake: ["Date"] });
+  vi.setSystemTime(new Date(2026, 10, 20, 12));
+  await open(
+    one({ id: "c-quiet", title: "Limiter" }, [
+      youSaid,
+      turnTiming("completed", "2026-11-10T10:02:13Z"),
+      inTurn(reply("r1", "The limiter is in.")),
+    ]),
+  );
+  // No work line, so no fold button; the time stands on its own line.
+  noButton(/Worked/);
+  const time = document.querySelector<HTMLElement>(".chat-turn-time")!;
+  expect(time.textContent).toMatch(/^Nov\s+10$/);
+  expect(time.closest(".chat-foldline")?.querySelector("button")).toBeNull();
+  // The line comes before the answer, as a work line does.
+  const answer = document.querySelector('[data-anchor="r1"]')!;
+  expect(
+    time.compareDocumentPosition(answer) & Node.DOCUMENT_POSITION_FOLLOWING,
+  ).toBeTruthy();
+  fireEvent.pointerMove(time);
+  expect((await screen.findByRole("tooltip")).textContent).toMatch(
+    /^Started Nov 10(, 2026)?, .+ · Ended .+$/,
+  );
+});
+
+test("a finished turn shows its start once, on the work line, with the exact times in its tooltip", async () => {
+  // Only the date is fixed, so the day label does not depend on when the suite runs.
+  vi.useFakeTimers({ toFake: ["Date"] });
+  vi.setSystemTime(new Date(2026, 10, 20, 12));
   await open(
     one({ id: "c1", title: "Limiter" }, [
+      youSaid,
+      turnTiming("completed", "2026-11-10T10:02:13Z"),
+      readFile("s1"),
+      inTurn(reply("r1", "The limiter is in.")),
+    ]),
+  );
+  const time = document.querySelector<HTMLElement>(".chat-turn-time")!;
+  expect(time.textContent).toMatch(/^Nov\s+10$/);
+  // The time is not part of the fold button's name: that stays the work line's words.
+  expect(button("Worked for 2m 13s").textContent).not.toMatch(/Nov/);
+  fireEvent.pointerMove(time);
+  expect((await screen.findByRole("tooltip")).textContent).toMatch(
+    /^Started Nov 10(, 2026)?, .+ · Ended .+$/,
+  );
+  // Your message has no time under it; Copy stays.
+  expect(document.querySelector(".chat-you-part .chat-fine")).toBeNull();
+  expect(
+    within(document.querySelector<HTMLElement>(".chat-you-part")!).getByRole(
+      "button",
+      { name: "Copy message" },
+    ),
+  ).toBeTruthy();
+});
+
+test("Copy and Save as Document belong to a turn's final response, not its progress notes", async () => {
+  await open(
+    one({ id: "c1", title: "Limiter" }, [
+      youSaid,
+      turnTiming("completed", "2026-11-10T10:02:13Z"),
+      inTurn(reply("r1", "Reading the limiter first.")),
+      readFile("s1"),
+      inTurn(reply("r2", "The limiter is in.")),
+    ]),
+  );
+  const names = ["Copy response", "Save as Document"];
+  const count = () =>
+    names.map((name) => screen.queryAllByRole("button", { name }).length);
+  expect(count()).toEqual([1, 1]);
+  // Opening the work shows the progress note, and it still has no actions.
+  fireEvent.click(button("Worked for 2m 13s"));
+  expect(conversation().getByText("Reading the limiter first.")).toBeTruthy();
+  expect(count()).toEqual([1, 1]);
+  // The actions sit at the end of the turn, below everything it shows.
+  const unit = button("Copy response").closest(".chat-turn-unit")!;
+  expect(unit.lastElementChild?.contains(button("Copy response"))).toBe(true);
+});
+
+test("a turn still running offers no reply actions", async () => {
+  await open(
+    one({ id: "c1", title: "Limiter", activity: "working" }, [
+      youSaid,
+      turnTiming("active"),
+      inTurn(reply("r1", "Reading the limiter first.")),
+      readFile("s1"),
+    ]),
+  );
+  // A running turn's text arrives in chunks, so it is read as a whole.
+  await waitFor(() =>
+    expect(document.querySelector(".chat-col")?.textContent).toContain(
+      "Reading the limiter first.",
+    ),
+  );
+  noButton("Copy response");
+  noButton("Save as Document");
+});
+
+/** Opens the turn's one stretch row, which a turn with no progress notes still has. */
+const openStretch = () =>
+  fireEvent.click(document.querySelector<HTMLElement>(".chat-stretch-row")!);
+
+test("a finished turn folds under one row, its final response outside, and opens to each step's output", async () => {
+  await open(
+    one({ id: "finished-fold", title: "Limiter" }, [
       youSaid,
       turnTiming("completed", "2026-11-10T10:02:13Z"),
       inTurn({
@@ -1336,6 +2786,7 @@ test("a finished turn folds under one row, its final response outside, and opens
     name: "Worked for 2m 13s · 1 failed",
   });
   expect(row.getAttribute("aria-controls")).toBe(body.id);
+  openStretch();
   // A row with nothing to open is not a control; its file name is.
   expect(
     within(body)
@@ -1363,7 +2814,7 @@ test("a finished turn folds under one row, its final response outside, and opens
 
 test("a stopped turn folds too, with its stop marker below the response", async () => {
   await open(
-    one({ id: "c1", title: "Migrate" }, [
+    one({ id: "stopped-fold", title: "Migrate" }, [
       youSaid,
       turnTiming("stopped", "2026-11-10T10:00:40Z"),
       inTurn({
@@ -1377,6 +2828,7 @@ test("a stopped turn folds too, with its stop marker below the response", async 
     "Migrate",
   );
   fireEvent.click(button("Stopped after 40s · 1 not finished"));
+  openStretch();
   expect(button("Run npm run test:all, Not finished")).toBeTruthy();
   expect(
     screen.getByText("You stopped this turn. Edits already made are kept."),
@@ -1532,7 +2984,7 @@ test("an answered approval folds into its step row, which says the decision", as
 
 test("what the agent changed in ticketd is a step row, verb first", async () => {
   await open(
-    one({ id: "c1", title: "Limiter" }, [
+    one({ id: "records-step", title: "Limiter" }, [
       youSaid,
       turnTiming("completed", "2026-11-10T10:00:30Z"),
       inTurn({
@@ -1553,6 +3005,7 @@ test("what the agent changed in ticketd is a step row, verb first", async () => 
     ]),
   );
   fireEvent.click(button("Worked for 30s"));
+  openStretch();
   const body = screen.getByRole("group", { name: "Worked for 30s" });
   expect(body.textContent).toContain("Moved T-12 to In review");
   expect(body.textContent).toContain("Posted an update on T-12");
@@ -1668,9 +3121,120 @@ test("a finished turn's record changes are one receipt row under it, whose more 
     "Moved T-12 to In review · Posted an update on T-12",
   );
   fireEvent.click(button("1 more"));
+  // The turn's fold and the stretch holding the change both open: no second click.
   expect(
     screen.getByRole("group", { name: "Worked for 30s" }).textContent,
   ).toContain("Created the Document Reset email copy");
+  expect(
+    document.querySelector(".chat-stretch-row")?.getAttribute("aria-expanded"),
+  ).toBe("true");
+  // A reader who then closes the stretch is not overruled.
+  openStretch();
+  expect(
+    document.querySelector(".chat-stretch-row")?.getAttribute("aria-expanded"),
+  ).toBe("false");
+});
+
+test("more opens the stretch even when the turn's fold is already open", async () => {
+  await open(
+    one({ id: "receipt-open", title: "Limiter" }, [
+      youSaid,
+      turnTiming("completed", "2026-11-10T10:00:30Z"),
+      inTurn({
+        id: "rec1",
+        at,
+        kind: "records",
+        changes: [
+          { kind: "update", reference: "T-12", excerpt: "Limiter is in" },
+          { kind: "update", reference: "T-13", excerpt: "Tests pass" },
+          { kind: "document", document_id: "d9", title: "Reset email copy" },
+        ],
+      }),
+    ]),
+  );
+  fireEvent.click(button("Worked for 30s"));
+  expect(
+    document.querySelector(".chat-stretch-row")?.getAttribute("aria-expanded"),
+  ).toBe("false");
+  fireEvent.click(button("1 more"));
+  expect(
+    document.querySelector(".chat-stretch-row")?.getAttribute("aria-expanded"),
+  ).toBe("true");
+  expect(
+    screen.getByRole("group", { name: "Worked for 30s" }).textContent,
+  ).toContain("Created the Document Reset email copy");
+});
+
+test("a ticket moved twice in a turn reads as the host's net move in the receipt row", async () => {
+  const status = (from: string, to: string) => ({
+    kind: "status" as const,
+    reference: "T-12",
+    title: "Improve the export dialog",
+    from,
+    to,
+  });
+  const update = {
+    kind: "update" as const,
+    reference: "T-12",
+    excerpt: "Started",
+  };
+  await open(
+    one({ id: "netted", title: "Limiter" }, [
+      youSaid,
+      turnTiming("completed", "2026-11-10T10:00:30Z"),
+      inTurn({
+        id: "rec1",
+        at,
+        kind: "records",
+        changes: [status("Todo", "In progress"), update],
+        net: [status("Todo", "In progress"), update],
+      }),
+      inTurn({
+        id: "rec2",
+        at,
+        kind: "records",
+        changes: [status("In progress", "In review")],
+        // The host nets the whole turn on its last call.
+        net: [status("Todo", "In review"), update],
+      }),
+    ]),
+  );
+  expect(document.querySelector(".chat-records-items")?.textContent).toBe(
+    "Moved T-12 to In review · Posted an update on T-12",
+  );
+  // Two sentences: nothing more to open.
+  expect(screen.queryByRole("button", { name: /more/ })).toBeNull();
+  // The fold still lists each change as its own step row.
+  fireEvent.click(button(/^Worked for 30s/));
+  openStretch();
+  const fold = screen.getByRole("group", { name: "Worked for 30s" });
+  expect(fold.textContent).toContain("Moved T-12 to In progress");
+  expect(fold.textContent).toContain("Moved T-12 to In review");
+});
+
+test("a receipt from an older host, with no net list, says each change", async () => {
+  const status = (from: string, to: string) => ({
+    kind: "status" as const,
+    reference: "T-12",
+    title: "Improve the export dialog",
+    from,
+    to,
+  });
+  await open(
+    one({ id: "older-host", title: "Limiter" }, [
+      youSaid,
+      turnTiming("completed", "2026-11-10T10:00:30Z"),
+      inTurn({
+        id: "rec1",
+        at,
+        kind: "records",
+        changes: [status("Todo", "In progress"), status("In progress", "Done")],
+      }),
+    ]),
+  );
+  expect(document.querySelector(".chat-records-items")?.textContent).toBe(
+    "Moved T-12 to In progress · Moved T-12 to Done",
+  );
 });
 
 /** The queue's head line; its count is an element of its own. */
@@ -1868,6 +3432,11 @@ test("records are linked by title and unlinked from their chip", async () => {
   await waitFor(() =>
     expect(screen.queryByRole("group", { name: "Linked records" })).toBeNull(),
   );
+});
+
+test("the context button carries no native title; its path is the shared tooltip", async () => {
+  await open(one({ id: "c1", title: "Limiter" }));
+  expect(button(/^Folder web-app/).hasAttribute("title")).toBe(false);
 });
 
 test("Check again shows only while the harness isn't ready, and a failed recheck says so", async () => {
@@ -2156,6 +3725,102 @@ test("a first message that was not sent opens the Chat with the text, and New Ch
   expect(asked[3]?.command_id).not.toBe(asked[2]?.command_id);
 });
 
+test.each([false, true])(
+  "a first-message save failure carries picked files and a screenshot into the created Chat (retried: %s)",
+  async (retry) => {
+    const mock = createMockChatClient({
+      enabled: true,
+      chats: one({ id: "c1", title: "Recovered Chat" }),
+    });
+    const createChat = vi.fn(async () => ({
+      chat_id: "c1",
+      send_error: "storage failed",
+    }));
+    if (retry)
+      createChat.mockRejectedValueOnce(new Error("The create reply was lost"));
+    const send = vi.fn(async () => {});
+    render(
+      <ChatClientContext value={{ ...mock, createChat, send }}>
+        <ChatProvider>
+          <ChatsView />
+        </ChatProvider>
+      </ChatClientContext>,
+    );
+    fireEvent.click(await screen.findByRole("button", { name: "New Chat" }));
+    const describe = "Describe a task or ask a question";
+    const file = new File(["old bytes"], "details.txt", { type: "text/plain" });
+    const wrongImage = new File(["plain text"], "wrong.png", {
+      type: "image/png",
+    });
+    const screenshot = new File([screenshotBytes], "Screen.png", {
+      type: "image/png",
+    });
+    fireEvent.change(screen.getByLabelText("Choose files to attach"), {
+      target: { files: [file, wrongImage] },
+    });
+    fireEvent.paste(composer(describe), {
+      clipboardData: { files: [screenshot] },
+    });
+    expect((await screen.findByRole("alert")).textContent).toMatch(
+      /image or|GIF image/i,
+    );
+    fireEvent.click(button("Remove wrong.png"));
+    await waitFor(() =>
+      expect(button("Send")).toHaveProperty("disabled", false),
+    );
+    fireEvent.click(button("Send"));
+    const captured = [
+      { name: "details.txt", dataUrl: "data:text/plain;base64,b2xkIGJ5dGVz" },
+      { name: "Screen.png", dataUrl: `data:image/png;base64,${png}` },
+    ];
+    expect(createChat).toHaveBeenCalledWith(
+      expect.objectContaining({ message: "", attachments: captured }),
+    );
+    if (retry) {
+      await screen.findByRole("button", { name: "Retry" });
+      type("A later draft", describe);
+      fireEvent.change(screen.getByLabelText("Choose files to attach"), {
+        target: {
+          files: [new File(["new"], "next.txt", { type: "text/plain" })],
+        },
+      });
+      await waitFor(() =>
+        expect(button("Send")).toHaveProperty("disabled", false),
+      );
+      fireEvent.click(button("Retry"));
+      expect(createChat.mock.calls[1]).toEqual(createChat.mock.calls[0]);
+    }
+    await screen.findByRole("heading", { name: "Recovered Chat" });
+    expect(screen.getByRole("alert").textContent).toContain("Storage failed.");
+    expect(button("Remove details.txt")).toBeTruthy();
+    expect(screen.getByRole("img", { name: "Screen.png" })).toBeTruthy();
+
+    fireEvent.click(button("New Chat"));
+    expect(
+      screen.queryByRole("button", { name: "Remove details.txt" }),
+    ).toBeNull();
+    expect(composer(describe)).toHaveProperty(
+      "value",
+      retry ? "A later draft" : "",
+    );
+    if (retry) expect(button("Remove next.txt")).toBeTruthy();
+    expect(screen.queryByRole("img", { name: "Screen.png" })).toBeNull();
+    fireEvent.click(screen.getByText("Recovered Chat"));
+    await screen.findByRole("button", { name: "Remove details.txt" });
+    type("Read the original file");
+    await waitFor(() =>
+      expect(button("Send")).toHaveProperty("disabled", false),
+    );
+    fireEvent.click(button("Send"));
+    expect(send).toHaveBeenCalledWith(
+      "c1",
+      "Read the original file",
+      [],
+      captured,
+    );
+  },
+);
+
 test("New Chat says how the harness is signed in before the first message is sent", async () => {
   const client = await open([]);
   client.setHarnesses([
@@ -2377,7 +4042,7 @@ test("New Chat picks harness, model and effort in one composer picker and starts
   fireEvent.click(await screen.findByRole("button", { name: "New Chat" }));
   // No radios: the harness is the picker's, beside Send.
   const trigger = await screen.findByRole("button", {
-    name: "Claude Code, model Opus 5.5, effort Default",
+    name: "Claude Code, model Opus 5.5",
   });
   expect(screen.queryByRole("radiogroup", { name: "Harness" })).toBeNull();
   fireEvent.click(trigger);
@@ -2425,9 +4090,7 @@ test("New Chat shows why the Antigravity model check failed beside Default", asy
     { id: "antigravity", name: "Antigravity", status: "ready" },
   ]);
   fireEvent.click(await screen.findByRole("button", { name: "New Chat" }));
-  fireEvent.click(
-    await screen.findByRole("button", { name: "Antigravity, model Default" }),
-  );
+  fireEvent.click(await screen.findByRole("button", { name: "Antigravity" }));
 
   const picker = await screen.findByRole("dialog", {
     name: "Harness and model",
@@ -2493,7 +4156,7 @@ test("a Chat started in New Chat keeps its picks on the triggers until the sessi
   fireEvent.click(await screen.findByRole("button", { name: "New Chat" }));
   fireEvent.click(
     await screen.findByRole("button", {
-      name: "Claude Code, model Opus 5.5, effort Default",
+      name: "Claude Code, model Opus 5.5",
     }),
   );
   fireEvent.click(await screen.findByRole("radio", { name: /^Sonnet 5/ }));
@@ -2578,9 +4241,7 @@ test("LIVE2-4: only the harness's default is tagged Default, and only once", asy
     { id: "claude-code", name: "Claude Code", status: "ready" },
   ]);
   fireEvent.click(await screen.findByRole("button", { name: "New Chat" }));
-  fireEvent.click(
-    await screen.findByRole("button", { name: /^Claude Code, model/ }),
-  );
+  fireEvent.click(await screen.findByRole("button", { name: "Claude Code" }));
   const radios = await screen.findAllByRole("radio", {
     name: /Default|Fable|Opus/,
   });
@@ -2687,7 +4348,7 @@ test("New Chat on Claude Code sends the shown default model and permission mode,
   ]);
   fireEvent.click(await screen.findByRole("button", { name: "New Chat" }));
   await screen.findByRole("button", {
-    name: "Claude Code, model Opus 5.5, effort Default",
+    name: "Claude Code, model Opus 5.5",
   });
   // The permission trigger names the mode, not "Default".
   expect(button("Permissions: Ask before edits")).toBeTruthy();
@@ -2968,7 +4629,7 @@ test("a change held for the turn's end shows the new value with a clock, never s
 test("before its session reports, a Chat's picker shows its harness and says why there is no choice", async () => {
   // Not made in New Chat during this run, so no start of its own to show.
   await open(one({ id: "reopened", title: "Limiter" }));
-  fireEvent.click(button("Codex, model Default"));
+  fireEvent.click(button("Codex"));
   expect(
     await screen.findByText(
       "Codex lists its models once the Chat's session starts.",
@@ -3107,4 +4768,338 @@ test("with no Chat open the detail pane is New Chat, and the pencil keeps its dr
   const box = composer("Describe a task or ask a question");
   expect(box).toHaveProperty("value", "Draft the reset email");
   await waitFor(() => expect(document.activeElement).toBe(box));
+});
+
+/** A turn's step, as the host sends it; `state` makes it the one running. */
+const stepItem = (
+  id: string,
+  step: Step,
+  state: Step["state"] = "done",
+): TranscriptItem =>
+  inTurn({ id, at, kind: "steps", steps: [{ ...step, state }] });
+const readLimiter: Step = {
+  kind: "read",
+  target: "src/auth/limiter.ts",
+  targets: [{ text: "src/auth/limiter.ts" }],
+};
+const npmTest: Step = { kind: "run", target: "npm test", command: "npm test" };
+const stretchRows = () =>
+  Array.from(document.querySelectorAll<HTMLElement>(".chat-stretch-row")).map(
+    (row) => row.textContent,
+  );
+
+test("a working Chat opens with its done stretches folded and the one in progress open", async () => {
+  await open(
+    one({ id: "stretch-open", title: "Limiter", activity: "working" }, [
+      youSaid,
+      turnTiming("active"),
+      stepItem("s1", readLimiter),
+      inTurn(reply("n1", "Reading the limiter first.")),
+      stepItem("s2", npmTest),
+      inTurn(reply("n2", "The tests ran.")),
+      stepItem("s3", { ...npmTest, target: "npm run lint" }, "running"),
+    ]),
+  );
+  // The notes stay as lines of the story; each finished stretch is one row.
+  expect(stretchRows()).toEqual(["Read 1 file", "Ran 1 command"]);
+  expect(button("Read 1 file").getAttribute("aria-expanded")).toBe("false");
+  expect(screen.queryByText("src/auth/limiter.ts")).toBeNull();
+  // The stretch in progress shows its steps as they come, with no row of its own.
+  expect(button("Running npm run lint")).toBeTruthy();
+  // Only the turn is still going: no work line yet.
+  noButton(/Worked/);
+});
+
+/** What the transcript's reader sees: the scroller is 600px tall, `place` is where a stretch sits. */
+function watching() {
+  const place = { top: 100, bottom: 200 };
+  const rect = vi
+    .spyOn(Element.prototype, "getBoundingClientRect")
+    .mockImplementation(function (this: Element) {
+      const box = this.classList.contains("chat-scroll")
+        ? { top: 0, bottom: 600 }
+        : place;
+      return {
+        ...box,
+        left: 0,
+        right: 0,
+        width: 0,
+        height: 0,
+        x: 0,
+        y: 0,
+      } as DOMRect;
+    });
+  const observers: { node: Element; run: (seen: boolean) => void }[] = [];
+  vi.stubGlobal(
+    "IntersectionObserver",
+    class {
+      callback: IntersectionObserverCallback;
+      constructor(callback: IntersectionObserverCallback) {
+        this.callback = callback;
+      }
+      observe(node: Element) {
+        observers.push({
+          node,
+          run: (seen) =>
+            this.callback(
+              [{ isIntersecting: seen } as IntersectionObserverEntry],
+              this as unknown as IntersectionObserver,
+            ),
+        });
+      }
+      unobserve() {}
+      disconnect() {}
+    },
+  );
+  return {
+    place,
+    /** The view moves: what is watched is now out of it, or in it. */
+    sees: (seen: boolean) =>
+      act(() =>
+        observers
+          .filter((each) => each.node.classList.contains("chat-stretch"))
+          .forEach((each) => each.run(seen)),
+      ),
+    done: () => {
+      rect.mockRestore();
+      vi.unstubAllGlobals();
+    },
+  };
+}
+
+test("a stretch that finishes in view stays open until it has left the view, then folds", async () => {
+  const view = watching();
+  try {
+    const client = await open(
+      one({ id: "stretch-held", title: "Limiter", activity: "working" }, [
+        youSaid,
+        turnTiming("active"),
+        stepItem("s1", npmTest, "running"),
+      ]),
+    );
+    act(() => {
+      client.push("stretch-held", stepItem("s1", npmTest));
+      client.push("stretch-held", inTurn(reply("n1", "The tests ran.")));
+    });
+    // A note follows it, so it is done; but someone is looking at it.
+    expect(button("Ran npm test")).toBeTruthy();
+    expect(stretchRows()).toEqual([]);
+    // It leaves the view: only now does it fold to its row.
+    view.sees(false);
+    expect(stretchRows()).toEqual(["Ran 1 command"]);
+    expect(screen.queryByRole("button", { name: "Ran npm test" })).toBeNull();
+  } finally {
+    view.done();
+  }
+});
+
+test("a stretch that left the view keeps a focused step until focus moves on", async () => {
+  const view = watching();
+  try {
+    const client = await open(
+      one({ id: "stretch-focused", title: "Limiter", activity: "working" }, [
+        youSaid,
+        turnTiming("active"),
+        stepItem("s1", npmTest, "running"),
+      ]),
+    );
+    act(() => {
+      client.push("stretch-focused", stepItem("s1", npmTest));
+      client.push("stretch-focused", inTurn(reply("n1", "The tests ran.")));
+    });
+    const step = button("Ran npm test");
+    step.focus();
+    expect(document.activeElement).toBe(step);
+    // It leaves the view, but the keyboard is inside it: nothing is removed.
+    view.place.top = 900;
+    view.place.bottom = 1000;
+    view.sees(false);
+    expect(document.activeElement).toBe(step);
+    expect(stretchRows()).toEqual([]);
+    // Focus moves on: now it folds.
+    act(() => step.blur());
+    await waitFor(() => expect(stretchRows()).toEqual(["Ran 1 command"]));
+  } finally {
+    view.done();
+  }
+});
+
+test("focus leaving a stretch that has just scrolled back into view does not fold it", async () => {
+  const view = watching();
+  try {
+    const client = await open(
+      one({ id: "stretch-returned", title: "Limiter", activity: "working" }, [
+        youSaid,
+        turnTiming("active"),
+        stepItem("s1", npmTest, "running"),
+      ]),
+    );
+    act(() => {
+      client.push("stretch-returned", stepItem("s1", npmTest));
+      client.push("stretch-returned", inTurn(reply("n1", "The tests ran.")));
+    });
+    const step = button("Ran npm test");
+    step.focus();
+    view.place.top = 900;
+    view.place.bottom = 1000;
+    view.sees(false);
+    // It scrolls back under the reader, but the observer has not said so yet.
+    view.place.top = 100;
+    view.place.bottom = 200;
+    act(() => step.blur());
+    await new Promise((resolve) => setTimeout(resolve, 20));
+    expect(stretchRows()).toEqual([]);
+    expect(button("Ran npm test")).toBeTruthy();
+  } finally {
+    view.done();
+  }
+});
+
+test("a stretch that finishes out of view folds at once", async () => {
+  const view = watching();
+  // Below the scroller's 600px: nobody is looking.
+  view.place.top = 900;
+  view.place.bottom = 1000;
+  try {
+    const client = await open(
+      one({ id: "stretch-away", title: "Limiter", activity: "working" }, [
+        youSaid,
+        turnTiming("active"),
+        stepItem("s1", npmTest, "running"),
+      ]),
+    );
+    act(() => {
+      client.push("stretch-away", stepItem("s1", npmTest));
+      client.push("stretch-away", inTurn(reply("n1", "The tests ran.")));
+    });
+    expect(stretchRows()).toEqual(["Ran 1 command"]);
+  } finally {
+    view.done();
+  }
+});
+
+test("a finished turn opens to its notes and stretch rows, and a stretch opens to its steps", async () => {
+  await open(
+    one({ id: "stretch-finished", title: "Limiter" }, [
+      youSaid,
+      turnTiming("completed", "2026-11-10T10:02:13Z"),
+      inTurn(reply("n1", "Reading the limiter first.")),
+      stepItem("s1", readLimiter),
+      stepItem("s2", npmTest),
+      inTurn(reply("n2", "Checking the tests.")),
+      stepItem("s3", { ...npmTest, target: "npm run lint" }, "failed"),
+      inTurn(reply("r1", "The limiter is in.")),
+    ]),
+  );
+  expect(screen.queryByText("Reading the limiter first.")).toBeNull();
+  fireEvent.click(button("Worked for 2m 13s · 1 failed"));
+  expect(conversation().getByText("Reading the limiter first.")).toBeTruthy();
+  expect(conversation().getByText("Checking the tests.")).toBeTruthy();
+  // Not every step: one row for each stretch, the failure on the row that holds it.
+  expect(stretchRows()).toEqual([
+    "Read 1 file and ran 1 command",
+    "Ran 1 command · 1 failed",
+  ]);
+  expect(screen.queryByText("src/auth/limiter.ts")).toBeNull();
+  fireEvent.click(button("Read 1 file and ran 1 command"));
+  expect(button("Ran npm test")).toBeTruthy();
+  expect(
+    within(
+      screen.getByRole("group", { name: "Read 1 file and ran 1 command" }),
+    ).getByRole("button", { name: "Open src/auth/limiter.ts" }),
+  ).toBeTruthy();
+});
+
+test("a turn with no progress notes shows its one stretch as a row when opened", async () => {
+  await open(
+    one({ id: "stretch-single", title: "Limiter" }, [
+      youSaid,
+      turnTiming("completed", "2026-11-10T10:00:30Z"),
+      stepItem("s1", readLimiter),
+      stepItem("s2", npmTest),
+      inTurn(reply("r1", "The limiter is in.")),
+    ]),
+  );
+  fireEvent.click(button("Worked for 30s"));
+  expect(stretchRows()).toEqual(["Read 1 file and ran 1 command"]);
+  expect(screen.queryByRole("button", { name: "Ran npm test" })).toBeNull();
+  fireEvent.click(button("Read 1 file and ran 1 command"));
+  expect(button("Ran npm test")).toBeTruthy();
+});
+
+test("a stretch of one Explored row opens straight to its files, with no row repeating its words", async () => {
+  await open(
+    one({ id: "stretch-explored", title: "Limiter" }, [
+      youSaid,
+      turnTiming("completed", "2026-11-10T10:00:30Z"),
+      inTurn(reply("n1", "Looking around first.")),
+      inTurn({
+        id: "s1",
+        at,
+        kind: "steps",
+        steps: [
+          { ...readLimiter, state: "done" },
+          {
+            kind: "search",
+            target: "limit",
+            targets: [{ text: "limit", scope: "src" }],
+            state: "done",
+          },
+        ],
+      }),
+      inTurn(reply("r1", "The limiter is in.")),
+    ]),
+  );
+  fireEvent.click(button("Worked for 30s"));
+  fireEvent.click(button("Explored 1 file · 1 search"));
+  // The files are right there; the same words are not said a second time.
+  expect(button("Open src/auth/limiter.ts")).toBeTruthy();
+  expect(screen.getAllByText("Explored 1 file · 1 search")).toHaveLength(1);
+});
+
+test("the stretches you open stay as you left them for the session", async () => {
+  await open(
+    one({ id: "stretch-toggled", title: "Limiter" }, [
+      youSaid,
+      turnTiming("completed", "2026-11-10T10:02:13Z"),
+      inTurn(reply("n1", "Reading the limiter first.")),
+      stepItem("s1", readLimiter),
+      inTurn(reply("r1", "The limiter is in.")),
+    ]),
+  );
+  fireEvent.click(button("Worked for 2m 13s"));
+  fireEvent.click(button("Read 1 file"));
+  expect(button("Read 1 file").getAttribute("aria-expanded")).toBe("true");
+  // Away and back: the Chat's rows are drawn again, the toggles are kept.
+  fireEvent.click(button("Close Chat"));
+  fireEvent.click(await screen.findByRole("button", { name: /^Limiter/ }));
+  await screen.findByRole("heading", { name: "Limiter" });
+  expect(button("Read 1 file").getAttribute("aria-expanded")).toBe("true");
+  expect(
+    screen.getByRole("button", { name: "Open src/auth/limiter.ts" }),
+  ).toBeTruthy();
+  // And closing one stays closed.
+  fireEvent.click(button("Read 1 file"));
+  expect(button("Read 1 file").getAttribute("aria-expanded")).toBe("false");
+});
+
+test("between steps, while words stream, the one live line says Writing", async () => {
+  await open(
+    one({ id: "writing", title: "Limiter", activity: "working" }, [
+      youSaid,
+      turnTiming("active"),
+      stepItem("s1", npmTest),
+      inTurn({
+        id: "n1",
+        at,
+        kind: "response",
+        text: "The tests ran, now",
+        state: "streaming",
+      }),
+    ]),
+  );
+  expect(working()).toMatch(/^Writing/);
+  // Its clock counts from when it appeared, not from the turn's start.
+  expect(working()).not.toMatch(/for/);
+  expect(document.querySelectorAll(".chat-spin")).toHaveLength(1);
 });

@@ -4,7 +4,7 @@
   list-style: none;
 }
 .documents-page .document-list-open {
-  white-space: nowrap;
+  white-space: normal;
   text-align: start;
 }
 .document-list-meta {
@@ -28,13 +28,13 @@
 .document-crumb-title {
   white-space: nowrap;
 }
-.document-subtitle {
+.document-meta-part {
   white-space: nowrap;
 }
-.document-rail ul {
+.document-end ul {
   list-style: none;
 }
-.document-rail li > button {
+.document-end :is(.document-linked-items, .document-mentions) > li > button {
   white-space: normal;
   text-align: left;
 }

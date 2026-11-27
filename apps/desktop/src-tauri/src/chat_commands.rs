@@ -22,9 +22,10 @@ use tauri_plugin_opener::OpenerExt;
 use crate::chat_reports::SettingChangeView;
 use crate::chat_view::{LinkedRecord, Summary};
 use crate::chats::{
-    Answer, ChatFailure, Chats, CloseAction, Created, FolderFile, HarnessStatus, HistorySelection,
-    LinkRef, NewChatInput, Opened, Overview, QuitAction, Restored, Retention, Stopping,
-    UncertainDecision, close_action, quit_action, tray_tooltip,
+    Answer, AttachmentInput, ChatFailure, Chats, CloseAction, Created, FolderFile, HarnessStatus,
+    HistorySelection, LinkRef, NewChatInput, Opened, Overview, QueueEditSave, QueueEditStatus,
+    QueuedDraft, QuitAction, Restored, Retention, Stopping, UncertainDecision, close_action,
+    quit_action, tray_tooltip,
 };
 use ticketd_chat_host::attention::{Alert, Notifier, Row, badge_text};
 
@@ -483,6 +484,8 @@ pub async fn chat_send(
     text: String,
     queue: bool,
     links: Option<Vec<LinkRef>>,
+    attachments: Option<Vec<AttachmentInput>>,
+    queue_edit: Option<QueueEditSave>,
 ) -> Outcome<()> {
     let mode = if queue {
         SendMode::Queue
@@ -492,8 +495,33 @@ pub async fn chat_send(
     let links = links.unwrap_or_default();
     bridge
         .chats
-        .send_linking(&chat_id, &text, mode, &links)
+        .send_linking(
+            &chat_id,
+            &text,
+            mode,
+            &links,
+            attachments.unwrap_or_default(),
+            queue_edit,
+        )
         .await
+}
+
+#[tauri::command(async)]
+pub fn chat_capture_attachment(
+    bridge: State<'_, ChatBridge>,
+    attachment: AttachmentInput,
+) -> Outcome<String> {
+    bridge.chats.capture_attachment(attachment)
+}
+
+#[tauri::command(async)]
+pub fn chat_export_attachment(
+    bridge: State<'_, ChatBridge>,
+    chat_id: String,
+    id: String,
+    destination: PathBuf,
+) -> Outcome<()> {
+    bridge.chats.export_attachment(&chat_id, &id, &destination)
 }
 
 /// Files and folders for the composer's `@` menu.
@@ -528,8 +556,41 @@ pub async fn chat_remove_queued(
     bridge: State<'_, ChatBridge>,
     chat_id: String,
     queued_id: String,
-) -> Outcome<()> {
-    bridge.chats.remove_queued(&chat_id, &queued_id).await
+    edit: Option<bool>,
+) -> Outcome<Option<QueuedDraft>> {
+    if edit == Some(true) {
+        bridge
+            .chats
+            .edit_queued(&chat_id, &queued_id)
+            .await
+            .map(Some)
+    } else {
+        bridge.chats.remove_queued(&chat_id, &queued_id).await?;
+        Ok(None)
+    }
+}
+
+#[tauri::command(async)]
+pub fn chat_check_queue_edits(
+    bridge: State<'_, ChatBridge>,
+    chat_id: String,
+    saves: Vec<String>,
+    removals: Vec<String>,
+) -> Outcome<QueueEditStatus> {
+    bridge.chats.check_queue_edits(&chat_id, saves, removals)
+}
+
+#[tauri::command]
+pub async fn chat_confirm_queue_edit(
+    bridge: State<'_, ChatBridge>,
+    chat_id: String,
+    queued_id: String,
+    transfer_id: String,
+) -> Outcome<bool> {
+    bridge
+        .chats
+        .confirm_queue_edit(&chat_id, &queued_id, &transfer_id)
+        .await
 }
 
 #[tauri::command]

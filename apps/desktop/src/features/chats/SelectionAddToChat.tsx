@@ -291,6 +291,7 @@ export function SelectionAddToChat() {
                           detail: null,
                         }}
                         activity={chat.activity}
+                        spinner
                       />
                     )}
                   </span>

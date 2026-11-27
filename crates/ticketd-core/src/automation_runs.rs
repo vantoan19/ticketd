@@ -506,6 +506,47 @@ fn schedules_to_update(connection: &Connection, now: chrono::NaiveDateTime) -> R
     Ok(false)
 }
 
+pub(crate) fn chat_owner(connection: &Connection, chat_id: &str) -> Result<Option<String>, Error> {
+    Ok(connection
+        .query_row(
+            "SELECT automation_run_id FROM chats WHERE id = ?1 AND automation_run_id IS NOT NULL",
+            [chat_id],
+            |row| row.get(0),
+        )
+        .optional()?)
+}
+
+pub(crate) fn take_over_chat(
+    connection: &Connection,
+    chat_id: &str,
+    replied: bool,
+) -> Result<Option<AutomationRun>, Error> {
+    let Some(run_id) = chat_owner(connection, chat_id)? else {
+        return Ok(None);
+    };
+    let status = one(connection, &run_id)?.status;
+    if !replied && status != AutomationRunStatus::Running {
+        return Ok(None);
+    }
+    crate::chats::set_aside_taken_over_prompt(connection, chat_id)?;
+    connection.execute(
+        "UPDATE chats SET automation_run_id = NULL, queue_paused = queue_paused OR NOT ?2
+         WHERE id = ?1",
+        params![chat_id, replied],
+    )?;
+    // The Chat list follows the Chat log. A view of the run follows the change
+    // token, which Chat tables leave alone, and for a Completed run nothing
+    // else here moves it (#387 3B2).
+    crate::chats::log(connection, chat_id, "chat", chat_id)?;
+    connection.execute(
+        "UPDATE workspace_changes SET token = token + 1 WHERE id = 1",
+        [],
+    )?;
+    end(connection, &run_id, Cause::TakenOver)?;
+    let run = one(connection, &run_id)?;
+    Ok(Some(run))
+}
+
 impl Workspace {
     /// Reads the Workspace events after each switched-on Automation's cursor, in
     /// order, creates a Queued run for each one that matches, and moves the cursor
@@ -838,6 +879,23 @@ impl Workspace {
         })
     }
 
+    /// The harness of a Chat still owned by an Automation run.
+    pub fn automation_chat_harness(&self, chat_id: &str) -> Result<Option<String>, Error> {
+        Ok(self
+            .connection
+            .query_row(
+                "SELECT harness FROM chats WHERE id = ?1 AND automation_run_id IS NOT NULL",
+                [chat_id],
+                |row| row.get(0),
+            )
+            .optional()?)
+    }
+
+    /// The owner used to coordinate dispatch and takeover across all of a run's Chats.
+    pub fn automation_chat_run_id(&self, chat_id: &str) -> Result<Option<String>, Error> {
+        chat_owner(&self.connection, chat_id)
+    }
+
     /// The person replied in (`replied`) or stopped a Chat. When a run owns the
     /// Chat, it becomes an ordinary Chat in the Chat list, and a run that was going
     /// or needed attention ends as Taken over: the step it was on ends there and
@@ -849,37 +907,8 @@ impl Workspace {
         chat_id: &str,
         replied: bool,
     ) -> Result<Option<AutomationRun>, Error> {
-        crate::write_scope::run(&self.connection, |transaction| {
-            let owner: Option<String> = transaction
-                .query_row(
-                    "SELECT automation_run_id FROM chats WHERE id = ?1",
-                    [chat_id],
-                    |row| row.get(0),
-                )
-                .optional()?
-                .flatten();
-            let Some(run_id) = owner else {
-                return Ok(None);
-            };
-            let status = one(transaction, &run_id)?.status;
-            if !replied && status != AutomationRunStatus::Running {
-                return Ok(None);
-            }
-            transaction.execute(
-                "UPDATE chats SET automation_run_id = NULL WHERE id = ?1",
-                [chat_id],
-            )?;
-            // The Chat list follows the Chat log. A view of the run follows the change
-            // token, which Chat tables leave alone, and for a Completed run nothing
-            // else here moves it (#387 3B2).
-            crate::chats::log(transaction, chat_id, "chat", chat_id)?;
-            transaction.execute(
-                "UPDATE workspace_changes SET token = token + 1 WHERE id = 1",
-                [],
-            )?;
-            end(transaction, &run_id, Cause::TakenOver)?;
-            let run = one(transaction, &run_id)?;
-            Ok(Some(run))
+        crate::write_scope::run(&self.connection, |connection| {
+            take_over_chat(connection, chat_id, replied)
         })
     }
 

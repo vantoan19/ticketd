@@ -67,6 +67,7 @@ pub(super) struct Reports {
     /// Net line counts per path from the turn's aggregated diff.
     turn_diffs: HashMap<String, HashMap<String, (u32, u32)>>,
     model: Option<String>,
+    turn_model: Option<String>,
     effort: Option<String>,
     /// The approval policy the thread last reported, by name.
     approval: Option<String>,
@@ -372,6 +373,16 @@ impl Reports {
         }
     }
 
+    /// A start reply does not name the model, so keep the selection until Codex reports it.
+    pub fn turn_start_written(&mut self) {
+        self.turn_model = self.overrides.model.clone().or_else(|| self.model.clone());
+        self.rerouted_to = None;
+    }
+
+    pub fn turn_start_rejected(&mut self) {
+        self.turn_model = None;
+    }
+
     pub fn turn_started(&mut self) {
         self.rerouted_to = None;
     }
@@ -420,7 +431,10 @@ impl Reports {
 
     pub fn settings_updated(&mut self, params: &Value) -> Option<EventKind> {
         let settings = params.get("threadSettings")?;
-        self.model = owned(settings, "model").or(self.model.take());
+        if let Some(model) = owned(settings, "model") {
+            self.model = Some(model);
+            self.turn_model = None;
+        }
         self.effort = owned(settings, "effort");
         self.approval = approval_name(settings.get("approvalPolicy")).or(self.approval.take());
         self.sandbox = sandbox_type(settings.get("sandboxPolicy")).or(self.sandbox.take());
@@ -502,6 +516,24 @@ impl Reports {
             }),
             _ => None,
         }
+    }
+
+    pub fn supports_image_input(&self, steering: bool) -> Option<bool> {
+        let selected = if steering {
+            self.rerouted_to.as_deref().or(self.turn_model.as_deref())
+        } else {
+            self.overrides.model.as_deref()
+        };
+        let model = selected.or(self.model.as_deref())?;
+        let modalities = self
+            .model_entry(model)?
+            .get("inputModalities")?
+            .as_array()?;
+        Some(
+            modalities
+                .iter()
+                .any(|modality| modality.as_str() == Some("image")),
+        )
     }
 
     pub fn settings(&self) -> EventKind {

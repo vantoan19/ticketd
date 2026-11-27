@@ -31,6 +31,14 @@ export function bridgeDefault(
       return null;
     case "document_context_links":
       return [[], []];
+    case "document_row":
+      return {
+        id: args?.id ?? "",
+        heading: "",
+        plans: [],
+        tickets: [],
+        tags: [],
+      };
     case "automation_run_taken_over_in":
       return null;
     case "automation_agent_list":
@@ -45,6 +53,9 @@ export function bridgeDefault(
     case "recent_documents":
     case "search_documents":
     case "all_documents":
+    case "finished_documents":
+    case "unlinked_documents":
+    case "documents_by_title":
     case "pinned_documents":
     case "activity_feed":
     case "ticket_history":
@@ -124,6 +135,8 @@ export function bridgeDefault(
     case "last_backup":
     case "project_icon": // no favicon: the letter tile
       return null;
+    case "current_work_documents":
+      return { groups: [], finished: 0, unlinked: 0, trashed: 0 };
     case "workspace_info":
       return {
         path: "/data/ticketd/workspace.sqlite3",

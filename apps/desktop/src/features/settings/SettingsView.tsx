@@ -47,6 +47,7 @@ function isFindShortcut(event: KeyboardEvent) {
  */
 export function SettingsView({
   onRestore,
+  onWorkspaceReplaced,
   onOpenInbox,
   onSourcesChanged,
   onSelect,
@@ -61,6 +62,8 @@ export function SettingsView({
   onSelect?: (page: SettingsPageId) => void;
   /** Called after anything replaced the Workspace: a restore, or a download from Drive. */
   onRestore: () => Promise<void>;
+  /** Called as soon as the replacement succeeds, before refreshing views. */
+  onWorkspaceReplaced?: (() => void) | undefined;
   onOpenInbox: () => void;
   onSourcesChanged?: (added?: SourceEntry) => Promise<void>;
   projectSourceSetup?: ProjectSourceSetup;
@@ -111,14 +114,24 @@ export function SettingsView({
       {selected === "attention" && <AttentionPage onOpenInbox={onOpenInbox} />}
       {selected === "location" && <LocationPage />}
       {selected === "attachments" && <AttachmentsPage key={restores} />}
-      {selected === "backups" && <BackupsPage onRestore={replaced} />}
+      {selected === "backups" && (
+        <BackupsPage
+          onRestore={replaced}
+          onWorkspaceReplaced={onWorkspaceReplaced}
+        />
+      )}
       {selected === "export" && <ExportPage />}
       {selected === "command-line" && <CommandLinePage />}
       {selected === "agent-skills" && <AgentSkillsPage />}
       {selected === "chat" && <ChatPage />}
       {selected === "automations" && <AutomationsPage />}
       {selected === "workspace-sync" && (
-        <WorkspaceSyncPage onReplaced={replaced} />
+        <WorkspaceSyncPage
+          onReplaced={() => {
+            onWorkspaceReplaced?.();
+            return replaced();
+          }}
+        />
       )}
       {selected === "google-drive" && <GoogleDrivePage />}
       {selected === "keyboard-shortcuts" && <KeyboardShortcutsPage />}

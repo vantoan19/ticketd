@@ -19,9 +19,10 @@ use ticketd_chat_host::{
 };
 use ticketd_core::harnesses::ResumePolicy;
 use ticketd_core::{
-    BackupCheck, Chat, ChatAgentChange, ChatDelivery, ChatInputStanding, ChatItem, ChatLink,
-    ChatLinkKind, ChatListFilter, ChatMessage, ChatRecord, ChatRole, ChatSubmissionIntent,
-    ChatTurnState, NewChat, Project, Workspace, WorkspaceGuard,
+    BackupCheck, Chat, ChatAgentChange, ChatAttachmentContent, ChatCreationReplay, ChatDelivery,
+    ChatInputStanding, ChatItem, ChatLink, ChatLinkKind, ChatListFilter, ChatMessage,
+    ChatQueueEdit, ChatRecord, ChatRole, ChatStartPicks, ChatSubmissionIntent, ChatTurnState,
+    MAX_BACKUP_FILE_BYTES, NewChat, Project, Workspace, WorkspaceGuard,
 };
 use tokio::sync::{oneshot, watch};
 
@@ -42,6 +43,8 @@ const SUMMARY_ITEMS: usize = 50;
 const HISTORY_ITEMS: usize = 10_000;
 const MAX_TEXT_BYTES: usize = 1024 * 1024;
 const MAX_LAST_MESSAGES: usize = 200;
+const RESTORING_WORKSPACE: &str =
+    "The workspace is being restored from a backup. Try again when it has finished.";
 
 /// A refused request. `stale` means the request, turn or runtime it named is no longer
 /// current; the message is shown to the person as it is.
@@ -81,12 +84,26 @@ impl From<HostError> for ChatFailure {
     fn from(error: HostError) -> Self {
         match error {
             HostError::InteractionExpired => stale(error.to_string()),
+            HostError::Core(error) => error.into(),
             other => failed(other.to_string()),
         }
     }
 }
 
 type Outcome<T> = Result<T, ChatFailure>;
+
+#[derive(Clone, PartialEq, Eq, Deserialize, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct AttachmentInput {
+    name: String,
+    data_url: String,
+}
+
+#[derive(Serialize)]
+pub struct QueuedDraft {
+    text: String,
+    attachments: Vec<AttachmentInput>,
+}
 
 /// Work nothing waits on, such as marking a Chat seen while a view opens: a failure
 /// does not stop the caller, and it is written to the log rather than lost. The failure's
@@ -130,7 +147,26 @@ impl From<LinkRef> for ChatLink {
     }
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct QueueEditSave {
+    command_id: String,
+    message_ids: Vec<String>,
+}
+
+#[derive(Serialize)]
+pub struct QueueEditStatus {
+    saved: Vec<String>,
+    removed: Vec<String>,
+}
+
+fn queue_edit_save_id(command_id: &str) -> Outcome<String> {
+    let id = uuid::Uuid::parse_str(command_id)
+        .map_err(|_| failed("the edit command id must be a UUID"))?;
+    Ok(format!("{id}:queue-edit-save"))
+}
+
+#[derive(Clone, PartialEq, Eq, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct NewChatInput {
     /// A UUID the interface makes once per New Chat attempt and repeats on a retry, so
@@ -141,6 +177,8 @@ pub struct NewChatInput {
     pub folder: Option<String>,
     pub links: Vec<LinkRef>,
     pub message: String,
+    #[serde(default)]
+    pub attachments: Vec<AttachmentInput>,
     /// New Chat's picks: option ids the harness listed. Unset keeps its own setting.
     #[serde(default)]
     pub model: Option<String>,
@@ -184,7 +222,7 @@ pub enum Retention {
 }
 
 /// A Chat that was created. `send_error` says why its first message was not saved. The
-/// Chat exists either way: the interface opens it with the unsent text in its composer
+/// Chat exists either way: the interface opens it with the unsent draft in its composer
 /// and makes a new `command_id` for whatever New Chat is asked for next.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 pub struct Created {
@@ -367,6 +405,10 @@ fn text_argument(text: &str, what: &str) -> Outcome<()> {
     if text.trim().is_empty() {
         return Err(failed(format!("{what} must not be empty")));
     }
+    text_byte_limit(text, what)
+}
+
+fn text_byte_limit(text: &str, what: &str) -> Outcome<()> {
     if text.len() > MAX_TEXT_BYTES {
         return Err(failed(format!("{what} is too long")));
     }
@@ -522,35 +564,40 @@ fn with_gone(workspace: &Workspace, item: Item) -> Item {
         id,
         at,
         changes,
+        net,
         turn_id,
         ..
     } = item
     else {
         return item;
     };
-    let gone = changes
-        .iter()
-        .map(|change| {
-            let trashed = match change {
-                ChatAgentChange::Status { reference, .. }
-                | ChatAgentChange::Update { reference, .. } => workspace
-                    .show_ticket(reference)
-                    .map(|ticket| ticket.trashed),
-            };
-            match trashed {
-                Ok(true) => Some("trashed"),
-                Ok(false) => None,
-                Err(ticketd_core::Error::NotFound(_)) => Some("deleted"),
-                // Not readable now: shown as it was, linked.
-                Err(_) => None,
-            }
-        })
-        .collect();
+    let gone_of = |changes: &[ChatAgentChange]| {
+        changes
+            .iter()
+            .map(|change| {
+                let trashed = match change {
+                    ChatAgentChange::Status { reference, .. }
+                    | ChatAgentChange::Update { reference, .. } => workspace
+                        .show_ticket(reference)
+                        .map(|ticket| ticket.trashed),
+                };
+                match trashed {
+                    Ok(true) => Some("trashed"),
+                    Ok(false) => None,
+                    Err(ticketd_core::Error::NotFound(_)) => Some("deleted"),
+                    // Not readable now: shown as it was, linked.
+                    Err(_) => None,
+                }
+            })
+            .collect()
+    };
     Item::Records {
         id,
         at,
+        gone: gone_of(&changes),
+        net_gone: gone_of(&net),
         changes,
-        gone,
+        net,
         turn_id,
     }
 }
@@ -690,6 +737,13 @@ fn surroundings(
         })
         .collect();
     let links = links(workspace, &chat.id)?;
+    let first_line = if chat_view::title_may_be_cut(chat) {
+        workspace
+            .chat_first_input_text(&chat.id)?
+            .and_then(|text| chat_view::first_line_of(&text))
+    } else {
+        None
+    };
     let trashed_links = workspace
         .chat_linked_records(&chat.id)?
         .into_iter()
@@ -701,6 +755,7 @@ fn surroundings(
         checked_turn,
         folder_missing,
         shared_with,
+        first_line,
         project: chat_project(chat, &workspace.list_projects()?),
         branch: None,
         links,
@@ -731,6 +786,8 @@ fn surroundings(
                     }),
                 id: message.id,
                 text: message.text,
+                editing: message.editing,
+                attachments: message.attachments,
             })
             .collect(),
     })
@@ -847,6 +904,12 @@ struct BuiltRow {
     summary: Summary,
 }
 
+#[derive(Default)]
+struct RestoreState {
+    replacing: bool,
+    generation: u64,
+}
+
 pub struct Chats {
     open_workspace: WorkspaceOpener,
     adapters: Vec<Arc<dyn HarnessAdapter>>,
@@ -856,9 +919,9 @@ pub struct Chats {
     /// The Experimental switch. The interface keeps the person's choice and tells the
     /// backend at startup; until then Chat is off and nothing can run.
     enabled: AtomicBool,
-    /// Set while the workspace is being replaced by a backup, so that no host is
-    /// started meanwhile. A host that already runs refuses work by itself.
-    restoring: AtomicBool,
+    /// Serializes the start of replacement with admission and the New Chat save.
+    restore_state: Mutex<RestoreState>,
+    restore_owner: tokio::sync::Mutex<()>,
     host: Mutex<Option<ChatHost>>,
     /// Per Chat, the failed turn after which "Check again" found the harness usable.
     // ponytail: kept for this run of ticketd only; after a restart the last turn's
@@ -892,6 +955,18 @@ fn lock<T>(mutex: &Mutex<T>) -> MutexGuard<'_, T> {
     mutex.lock().unwrap_or_else(PoisonError::into_inner)
 }
 
+struct RestoreAdmission<'a>(&'a Chats);
+
+impl Drop for RestoreAdmission<'_> {
+    fn drop(&mut self) {
+        let mut restore = lock(&self.0.restore_state);
+        if let Some(host) = self.0.started_host() {
+            host.finish_restore();
+        }
+        restore.replacing = false;
+    }
+}
+
 impl Chats {
     pub fn new(
         open_workspace: WorkspaceOpener,
@@ -905,7 +980,8 @@ impl Chats {
             unavailable,
             context,
             enabled: AtomicBool::new(false),
-            restoring: AtomicBool::new(false),
+            restore_state: Mutex::default(),
+            restore_owner: tokio::sync::Mutex::new(()),
             host: Mutex::new(None),
             checked: Mutex::new(HashMap::new()),
             feeds: Mutex::new(HashMap::new()),
@@ -952,16 +1028,18 @@ impl Chats {
         if !self.enabled() {
             return Err(failed("Chat is turned off in Settings > Experimental."));
         }
-        if self.restoring.load(Ordering::SeqCst) {
-            return Err(failed(
-                "The workspace is being restored from a backup. Try again when it has finished.",
-            ));
-        }
-        Ok(self.started_or_start()?)
+        self.started_or_start().map_err(|error| match error {
+            HostError::Restoring => failed(RESTORING_WORKSPACE),
+            error => error.into(),
+        })
     }
 
     /// The one host, started if it has not been yet.
     fn started_or_start(&self) -> Result<ChatHost, HostError> {
+        let restore = lock(&self.restore_state);
+        if restore.replacing {
+            return Err(HostError::Restoring);
+        }
         let mut host = lock(&self.host);
         if let Some(host) = host.as_ref() {
             return Ok(host.clone());
@@ -982,15 +1060,26 @@ impl Chats {
         if !self.enabled() {
             return Err(HostError::TurnedOff);
         }
-        if self.restoring.load(Ordering::SeqCst) {
-            return Err(HostError::Restoring);
-        }
         self.started_or_start()
     }
 
     /// Starts the host if Chat is on, so its change signal can be watched.
     pub fn start(&self) -> Outcome<()> {
         self.host().map(|_| ())
+    }
+
+    /// Hold through a New Chat's write, so a restore cannot start across the check.
+    fn new_chat_save_fence(&self, generation: u64) -> Outcome<MutexGuard<'_, RestoreState>> {
+        let restore = lock(&self.restore_state);
+        if restore.generation != generation {
+            return Err(stale(
+                "The workspace changed while preparing this Chat. Try again.",
+            ));
+        }
+        if restore.replacing {
+            return Err(failed(RESTORING_WORKSPACE));
+        }
+        Ok(restore)
     }
 
     /// Moves whenever any Chat record was written or live state changed; cheap to read.
@@ -1074,24 +1163,17 @@ impl Chats {
             .is_ok_and(|workspace| workspace.any_automation_on().unwrap_or(false))
     }
 
-    /// Before the workspace is replaced by a backup: stops every running Chat, so no
-    /// harness keeps working against records that are about to change, and refuses new
-    /// work until `finish_restore`. Returns the Chats whose harness could not be
-    /// confirmed stopped.
-    pub async fn begin_restore(&self) -> Vec<UnconfirmedCleanup> {
-        self.restoring.store(true, Ordering::SeqCst);
+    /// Stops running Chats and refuses requests from existing clones of the host.
+    async fn stop_for_restore(&self) -> Result<Vec<UnconfirmedCleanup>, UnconfirmedCleanup> {
         match self.started_host() {
-            // The host refuses on every clone of it, including one a command took
-            // before this point.
             Some(host) => host.begin_restore().await,
-            None => Vec::new(),
+            None => Ok(Vec::new()),
         }
     }
 
-    /// After the restore, whether or not it replaced anything. The records now in the
-    /// workspace have no runtime behind them: they are reconciled as lost contact, and
-    /// every queue with input in it is paused, so restored input waits for the person.
-    pub fn finish_restore(&self) -> Outcome<()> {
+    /// Reconcile work with no runtime behind it. The installed queues were paused
+    /// in the staged database before replacement.
+    fn reconcile_restored_workspace(&self) -> Outcome<()> {
         let reconciled = self.workspace().and_then(|mut workspace| {
             let restored = TurnEnding::StoppedByTicketd(StopReason::Restore);
             workspace.mark_chat_contact_lost(
@@ -1099,27 +1181,12 @@ impl Chats {
                 &restored.detail().unwrap_or_default(),
                 &restored.key(),
             )?;
-            let filters = [
-                ChatListFilter::Active,
-                ChatListFilter::Archived,
-                ChatListFilter::Trashed,
-            ];
-            for filter in filters {
-                for chat in workspace.list_chats(filter)? {
-                    if !chat.queue_paused && !workspace.chat_queue(&chat.id)?.is_empty() {
-                        workspace.set_chat_queue_paused(&chat.id, true)?;
-                    }
-                }
-            }
             Ok(())
         });
         // Views read a new snapshot: their cursors belong to the replaced records.
         lock(&self.feeds).clear();
         lock(&self.checked).clear();
-        if let Some(host) = self.started_host() {
-            host.finish_restore();
-        }
-        self.restoring.store(false, Ordering::SeqCst);
+        *lock(&self.built_rows) = BuiltRows::default();
         reconciled
     }
 
@@ -1127,24 +1194,42 @@ impl Chats {
     /// copy. The backup is checked first, so one that cannot be restored stops nothing;
     /// then running Chats are stopped and nothing restored is run.
     pub async fn restore(
-        &self,
+        self: &Arc<Self>,
         backup: PathBuf,
         replace: impl FnOnce(PathBuf) -> Result<PathBuf, String> + Send + 'static,
     ) -> Result<Restored, String> {
-        let open = self.open_workspace.clone();
-        let checked = backup.clone();
-        let check = tokio::task::spawn_blocking(move || restorable(&open, &checked)).await;
-        // A check that could not run is not a refusal: the restore checks the backup again.
-        if let Ok(Err(refused)) = check {
-            return Err(refused);
-        }
-        let unconfirmed = self.begin_restore().await;
-        let restored = tokio::task::spawn_blocking(move || replace(backup))
-            .await
-            .map_err(|error| error.to_string())
-            .and_then(|restored| restored);
-        let reconciled = self.finish_restore();
-        restore_outcome(restored, reconciled, unconfirmed.len())
+        let chats = self.clone();
+        // A cancelled caller cannot abandon a replacement already running on a blocking thread.
+        tokio::spawn(async move {
+            let _owner = chats.restore_owner.try_lock().map_err(|_| {
+                "A workspace restore is already in progress. Try again when it has finished."
+                    .to_owned()
+            })?;
+            let open = chats.open_workspace.clone();
+            let checked = backup.clone();
+            let check = tokio::task::spawn_blocking(move || restorable(&open, &checked)).await;
+            // If the check did not run, replacement still checks the backup.
+            if let Ok(result) = check {
+                result?;
+            }
+            lock(&chats.restore_state).replacing = true;
+            let _admission = RestoreAdmission(&chats);
+            let unconfirmed = chats.stop_for_restore().await.map_err(|blocked| {
+                format!(
+                    "The workspace could not be restored because {}.",
+                    blocked.reason,
+                )
+            })?;
+            lock(&chats.restore_state).generation += 1;
+            let restored = tokio::task::spawn_blocking(move || replace(backup))
+                .await
+                .map_err(|error| error.to_string())
+                .and_then(|restored| restored);
+            let reconciled = chats.reconcile_restored_workspace();
+            restore_outcome(restored, reconciled, unconfirmed.len())
+        })
+        .await
+        .map_err(|error| error.to_string())?
     }
 
     /// Stops app-owned execution with bounded cleanup. The host accepts nothing afterwards.
@@ -1304,10 +1389,15 @@ impl Chats {
         #[cfg(test)]
         self.rows_built.fetch_add(1, Ordering::SeqCst);
         let items = workspace.chat_snapshot(&chat.id, SUMMARY_ITEMS)?.items;
+        let mut tracker = Tracker::from_items(&items);
+        // A long turn's own record can lie outside the window; the row still says it.
+        if let Some(turn) = workspace.chat_latest_turn(&chat.id)? {
+            tracker.note(&ChatItem::Turn(turn));
+        }
         Ok(chat_view::summary(
             chat,
             live,
-            &Tracker::from_items(&items),
+            &tracker,
             &surroundings(
                 workspace,
                 chat,
@@ -1517,7 +1607,6 @@ impl Chats {
         host.skills(harness_id, &folder).await?.map_err(failed)
     }
 
-    /// How many Chats outside the trash already use the folder.
     /// The Project whose checkout holds `path`, for New Chat's folder button.
     pub fn folder_project(&self, path: &str) -> Outcome<Option<ProjectRef>> {
         Ok(self
@@ -1529,6 +1618,7 @@ impl Chats {
             }))
     }
 
+    /// How many Chats outside the trash already use the folder.
     pub fn folder_use(&self, path: &str) -> Outcome<usize> {
         let workspace = self.workspace()?;
         let mut count = 0;
@@ -1545,21 +1635,128 @@ impl Chats {
     /// Creates a Chat and sends its first message. Repeating `command_id` finds the Chat
     /// and the message an earlier try saved instead of making them again.
     pub async fn create(&self, input: NewChatInput) -> Outcome<Created> {
+        let generation = lock(&self.restore_state).generation;
         let host = self.host()?;
-        text_argument(&input.message, "The message")?;
         let command_id = uuid::Uuid::parse_str(&input.command_id)
             .map_err(|_| failed("the request id must be a UUID"))?
             .to_string();
-        let served = |adapter: &Arc<dyn HarnessAdapter>| adapter.harness().key.as_str();
-        if !self.adapters.iter().any(|a| served(a) == input.harness_id) {
-            return Err(failed(self.unavailable(&input.harness_id)));
-        }
+        let create = format!("{command_id}:chat");
+        let first = format!("{command_id}:first");
         let picks = StartSettings {
-            model: input.model.clone(),
-            effort: input.effort.clone(),
-            permission: input.permission.clone(),
+            model: input.model,
+            effort: input.effort,
+            permission: input.permission,
             ..StartSettings::default()
         };
+        let requested = ChatStartPicks {
+            model: picks.model.as_deref(),
+            effort: picks.effort.as_deref(),
+            permission: picks.permission.as_deref(),
+        };
+        let (new_chat, attachments, legacy_saved) = {
+            let workspace = self.workspace()?;
+            // Beside the Workspace, one folder per Chat, named by the request.
+            let execution_folder = match &input.folder {
+                Some(path) => path.clone(),
+                None => managed_chat_folders(&workspace)?
+                    .join(&command_id)
+                    .to_string_lossy()
+                    .into_owned(),
+            };
+            let attachment_title = input.attachments.first().map(|file| file.name.clone());
+            let has_receipt = workspace.has_chat_creation_receipt(&create)?;
+            let new_limit = (!has_receipt && !input.attachments.is_empty())
+                .then(|| workspace.attachment_upload_limit())
+                .transpose()?;
+            let attachments = Self::decode_message_attachments(
+                &input.message,
+                input.attachments,
+                new_limit.unwrap_or(MAX_BACKUP_FILE_BYTES),
+            )?;
+            let first_line = chat_view::first_line_of(&input.message).or(attachment_title);
+            let previous_title = first_line
+                .as_ref()
+                .map(|line| line.chars().take(80).collect());
+            let mut new_chat = NewChat {
+                title: first_line
+                    .as_deref()
+                    .map(|line| chat_view::cut_at_word(line, chat_view::TITLE_LIMIT)),
+                harness: input.harness_id.clone(),
+                execution_folder,
+                folder_managed: input.folder.is_none(),
+                links: input.links.into_iter().map(ChatLink::from).collect(),
+            };
+            let receipt = if has_receipt {
+                let replay = |chat: &NewChat| {
+                    workspace.replay_chat_creation(
+                        &create,
+                        chat,
+                        requested,
+                        &input.message,
+                        &attachments,
+                    )
+                };
+                match replay(&new_chat) {
+                    Err(ticketd_core::Error::RequestConflict(_))
+                        if new_chat.title != previous_title =>
+                    {
+                        // Earlier receipts include the title cut at the character limit.
+                        new_chat.title = previous_title;
+                        replay(&new_chat)?
+                    }
+                    result => result?,
+                }
+            } else {
+                None
+            };
+            let mut legacy_saved = None;
+            if let Some(receipt) = receipt {
+                let (chat, exact) = match receipt {
+                    ChatCreationReplay::Exact(chat) => (chat, true),
+                    ChatCreationReplay::Legacy(chat) => (chat, false),
+                };
+                if workspace
+                    .replay_chat_input_replacing(
+                        &first,
+                        &chat.id,
+                        &input.message,
+                        &attachments,
+                        &[],
+                    )?
+                    .is_some()
+                {
+                    let created = Created {
+                        chat_id: chat.id,
+                        send_error: None,
+                    };
+                    if exact || picks.is_empty() {
+                        let _fence = self.new_chat_save_fence(generation)?;
+                        return Ok(created);
+                    }
+                    legacy_saved = Some(created);
+                }
+            }
+            if legacy_saved.is_none() && new_limit.is_none() && !attachments.is_empty() {
+                let limit = workspace.attachment_upload_limit()?;
+                if attachments
+                    .iter()
+                    .any(|file| file.bytes().len() as u64 > limit)
+                {
+                    return Err(ticketd_core::Error::UploadLimit { limit }.into());
+                }
+            }
+            if legacy_saved.is_none() && !new_chat.folder_managed {
+                folder_argument(&new_chat.execution_folder)?;
+            }
+            (new_chat, attachments, legacy_saved)
+        };
+        if legacy_saved.is_none() {
+            let served = |adapter: &Arc<dyn HarnessAdapter>| adapter.harness().key.as_str();
+            if !self.adapters.iter().any(|a| served(a) == input.harness_id) {
+                return Err(failed(self.unavailable(&input.harness_id)));
+            }
+            host.check_attachment_input(&input.harness_id, &attachments)?;
+        }
         if !picks.is_empty() {
             // Only what the harness offered and allows.
             let offered = self.options(&input.harness_id).await?;
@@ -1574,27 +1771,20 @@ impl Chats {
                 )));
             }
         }
-        let mut workspace = self.workspace()?;
-        // Beside the workspace file, one per Chat, named by the request so that a
-        // retry asks for the same Chat.
-        let managed = managed_chat_folders(&workspace)?.join(&command_id);
-        let (execution_folder, folder_managed) = match &input.folder {
-            Some(path) => (folder_argument(path)?, false),
-            None => (managed.to_string_lossy().into_owned(), true),
+        let chat = {
+            let _fence = self.new_chat_save_fence(generation)?;
+            if let Some(created) = legacy_saved {
+                return Ok(created);
+            }
+            // The Chat is stored first: a request the core refuses leaves no folder behind.
+            self.workspace()?.create_chat_for_first_message(
+                &create,
+                new_chat,
+                requested,
+                &input.message,
+                &attachments,
+            )?
         };
-        let first_line = input.message.trim().lines().next().unwrap_or_default();
-        // The Chat is stored first: a request the core refuses leaves no folder behind.
-        let chat = workspace.create_chat(
-            Some(&format!("{command_id}:chat")),
-            NewChat {
-                title: Some(first_line.chars().take(80).collect()),
-                harness: input.harness_id,
-                execution_folder,
-                folder_managed,
-                links: input.links.into_iter().map(ChatLink::from).collect(),
-            },
-        )?;
-        drop(workspace);
         let created = |send_error| Created {
             chat_id: chat.id.clone(),
             send_error,
@@ -1613,8 +1803,13 @@ impl Chats {
                 .await
                 .map_err(ChatFailure::from)?;
         }
-        let first = format!("{command_id}:first");
-        let sent = host.send(&chat.id, Some(&first), &input.message, SendMode::Auto);
+        let sent = host.send_with_attachments(
+            &chat.id,
+            Some(&first),
+            &input.message,
+            SendMode::Auto,
+            attachments,
+        );
         Ok(created(
             sent.await
                 .err()
@@ -1956,23 +2151,109 @@ impl Chats {
         Ok(())
     }
 
-    /// Sends or queues a message after linking the records it mentions or quotes, so the
-    /// harness is told about them with this message (spec 21.4). An invalid link
-    /// refuses the whole set of links and the message.
+    fn decode_message_attachments(
+        text: &str,
+        files: Vec<AttachmentInput>,
+        limit: u64,
+    ) -> Outcome<Vec<ChatAttachmentContent>> {
+        if files.is_empty() {
+            text_argument(text, "The message")?;
+            return Ok(Vec::new());
+        }
+        text_byte_limit(text, "The message")?;
+        files
+            .into_iter()
+            .map(|file| {
+                ChatAttachmentContent::from_data_url(&file.name, &file.data_url, limit)
+                    .map_err(ChatFailure::from)
+            })
+            .collect()
+    }
+
+    /// Saves a message or queued edit with the records it mentions or quotes, so the
+    /// harness is told about the links with this message (spec 21.4).
     pub async fn send_linking(
         &self,
         chat_id: &str,
         text: &str,
         mode: SendMode,
         links: &[LinkRef],
+        files: Vec<AttachmentInput>,
+        queue_edit: Option<QueueEditSave>,
     ) -> Outcome<()> {
-        text_argument(text, "The message")?;
         let host = self.host()?;
         let links: Vec<_> = links.iter().cloned().map(ChatLink::from).collect();
-        if !links.is_empty() && self.workspace()?.add_chat_links(chat_id, &links)? {
-            host.links_changed(chat_id).await?;
+        if let Some(edit) = queue_edit {
+            if edit.message_ids.is_empty() {
+                return Err(failed("choose a queued message to edit"));
+            }
+            let command_id = queue_edit_save_id(&edit.command_id)?;
+            let edit = ChatQueueEdit {
+                replaces: edit.message_ids,
+                links,
+            };
+            // A saved edit can replay after the current upload limit changed.
+            // Core checks that limit in the transaction for a new edit.
+            let attachments = Self::decode_message_attachments(text, files, MAX_BACKUP_FILE_BYTES)?;
+            {
+                let workspace = self.workspace()?;
+                if workspace.chat_queue_edit_saved(chat_id, &command_id)?
+                    && workspace
+                        .replay_chat_input_with_edit(
+                            &command_id,
+                            chat_id,
+                            text,
+                            &attachments,
+                            Some(&edit),
+                        )?
+                        .is_some()
+                {
+                    self.resync(chat_id);
+                    return Ok(());
+                }
+            }
+            host.send_with_edit(
+                chat_id,
+                Some(&command_id),
+                text,
+                mode,
+                attachments,
+                Some(edit),
+            )
+            .await?;
+            self.resync(chat_id);
+            return Ok(());
         }
-        self.send(chat_id, text, mode).await
+
+        let limit = if files.is_empty() {
+            0
+        } else {
+            self.workspace()?.attachment_upload_limit()?
+        };
+        let attachments = Self::decode_message_attachments(text, files, limit)?;
+        if attachments.is_empty() && links.is_empty() {
+            return self.send(chat_id, text, mode).await;
+        }
+        host.send_linking(chat_id, text, mode, attachments, links)
+            .await?;
+        Ok(())
+    }
+
+    pub fn export_attachment(&self, chat_id: &str, id: &str, destination: &Path) -> Outcome<()> {
+        self.host()?;
+        self.workspace()?
+            .export_chat_attachment(chat_id, id, destination)?;
+        Ok(())
+    }
+
+    pub fn capture_attachment(&self, file: AttachmentInput) -> Outcome<String> {
+        let limit = self.workspace()?.attachment_upload_limit()?;
+        let content = ChatAttachmentContent::from_data_url(&file.name, &file.data_url, limit)
+            .map_err(|error| ChatFailure {
+                code: "invalid_attachment",
+                message: error.to_string(),
+            })?;
+        Ok(content.media_type().to_owned())
     }
 
     /// What the composer's `@` menu offers from a Chat's folder.
@@ -2012,6 +2293,74 @@ impl Chats {
         // A withdrawn message that was tried before has a transcript row to remove.
         self.resync(chat_id);
         Ok(())
+    }
+
+    pub async fn edit_queued(&self, chat_id: &str, message_id: &str) -> Outcome<QueuedDraft> {
+        let (text, attachments) = self.host()?.prepare_queue_edit(chat_id, message_id).await?;
+        Ok(QueuedDraft {
+            text,
+            attachments: attachments
+                .into_iter()
+                .map(|file| AttachmentInput {
+                    name: file.name().to_owned(),
+                    data_url: file.data_url(),
+                })
+                .collect(),
+        })
+    }
+
+    pub async fn confirm_queue_edit(
+        &self,
+        chat_id: &str,
+        message_id: &str,
+        transfer_id: &str,
+    ) -> Outcome<bool> {
+        let transfer_id = uuid::Uuid::parse_str(transfer_id)
+            .map_err(|_| failed("the transfer id must be a UUID"))?;
+        let held = self
+            .host()?
+            .confirm_queue_edit(chat_id, message_id, &format!("{transfer_id}:queue-edit"))
+            .await?;
+        if held {
+            self.resync(chat_id);
+        }
+        Ok(held)
+    }
+
+    pub fn check_queue_edits(
+        &self,
+        chat_id: &str,
+        saves: Vec<String>,
+        removals: Vec<String>,
+    ) -> Outcome<QueueEditStatus> {
+        self.host()?;
+        let saves = saves
+            .into_iter()
+            .map(|id| queue_edit_save_id(&id).map(|key| (id, key)))
+            .collect::<Outcome<Vec<_>>>()?;
+        let result = self.workspace()?.read(|workspace| {
+            let mut saved = Vec::new();
+            for (id, key) in saves {
+                if workspace.chat_queue_edit_saved(chat_id, &key)? {
+                    saved.push(id);
+                }
+            }
+            let removed = if removals.is_empty() {
+                removals
+            } else {
+                let queue = workspace.chat_queue(chat_id)?;
+                removals
+                    .into_iter()
+                    .filter(|id| {
+                        !queue
+                            .iter()
+                            .any(|message| &message.id == id && message.editing)
+                    })
+                    .collect()
+            };
+            Ok(QueueEditStatus { saved, removed })
+        })?;
+        Ok(result)
     }
 
     pub async fn resume_queue(&self, chat_id: &str) -> Outcome<()> {
@@ -2147,6 +2496,8 @@ impl Chats {
             return Err(failed("The folder is still missing.".to_owned()));
         }
         let items = workspace.chat_snapshot(chat_id, SUMMARY_ITEMS)?.items;
+        // The row reads the last turn on its own too, so this must see what the row sees.
+        let latest_turn = workspace.chat_latest_turn(chat_id)?;
         drop(workspace);
         let descriptor = self
             .catalog()
@@ -2163,7 +2514,11 @@ impl Chats {
         ) {
             host.resume(chat_id, ResumeMode::Native).await?;
         }
-        if let Some(turn) = Tracker::from_items(&items).failed_turn() {
+        let mut tracker = Tracker::from_items(&items);
+        if let Some(turn) = latest_turn {
+            tracker.note(&ChatItem::Turn(turn));
+        }
+        if let Some(turn) = tracker.failed_turn() {
             // A sign-in the probe cannot see is not shown to be in order by it.
             let signed_out = matches!(
                 TurnEnding::of(turn),
@@ -2359,6 +2714,10 @@ impl Chats {
                 ("picked", chosen)
             }
         };
+        let chosen: Vec<_> = chosen
+            .into_iter()
+            .filter(|message| message.attachments.is_empty() || !message.text.trim().is_empty())
+            .collect();
         let mut text = String::new();
         if !chosen.is_empty() {
             text.push_str(

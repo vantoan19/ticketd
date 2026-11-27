@@ -9,6 +9,7 @@ import {
   useState,
   useRef,
   useLayoutEffect,
+  useId,
 } from "react";
 import ReactMarkdown, {
   defaultUrlTransform,
@@ -27,6 +28,7 @@ import { useStatusLine } from "@/components/ui/use-status-line";
 import { RecordLink } from "@/components/ui/record-link";
 import { SyntaxCode } from "./SyntaxCode";
 import { codeLanguageLabel } from "./code-language";
+import { boldOnly } from "./bold-only";
 import { chunkFade } from "./chunk-fade";
 import { MermaidDiagram } from "./MermaidDiagram";
 import { AttachmentLink } from "@/features/attachments/AttachmentLink";
@@ -35,9 +37,10 @@ import { cardGaps, cardLinks } from "./attachment-cards";
 import { attachmentOrder, type PlaceMentions } from "./attachment-order";
 import { AttachmentPlace } from "@/features/attachments/attachment-place";
 import { CopyButton } from "@/components/ui/copy-button";
-import { Check } from "lucide-react";
+import { Check, ChevronDown, ChevronRight } from "lucide-react";
 import { AttachmentImage as InlineAttachmentImage } from "./InlineImage";
 import { BlockHeader } from "./BlockHeader";
+import type { OutlineHeading } from "./outline";
 import type { ReferenceReplacement } from "@/features/attachments/AttachmentPreview";
 import { attachments, type Attachment } from "@/lib/api/attachments";
 import { useDraftRecovery } from "@/lib/draft-recovery-context";
@@ -79,12 +82,25 @@ function htmlAsText() {
   };
   return (tree: MdNode) => walk(tree);
 }
-const remarkPlugins = [remarkGfm, references, htmlAsText];
+const remarkPlugins = [remarkGfm, references, htmlAsText, boldOnly];
 const urlTransform = (url: string) =>
   url.startsWith("ticketd:") ? url : defaultUrlTransform(url);
 /** The passage to mark, and the element that describes it to assistive technology. */
 type MentionMark = MentionSpan & { describedBy: string };
 const MentionTarget = createContext<MentionMark | null>(null);
+/** The outlined headings, by the source offset each starts at: each gets its anchor. */
+const HeadingAnchors = createContext<ReadonlyMap<
+  number,
+  OutlineHeading
+> | null>(null);
+/** Which sections are folded, and how a heading's chevron changes that. */
+export type SectionFolding = {
+  folded: ReadonlySet<string>;
+  /** Sections shown as their first sentence only, their subsections still on show. */
+  introFolded: ReadonlySet<string>;
+  toggle: (id: string) => void;
+};
+const Folding = createContext<SectionFolding | null>(null);
 const TicketNavigation = createContext<{
   select: ((reference: string) => void) | undefined;
   revision: number | undefined;
@@ -292,8 +308,59 @@ function mentionBlock(tag: string) {
     const mark = useContext(MentionTarget);
     const replacement = useContext(AttachmentReplacement);
     const cards = useContext(AttachmentCards);
+    const anchors = useContext(HeadingAnchors);
+    const folding = useContext(Folding);
+    const labelId = useId();
+    const offset = (node as PositionedNode | undefined)?.position?.start.offset;
+    const outlined =
+      anchors && offset !== undefined && /^h[1-4]$/.test(tag)
+        ? anchors.get(offset)
+        : undefined;
+    const attributes =
+      outlined === undefined ? props : { ...props, id: outlined.id };
     const marked =
       mark !== null && isMentionBlock(node as PositionedNode, mark);
+    if (outlined?.foldable && folding) {
+      const isFolded =
+        folding.folded.has(outlined.id) || folding.introFolded.has(outlined.id);
+      // A section folded to its first sentence still shows its subsections: it reads as open.
+      const showsSubsections =
+        folding.introFolded.has(outlined.id) &&
+        !folding.folded.has(outlined.id);
+      return createElement(
+        tag,
+        {
+          ...attributes,
+          "aria-labelledby": labelId,
+          "data-foldable": "",
+          "data-folded": isFolded ? "" : undefined,
+          ...(marked && {
+            "data-mention-target": "",
+            tabIndex: -1,
+            "aria-describedby": mark.describedBy,
+          }),
+        },
+        <button
+          type="button"
+          className="fold"
+          aria-label={`Fold ${outlined.text}`}
+          aria-expanded={!isFolded}
+          onClick={() => folding.toggle(outlined.id)}
+        >
+          {isFolded && !showsSubsections ? (
+            <ChevronRight aria-hidden="true" />
+          ) : (
+            <ChevronDown aria-hidden="true" />
+          )}
+        </button>,
+        <span id={labelId} className="fold-title">
+          {children as React.ReactNode}
+        </span>,
+        isFolded && outlined.summary && (
+          <span className="folded-summary">{outlined.summary}</span>
+        ),
+      );
+    }
     const alone =
       cards && (tag === "p" || tag === "li") ? cardLinks(node) : null;
     // A card is a block: it cannot sit inside a paragraph, so its row is a div.
@@ -302,12 +369,12 @@ function mentionBlock(tag: string) {
       {
         ...(marked
           ? {
-              ...props,
+              ...attributes,
               "data-mention-target": "",
               tabIndex: -1,
               "aria-describedby": mark.describedBy,
             }
-          : props),
+          : attributes),
         ...(alone && { "data-cards": "" }),
       },
       alone
@@ -452,6 +519,46 @@ function replaceDestination(
   );
 }
 
+/**
+ * Hides what each folded section holds: every block after its heading, up to the
+ * next heading of its level or a shallower one. A section folded to its first
+ * sentence only hides its own blocks, up to the next heading of any level. The blocks are the rendered
+ * Markdown's own elements, so they are marked here instead of wrapped, which
+ * keeps the text column where it is. Without folds everything is shown.
+ */
+function hideFolded(
+  root: HTMLElement,
+  headings: readonly OutlineHeading[],
+  folded: ReadonlySet<string> | undefined,
+  introFolded: ReadonlySet<string> | undefined,
+) {
+  const byId = new Map(headings.map((heading) => [heading.id, heading]));
+  let hidingBelow: number | null = null;
+  let hidingIntro = false;
+  let followsFolded = false;
+  for (const element of Array.from(root.children)) {
+    const heading = /^H[1-4]$/.test(element.tagName)
+      ? byId.get(element.id)
+      : undefined;
+    if (heading && hidingBelow !== null && heading.level <= hidingBelow)
+      hidingBelow = null;
+    if (/^H[1-6]$/.test(element.tagName)) hidingIntro = false;
+    const hidden = hidingBelow !== null || hidingIntro;
+    (element as HTMLElement).hidden = hidden;
+    // The heading that follows a folded one sits close under it: folded lines stack.
+    element.toggleAttribute("data-after-folded", !hidden && followsFolded);
+    if (hidden) continue;
+    followsFolded = false;
+    if (heading && folded?.has(heading.id)) {
+      hidingBelow = heading.level;
+      followsFolded = true;
+    } else if (heading && introFolded?.has(heading.id)) {
+      hidingIntro = true;
+      followsFolded = true;
+    }
+  }
+}
+
 export function MarkdownDocument({
   source,
   select,
@@ -460,6 +567,8 @@ export function MarkdownDocument({
   onChange,
   chunkStarts,
   attachmentCards = false,
+  headings,
+  folding,
 }: {
   source: string;
   select?: ((reference: string) => void) | undefined;
@@ -472,6 +581,10 @@ export function MarkdownDocument({
   chunkStarts?: readonly number[] | undefined;
   /** Show an attachment link that stands alone on its line as a card. */
   attachmentCards?: boolean | undefined;
+  /** The Document's outline: each of these headings is rendered with its anchor as its `id`. */
+  headings?: readonly OutlineHeading[] | undefined;
+  /** Folds hide the sections named here and give each foldable heading its chevron. */
+  folding?: SectionFolding | undefined;
 }) {
   const currentSource = useRef(source);
   const recovery = useDraftRecovery();
@@ -547,19 +660,32 @@ export function MarkdownDocument({
     ),
     [source, chunkStarts, mentions, attachmentCards],
   );
+  const anchors = useMemo(
+    () => headings && new Map(headings.map((h) => [h.offset, h])),
+    [headings],
+  );
+  const root = useRef<HTMLDivElement>(null);
+  useLayoutEffect(() => {
+    if (root.current && headings)
+      hideFolded(root.current, headings, folding?.folded, folding?.introFolded);
+  }, [rendered, headings, folding?.folded, folding?.introFolded]);
   return (
-    <div className="markdown-document">
+    <div className="markdown-document" ref={root}>
       <TicketNavigation.Provider value={{ select, revision }}>
         <MentionTarget.Provider value={mention ?? null}>
-          <MarkdownSource.Provider value={source}>
-            <AttachmentReplacement.Provider value={replacement}>
-              <AttachmentCards.Provider value={attachmentCards}>
-                <AttachmentPlace.Provider value={place}>
-                  {rendered}
-                </AttachmentPlace.Provider>
-              </AttachmentCards.Provider>
-            </AttachmentReplacement.Provider>
-          </MarkdownSource.Provider>
+          <HeadingAnchors.Provider value={anchors ?? null}>
+            <Folding.Provider value={folding ?? null}>
+              <MarkdownSource.Provider value={source}>
+                <AttachmentReplacement.Provider value={replacement}>
+                  <AttachmentCards.Provider value={attachmentCards}>
+                    <AttachmentPlace.Provider value={place}>
+                      {rendered}
+                    </AttachmentPlace.Provider>
+                  </AttachmentCards.Provider>
+                </AttachmentReplacement.Provider>
+              </MarkdownSource.Provider>
+            </Folding.Provider>
+          </HeadingAnchors.Provider>
         </MentionTarget.Provider>
       </TicketNavigation.Provider>
     </div>

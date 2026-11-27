@@ -9,15 +9,17 @@ use std::collections::{BTreeMap, HashSet, VecDeque};
 use std::future::{Future, pending};
 use std::path::PathBuf;
 use std::sync::Arc;
-use std::sync::atomic::{AtomicU64, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
+use std::time::Duration;
 
 use ticketd_core::{
-    Chat, ChatInteractionKind, ChatInteractionState, ChatMessage, ChatObservation,
-    ChatSessionOrigin, ChatSubmissionIntent, ChatToolState, ChatTurnReceipt, ChatTurnState, Error,
-    Workspace,
+    Chat, ChatAttachmentContent, ChatInputChange, ChatInputReceipt, ChatInteractionKind,
+    ChatInteractionState, ChatMessage, ChatObservation, ChatSessionOrigin, ChatSubmissionIntent,
+    ChatToolState, ChatTurnReceipt, ChatTurnState, Error, Workspace,
 };
 use tokio::sync::{mpsc, oneshot};
-use tokio::time::{Instant, sleep_until, timeout, timeout_at};
+use tokio::task::JoinHandle;
+use tokio::time::{Instant, sleep_until, timeout};
 use tracing::Instrument;
 use uuid::Uuid;
 
@@ -49,13 +51,17 @@ use crate::outcome::{settle, tool_state};
 use crate::subscription::{self, ChatUpdate, Publisher};
 use crate::unattended::{UnattendedChat, set_aside_first_message};
 use crate::{
-    ApprovalDecision, Capabilities, CloseOutcome, DeliveryEvidence, DispatchOutcome, EventKind,
-    HarnessAdapter, HarnessRuntime, InteractionAnswer, InteractionKind, InteractionRequest,
-    InteractionResolution, InteractionResponse, InterruptOutcome, InterruptRequest,
-    NativeRequestId, NativeSessionId, NativeTurnId, NoticeKind, OpenRequest, OpenedRuntime,
-    Problem, RespondOutcome, RuntimeEvent, RuntimeGeneration, SessionStart, Submission,
-    SubmissionId, SubmissionKind, Subscription, TurnEvidence, TurnOutcome,
+    ApprovalDecision, AutomationPromptAdmission, Capabilities, CloseOutcome, DeliveryEvidence,
+    DispatchOutcome, EventKind, HarnessAdapter, HarnessRuntime, InteractionAnswer, InteractionKind,
+    InteractionRequest, InteractionResolution, InteractionResponse, InterruptOutcome,
+    InterruptRequest, NativeRequestId, NativeSessionId, NativeTurnId, NoticeKind, OpenRequest,
+    OpenedRuntime, Problem, Refusal, RespondOutcome, RuntimeEvent, RuntimeGeneration, SessionStart,
+    Submission, SubmissionId, SubmissionKind, Subscription, TurnEvidence, TurnOutcome,
 };
+
+const QUEUE_READ_RETRY: Duration = Duration::from_millis(250);
+const LINK_CONTEXT_RETRY: Duration = Duration::from_secs(1);
+const MAX_PENDING_CONTEXTS: usize = 64;
 
 pub(crate) type Reply<T> = oneshot::Sender<Result<T, HostError>>;
 
@@ -65,7 +71,13 @@ pub(crate) enum Command {
         command_id: Option<String>,
         text: String,
         mode: SendMode,
-        reply: Reply<ChatMessage>,
+        attachments: Vec<ChatAttachmentContent>,
+        change: Option<ChatInputChange>,
+        reply: Reply<ChatInputReceipt>,
+    },
+    ScheduleSaved {
+        message_id: String,
+        reply: Reply<()>,
     },
     SendUnattended {
         text: String,
@@ -77,6 +89,15 @@ pub(crate) enum Command {
     SendQueuedNow {
         message_id: String,
         reply: Reply<()>,
+    },
+    PrepareQueueEdit {
+        message_id: String,
+        reply: Reply<(String, Vec<ChatAttachmentContent>)>,
+    },
+    ConfirmQueueEdit {
+        message_id: String,
+        transfer_id: String,
+        reply: Reply<bool>,
     },
     Respond {
         interaction_id: String,
@@ -110,18 +131,14 @@ pub(crate) enum Command {
 
 /// The result of an adapter call that ran in its own task.
 enum Done {
-    Opened {
-        generation: RuntimeGeneration,
-        result: Result<OpenedRuntime, Problem>,
-        /// The ticketd context read for the new session, or why it could not be.
-        context: Result<Option<String>, String>,
-    },
+    OpenCleanupComplete,
     Dispatched {
         outcome: DispatchOutcome,
     },
     /// The ticketd context read again for the live session after its links changed.
     Context {
         generation: RuntimeGeneration,
+        request: Uuid,
         context: Result<Option<String>, String>,
     },
     Interrupted {
@@ -142,6 +159,14 @@ enum Done {
     },
 }
 
+/// A late open needs an answer even while other completions wait for Chat On.
+struct FinishedOpen {
+    generation: RuntimeGeneration,
+    result: Result<OpenedRuntime, Problem>,
+    accepted: oneshot::Sender<()>,
+    context: Result<Option<String>, String>,
+}
+
 struct Runtime {
     generation: RuntimeGeneration,
     /// Unique per process, so record IDs derived from native IDs never collide with
@@ -156,6 +181,8 @@ struct Runtime {
     /// Harness notices already kept for this session.
     said: HashSet<String>,
     context: Option<ContextReport>,
+    /// Last ticketd link context delivered in this runtime.
+    link_context: Option<Arc<str>>,
     /// When the session compacted, kept for a context report that comes later.
     compacted_at: Option<i64>,
     settings: Option<HarnessSettings>,
@@ -168,14 +195,62 @@ struct Opening {
     origin: ChatSessionOrigin,
     preamble: Option<String>,
     reply: Option<Reply<()>>,
+    context_changed: Option<ContextRefreshScope>,
+    start_claimed: Arc<AtomicBool>,
+    worker: JoinHandle<()>,
 }
 
 struct Dispatch {
     attempt: String,
     generation: RuntimeGeneration,
     starts_turn: bool,
+    early_rejection: Option<String>,
     preamble: Option<String>,
-    context: Option<String>,
+}
+
+struct ContextTransfer {
+    attempt_id: String,
+    text: Arc<str>,
+}
+
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum DirectSend {
+    Auto,
+    SendNow,
+    /// Send now was accepted before the current turn was known to be incompatible.
+    AfterTurn,
+}
+
+#[derive(Clone)]
+struct PendingInput {
+    id: String,
+    requires_link_context: bool,
+}
+
+enum DispatchProgress {
+    Finished,
+    Skipped,
+    ImageNeedsNewTurn,
+}
+
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+enum ContextRefreshScope {
+    LinkedInput,
+    NextTurn,
+}
+
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+enum ContextRefresh {
+    Reading {
+        request: Uuid,
+        retrying: bool,
+        scope: ContextRefreshScope,
+    },
+    RetryAt {
+        at: Instant,
+        armed: bool,
+        scope: ContextRefreshScope,
+    },
 }
 
 struct ActiveTurn {
@@ -234,6 +309,7 @@ pub(crate) struct Supervisor {
     /// stderr lines are correlated with the Chat and do not hold a Turn's span open.
     span: tracing::Span,
     open_workspace: WorkspaceOpener,
+    workspace_generation: u64,
     adapter: Option<Arc<dyn HarnessAdapter>>,
     context: Option<ContextSource>,
     /// Set for the Chat of an Automation run: every session opens with these settings.
@@ -242,6 +318,8 @@ pub(crate) struct Supervisor {
     commands: mpsc::Receiver<Command>,
     done: mpsc::UnboundedSender<Done>,
     finished: mpsc::UnboundedReceiver<Done>,
+    open_done: mpsc::UnboundedSender<FinishedOpen>,
+    finished_open: mpsc::UnboundedReceiver<FinishedOpen>,
     generations: u64,
     runtime: Option<Runtime>,
     opening: Option<Opening>,
@@ -255,18 +333,18 @@ pub(crate) struct Supervisor {
     unconfirmed_deadline: Option<Instant>,
     active: Option<ActiveTurn>,
     /// Input the person sent for immediate dispatch, ahead of the queue.
-    direct: VecDeque<String>,
-    /// The inputs in `direct` that the person took out of the queue with Send now.
-    /// They had no row on screen, so their history moves to where they are sent.
-    direct_from_queue: HashSet<String>,
+    direct: VecDeque<(PendingInput, DirectSend)>,
+    /// Prepared edits keep their saved rows. The automatic queue waits for the
+    /// composer, while an explicit Send now or Resume may still release them.
+    prepared_queue_edits: HashSet<String>,
     /// Input the person asked to send again although its delivery is uncertain.
-    resend: Option<String>,
+    resend: Option<PendingInput>,
     /// Selected history for a fresh session, sent with the next new turn.
     preamble: Option<String>,
     /// The ticketd context of a new session, sent with its first new turn.
-    session_context: Option<String>,
-    /// Context handed over with a submission whose turn has not been recorded yet.
-    context_sent: Option<String>,
+    session_context: Option<Arc<str>>,
+    /// Unconfirmed context transfers, in dispatch order.
+    pending_contexts: VecDeque<ContextTransfer>,
     text: Vec<TextBuffer>,
     pending_tools: Vec<(String, ChatObservation)>,
     interactions: BTreeMap<String, LiveRequest>,
@@ -288,13 +366,16 @@ pub(crate) struct Supervisor {
     /// The person resumed the queue or sent into it, so it may open a session. Without
     /// that, queued input waits for a live runtime: viewing a Chat starts nothing.
     queue_started: bool,
+    /// A saved takeover reply which still needs its place in the queue decided.
+    saved_reply: Option<String>,
+    /// Wake to retry reading the queue without saving an input or recording an attempt again.
+    queue_read_retry_at: Option<Instant>,
     /// The runtime is being closed on purpose; its connection ending is not a loss.
     closing: bool,
     /// Something may have been written since views were last brought up to date.
     unpublished: bool,
-    /// The context of the live session is being read again; nothing is dispatched until
-    /// it is, so the next message carries it.
-    refreshing: Option<RuntimeGeneration>,
+    /// A context read or its paced retry. Unrelated steering can continue.
+    refreshing: Option<ContextRefresh>,
     /// The person's picks for the next session, new or resumed: New Chat's, or a change
     /// made while no session ran. Kept until one opens.
     start_settings: StartSettings,
@@ -330,6 +411,13 @@ pub(crate) async fn bounded_close(handle: &dyn HarnessRuntime) -> Option<String>
     }
 }
 
+fn prompt_admission_refused(refusal: &Refusal) -> bool {
+    matches!(
+        refusal,
+        Refusal::AutomationPromptNotAllowed | Refusal::AutomationPromptOwnershipUnavailable
+    )
+}
+
 impl Supervisor {
     pub(crate) fn spawn(
         chat: &Chat,
@@ -340,8 +428,32 @@ impl Supervisor {
         unattended: Option<Arc<UnattendedChat>>,
         lifecycle: Arc<HostLifecycle>,
     ) -> mpsc::Sender<Command> {
+        let (supervisor, sender) = Self::new(
+            chat,
+            open_workspace,
+            adapter,
+            context,
+            board,
+            unattended,
+            lifecycle,
+        );
+        let span = supervisor.span.clone();
+        tokio::spawn(supervisor.run().instrument(span));
+        sender
+    }
+
+    fn new(
+        chat: &Chat,
+        open_workspace: WorkspaceOpener,
+        adapter: Option<Arc<dyn HarnessAdapter>>,
+        context: Option<ContextSource>,
+        board: Arc<Board>,
+        unattended: Option<Arc<UnattendedChat>>,
+        lifecycle: Arc<HostLifecycle>,
+    ) -> (Self, mpsc::Sender<Command>) {
         let (sender, commands) = mpsc::channel(64);
         let (done, finished) = mpsc::unbounded_channel();
+        let (open_done, finished_open) = mpsc::unbounded_channel();
         // A root span, so a Chat opened from inside a command or a pass is not held open by it.
         let span = tracing::info_span!(
             parent: None,
@@ -352,10 +464,11 @@ impl Supervisor {
                 .map(|unattended| unattended.settings.run_id.as_str()),
         );
         let supervisor = Self {
-            span: span.clone(),
+            span,
             chat_id: chat.id.clone(),
             number: NEXT_SUPERVISOR.fetch_add(1, Ordering::Relaxed),
             open_workspace,
+            workspace_generation: lifecycle.workspace_generation(),
             adapter,
             context,
             unattended,
@@ -363,6 +476,8 @@ impl Supervisor {
             commands,
             done,
             finished,
+            open_done,
+            finished_open,
             generations: 0,
             runtime: None,
             opening: None,
@@ -372,11 +487,11 @@ impl Supervisor {
             unconfirmed_deadline: None,
             active: None,
             direct: VecDeque::new(),
-            direct_from_queue: HashSet::new(),
+            prepared_queue_edits: HashSet::new(),
             resend: None,
             preamble: None,
             session_context: None,
-            context_sent: None,
+            pending_contexts: VecDeque::new(),
             text: Vec::new(),
             pending_tools: Vec::new(),
             interactions: BTreeMap::new(),
@@ -394,6 +509,8 @@ impl Supervisor {
             shutting_down: false,
             shut_down_for: None,
             queue_started: false,
+            saved_reply: None,
+            queue_read_retry_at: None,
             closing: false,
             unpublished: true,
             refreshing: None,
@@ -403,8 +520,7 @@ impl Supervisor {
             lifecycle,
             recorded_settings: chat.effective_settings.clone(),
         };
-        tokio::spawn(supervisor.run().instrument(span));
-        sender
+        (supervisor, sender)
     }
 
     async fn run(mut self) {
@@ -414,6 +530,8 @@ impl Supervisor {
                 self.checkpoint_at,
                 self.stop_deadline,
                 self.unconfirmed_deadline,
+                self.queue_read_retry_at,
+                self.context_retry_at(),
             ]
             .into_iter()
             .flatten()
@@ -463,6 +581,13 @@ impl Supervisor {
                         return;
                     }
                 },
+                Some(opened) = self.finished_open.recv() => {
+                    // Dropping the handoff while Off lets the opening worker close
+                    // the late runtime. Other completions wait for storage recovery.
+                    if !self.shutting_down {
+                        self.turn_span().in_scope(|| self.on_opened(opened));
+                    }
+                }
                 Some(done) = self.finished.recv(), if !self.shutting_down => {
                     self.turn_span().in_scope(|| self.on_done(done));
                 }
@@ -612,9 +737,14 @@ impl Supervisor {
     fn hold_queue(&mut self) {
         let chat = self.chat_id.clone();
         let _ = self.write(|core| core.set_chat_queue_paused(&chat, true));
-        self.direct.clear();
-        self.direct_from_queue.clear();
+        self.clear_direct();
         self.resend = None;
+    }
+
+    fn clear_direct(&mut self) {
+        self.saved_reply = None;
+        self.queue_read_retry_at = None;
+        self.direct.clear();
     }
 
     /// Keeps the person's latest permission change the runtime has not answered (held
@@ -669,10 +799,24 @@ impl Supervisor {
                     let _ = reply.send(Err(HostError::Quitting));
                     return;
                 };
-                let command_id = format!("{}:first", self.chat_id);
-                let result = self.send(Some(&command_id), &text, SendMode::Auto);
+                let result = self.recover_storage().and_then(|()| {
+                    let chat_id = self.chat_id.clone();
+                    self.write(|core| {
+                        core.save_automation_chat_prompt(
+                            &chat_id,
+                            &unattended.settings.run_id,
+                            &text,
+                        )
+                    })
+                    .map_err(HostError::from)
+                });
                 if let Ok(message) = &result {
                     let _ = unattended.first_message.set(message.id.clone());
+                    // The run cannot drain the ordinary queue, even when older input waits.
+                    if self.active.is_none() && self.can_schedule_saved(message) {
+                        let input = self.pending_input(message);
+                        self.direct.push_back((input, DirectSend::Auto));
+                    }
                 }
                 let _ = reply.send(result);
             }
@@ -680,9 +824,21 @@ impl Supervisor {
                 command_id,
                 text,
                 mode,
+                attachments,
+                change,
                 reply,
             } => {
-                let _ = reply.send(self.send(command_id.as_deref(), &text, mode));
+                let _ = reply.send(self.send(
+                    command_id.as_deref(),
+                    &text,
+                    mode,
+                    &attachments,
+                    change.as_ref(),
+                ));
+            }
+            Command::ScheduleSaved { message_id, reply } => {
+                self.saved_reply = Some(message_id);
+                let _ = reply.send(Ok(()));
             }
             Command::Stop(reply) => {
                 let _ = reply.send(self.request_stop());
@@ -692,6 +848,20 @@ impl Supervisor {
             }
             Command::SendQueuedNow { message_id, reply } => {
                 let _ = reply.send(self.send_queued_now(message_id).await);
+            }
+            Command::PrepareQueueEdit { message_id, reply } => {
+                let draft = self.prepare_queue_edit(&message_id);
+                let prepared = draft.is_ok();
+                if reply.send(draft).is_ok() && prepared {
+                    self.prepared_queue_edits.insert(message_id);
+                }
+            }
+            Command::ConfirmQueueEdit {
+                message_id,
+                transfer_id,
+                reply,
+            } => {
+                let _ = reply.send(self.confirm_queue_edit(&message_id, &transfer_id));
             }
             Command::Respond {
                 interaction_id,
@@ -718,7 +888,7 @@ impl Supervisor {
                 let _ = reply.send(Ok(self.change_setting(setting, value)));
             }
             Command::StartWith(settings) => self.start_settings = settings,
-            Command::LinksChanged => self.refresh_context(),
+            Command::LinksChanged => self.refresh_context(ContextRefreshScope::NextTurn),
             // Views read the Chat again even when no record changed: what they show
             // can depend on the folder too, such as its branch.
             Command::Changed => self.last_live = None,
@@ -874,13 +1044,54 @@ impl Supervisor {
 
     /// Reads the ticketd context again for the live session. Without one there is nothing
     /// to tell: the next session reads the context when it opens.
-    fn refresh_context(&mut self) {
-        let (Some(runtime), Some(source)) = (&self.runtime, self.context.clone()) else {
+    fn refresh_context(&mut self, mut scope: ContextRefreshScope) {
+        let Some(source) = self.context.clone() else {
             return;
+        };
+        if let Some(opening) = &mut self.opening {
+            if opening.context_changed != Some(ContextRefreshScope::NextTurn) {
+                opening.context_changed = Some(scope);
+            }
+            return;
+        }
+        let Some(runtime) = &self.runtime else {
+            return;
+        };
+        let retrying = match self.refreshing {
+            Some(ContextRefresh::RetryAt {
+                at,
+                armed,
+                scope: previous,
+            }) => {
+                if previous == ContextRefreshScope::NextTurn {
+                    scope = previous;
+                }
+                if at > Instant::now() {
+                    self.refreshing = Some(ContextRefresh::RetryAt { at, armed, scope });
+                    return;
+                }
+                true
+            }
+            Some(ContextRefresh::Reading {
+                retrying,
+                scope: previous,
+                ..
+            }) => {
+                if previous == ContextRefreshScope::NextTurn {
+                    scope = previous;
+                }
+                retrying
+            }
+            None => false,
         };
         let (done, chat_id, generation) =
             (self.done.clone(), self.chat_id.clone(), runtime.generation);
-        self.refreshing = Some(generation);
+        let request = Uuid::new_v4();
+        self.refreshing = Some(ContextRefresh::Reading {
+            request,
+            retrying,
+            scope,
+        });
         tokio::spawn(async move {
             // It runs the CLI and can take seconds: off the async threads.
             let context = tokio::task::spawn_blocking(move || source(&chat_id))
@@ -888,21 +1099,89 @@ impl Supervisor {
                 .unwrap_or_else(|error| Err(error.to_string()));
             let _ = done.send(Done::Context {
                 generation,
+                request,
                 context,
             });
         });
     }
 
+    fn context_retry_at(&self) -> Option<Instant> {
+        match self.refreshing {
+            Some(ContextRefresh::RetryAt { at, armed, scope })
+                if armed || scope == ContextRefreshScope::NextTurn =>
+            {
+                Some(at)
+            }
+            _ => None,
+        }
+    }
+
+    fn context_read_failed(&mut self, error: String, retrying: bool, scope: ContextRefreshScope) {
+        if !retrying {
+            self.notice(format!(
+                "ticketd could not read this Chat's changed links, so the session was not told about them: {error}"
+            ));
+        }
+        self.schedule_context_retry(scope);
+    }
+
+    fn schedule_context_retry(&mut self, scope: ContextRefreshScope) {
+        self.refreshing = Some(ContextRefresh::RetryAt {
+            at: Instant::now() + LINK_CONTEXT_RETRY,
+            armed: false,
+            scope,
+        });
+    }
+
+    fn arm_context_retry(&mut self) {
+        if let Some(ContextRefresh::RetryAt { armed, .. }) = &mut self.refreshing {
+            *armed = true;
+        }
+    }
+
+    fn retry_link_context(&mut self) {
+        if self
+            .direct
+            .iter()
+            .any(|(input, _)| input.requires_link_context)
+            && let Ok(queue) = self.core(|core| core.chat_queue(&self.chat_id))
+        {
+            // A pending input may have been withdrawn while the context was unavailable.
+            self.direct.retain(|(input, _)| {
+                !input.requires_link_context || queue.iter().any(|message| message.id == input.id)
+            });
+        }
+        self.refresh_context(ContextRefreshScope::LinkedInput);
+    }
+
     /// The context this Chat's sessions were last given or are about to be given.
-    fn context_given(&self) -> Option<String> {
-        if let Some(context) = self.session_context.as_ref().or(self.context_sent.as_ref()) {
+    fn context_given(&self) -> Option<Arc<str>> {
+        if let Some(context) = self.session_context.as_ref() {
             return Some(context.clone());
+        }
+        if let Some(transfer) = self.pending_contexts.back() {
+            return Some(transfer.text.clone());
+        }
+        if let Some(runtime) = &self.runtime
+            && (runtime.link_context.is_some() || runtime.origin != ChatSessionOrigin::NativeResume)
+        {
+            return runtime.link_context.clone();
         }
         let chat = self.chat_id.clone();
         // Unreadable: treated as never given, so the context is sent rather than lost.
         self.core(|core| core.chat_latest_tool_input(&chat, CONTEXT_RECORD_NAME))
             .ok()
             .flatten()
+            .map(Arc::from)
+    }
+
+    fn set_session_context(&mut self, context: String) {
+        let retained = self
+            .pending_contexts
+            .iter()
+            .find(|transfer| *transfer.text == context)
+            .map(|transfer| transfer.text.clone());
+        self.session_context = Some(retained.unwrap_or_else(|| Arc::from(context)));
     }
 
     fn attach(&mut self) -> Result<(ChatView, Subscription), HostError> {
@@ -925,26 +1204,210 @@ impl Supervisor {
         command_id: Option<&str>,
         text: &str,
         mode: SendMode,
-    ) -> Result<ChatMessage, HostError> {
-        self.recover_storage()?;
+        attachments: &[ChatAttachmentContent],
+        change: Option<&ChatInputChange>,
+    ) -> Result<ChatInputReceipt, HostError> {
         let chat = self.chat_id.clone();
-        let message = self.write(|core| core.save_chat_input(command_id, &chat, text))?;
-        let immediate = self.active.is_none() || self.steering().is_some();
-        if mode == SendMode::Auto
-            && !self.lifecycle.has_retired_permission_runtime(&self.chat_id)
-            && immediate
-            && message.queued
-            && !self.direct.contains(&message.id)
+        // A lost reply can arrive after queue eligibility changed. Repeating an
+        // already saved edit returns its receipt without dispatching it again.
+        if change.is_some()
+            && let Some(command_id) = command_id
+            && let Some(saved) = self.core(|core| {
+                core.replay_chat_input_with_change(command_id, &chat, text, attachments, change)
+            })?
         {
+            return Ok(saved);
+        }
+        self.recover_storage()?;
+        let has_images = attachments.iter().any(ChatAttachmentContent::is_image);
+        let can_steer = self.active.is_some()
+            && self.steering().is_some()
+            && !(has_images && self.images_refused(true));
+        if !attachments.is_empty() {
+            let model_changing = self.runtime.as_ref().is_some_and(|runtime| {
+                runtime.setting_changes.iter().any(|change| {
+                    change.setting == SettingKey::Model
+                        && matches!(
+                            change.state,
+                            SettingChangeState::Held | SettingChangeState::Sent
+                        )
+                })
+            });
+            let mut refusal = self.attachment_refusal(attachments);
+            if refusal.is_none()
+                && has_images
+                && self.images_refused(false)
+                && !model_changing
+                && (mode != SendMode::Auto
+                    || !can_steer
+                    || self.linked_input_waits_for_new_turn(change)?)
+            {
+                refusal = Some(Refusal::ImageInputUnsupported);
+            }
+            if let Some(refusal) = refusal {
+                if change.is_none()
+                    && let Some(command_id) = command_id
+                    && let Some(saved) = self.core(|core| {
+                        core.replay_chat_input_replacing(command_id, &chat, text, attachments, &[])
+                    })?
+                {
+                    return Ok(saved);
+                }
+                return Err(refusal.attachment_error().into());
+            }
+        }
+        let (receipt, linked) = self.write(|core| {
+            core.save_chat_input_with_change(command_id, &chat, text, attachments, change)
+        })?;
+        if linked {
+            self.refresh_context(ContextRefreshScope::LinkedInput);
+        }
+        if mode == SendMode::Auto
+            && let Some(message) = &receipt.message
+        {
+            self.schedule_saved(message, self.active.is_none() || can_steer);
+        }
+        Ok(receipt)
+    }
+
+    fn can_schedule_saved(&self, message: &ChatMessage) -> bool {
+        !self.lifecycle.has_retired_permission_runtime(&self.chat_id)
+            && message.queued
+            && !message.editing
+            && !self.prepared_queue_edits.contains(&message.id)
+            && !self.is_sending(&message.id)
+    }
+
+    fn pending_input(&self, message: &ChatMessage) -> PendingInput {
+        PendingInput {
+            id: message.id.clone(),
+            requires_link_context: message.requires_link_context && self.context.is_some(),
+        }
+    }
+
+    fn is_sending(&self, message_id: &str) -> bool {
+        self.direct.iter().any(|(input, _)| input.id == message_id)
+    }
+
+    fn waits_for_new_turn(&self, input: &PendingInput, intent: DirectSend) -> bool {
+        intent == DirectSend::AfterTurn || (input.requires_link_context && self.context_pending())
+    }
+
+    fn context_pending(&self) -> bool {
+        self.refreshing.is_some()
+            || self.session_context.is_some()
+            || !self.pending_contexts.is_empty()
+    }
+
+    /// A new link schedules a refresh. An existing link or the held input's
+    /// context requirement only prevents a steer while that context is pending.
+    fn linked_input_waits_for_new_turn(
+        &self,
+        change: Option<&ChatInputChange>,
+    ) -> Result<bool, Error> {
+        let Some(change) = change.filter(|_| self.context.is_some()) else {
+            return Ok(false);
+        };
+        let (links, replaces) = match change {
+            ChatInputChange::Link(links) => (links.as_slice(), &[][..]),
+            ChatInputChange::Edit(edit) => (edit.links.as_slice(), edit.replaces.as_slice()),
+        };
+        let pending = self.context_pending();
+        self.core(|core| {
+            if !links.is_empty() {
+                let chat = core.chat(&self.chat_id)?;
+                if pending || links.iter().any(|link| !chat.links.contains(link)) {
+                    return Ok(true);
+                }
+            }
+            if pending {
+                for original in replaces {
+                    if core.chat_input_requires_link_context(&self.chat_id, original)? {
+                        return Ok(true);
+                    }
+                }
+            }
+            Ok(false)
+        })
+    }
+
+    fn schedule_saved(&mut self, message: &ChatMessage, immediate: bool) {
+        if immediate && self.can_schedule_saved(message) {
             if self.active.is_none() && self.older_input_waits(&message.id) {
                 // Older input waits in a queue that is not paused: this goes after
                 // it, and the queue runs.
                 self.queue_started = true;
             } else {
-                self.direct.push_back(message.id.clone());
+                let input = self.pending_input(message);
+                self.direct.push_back((input, DirectSend::Auto));
             }
         }
-        Ok(message)
+    }
+
+    /// Returns false while a saved takeover reply still needs its queue order read.
+    fn schedule_takeover_reply(&mut self) -> bool {
+        let Some(saved) = &self.saved_reply else {
+            return true;
+        };
+        let chat_id = &self.chat_id;
+        match self.core(|core| {
+            let chat = core.chat(chat_id)?;
+            Ok((chat.trashed, chat.queue_paused, core.chat_queue(chat_id)?))
+        }) {
+            Ok((trashed, paused, queue)) => {
+                if !trashed
+                    && self.active.is_none()
+                    && let Some(message) = queue.iter().find(|message| message.id == *saved)
+                    && self.can_schedule_saved(message)
+                {
+                    let input = self.pending_input(message);
+                    if input.requires_link_context {
+                        self.refresh_context(ContextRefreshScope::LinkedInput);
+                    }
+                    if !paused
+                        && queue
+                            .iter()
+                            .find(|row| !row.editing)
+                            .is_some_and(|first| first.id != message.id)
+                    {
+                        self.queue_started = true;
+                    } else {
+                        self.direct.push_front((input, DirectSend::Auto));
+                    }
+                }
+                self.saved_reply = None;
+                true
+            }
+            Err(error) if is_refusal(&error) => {
+                self.saved_reply = None;
+                true
+            }
+            Err(_) => {
+                self.queue_read_retry_at = Some(Instant::now() + QUEUE_READ_RETRY);
+                false
+            }
+        }
+    }
+
+    fn attachment_refusal(&self, attachments: &[ChatAttachmentContent]) -> Option<Refusal> {
+        if attachments.is_empty() {
+            return None;
+        }
+        self.adapter
+            .as_ref()
+            .map_or(Some(Refusal::Unsupported), |adapter| {
+                adapter.attachment_refusal(attachments)
+            })
+    }
+
+    fn images_refused(&self, steering: bool) -> bool {
+        self.runtime.as_ref().and_then(|runtime| {
+            if steering {
+                runtime.handle.supports_steer_image_input()
+            } else {
+                runtime.handle.supports_image_input()
+            }
+        }) == Some(false)
     }
 
     /// Accept work again only once storage can record what was lost meanwhile.
@@ -976,6 +1439,7 @@ impl Supervisor {
         self.confirm_permission_restart_cleanup().await?;
         let chat = self.chat_id.clone();
         self.write(|core| core.set_chat_queue_paused(&chat, false))?;
+        self.prepared_queue_edits.clear();
         // The person asked for the queue to run: it opens a session when none is live.
         self.queue_started = true;
         if matches!(self.problem, Some(ChatProblem::DispatchRefused { .. })) {
@@ -995,16 +1459,70 @@ impl Supervisor {
             return Err(HostError::Working);
         }
         let chat = self.chat_id.clone();
-        let queued = self.core(|core| core.chat_queue(&chat))?;
-        if !queued.iter().any(|message| message.id == message_id) {
-            return Err(Error::Chat("this input is not in the queue".to_owned()).into());
+        let queued = self
+            .core(|core| core.chat_queue(&chat))?
+            .into_iter()
+            .find(|message| message.id == message_id && !message.editing)
+            .ok_or_else(|| Error::Chat("this input is not in the queue".to_owned()))?;
+        if self.active.is_some()
+            && self.images_refused(true)
+            && queued
+                .attachments
+                .iter()
+                .any(|file| file.media_type.starts_with("image/"))
+        {
+            return Err(Refusal::ImageInputUnsupported.attachment_error().into());
         }
         self.confirm_permission_restart_cleanup().await?;
-        if !self.direct.contains(&message_id) {
-            self.direct_from_queue.insert(message_id.clone());
-            self.direct.push_back(message_id);
+        self.prepared_queue_edits.remove(&message_id);
+        let input = self.pending_input(&queued);
+        match self
+            .direct
+            .iter_mut()
+            .find(|(pending, _)| pending.id == message_id)
+        {
+            Some((_, intent @ DirectSend::Auto)) => *intent = DirectSend::SendNow,
+            Some(_) => {}
+            None => self.direct.push_back((input, DirectSend::SendNow)),
         }
         Ok(())
+    }
+
+    fn prepare_queue_edit(
+        &self,
+        message_id: &str,
+    ) -> Result<(String, Vec<ChatAttachmentContent>), HostError> {
+        if self.is_sending(message_id) {
+            return Err(HostError::Working);
+        }
+        let chat = self.chat_id.clone();
+        self.core(|core| {
+            core.read(|core| {
+                let message = core
+                    .chat_queue(&chat)?
+                    .into_iter()
+                    .find(|message| message.id == message_id)
+                    .ok_or_else(|| Error::Chat("this input is not in the queue".to_owned()))?;
+                let attachments = core.chat_message_attachment_contents(&chat, message_id)?;
+                Ok((message.text, attachments))
+            })
+        })
+        .map_err(Into::into)
+    }
+
+    fn confirm_queue_edit(
+        &mut self,
+        message_id: &str,
+        transfer_id: &str,
+    ) -> Result<bool, HostError> {
+        if self.is_sending(message_id) {
+            return Ok(false);
+        }
+        let chat = self.chat_id.clone();
+        let held =
+            self.write(|core| core.confirm_chat_queue_edit(&chat, message_id, transfer_id))?;
+        self.prepared_queue_edits.remove(message_id);
+        Ok(held)
     }
 
     /// Whether the queue, not paused, holds input saved before `message_id`.
@@ -1014,7 +1532,8 @@ impl Supervisor {
             Ok(!core.chat(&chat)?.queue_paused
                 && core
                     .chat_queue(&chat)?
-                    .first()
+                    .iter()
+                    .find(|message| !message.editing)
                     .is_some_and(|first| first.id != message_id))
         })
         // Unreadable now: sent directly, as before; the dispatch reads storage again.
@@ -1026,8 +1545,8 @@ impl Supervisor {
     fn request_stop(&mut self) -> Result<(), HostError> {
         let chat = self.chat_id.clone();
         self.write(|core| core.set_chat_queue_paused(&chat, true))?;
-        self.direct.clear();
-        self.direct_from_queue.clear();
+        self.clear_direct();
+        self.resend = None;
         if self.active.is_some() {
             self.interrupt();
         } else if self.unconfirmed_start.is_some()
@@ -1060,12 +1579,19 @@ impl Supervisor {
         if self.core(|core| core.chat(&chat))?.trashed {
             return Err(Error::ChatTrashed(chat).into());
         }
+        let requires_link_context = self.context.is_some()
+            && self.core(|core| core.chat_input_requires_link_context(&chat, &message_id))?;
         self.confirm_permission_restart_cleanup().await?;
         self.write(|core| core.set_chat_queue_paused(&chat, true))?;
-        self.direct.clear();
-        self.direct_from_queue.clear();
+        self.clear_direct();
         self.problem = None;
-        self.resend = Some(message_id);
+        self.resend = Some(PendingInput {
+            id: message_id,
+            requires_link_context,
+        });
+        if requires_link_context && !self.context_pending() {
+            self.refresh_context(ContextRefreshScope::LinkedInput);
+        }
         Ok(())
     }
 
@@ -1079,8 +1605,7 @@ impl Supervisor {
         }]);
         let chat = self.chat_id.clone();
         let _ = self.write(|core| core.set_chat_queue_paused(&chat, true));
-        self.direct.clear();
-        self.direct_from_queue.clear();
+        self.clear_direct();
         self.stop = None;
         self.stop_deadline = None;
     }
@@ -1268,7 +1793,6 @@ impl Supervisor {
         self.start_settings.permission.get_or_insert(value);
         self.permission_restart_pending = true;
         let direct = std::mem::take(&mut self.direct);
-        let from_queue = std::mem::take(&mut self.direct_from_queue);
         let resend = self.resend.take();
         // End ownership before checking storage. A paused queue can still be
         // sent to directly.
@@ -1281,7 +1805,6 @@ impl Supervisor {
             }
             if unconfirmed.is_none() {
                 self.direct = direct;
-                self.direct_from_queue = from_queue;
                 self.resend = resend;
             }
             return;
@@ -1299,7 +1822,6 @@ impl Supervisor {
             }
         };
         self.direct = direct;
-        self.direct_from_queue = from_queue;
         self.resend = resend;
         let (session, origin, preamble) = native_session(&chat);
         self.open(&chat, session, origin, preamble, None);
@@ -1340,7 +1862,13 @@ impl Supervisor {
         preamble: Option<String>,
         reply: Option<Reply<()>>,
     ) {
-        if let Err(error) = self.lifecycle.serving() {
+        let readiness = self.lifecycle.serving().and_then(|()| {
+            if self.lifecycle.has_runtime_cleanup(&self.chat_id) {
+                return Err(HostError::PermissionRestartCleanupUnconfirmed);
+            }
+            Ok(())
+        });
+        if let Err(error) = readiness {
             if let Some(reply) = reply {
                 let _ = reply.send(Err(error));
             }
@@ -1403,15 +1931,13 @@ impl Supervisor {
             ticketd_cli: None,
             taken_over,
         };
-        self.opening = Some(Opening {
-            generation,
-            origin,
-            preamble,
-            reply,
-        });
+        let start_claimed = Arc::new(AtomicBool::new(false));
+        let worker_start = start_claimed.clone();
         let (done, chat_id) = (self.done.clone(), chat.id.clone());
+        let open_done = self.open_done.clone();
         let chat_span = self.span.clone();
-        tokio::spawn(
+        let lifecycle = self.lifecycle.clone();
+        let worker = tokio::spawn(
             async move {
                 // Reading the context runs the CLI and can take seconds: off the async threads.
                 let context = match source {
@@ -1424,15 +1950,42 @@ impl Supervisor {
                     .await
                     .ok()
                     .flatten();
+                if worker_start.swap(true, Ordering::SeqCst) {
+                    return;
+                }
+                let chat_id = request.chat_id.clone();
                 let result = adapter.open(request).await;
-                let _ = done.send(Done::Opened {
+                let (accepted, received) = oneshot::channel();
+                let runtime = result.as_ref().ok().map(|opened| opened.runtime.clone());
+                let _ = open_done.send(FinishedOpen {
                     generation,
                     result,
+                    accepted,
                     context,
                 });
+                // The old worker may have timed out waiting for this open. Close a
+                // late process before allowing a replacement worker to start.
+                if received.await.is_err() {
+                    if let Some(runtime) = runtime
+                        && bounded_close(runtime.as_ref()).await.is_some()
+                    {
+                        lifecycle.retire_runtime(&chat_id, runtime, true);
+                    }
+                    lifecycle.release_pending_open_cleanup(&chat_id);
+                    let _ = done.send(Done::OpenCleanupComplete);
+                }
             }
             .instrument(chat_span),
         );
+        self.opening = Some(Opening {
+            generation,
+            origin,
+            preamble,
+            reply,
+            context_changed: None,
+            start_claimed,
+            worker,
+        });
     }
 
     fn finish_unattended_shutdown(&mut self, why: StopReason) {
@@ -1489,12 +2042,28 @@ impl Supervisor {
         self.record(Vec::new());
         let deadline = Instant::now() + CLOSE_TIMEOUT;
         while self.opening.is_some() {
-            match timeout_at(deadline, self.finished.recv()).await {
-                Ok(Some(done)) => self.on_done(done),
-                _ => break,
+            // Claim the start before the worker does, or let an already-started
+            // adapter use the bounded handoff and late cleanup below.
+            if let Some(opening) = self
+                .opening
+                .take_if(|opening| !opening.start_claimed.swap(true, Ordering::SeqCst))
+            {
+                opening.worker.abort();
+                let _ = opening.worker.await;
+                if let Some(reply) = opening.reply {
+                    let _ = reply.send(Err(HostError::Quitting));
+                }
+                self.runtime_gone(TurnEnding::StoppedByTicketd(why), false);
+                return None;
+            }
+            tokio::select! {
+                Some(opened) = self.finished_open.recv() => self.on_opened(opened),
+                Some(done) = self.finished.recv() => self.on_done(done),
+                () = sleep_until(deadline) => break,
             }
         }
         if let Some(opening) = self.opening.take() {
+            self.lifecycle.hold_pending_open_cleanup(&self.chat_id);
             if let Some(reply) = opening.reply {
                 let _ = reply.send(Err(HostError::Quitting));
             }
@@ -1531,18 +2100,21 @@ impl Supervisor {
         let permission_restart =
             why == StopReason::ExplicitResume && self.permission_restart_pending;
         // Losing the event stream does not prove that the previous process exited.
-        let unconfirmed = if permission_restart || self.runtime.is_some() {
-            self.drive(bounded_close(handle.as_ref())).await
-        } else {
-            None
-        };
+        let unconfirmed =
+            if permission_restart || self.unattended.is_some() || self.runtime.is_some() {
+                self.drive(bounded_close(handle.as_ref())).await
+            } else {
+                None
+            };
         self.keep_unanswered_permission();
         self.runtime = None;
         self.runtime_gone(TurnEnding::StoppedByTicketd(why), false);
         if let Some(reason) = &unconfirmed {
-            if permission_restart {
+            if permission_restart || self.unattended.is_some() {
                 self.lifecycle
-                    .retire_permission_runtime(&self.chat_id, handle);
+                    .retire_runtime(&self.chat_id, handle, self.unattended.is_some());
+            }
+            if permission_restart {
                 self.notice(
                     "ticketd could not confirm that the previous harness exited during the permission restart. Tools it started may still be running."
                         .to_owned(),
@@ -1581,11 +2153,12 @@ impl Supervisor {
         self.unconfirmed_start = None;
         self.turn_evidence = None;
         self.unconfirmed_deadline = None;
+        self.refreshing = None;
+        self.pending_contexts.clear();
         self.interactions.clear();
         self.text.clear();
         self.pending_tools.clear();
-        self.direct.clear();
-        self.direct_from_queue.clear();
+        self.clear_direct();
         self.resend = None;
         self.stop = None;
         self.stop_deadline = None;
@@ -1649,7 +2222,14 @@ impl Supervisor {
                 && !self.setting_on_its_way());
         self.keep_unanswered_permission();
         self.record(Vec::new());
-        self.runtime = None;
+        if let Some(runtime) = self.runtime.take()
+            && self.unattended.is_some()
+            && !self.closing
+        {
+            // Shutdown still needs to confirm the agent exited after event loss.
+            self.lifecycle
+                .retire_runtime(&self.chat_id, runtime.handle, true);
+        }
         if self.closing {
             // `stop_runtime` settles what was open, with its own reason.
             return;
@@ -1674,86 +2254,195 @@ impl Supervisor {
     /// sent goes first; queued input follows only while a runtime is live and the queue
     /// is not paused, so viewing or restoring a Chat never starts work.
     fn pump(&mut self) {
+        if let Some(ContextRefresh::RetryAt { armed, .. }) = &mut self.refreshing {
+            *armed = false;
+        }
+        if self
+            .queue_read_retry_at
+            .is_some_and(|at| at > Instant::now())
+        {
+            return;
+        }
+        self.queue_read_retry_at = None;
         if self.shutting_down
             || self.lifecycle.serving().is_err()
-            || self.lifecycle.has_retired_permission_runtime(&self.chat_id)
+            || self.lifecycle.has_runtime_cleanup(&self.chat_id)
             || self.storage_failed.is_some()
             || self.dispatching.is_some()
             || self.opening.is_some()
-            || self.refreshing.is_some()
             || self.unconfirmed_start.is_some()
             || self.setting_on_its_way()
+            || !self.schedule_takeover_reply()
         {
             return;
         }
         let idle = self.active.is_none();
-        if !idle && self.direct.is_empty() {
+        if idle
+            && matches!(
+                self.refreshing,
+                Some(
+                    ContextRefresh::Reading {
+                        scope: ContextRefreshScope::NextTurn,
+                        ..
+                    } | ContextRefresh::RetryAt {
+                        scope: ContextRefreshScope::NextTurn,
+                        ..
+                    }
+                )
+            )
+        {
+            return;
+        }
+        if !idle
+            && self
+                .direct
+                .iter()
+                .all(|(input, intent)| self.waits_for_new_turn(input, *intent))
+        {
             // During a turn only steering input can go out, so the workspace is not
             // read for every event of a streaming turn.
             return;
         }
         let chat_id = self.chat_id.clone();
-        let Ok(chat) = self.core(|core| core.chat(&chat_id)) else {
-            return;
+        let chat = match self.core(|core| core.chat(&chat_id)) {
+            Ok(chat) => chat,
+            Err(error) => {
+                if !is_refusal(&error)
+                    && (!self.direct.is_empty()
+                        || self.queue_started
+                        || self.resend.is_some()
+                        || (idle && self.runtime.is_some() && self.unattended.is_none()))
+                {
+                    self.queue_read_retry_at = Some(Instant::now() + QUEUE_READ_RETRY);
+                }
+                return;
+            }
         };
         if chat.trashed {
             self.direct.clear();
-            self.direct_from_queue.clear();
+            self.prepared_queue_edits.clear();
             self.resend = None;
+            return;
+        }
+        if !idle && self.steering().is_none() {
+            self.direct.retain_mut(|(input, intent)| match intent {
+                DirectSend::Auto => input.requires_link_context,
+                DirectSend::SendNow | DirectSend::AfterTurn => {
+                    *intent = DirectSend::AfterTurn;
+                    true
+                }
+            });
             return;
         }
         // What the person asked to send again goes alone, as a new turn.
-        let resend = self.resend.clone().filter(|_| idle);
-        let message_id = loop {
-            if let Some(id) = &resend {
-                break id.clone();
+        loop {
+            let resend = self.resend.clone().filter(|_| idle);
+            if idle
+                && self
+                    .direct
+                    .iter()
+                    .any(|(input, _)| input.requires_link_context)
+            {
+                self.arm_context_retry();
             }
-            match self.direct.front() {
-                Some(id) if idle || self.steering().is_some() => break id.clone(),
-                // Steering is not available: it stays in the visible queue.
-                Some(_) => {
-                    if let Some(id) = self.direct.pop_front() {
-                        self.direct_from_queue.remove(&id);
+            let direct_index = self.direct.iter().position(|(input, intent)| {
+                if idle {
+                    self.refreshing.is_none() || !input.requires_link_context
+                } else {
+                    !self.waits_for_new_turn(input, *intent)
+                }
+            });
+            let input = if let Some(input) = &resend {
+                input.clone()
+            } else if let Some(index) = direct_index {
+                self.direct[index].0.clone()
+            } else if idle
+                && self.unattended.is_none()
+                && !chat.queue_paused
+                && (self.runtime.is_some() || self.queue_started)
+            {
+                match self.core(|core| core.chat_queue(&chat_id)) {
+                    Ok(queue) => {
+                        self.prepared_queue_edits
+                            .retain(|id| queue.iter().any(|message| &message.id == id));
+                        let Some(message) = queue.into_iter().find(|message| !message.editing)
+                        else {
+                            self.queue_started = false;
+                            return;
+                        };
+                        if self.prepared_queue_edits.contains(&message.id) {
+                            return;
+                        }
+                        self.pending_input(&message)
+                    }
+                    Err(error) => {
+                        if !is_refusal(&error) {
+                            self.queue_read_retry_at = Some(Instant::now() + QUEUE_READ_RETRY);
+                        }
+                        return;
                     }
                 }
-                None if idle
-                    && !chat.queue_paused
-                    && (self.runtime.is_some() || self.queue_started) =>
-                {
-                    match self.core(|core| core.chat_queue(&chat_id)) {
-                        Ok(queue) => match queue.into_iter().next() {
-                            Some(message) => break message.id,
-                            None => {
-                                self.queue_started = false;
-                                return;
+            } else {
+                if chat.queue_paused {
+                    self.queue_started = false;
+                }
+                return;
+            };
+            // A run's supervisor may only send its own Prompt. This also holds
+            // if a person's saved reply became visible while this pump was running.
+            if self
+                .unattended
+                .as_ref()
+                .is_some_and(|agent| agent.first_message.get() != Some(&input.id))
+            {
+                if resend.is_some() {
+                    self.resend = None;
+                } else if let Some(index) = direct_index {
+                    self.direct.remove(index);
+                }
+                continue;
+            }
+            if self.runtime.is_none() {
+                if self.unattended.is_some() {
+                    match self.core(|core| core.automation_chat_harness(&chat_id)) {
+                        Ok(Some(_)) => {}
+                        Ok(None) => return,
+                        Err(error) => {
+                            if !is_refusal(&error) {
+                                self.queue_read_retry_at = Some(Instant::now() + QUEUE_READ_RETRY);
                             }
-                        },
-                        Err(_) => return,
+                            return;
+                        }
                     }
                 }
-                None => {
-                    if chat.queue_paused {
-                        self.queue_started = false;
+                let (session, origin, preamble) = native_session(&chat);
+                self.open(&chat, session, origin, preamble, None);
+                return;
+            }
+            if self.refreshing.is_some() && input.requires_link_context {
+                self.arm_context_retry();
+                return;
+            }
+            let direct = if resend.is_some() {
+                self.resend = None;
+                None
+            } else {
+                direct_index.and_then(|index| self.direct.remove(index).map(|input| (index, input)))
+            };
+            let from_queue = resend.is_none()
+                && direct
+                    .as_ref()
+                    .is_none_or(|(_, (_, intent))| *intent != DirectSend::Auto);
+            match self.defer_image_steer_or_dispatch(&input.id, resend.is_some(), from_queue) {
+                DispatchProgress::Finished => return,
+                DispatchProgress::Skipped => {}
+                DispatchProgress::ImageNeedsNewTurn => {
+                    if let Some((index, (input, DirectSend::SendNow))) = direct {
+                        self.direct.insert(index, (input, DirectSend::AfterTurn));
                     }
-                    return;
                 }
             }
-        };
-        if self.runtime.is_none() {
-            let (session, origin, preamble) = native_session(&chat);
-            self.open(&chat, session, origin, preamble, None);
-            return;
         }
-        let mut from_queue = false;
-        if resend.is_some() {
-            self.resend = None;
-        } else if self.direct.front() == Some(&message_id) {
-            self.direct.pop_front();
-            from_queue = self.direct_from_queue.remove(&message_id);
-        } else {
-            from_queue = true;
-        }
-        self.dispatch(&message_id, resend.is_some(), from_queue);
     }
 
     /// Records the possible submission, then hands the input to the adapter. Nothing
@@ -1762,9 +2451,14 @@ impl Supervisor {
     ///
     /// `resend` is set only for input the person asked to send again; it alone may
     /// follow an uncertain attempt. `from_queue` input had no row on screen until now.
-    fn dispatch(&mut self, message_id: &str, resend: bool, from_queue: bool) {
+    fn defer_image_steer_or_dispatch(
+        &mut self,
+        message_id: &str,
+        resend: bool,
+        from_queue: bool,
+    ) -> DispatchProgress {
         let Some(runtime) = &self.runtime else {
-            return;
+            return DispatchProgress::Finished;
         };
         let (handle, generation) = (runtime.handle.clone(), runtime.generation);
         let (kind, intent) = match &self.active {
@@ -1779,17 +2473,40 @@ impl Supervisor {
         let starts_turn = kind == SubmissionKind::StartTurn;
         let attempt = Uuid::new_v4().to_string();
         let chat = self.chat_id.clone();
+        let unattended = self.unattended.clone();
+        let mut image_needs_new_turn = false;
         let recorded = self.write(|core| {
-            if resend {
+            let attachments = core.chat_message_attachment_contents(&chat, message_id)?;
+            if !starts_turn
+                && handle.supports_steer_image_input() == Some(false)
+                && attachments.iter().any(ChatAttachmentContent::is_image)
+            {
+                image_needs_new_turn = true;
+                return Ok(None);
+            }
+            if let Some(agent) = unattended {
+                return Ok(core
+                    .record_automation_chat_submission(
+                        &chat,
+                        &agent.settings.run_id,
+                        message_id,
+                        &attempt,
+                    )?
+                    .map(|message| (message, attachments)));
+            }
+            let message = if resend {
                 core.record_chat_resubmission(&chat, message_id, &attempt)
             } else if from_queue {
                 core.record_chat_queue_submission(&chat, message_id, &attempt, intent)
             } else {
                 core.record_chat_submission(&chat, message_id, &attempt, intent)
-            }
+            }?;
+            Ok(Some((message, attachments)))
         });
-        let message = match recorded {
-            Ok(message) => message,
+        let (message, attachments) = match recorded {
+            Ok(Some(recorded)) => recorded,
+            Ok(None) if image_needs_new_turn => return DispatchProgress::ImageNeedsNewTurn,
+            Ok(None) => return DispatchProgress::Skipped,
             Err(error) => {
                 // Storage failure is reported by `write`; a refusal is said here.
                 // The queue is paused so the same refusal is not met again unasked.
@@ -1797,7 +2514,7 @@ impl Supervisor {
                     self.notice(format!("A message was not sent: {error}"));
                     let _ = self.write(|core| core.set_chat_queue_paused(&chat, true));
                 }
-                return;
+                return DispatchProgress::Finished;
             }
         };
         if starts_turn {
@@ -1809,20 +2526,22 @@ impl Supervisor {
         } else {
             None
         };
-        let context = if starts_turn {
-            self.session_context.take()
+        let context = if starts_turn && self.refreshing.is_none() {
+            // A written turn can time out without having received its context.
+            self.session_context.take().or_else(|| {
+                self.pending_contexts
+                    .back()
+                    .map(|transfer| transfer.text.clone())
+            })
         } else {
             None
         };
-        if starts_turn {
-            self.context_sent = context.clone();
-        }
         // Context and selected history go to the harness with the input; the stored
         // message stays the person's own words.
         let text = [
             context.as_deref(),
             preamble.as_deref(),
-            Some(&*message.text),
+            (!message.text.is_empty()).then_some(message.text.as_str()),
         ]
         .into_iter()
         .flatten()
@@ -1833,19 +2552,66 @@ impl Supervisor {
             generation,
             kind,
             text,
+            attachments,
         };
+        if let Some(text) = context {
+            // An older attempt can still settle delivery without a context record.
+            if self.pending_contexts.len() == MAX_PENDING_CONTEXTS {
+                self.pending_contexts.pop_front();
+            }
+            self.pending_contexts.push_back(ContextTransfer {
+                attempt_id: attempt.clone(),
+                text,
+            });
+        }
         self.dispatching = Some(Dispatch {
             attempt,
             generation,
             starts_turn,
+            early_rejection: None,
             preamble,
-            context,
         });
+        if let Some(refusal) = self.attachment_refusal(&submission.attachments) {
+            self.on_dispatched(DispatchOutcome::NotSent(refusal));
+            return DispatchProgress::Finished;
+        }
         let done = self.done.clone();
+        let open_workspace = self.open_workspace.clone();
+        let lifecycle = self.lifecycle.clone();
+        let workspace_generation = self.workspace_generation;
+        let admission = self
+            .unattended
+            .as_ref()
+            .map(|agent| AutomationPromptAdmission {
+                fence: agent.prompt_fence.clone(),
+                open_workspace: open_workspace.clone(),
+                lifecycle: lifecycle.clone(),
+                workspace_generation,
+                chat_id: chat.clone(),
+                run_id: agent.settings.run_id.clone(),
+            });
         tokio::spawn(async move {
-            let outcome = handle.submit(submission).await;
+            let attempt_id = submission.submission.0.clone();
+            let outcome = handle.submit_with_admission(submission, admission).await;
+            if let DispatchOutcome::NotSent(refusal) = &outcome
+                && prompt_admission_refused(refusal)
+                && lifecycle.serving().is_ok()
+                && let Ok(mut workspace) = open_workspace()
+                && lifecycle.serves_workspace_generation(workspace_generation)
+            {
+                // The actor may already be closing after the run ended. Settle
+                // known non-delivery even if it can no longer receive Done.
+                let _ = workspace.record_chat_observations(
+                    &chat,
+                    vec![ChatObservation::SubmissionNotDelivered {
+                        attempt_id,
+                        detail: Some(refusal.reason().to_owned()),
+                    }],
+                );
+            }
             let _ = done.send(Done::Dispatched { outcome });
         });
+        DispatchProgress::Finished
     }
 
     // ------------------------------------------------------------------
@@ -1854,33 +2620,35 @@ impl Supervisor {
 
     fn on_done(&mut self, done: Done) {
         match done {
-            Done::Opened {
-                generation,
-                result,
-                context,
-            } => self.on_opened(generation, result, context),
+            Done::OpenCleanupComplete => {}
             Done::Dispatched { outcome } => self.on_dispatched(outcome),
             Done::Context {
                 generation,
+                request,
                 context,
             } => {
-                if self.refreshing != Some(generation) {
+                let Some(ContextRefresh::Reading {
+                    request: latest,
+                    retrying,
+                    scope,
+                }) = self.refreshing
+                else {
+                    return;
+                };
+                let current = self.runtime.as_ref().map(|runtime| runtime.generation);
+                if latest != request || current != Some(generation) {
                     return;
                 }
                 self.refreshing = None;
-                let current = self.runtime.as_ref().map(|runtime| runtime.generation);
                 match context {
                     // Told with the next new turn, and only when it is news to the session.
                     Ok(Some(context))
-                        if current == Some(generation)
-                            && self.context_given().as_ref() != Some(&context) =>
+                        if self.context_given().as_deref() != Some(context.as_str()) =>
                     {
-                        self.session_context = Some(context);
+                        self.set_session_context(context);
                     }
                     Ok(_) => {}
-                    Err(error) => self.notice(format!(
-                        "ticketd could not read this Chat's changed links, so the session was not told about them: {error}"
-                    )),
+                    Err(error) => self.context_read_failed(error, retrying, scope),
                 }
             }
             Done::Interrupted {
@@ -1974,18 +2742,20 @@ impl Supervisor {
         }
     }
 
-    fn on_opened(
-        &mut self,
-        generation: RuntimeGeneration,
-        result: Result<OpenedRuntime, Problem>,
-        context: Result<Option<String>, String>,
-    ) {
+    fn on_opened(&mut self, opened: FinishedOpen) {
+        let FinishedOpen {
+            generation,
+            result,
+            accepted,
+            context,
+        } = opened;
         let Some(opening) = self
             .opening
             .take_if(|opening| opening.generation == generation)
         else {
             return;
         };
+        let _ = accepted.send(());
         let result = match result {
             Ok(opened) => {
                 self.start_settings = StartSettings::default();
@@ -2001,6 +2771,7 @@ impl Supervisor {
                     tools: HashSet::new(),
                     said: HashSet::new(),
                     context: None,
+                    link_context: None,
                     compacted_at: None,
                     settings: None,
                     setting_changes: Vec::new(),
@@ -2013,12 +2784,20 @@ impl Supervisor {
                     // A resumed native session remembers what it was given.
                     Ok(Some(context))
                         if opening.origin == ChatSessionOrigin::NativeResume
-                            && self.context_given().as_ref() == Some(&context) => {}
-                    Ok(Some(context)) => self.session_context = Some(context),
+                            && self.context_given().as_deref() == Some(context.as_str()) => {}
+                    Ok(Some(context)) => self.set_session_context(context),
                     Ok(None) => {}
-                    Err(error) => self.notice(format!(
-                        "ticketd could not prepare this Chat's context, so the session started without it: {error}"
-                    )),
+                    Err(error) => {
+                        self.notice(format!(
+                            "ticketd could not prepare this Chat's context: {error}"
+                        ));
+                        self.schedule_context_retry(ContextRefreshScope::LinkedInput);
+                    }
+                }
+                if let Some(scope) = opening.context_changed
+                    && !self.closing
+                {
+                    self.refresh_context(scope);
                 }
                 self.problem = None;
                 Ok(())
@@ -2093,7 +2872,7 @@ impl Supervisor {
     /// outcome that arrives after its runtime was lost still settles the same attempt,
     /// but can no longer start a turn.
     fn on_dispatched(&mut self, outcome: DispatchOutcome) {
-        let Some(dispatch) = self.dispatching.take() else {
+        let Some(mut dispatch) = self.dispatching.take() else {
             return;
         };
         let attempt_id = dispatch.attempt.clone();
@@ -2101,6 +2880,13 @@ impl Supervisor {
             .runtime
             .as_ref()
             .is_some_and(|runtime| runtime.generation == dispatch.generation);
+        // A rejection can reach the event stream before the write task reports back.
+        let outcome = match (outcome, dispatch.early_rejection.take()) {
+            (DispatchOutcome::Written | DispatchOutcome::UnknownAfterLoss, Some(reason)) => {
+                DispatchOutcome::Rejected { reason }
+            }
+            (outcome, _) => outcome,
+        };
         match outcome {
             DispatchOutcome::NotSent(refusal) => {
                 let detail = refusal.reason().to_owned();
@@ -2108,7 +2894,20 @@ impl Supervisor {
                     attempt_id,
                     detail: Some(detail.clone()),
                 }]);
-                self.not_accepted(dispatch, current, detail);
+                let admission_refused = prompt_admission_refused(&refusal);
+                if current && admission_refused {
+                    self.problem = Some(match refusal {
+                        Refusal::AutomationPromptOwnershipUnavailable => {
+                            ChatProblem::StorageFailed {
+                                detail: detail.clone(),
+                            }
+                        }
+                        _ => ChatProblem::DispatchRefused {
+                            detail: detail.clone(),
+                        },
+                    });
+                }
+                self.not_accepted(dispatch, current && !admission_refused, detail);
             }
             DispatchOutcome::Rejected { reason } => {
                 self.record(vec![ChatObservation::SubmissionRejected {
@@ -2129,10 +2928,7 @@ impl Supervisor {
                     attempt_id: attempt_id.clone(),
                 }];
                 if current && let Some(turn_id) = self.turn(&turn, &mut observations) {
-                    observations.push(ChatObservation::SubmissionProcessing {
-                        attempt_id,
-                        turn_id,
-                    });
+                    self.submission_processing(attempt_id, turn_id, &mut observations);
                 }
                 self.record(observations);
             }
@@ -2157,10 +2953,7 @@ impl Supervisor {
         if dispatch.preamble.is_some() {
             self.preamble = dispatch.preamble;
         }
-        if dispatch.context.is_some() {
-            self.session_context = dispatch.context;
-            self.context_sent = None;
-        }
+        self.restore_rejected_context(&dispatch.attempt);
         if dispatch.starts_turn {
             self.stop_when_turn_known = false;
             if self.active.is_none() {
@@ -2169,6 +2962,19 @@ impl Supervisor {
             if current {
                 self.pause(ChatProblem::DispatchRefused { detail });
             }
+        }
+    }
+
+    fn restore_rejected_context(&mut self, attempt_id: &str) {
+        if let Some(index) = self
+            .pending_contexts
+            .iter()
+            .position(|transfer| transfer.attempt_id == attempt_id)
+            && let Some(transfer) = self.pending_contexts.remove(index)
+            && index == self.pending_contexts.len()
+            && self.session_context.is_none()
+        {
+            self.session_context = Some(transfer.text);
         }
     }
 
@@ -2200,16 +3006,6 @@ impl Supervisor {
             turn_id: turn_id.clone(),
             native_turn_id: Some(native.0.clone()),
         });
-        if let Some(context) = self.context_sent.take() {
-            observations.push(ChatObservation::Tool {
-                tool_id: format!("{turn_id}:ticketd-context"),
-                turn_id: turn_id.clone(),
-                name: CONTEXT_RECORD_NAME.to_owned(),
-                input: context,
-                state: ChatToolState::Completed,
-                output: None,
-            });
-        }
         self.active = Some(ActiveTurn {
             turn_id: turn_id.clone(),
             native: native.clone(),
@@ -2221,6 +3017,37 @@ impl Supervisor {
             self.interrupt();
         }
         Some(turn_id)
+    }
+
+    fn submission_processing(
+        &mut self,
+        attempt_id: String,
+        turn_id: String,
+        observations: &mut Vec<ChatObservation>,
+    ) {
+        if let Some(index) = self
+            .pending_contexts
+            .iter()
+            .position(|transfer| transfer.attempt_id == attempt_id)
+            && let Some(runtime) = &mut self.runtime
+            && let Some(transfer) = self.pending_contexts.drain(..=index).next_back()
+        {
+            // The durable record also supplies the next session's baseline, so
+            // older transfers cannot replace a newer confirmed one.
+            runtime.link_context = Some(transfer.text.clone());
+            observations.push(ChatObservation::Tool {
+                tool_id: format!("{turn_id}:ticketd-context"),
+                turn_id: turn_id.clone(),
+                name: CONTEXT_RECORD_NAME.to_owned(),
+                input: transfer.text.to_string(),
+                state: ChatToolState::Completed,
+                output: None,
+            });
+        }
+        observations.push(ChatObservation::SubmissionProcessing {
+            attempt_id,
+            turn_id,
+        });
     }
 
     /// The Turn in progress, for the work done on its behalf; the Chat's own span when none is.
@@ -2263,28 +3090,28 @@ impl Supervisor {
                             attempt_id: attempt_id.clone(),
                         });
                         if let Some(turn_id) = self.turn(&turn, &mut observations) {
-                            observations.push(ChatObservation::SubmissionProcessing {
-                                attempt_id,
-                                turn_id,
-                            });
+                            self.submission_processing(attempt_id, turn_id, &mut observations);
                         }
                     }
                     DeliveryEvidence::Processing { turn } => {
                         if let Some(turn_id) = self.turn(&turn, &mut observations) {
-                            observations.push(ChatObservation::SubmissionProcessing {
-                                attempt_id,
-                                turn_id,
-                            });
+                            self.submission_processing(attempt_id, turn_id, &mut observations);
                         }
                     }
                     DeliveryEvidence::Rejected { reason } => {
                         observations.push(ChatObservation::SubmissionRejected {
-                            attempt_id,
+                            attempt_id: attempt_id.clone(),
                             detail: Some(reason.clone()),
                         });
+                        self.restore_rejected_context(&attempt_id);
                         if unconfirmed {
                             self.stop_when_turn_known = false;
                             self.pause(ChatProblem::DispatchRefused { detail: reason });
+                        } else if let Some(dispatch) = &mut self.dispatching
+                            && dispatch.starts_turn
+                            && dispatch.attempt == attempt_id
+                        {
+                            dispatch.early_rejection = Some(reason);
                         }
                     }
                 }
@@ -2411,10 +3238,7 @@ impl Supervisor {
                     if self.unconfirmed_start.as_ref() == Some(&submission.0) {
                         self.unconfirmed_start = None;
                     }
-                    observations.push(ChatObservation::SubmissionProcessing {
-                        attempt_id: submission.0,
-                        turn_id: turn_id.clone(),
-                    });
+                    self.submission_processing(submission.0, turn_id.clone(), &mut observations);
                 }
                 // The harness ended the turn, so text it streamed without a final copy
                 // is all there is: it is kept whole. Only lost contact leaves a response
@@ -2480,7 +3304,6 @@ impl Supervisor {
                             let _ = self.write(|core| core.set_chat_queue_paused(&chat, true));
                         }
                         self.direct.clear();
-                        self.direct_from_queue.clear();
                     }
                 }
             }
@@ -2706,6 +3529,9 @@ impl Supervisor {
 
     fn on_timer(&mut self) {
         let now = Instant::now();
+        if self.context_retry_at().is_some_and(|at| at <= now) {
+            self.retry_link_context();
+        }
         if self.show_text_at.is_some_and(|at| at <= now) {
             self.show_text();
         }
@@ -2796,8 +3622,14 @@ impl Supervisor {
                 _ => None,
             },
             steering: self.active.as_ref().and_then(|_| self.steering()),
+            steering_images_refused: self.active.is_some() && self.images_refused(true),
             delivery_unconfirmed: self.unconfirmed_start.is_some(),
-            sending: self.direct.iter().cloned().collect(),
+            sending: self
+                .direct
+                .iter()
+                .map(|(input, _)| input.id.clone())
+                .collect(),
+            prepared_queue_edits: self.prepared_queue_edits.clone(),
             interactions: self
                 .interactions
                 .iter()
@@ -2812,7 +3644,11 @@ impl Supervisor {
                 Some(detail) => Some(ChatProblem::StorageFailed {
                     detail: detail.clone(),
                 }),
-                None if self.lifecycle.has_retired_permission_runtime(&self.chat_id) => {
+                // The Automation still reports the reason it lost its own run.
+                // A replacement supervisor reports the pending cleanup instead.
+                None if self.unattended.is_none()
+                    && self.lifecycle.has_retired_permission_runtime(&self.chat_id) =>
+                {
                     Some(ChatProblem::CleanupUnconfirmed {
                         reason: HostError::PermissionRestartCleanupUnconfirmed.to_string(),
                     })
@@ -2901,5 +3737,391 @@ fn native_session(chat: &Chat) -> (SessionStart, ChatSessionOrigin, Option<Strin
             None,
         ),
         None => (SessionStart::New, ChatSessionOrigin::New, None),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    #![allow(clippy::unwrap_used)] // test setup and assertions
+
+    use super::*;
+    use crate::testing::FakeAdapter;
+    use ticketd_core::{NewChat, WorkspaceSession};
+
+    fn supervisor(path: PathBuf) -> (Supervisor, Chat) {
+        let fake = FakeAdapter::codex();
+        let chat = Workspace::open(&path)
+            .unwrap()
+            .create_chat(
+                None,
+                NewChat {
+                    title: None,
+                    harness: fake.harness().key.as_str().to_owned(),
+                    execution_folder: "/work/app".to_owned(),
+                    folder_managed: false,
+                    links: Vec::new(),
+                },
+            )
+            .unwrap();
+        let (supervisor, _) = Supervisor::new(
+            &chat,
+            Arc::new(move || WorkspaceSession::for_file(&path)?.workspace()),
+            Some(Arc::new(fake)),
+            None,
+            Arc::new(Board::new()),
+            None,
+            Arc::new(HostLifecycle::default()),
+        );
+        (supervisor, chat)
+    }
+
+    async fn open(supervisor: &mut Supervisor, chat: &Chat) -> RuntimeGeneration {
+        supervisor.open(chat, SessionStart::New, ChatSessionOrigin::New, None, None);
+        let opened = supervisor.finished_open.recv().await.unwrap();
+        let generation = opened.generation;
+        supervisor.on_opened(opened);
+        generation
+    }
+
+    #[tokio::test]
+    async fn stale_context_completion_cannot_release_pending_dispatch() {
+        let dir = tempfile::tempdir().unwrap();
+        let (mut supervisor, chat) = supervisor(dir.path().join("workspace.sqlite3"));
+        let generation = open(&mut supervisor, &chat).await;
+        supervisor
+            .send(None, "queued reply", SendMode::Auto, &[], None)
+            .unwrap();
+        let latest = Uuid::new_v4();
+        let reading = Some(ContextRefresh::Reading {
+            request: latest,
+            retrying: false,
+            scope: ContextRefreshScope::NextTurn,
+        });
+        supervisor.refreshing = reading;
+
+        supervisor.on_done(Done::Context {
+            generation,
+            request: Uuid::new_v4(),
+            context: Ok(Some("old links".to_owned())),
+        });
+        supervisor.pump();
+        assert!(supervisor.dispatching.is_none());
+        assert_eq!(supervisor.refreshing, reading);
+
+        supervisor.on_done(Done::Context {
+            generation,
+            request: latest,
+            context: Ok(Some("new links".to_owned())),
+        });
+        supervisor.pump();
+        assert_eq!(
+            supervisor.pending_contexts.back().unwrap().text.as_ref(),
+            "new links"
+        );
+    }
+
+    #[tokio::test]
+    async fn rejected_submission_keeps_newer_link_context_for_the_next_turn() {
+        let dir = tempfile::tempdir().unwrap();
+        let (mut supervisor, chat) = supervisor(dir.path().join("workspace.sqlite3"));
+        let generation = open(&mut supervisor, &chat).await;
+        supervisor.session_context = Some("old links".into());
+        supervisor
+            .send(None, "reply", SendMode::Auto, &[], None)
+            .unwrap();
+        supervisor.pump();
+        supervisor.dispatching.as_mut().unwrap().early_rejection =
+            Some("harness rejected the request".to_owned());
+        let latest = Uuid::new_v4();
+        supervisor.refreshing = Some(ContextRefresh::Reading {
+            request: latest,
+            retrying: false,
+            scope: ContextRefreshScope::NextTurn,
+        });
+        supervisor.on_done(Done::Context {
+            generation,
+            request: latest,
+            context: Ok(Some("new links".to_owned())),
+        });
+        supervisor.on_done(Done::Dispatched {
+            outcome: DispatchOutcome::Written,
+        });
+
+        supervisor.resume_queue().await.unwrap();
+        supervisor.pump();
+        assert_eq!(
+            supervisor.pending_contexts.back().unwrap().text.as_ref(),
+            "new links"
+        );
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn closing_while_initial_context_is_blocked_cancels_the_open() {
+        let dir = tempfile::tempdir().unwrap();
+        let (mut supervisor, chat) = supervisor(dir.path().join("workspace.sqlite3"));
+        let fake = FakeAdapter::codex();
+        supervisor.adapter = Some(Arc::new(fake.clone()));
+        let (entered, mut reading) = mpsc::unbounded_channel();
+        let (released, mut finished) = mpsc::unbounded_channel();
+        supervisor.context = Some(Arc::new(move |_| {
+            let (resume, held) = std::sync::mpsc::channel();
+            if entered.send(resume).is_ok() {
+                let _ = held.recv();
+            }
+            let _ = released.send(());
+            Ok(Some("initial context".to_owned()))
+        }));
+        let (reply, cancelled) = oneshot::channel();
+        supervisor.open(
+            &chat,
+            SessionStart::New,
+            ChatSessionOrigin::New,
+            None,
+            Some(reply),
+        );
+        let release = timeout(Duration::from_secs(10), reading.recv())
+            .await
+            .unwrap()
+            .unwrap();
+        let worker = supervisor.opening.as_ref().unwrap().worker.abort_handle();
+
+        assert_eq!(
+            timeout(
+                CLOSE_TIMEOUT,
+                supervisor.close_runtime(StopReason::TurnedOff)
+            )
+            .await
+            .unwrap(),
+            None
+        );
+        assert!(matches!(cancelled.await.unwrap(), Err(HostError::Quitting)));
+        assert!(worker.is_finished());
+        assert!(!supervisor.lifecycle.has_runtime_cleanup(&chat.id));
+        release.send(()).unwrap();
+        timeout(Duration::from_secs(10), finished.recv())
+            .await
+            .unwrap()
+            .unwrap();
+        assert!(fake.opens().is_empty());
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn timed_out_resends_share_a_bounded_context_and_evicted_evidence_still_settles() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("workspace.sqlite3");
+        let (mut supervisor, chat) = supervisor(path.clone());
+        let generation = open(&mut supervisor, &chat).await;
+        let original_context: Arc<str> = "original links".into();
+        supervisor.session_context = Some(original_context.clone());
+        let input = supervisor
+            .send(None, "first", SendMode::Auto, &[], None)
+            .unwrap();
+        supervisor.pump();
+        let first_attempt = supervisor.dispatching.as_ref().unwrap().attempt.clone();
+
+        for _ in 0..MAX_PENDING_CONTEXTS {
+            supervisor.on_dispatched(DispatchOutcome::Written);
+            tokio::time::advance(DELIVERY_CONFIRMATION_TIMEOUT).await;
+            supervisor.on_timer();
+            supervisor.request_resend(input.id.clone()).await.unwrap();
+            supervisor.pump();
+            assert!(supervisor.dispatching.is_some());
+        }
+        assert_eq!(supervisor.pending_contexts.len(), MAX_PENDING_CONTEXTS);
+        assert!(supervisor.pending_contexts.iter().all(|transfer| {
+            transfer.attempt_id != first_attempt && Arc::ptr_eq(&transfer.text, &original_context)
+        }));
+
+        supervisor.on_dispatched(DispatchOutcome::Written);
+        tokio::time::advance(DELIVERY_CONFIRMATION_TIMEOUT).await;
+        supervisor.on_timer();
+        supervisor.set_session_context("edited links".to_owned());
+        supervisor
+            .send(None, "second", SendMode::Auto, &[], None)
+            .unwrap();
+        supervisor.pump();
+        let first_turn = NativeTurnId::new("first");
+        supervisor.on_event(Some(RuntimeEvent {
+            generation,
+            kind: EventKind::SubmissionEvidence {
+                submission: SubmissionId(first_attempt.clone()),
+                evidence: DeliveryEvidence::Acknowledged {
+                    turn: first_turn.clone(),
+                },
+            },
+        }));
+
+        let workspace = Workspace::open(&path).unwrap();
+        let items = workspace.chat_snapshot(&chat.id, 100).unwrap().items;
+        let first = items
+            .iter()
+            .find_map(|item| match item {
+                ticketd_core::ChatItem::Message(message) if message.id == input.id => message
+                    .attempts
+                    .iter()
+                    .find(|attempt| attempt.id == first_attempt),
+                _ => None,
+            })
+            .unwrap();
+        assert_eq!(first.delivery, ticketd_core::ChatDelivery::Acknowledged);
+        assert_eq!(
+            workspace
+                .chat_latest_tool_input(&chat.id, CONTEXT_RECORD_NAME)
+                .unwrap(),
+            None
+        );
+        assert_eq!(
+            supervisor.pending_contexts.back().unwrap().text.as_ref(),
+            "edited links"
+        );
+
+        supervisor.on_event(Some(RuntimeEvent {
+            generation,
+            kind: EventKind::TurnEnded {
+                turn: first_turn,
+                outcome: TurnOutcome::Completed,
+                submissions: Vec::new(),
+            },
+        }));
+        supervisor.on_dispatched(DispatchOutcome::Acknowledged {
+            turn: NativeTurnId::new("second"),
+        });
+        assert_eq!(
+            workspace
+                .chat_latest_tool_input(&chat.id, CONTEXT_RECORD_NAME)
+                .unwrap()
+                .as_deref(),
+            Some("edited links"),
+        );
+        assert!(supervisor.pending_contexts.is_empty());
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn late_evidence_only_records_its_own_context_before_or_after_a_newer_confirmation() {
+        for newer_first in [false, true] {
+            let dir = tempfile::tempdir().unwrap();
+            let path = dir.path().join("workspace.sqlite3");
+            let (mut supervisor, chat) = supervisor(path.clone());
+            let generation = open(&mut supervisor, &chat).await;
+            supervisor.session_context = Some("original links".into());
+            let original = supervisor
+                .send(None, "first", SendMode::Auto, &[], None)
+                .unwrap();
+            supervisor.pump();
+            let first_attempt = supervisor.dispatching.as_ref().unwrap().attempt.clone();
+            supervisor.on_dispatched(DispatchOutcome::Written);
+            tokio::time::advance(DELIVERY_CONFIRMATION_TIMEOUT).await;
+            supervisor.on_timer();
+            assert!(supervisor.unconfirmed_start.is_none());
+
+            supervisor.session_context = Some("edited links".into());
+            supervisor
+                .send(None, "second", SendMode::Auto, &[], None)
+                .unwrap();
+            supervisor.pump();
+            let later_attempt = supervisor.dispatching.as_ref().unwrap().attempt.clone();
+            let first = NativeTurnId::new("first");
+            let later = NativeTurnId::new("second");
+            let ended = |turn| {
+                Some(RuntimeEvent {
+                    generation,
+                    kind: EventKind::TurnEnded {
+                        turn,
+                        outcome: TurnOutcome::Completed,
+                        submissions: Vec::new(),
+                    },
+                })
+            };
+            let latest = || {
+                Workspace::open(&path)
+                    .unwrap()
+                    .chat_latest_tool_input(&chat.id, CONTEXT_RECORD_NAME)
+                    .unwrap()
+                    .unwrap()
+            };
+            if newer_first {
+                // The turn's named processing evidence can arrive before submit replies.
+                supervisor.on_event(Some(RuntimeEvent {
+                    generation,
+                    kind: EventKind::TurnEnded {
+                        turn: later.clone(),
+                        outcome: TurnOutcome::Completed,
+                        submissions: vec![SubmissionId(later_attempt.clone())],
+                    },
+                }));
+                assert_eq!(latest(), "edited links");
+            }
+            supervisor.on_event(Some(RuntimeEvent {
+                generation,
+                kind: EventKind::SubmissionEvidence {
+                    submission: SubmissionId(first_attempt),
+                    evidence: DeliveryEvidence::Acknowledged {
+                        turn: first.clone(),
+                    },
+                },
+            }));
+            supervisor.on_event(ended(first));
+            if newer_first {
+                assert_eq!(latest(), "edited links");
+            } else {
+                assert_eq!(latest(), "original links");
+                assert_eq!(
+                    supervisor.pending_contexts.back().unwrap().attempt_id,
+                    later_attempt
+                );
+                supervisor.on_dispatched(DispatchOutcome::Acknowledged { turn: later });
+                assert_eq!(latest(), "edited links");
+            }
+            let items = Workspace::open(&path)
+                .unwrap()
+                .chat_snapshot(&chat.id, 100)
+                .unwrap()
+                .items;
+            let attempt = items
+                .iter()
+                .find_map(|item| match item {
+                    ticketd_core::ChatItem::Message(message) if message.id == original.id => {
+                        message.attempts.first()
+                    }
+                    _ => None,
+                })
+                .unwrap();
+            assert_eq!(attempt.delivery, ticketd_core::ChatDelivery::Acknowledged);
+            let tools = items
+                .iter()
+                .filter(|item| {
+                    matches!(item,
+                        ticketd_core::ChatItem::Tool(tool) if tool.name == CONTEXT_RECORD_NAME
+                    )
+                })
+                .count();
+            assert_eq!(tools, if newer_first { 1 } else { 2 });
+        }
+    }
+
+    #[tokio::test]
+    async fn replacement_open_refuses_a_retired_late_runtime_after_its_hold_releases() {
+        let dir = tempfile::tempdir().unwrap();
+        let (mut supervisor, chat) = supervisor(dir.path().join("workspace.sqlite3"));
+        open(&mut supervisor, &chat).await;
+        let runtime = supervisor.runtime.take().unwrap();
+        let lifecycle = supervisor.lifecycle.clone();
+        lifecycle.hold_pending_open_cleanup(&chat.id);
+        lifecycle.retire_runtime(&chat.id, runtime.handle, true);
+        lifecycle.release_pending_open_cleanup(&chat.id);
+
+        let (send, mut reply) = oneshot::channel();
+        supervisor.open(
+            &chat,
+            SessionStart::New,
+            ChatSessionOrigin::New,
+            None,
+            Some(send),
+        );
+        assert!(matches!(
+            reply.try_recv(),
+            Ok(Err(HostError::PermissionRestartCleanupUnconfirmed))
+        ));
+        assert!(supervisor.opening.is_none());
     }
 }

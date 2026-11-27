@@ -51,9 +51,156 @@ fn facts<'a>(chat: &'a Chat, live: &'a ChatLive, last_turn: Option<&'a ChatTurn>
         failure: None,
         activity: "idle",
         opening: false,
-        last_change: None,
+        first_change: None,
+        files_changed: None,
         last_response: Some("All **done**. See `x`."),
     }
+}
+
+/// A seen row after a finished turn: the words line two says.
+fn seen_words(facts: Facts<'_>) -> String {
+    let status = status(&facts);
+    assert_eq!(status.rank, Rank::Idle);
+    status.word
+}
+
+#[test]
+fn a_seen_idle_row_says_its_last_outcome_by_priority() {
+    let live = idle();
+    let ended = turn(5, TurnEnding::Completed);
+    let chat = chat(5);
+    let change = ChatAgentChange::Status {
+        reference: "T-12".to_owned(),
+        title: "Demo".to_owned(),
+        from: "Todo".to_owned(),
+        to: "In review".to_owned(),
+    };
+    // A record the agent changed comes first, then the files, then the reply.
+    let mut all = facts(&chat, &live, Some(&ended));
+    all.first_change = Some(&change);
+    all.files_changed = Some(3);
+    assert_eq!(seen_words(all), "Moved T-12 to In review");
+    let mut files = facts(&chat, &live, Some(&ended));
+    files.files_changed = Some(3);
+    assert_eq!(seen_words(files), "3 files changed");
+    let mut one = facts(&chat, &live, Some(&ended));
+    one.files_changed = Some(1);
+    assert_eq!(seen_words(one), "1 file changed");
+    // No files: the reply's first words.
+    assert_eq!(
+        seen_words(facts(&chat, &live, Some(&ended))),
+        "All done. See x."
+    );
+}
+
+fn moved(reference: &str, from: &str, to: &str) -> ChatAgentChange {
+    ChatAgentChange::Status {
+        reference: reference.to_owned(),
+        title: "Demo".to_owned(),
+        from: from.to_owned(),
+        to: to.to_owned(),
+    }
+}
+
+fn posted(reference: &str) -> ChatAgentChange {
+    ChatAgentChange::Update {
+        reference: reference.to_owned(),
+        excerpt: "Done".to_owned(),
+    }
+}
+
+#[test]
+fn a_tickets_status_moves_net_into_one_move() {
+    // Todo -> In progress -> In review, with an update between: the net move leads.
+    assert_eq!(
+        net_changes(&[
+            moved("T-12", "Todo", "In progress"),
+            posted("T-12"),
+            moved("T-12", "In progress", "In review"),
+        ]),
+        [moved("T-12", "Todo", "In review"), posted("T-12")]
+    );
+    // A move that ends where it began is nothing.
+    assert_eq!(
+        net_changes(&[
+            moved("T-12", "Todo", "In progress"),
+            moved("T-12", "In progress", "Todo"),
+            posted("T-12"),
+        ]),
+        [posted("T-12")]
+    );
+    // Each ticket nets by itself and keeps the place of its first move.
+    assert_eq!(
+        net_changes(&[
+            moved("T-12", "Todo", "In progress"),
+            moved("T-13", "Todo", "In progress"),
+            moved("T-12", "In progress", "Done"),
+        ]),
+        [
+            moved("T-12", "Todo", "Done"),
+            moved("T-13", "Todo", "In progress")
+        ]
+    );
+    // Updates are never merged.
+    assert_eq!(
+        net_changes(&[posted("T-12"), posted("T-12")]),
+        [posted("T-12"), posted("T-12")]
+    );
+}
+
+#[test]
+fn an_idle_row_says_the_first_sentence_of_the_records_row() {
+    let live = idle();
+    let ended = turn(5, TurnEnding::Completed);
+    let chat = chat(5);
+    let net = net_changes(&[
+        moved("T-12", "Todo", "In progress"),
+        posted("T-12"),
+        moved("T-12", "In progress", "In review"),
+    ]);
+    let mut all = facts(&chat, &live, Some(&ended));
+    all.first_change = net.first();
+    assert_eq!(seen_words(all), "Moved T-12 to In review");
+}
+
+#[test]
+fn a_reply_is_cut_at_a_word_and_never_inside_a_link() {
+    let live = idle();
+    let ended = turn(5, TurnEnding::Completed);
+    let chat = chat(5);
+    let long = "Yes, the migration is safe to run twice because every step checks first and skips what exists";
+    let mut cut = facts(&chat, &live, Some(&ended));
+    cut.last_response = Some(long);
+    let words = seen_words(cut);
+    assert!(words.ends_with('…'), "{words}");
+    assert!(words.chars().count() <= 61, "{words}");
+    assert!(long.starts_with(words.trim_end_matches('…')), "{words}");
+    assert!(
+        !words.trim_end_matches('…').ends_with(' '),
+        "no space before the ellipsis: {words}"
+    );
+    assert!(
+        long[words.trim_end_matches('…').len()..].starts_with(' '),
+        "the cut falls at a word: {words}"
+    );
+
+    let mut link = facts(&chat, &live, Some(&ended));
+    link.last_response = Some("I opened the PR: https://github.com/example/repo/pull/12345");
+    assert_eq!(seen_words(link), "I opened the PR…");
+
+    let mut only = facts(&chat, &live, Some(&ended));
+    only.last_response = Some("https://github.com/example/repo/pull/12345");
+    assert_eq!(seen_words(only), "Done");
+}
+
+#[test]
+fn an_unused_chat_never_says_idle() {
+    let live = idle();
+    let status = status(&Facts {
+        last_response: None,
+        ..facts(&chat(0), &live, None)
+    });
+    assert_eq!(status.word, "No messages yet");
 }
 
 #[test]
@@ -379,4 +526,16 @@ fn a_turn_ticketd_stopped_before_endings_existed_reads_stopped_then_its_cause() 
             (Rank::Idle, "Stopped", format!("Stopped · {cause}"))
         );
     }
+}
+
+#[test]
+fn a_reply_with_long_spacing_keeps_whole_words_not_a_fragment() {
+    let live = idle();
+    let ended = turn(5, TurnEnding::Completed);
+    let chat = chat(5);
+    // The spaces collapse to one, so both words fit; no cut may land inside the second.
+    let spaced = format!("A{}{}", " ".repeat(120), "b".repeat(40));
+    let mut row = facts(&chat, &live, Some(&ended));
+    row.last_response = Some(&spaced);
+    assert_eq!(seen_words(row), format!("A {}", "b".repeat(40)));
 }

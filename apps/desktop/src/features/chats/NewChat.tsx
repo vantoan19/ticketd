@@ -1,7 +1,14 @@
 import { FailureAlert } from "@/components/ui/failure-alert";
 import { describeFailure, sentence } from "@/lib/api/describe-failure";
 import { chatFailure, type ChatFailureNotice } from "@/features/chats/failure";
-import { useEffect, useMemo, useRef, useState, type ReactNode } from "react";
+import {
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+  useSyncExternalStore,
+  type ReactNode,
+} from "react";
 import {
   ArrowLeft,
   ChevronDown,
@@ -39,7 +46,7 @@ import type { Token } from "@/features/chats/composer-mentions";
 import { useCodexCommands } from "@/features/chats/composer-settings";
 import type { ComposerMentions } from "@/features/chats/ComposerField";
 import { ComposerQuotes } from "@/features/chats/ComposerQuote";
-import { carryIntoChat } from "@/features/chats/drafts";
+import { arrivals, draftOf, type PendingCreate } from "@/features/chats/drafts";
 import {
   NEW_CHAT,
   clearQuotes,
@@ -69,11 +76,11 @@ import { notificationClient } from "@/lib/api/notifications";
 import { withoutVerbatim } from "@/lib/paths";
 import { loadPreferences } from "@/lib/preferences";
 
-/** The draft survives leaving and returning to New Chat while the app is open. */
-let draft = "";
-let draftTokens: Token[] = [];
-/** The ticket prompt the draft was prefilled with, while nobody has edited it. */
-let prefilled: string | null = null;
+const pickParameters = ({ model, effort, permission }: Pick) => ({
+  ...(model && { model }),
+  ...(effort && { effort }),
+  ...(permission && { permission }),
+});
 
 /**
  * Starts a Chat: a first message, the harness (chosen only here), the folder
@@ -113,19 +120,21 @@ export function NewChat({
   crumb?: ReactNode;
 }) {
   const client = useChatClient();
+  const draft = draftOf(client, NEW_CHAT);
   // A prefill nobody edited is replaced; a draft someone typed is kept, with
   // the ticket's prompt one click away.
   const [prompt] = useState(() => {
     if (!start) return null;
     const next = ticketPrompt(start.ticket);
-    const kept = draft.trim() !== "" && draft !== prefilled;
-    if (!kept) {
-      draft = next.text;
-      draftTokens = next.tokens;
-      prefilled = next.text;
-    }
+    const kept = !draft.canPrefill();
+    if (!kept) draft.setText(next.text, next.tokens, true);
     return { ...next, kept };
   });
+  const {
+    text: typed,
+    saving,
+    pendingCreate,
+  } = useSyncExternalStore(draft.subscribe, draft.snapshot);
   const [composerKey, setComposerKey] = useState(0);
   const [pickerOpen, setPickerOpen] = useState(false);
   const [folderMissing, setFolderMissing] = useState(false);
@@ -135,18 +144,17 @@ export function NewChat({
   const [harnesses, setHarnesses] = useState<HarnessStatus[] | null>(null);
   const [harnessId, setHarnessId] = useState("");
   /** null is the managed folder ticketd keeps for the Chat. */
-  const [folder, setFolder] = useState<string | null>(
-    () => start?.folder ?? null,
+  const [folder, setFolder] = useState<string | null>(() =>
+    start ? start.folder : (pendingCreate?.request.folder ?? null),
   );
   const [links, setLinks] = useState<LinkedRecord[]>(() =>
-    start ? [start.ticket] : [],
+    start ? [start.ticket] : (pendingCreate?.links ?? []),
   );
   const [failure, setFailure] = useState<ChatFailureNotice | null>(null);
   const [probe, setProbe] = useState(0);
   // Suggestions show only while the box is empty. Choosing one refills the box
   // (remounting the composer with the prompt) and links its records; both are
   // one undo step, kept in `before`.
-  const [typed, setTyped] = useState(draft);
   const [before, setBefore] = useState<{
     text: string;
     tokens: Token[];
@@ -177,14 +185,12 @@ export function NewChat({
     box.setSelectionRange(box.value.length, box.value.length);
   }, [refilled]);
   const refill = (text: string, tokens: Token[]) => {
-    draft = text;
-    draftTokens = tokens;
-    prefilled = null;
-    setTyped(text);
+    if (!draft.setText(text, tokens)) return;
     setComposerKey((count) => count + 1);
     setRefilled((count) => count + 1);
   };
   const choose = (suggestion: Suggestion) => {
+    if (draft.locked()) return;
     const { prompt: text, links: chosen } = suggestionFill(suggestion);
     const added = chosen.filter(
       (record) =>
@@ -192,7 +198,8 @@ export function NewChat({
           (item) => item.kind === record.kind && item.id === record.id,
         ),
     );
-    setBefore({ text: draft, tokens: draftTokens, links, prompt: text });
+    const { text: previous, tokens } = draft.snapshot();
+    setBefore({ text: previous, tokens, links, prompt: text });
     setLinks([...links, ...added]);
     refill(text, []);
     const names = added.map((record) =>
@@ -207,20 +214,13 @@ export function NewChat({
     );
   };
   const undoChoice = () => {
-    if (!before) return false;
+    if (!before || draft.locked()) return false;
     setLinks(before.links);
     refill(before.text, before.tokens);
     setBefore(null);
     setLinkedNote("");
     return true;
   };
-  /**
-   * Names a request to the host. It is repeated only when the very same request
-   * is sent again after a failure, which then finds what the first try made; any
-   * change to the message, harness, folder or links is a new request.
-   */
-  const attempt = useRef({ id: crypto.randomUUID(), request: "" });
-  const retrySend = useRef<(() => void) | null>(null);
   useEffect(() => {
     let current = true;
     client.harnesses().then(
@@ -273,11 +273,11 @@ export function NewChat({
     };
   }, [client, start?.folder]);
   const found = harnesses ?? [];
-  // The one chosen here, else the last one used while it can still be, else the
-  // first that can be used, in the host's order.
+  // An automatic probe keeps the pending request's harness until a choice is made.
+  const selectedHarness = harnessId || pendingCreate?.request.harness_id;
   const remembered = rememberedHarness();
   const harness =
-    found.find((item) => item.id === harnessId) ??
+    found.find((item) => item.id === selectedHarness) ??
     found.find((item) => item.id === remembered && item.usable) ??
     found.find((item) => item.usable) ??
     found[0];
@@ -310,11 +310,25 @@ export function NewChat({
   // The last pick for this harness while the harness still offers it, else
   // its listed defaults: what the picker shows is what the first turn runs on.
   const [picks, setPicks] = useState<Record<string, Pick>>({});
+  // A pending create keeps its pick through automatic harness probes and reopening.
+  const [restoredPick, setRestoredPick] = useState(
+    () =>
+      pendingCreate && {
+        harnessId: pendingCreate.request.harness_id,
+        pick: pendingCreate.pick,
+      },
+  );
+  const restored =
+    restoredPick?.harnessId === harness?.id ? restoredPick?.pick : undefined;
   const pick = harness
-    ? startPick(offered, picks[harness.id] ?? rememberedPick(harness.id))
+    ? startPick(
+        offered,
+        restored ?? picks[harness.id] ?? rememberedPick(harness.id),
+      )
     : NO_PICK;
   const choosePick = (next: Pick) => {
     if (!harness) return;
+    setRestoredPick(null);
     setPicks((known) => ({ ...known, [harness.id]: next }));
     rememberPick(harness.id, next);
   };
@@ -366,6 +380,60 @@ export function NewChat({
       canListSkills,
     ],
   );
+  const create = async (pending: PendingCreate, keepDraft = false) => {
+    const { request, options, pick, quotes } = pending;
+    // Notifications are asked for with the first Chat message.
+    if (loadPreferences().notifyChats)
+      void notificationClient.requestPermission().catch(() => {});
+    try {
+      const created = await client.createChat(request);
+      if (!draft.belongsToWorkspace()) return;
+      if (options) rememberStart(created.chat_id, options, pick);
+      if (request.folder) rememberFolder(request.folder);
+      clearQuotes(NEW_CHAT, quotes);
+      // The Chat exists but holds no message. Open it with the captured draft.
+      if (created.send_error) {
+        await draftOf(client, created.chat_id).recover({
+          text: request.message,
+          attachments: request.attachments ?? [],
+        });
+        if (!draft.belongsToWorkspace()) return;
+        arrivals.set(
+          created.chat_id,
+          `Your first message wasn’t sent. ${sentence(created.send_error)} It’s in the box below.`,
+        );
+      }
+      if (keepDraft) draft.settleCreateInput(pending.submitted);
+      draft.setPendingCreate(null);
+      setRestoredPick(null);
+      setFailure(null);
+      if (
+        input.current?.isConnected &&
+        !input.current.closest('[hidden], [data-single="list"]')
+      )
+        onCreated(created.chat_id);
+    } catch (reason) {
+      draft.setPendingCreate({
+        ...pending,
+        failure: describeFailure(reason, "start the Chat"),
+      });
+      throw reason;
+    }
+  };
+  const retryCreate = () => {
+    const current = draft.snapshot();
+    const pending = current.pendingCreate;
+    if (!pending?.failure) return;
+    input.current?.focus();
+    const { submitted } = pending;
+    const keepDraft =
+      current.text !== submitted.text ||
+      current.tokens !== submitted.tokens ||
+      current.items !== submitted.items;
+    // The host may already have committed this exact command.
+    draft.save("send", () => create(pending, keepDraft), keepDraft);
+  };
+  const shownFailure = pendingCreate?.failure ?? failure?.failure;
   return (
     <section className="ticket-detail chat-pane" aria-labelledby="chat-heading">
       <div className="detail-header">
@@ -424,28 +492,24 @@ export function NewChat({
                 autoFocus={!resting}
                 inputRef={input}
                 placeholder="Describe a task or ask a question"
-                initialText={draft}
-                initialTokens={draftTokens}
-                onText={(text, tokens) => {
-                  draft = text;
-                  draftTokens = tokens;
-                  if (text !== prefilled) prefilled = null;
-                  setTyped(text);
+                draft={draft}
+                onText={(text) => {
                   if (before && text !== before.prompt) setBefore(null);
                 }}
                 mentions={mentions}
                 above={
                   <ComposerQuotes quotes={quotes} onRemove={removeQuote} />
                 }
-                controls={(text) => ({
+                controls={(text, hasAttachments) => ({
                   send: "send",
-                  enabled: ready && text.trim() !== "",
+                  enabled: ready && (text.trim() !== "" || hasAttachments),
                 })}
                 leading={
                   <NewChatControls
                     harnesses={found}
                     harnessId={harness?.id ?? null}
                     onHarness={(id) => {
+                      if (id !== harness?.id) setRestoredPick(null);
                       setHarnessId(id);
                       rememberHarness(id);
                     }}
@@ -470,8 +534,7 @@ export function NewChat({
                     openers={openers}
                   />
                 }
-                retryRef={retrySend}
-                onSend={async (typed, mentioned) => {
+                onSend={async (typed, mentioned, attachments) => {
                   if (!harness) return;
                   const message = quotedMessage(quotes, typed);
                   const chosen = links.map(({ kind, id }) => ({ kind, id }));
@@ -491,49 +554,47 @@ export function NewChat({
                         ) === index,
                     ),
                     message,
-                    // The first turn runs on what the picker shows (LIVE-7).
-                    ...(pick.model && { model: pick.model }),
-                    ...(pick.effort && { effort: pick.effort }),
-                    ...(pick.permission && { permission: pick.permission }),
+                    ...(attachments && { attachments }),
                   };
-                  const request = JSON.stringify(requestInput);
-                  if (attempt.current.request !== request)
-                    attempt.current = { id: crypto.randomUUID(), request };
-                  // Notifications are asked for with the first Chat message.
-                  if (loadPreferences().notifyChats)
-                    void notificationClient.requestPermission().catch(() => {});
-                  try {
-                    const created = await client.createChat({
-                      command_id: attempt.current.id,
-                      ...requestInput,
-                    });
-                    // Answered: whatever is asked for next is a new request.
-                    attempt.current = { id: crypto.randomUUID(), request: "" };
-                    if (offered) rememberStart(created.chat_id, offered, pick);
-                    if (folder) rememberFolder(folder);
-                    clearQuotes(NEW_CHAT);
-                    prefilled = null;
-                    // The Chat exists but holds no message. It is opened with the
-                    // unsent words in its composer, so they are sent there and no
-                    // second Chat is made for them.
-                    if (created.send_error)
-                      carryIntoChat(
-                        created.chat_id,
-                        message,
-                        `Your first message wasn’t sent. ${sentence(created.send_error)} It’s in the box below.`,
-                      );
-                    setFailure(null);
-                    onCreated(created.chat_id);
-                  } catch (reason) {
-                    // Sending again repeats this same request safely.
-                    setFailure(
-                      chatFailure(reason, "start the Chat", () => {
-                        input.current?.focus();
-                        retrySend.current?.();
+                  const previous = draft.snapshot().pendingCreate;
+                  // An unchanged request can reconcile its original create after
+                  // a probe changes the choices. Edited requests use today's pick.
+                  if (
+                    previous &&
+                    restored &&
+                    draft.repeatsRequest(
+                      JSON.stringify({
+                        ...requestInput,
+                        ...pickParameters(restored),
                       }),
-                    );
-                    throw reason;
+                    )
+                  ) {
+                    await create(previous);
+                    return;
                   }
+                  // The first turn runs on what the picker shows (LIVE-7).
+                  const selectedInput = {
+                    ...requestInput,
+                    ...pickParameters(pick),
+                  };
+                  const request = {
+                    command_id: draft.requestId(JSON.stringify(selectedInput)),
+                    ...selectedInput,
+                  };
+                  const { text, tokens, items } = draft.snapshot();
+                  const pending: PendingCreate = {
+                    request,
+                    links,
+                    quotes,
+                    options: offered,
+                    pick,
+                    submitted: { text, tokens, items },
+                    failure: null,
+                  };
+                  draft.setPendingCreate(pending);
+                  setRestoredPick({ harnessId: harness.id, pick });
+                  setFailure(null);
+                  await create(pending);
                 }}
               />
             </div>
@@ -628,12 +689,11 @@ export function NewChat({
                 <Button
                   variant="ghost"
                   size="xs"
+                  disabled={saving}
                   onClick={() => {
-                    draft = prompt.text;
-                    draftTokens = prompt.tokens;
-                    prefilled = prompt.text;
-                    setTyped(prompt.text);
-                    setComposerKey((count) => count + 1);
+                    if (draft.setText(prompt.text, prompt.tokens, true)) {
+                      setComposerKey((count) => count + 1);
+                    }
                   }}
                 >
                   Use {start.ticket.reference} prompt
@@ -642,7 +702,7 @@ export function NewChat({
             )}
             {/* Suggestions or the harness's notice, never both: the notice's
               actions come next in Tab order. */}
-            {typed.trim() === "" && !harness?.problem && (
+            {typed.trim() === "" && !saving && !harness?.problem && (
               <Suggestions
                 folder={folder}
                 linked={links.flatMap((record) =>
@@ -672,11 +732,13 @@ export function NewChat({
                 onAction={() => setProbe((count) => count + 1)}
               />
             )}
-            {failure && (
+            {shownFailure && (
               <FailureAlert
                 size="compact"
-                failure={failure.failure}
-                {...(failure.retry && { onRetry: failure.retry })}
+                failure={shownFailure}
+                {...(pendingCreate?.failure
+                  ? { onRetry: retryCreate }
+                  : failure?.retry && { onRetry: failure.retry })}
               />
             )}
           </div>

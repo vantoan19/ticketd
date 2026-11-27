@@ -246,6 +246,7 @@ function UpdateShell() {
 function AppContent() {
   const updateNotice = useUpdateNotice();
   const workspaceReplaced = useReplaced();
+  const [chatWorkspace, setChatWorkspace] = useState(0);
   const pageZoom = usePageZoom();
   useEffect(keepWebviewInStep, []);
   const recoveryGeneration = useDraftRecoveryGeneration();
@@ -774,6 +775,13 @@ function AppContent() {
     });
   }
   const bulk = useBulkEdit(reportChange);
+  const discardChatWorkspace = () => {
+    chat.replaceWorkspace?.();
+    setSeenChatOpen(0);
+    setSeenChatRequest(0);
+    setChatWorkspace((generation) => generation + 1);
+    setNewChatRequest(0);
+  };
   // A restore or a download from Drive replaced the whole Workspace: the
   // selection, the opened pages and a failed bulk change describe the old one.
   // The report reloads the list through the shared version.
@@ -1414,6 +1422,9 @@ function AppContent() {
                                             setView("inbox");
                                           }}
                                           onRestore={replaceWorkspace}
+                                          onWorkspaceReplaced={
+                                            discardChatWorkspace
+                                          }
                                           onSourcesChanged={
                                             sourceConnectionsChanged
                                           }
@@ -1636,6 +1647,7 @@ function AppContent() {
                                         }
                                       >
                                         <ChatsView
+                                          key={chatWorkspace}
                                           newChatRequest={newChatRequest}
                                           projects={projects}
                                         />

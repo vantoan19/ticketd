@@ -413,6 +413,14 @@
   width: 100%;
   padding-inline: 32px 36px;
 }
+.ui-search-input > [data-slot="search-count"] {
+  position: absolute;
+  right: 32px;
+  pointer-events: none;
+}
+.ui-search-input:has(> [data-slot="search-count"]) > input {
+  padding-inline-end: 64px;
+}
 .ui-search-input > input::-webkit-search-cancel-button {
   appearance: none;
 }

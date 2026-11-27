@@ -263,10 +263,31 @@ core workflows for Documents, Activities, Plans, tags, and links
 
 - A **Document** is Markdown with its own ID, an optional title, and no mandatory
   type. Without a title, its heading is the first nonempty line (or, for activity
-  details, the Activity's brief).
+  details, the Activity's brief). A Document may also carry a **summary**: one
+  plain line written by its author (`--summary` on `document create` and `document
+change`; an empty value clears it) or by a person in the reader's Edit mode. The
+  reader shows it under the meta line. ticketd never writes one.
 - Capture opens an editor at once with no required field, autosaves, and creates
-  nothing if left empty. Documents opens on Recently opened with pinned items above;
-  tags, pins, and links are optional.
+  nothing if left empty. Documents opens on **Current work** with pinned items above:
+  the Documents of Active Plans and open tickets, one group per Plan, each Plan's spec
+  first, then "Open tickets", with "Finished work" and "No Plan or ticket" closed below
+  and read when opened. Recent (by recently opened, recently updated, or title) stays one
+  click away; the view and which groups are open are remembered on this computer. Tags,
+  pins, and links are optional.
+- Searching Documents shows where each result matched: **Titles** (the title holds every
+  word) first, then **Inside Documents** with the matching passage under the title. The
+  words are marked with a fill and an underline, each group shows its count, and the
+  search field shows the total.
+- Reading a long Document: an outline of its headings opens from the right edge, and
+  each h2 and h3 can be folded to its first sentence, one at a time or with Fold all
+  in the outline. Folds are kept per Document on this computer, never change the
+  Markdown, and editing shows everything.
+- A Document can be read at full width: the reader's button hides the list, and the
+  choice is remembered on this computer. The header then shows "N of M" with Previous
+  and Next Document buttons that follow the list as it shows (the chosen view and its
+  order), and the outline becomes a rail beside the text with the sections, Fold all,
+  Back to top (once scrolled) and the Document's Linked Plans and tickets, all kept in view; once everything is folded, the rail shows how many sections are folded and Unfold all instead of the list. Narrow windows keep taking
+  turns between the list and the reader.
 - Documents use recoverable trash; permanent deletion is not supported. A Document can
   create a ticket and be linked to several tickets and Plans.
 - CLI: the `document` command group (`create`, `show`, `read`, `change`, `recent`,
@@ -647,6 +668,13 @@ collect OAuth tokens, proxy model requests, or change billing.
   Before sending, the person picks the harness and, from what it reports, its model,
   effort, and permission mode. Full access, where the harness edits and runs
   commands without asking, is a choice for a person's Chat.
+- **Titles.** A Chat is titled by its first line, cut at a word with "…" when it runs
+  past 80 characters. A Chat started from a ticket takes the ticket's title instead of
+  repeating "Work on T-12:", and the linked chip then shows the reference alone.
+  Existing Chats read the same way; nothing stored is rewritten. A row's second line
+  says what the Chat last did (the first sentence of its last turn's records row, where a
+  ticket's status moves read as the net move; else the files it changed, or the first
+  words of its reply), and "Working" while it runs.
 - **Folder choice.** New Chat offers locally registered Project checkouts,
   recent folders, a Scratch folder, and the system folder chooser. If a Chat's
   folder goes missing, it can continue in another Project checkout or a folder
@@ -669,6 +697,33 @@ collect OAuth tokens, proxy model requests, or change billing.
   turn steers it where the harness supports that, otherwise the message is visibly
   queued. ticketd owns the queue. Stop pauses it and requests interruption without
   claiming every tool stopped.
+- **Chat attachments.** Paste a screenshot or files copied in the system file manager,
+  or choose multiple files with **Attach files**. The composer shows removable filenames
+  and image previews and can send attachments with or without text. Chat captures the
+  bytes when a file is added and supplies native images or readable file copies to the
+  selected harness within its permissions. Queueing, editing, and resending keep the text
+  and files together. While a queued message is being edited, its original text and
+  files stay saved in the queue and can be reopened after restarting ticketd. Saving
+  the edited message replaces the original. Sent files can be saved from Chat history.
+- **Working turns.** A turn's progress notes (what the harness says while it
+  works) stay in the transcript as lines of its story, and the steps between two
+  notes fold into one row each, such as "Read 6 files and ran 3 commands", with
+  "· 1 failed" when a step failed. A stretch already done when the Chat opens
+  starts folded. The stretch in progress stays open, and one that finishes while
+  someone is looking at it folds only after it has left the view, so nothing above
+  the newest line moves. What the person opens or closes stays that way for the
+  session. When the turn ends its work line folds the notes and stretches together;
+  opened, it shows the notes and stretch rows, and a stretch opens to its steps. A
+  harness that writes no notes has one stretch per turn, shown as its one stretch
+  row, which opens to its steps.
+- **Steps.** Each tool call reads as one line in the words of what it did. When Claude
+  Code describes a command, the row reads that description and opens to the exact
+  command and its output; any other command reads as its first line, muted and cut to
+  one line. Paths show their folder muted before the file name, and a long path is cut
+  from its start, never its name. A run of reads and searches is one row, "Explored 6
+  files · 2 searches". The Chat host reads the description from the stored tool input
+  each time the view is built, so existing Chats read this way with no migration
+  ([ADR 0022](adr/0022-harnesses-plug-into-ticketds-chat-vocabulary.md)).
 - **Lifetime.** Execution belongs to the desktop backend, not the view: navigating away
   keeps work running, and explicit Quit stops it. One ranked status per Chat drives
   the list, sidebar count, app-icon count, and system notifications, which can be
@@ -678,9 +733,10 @@ collect OAuth tokens, proxy model requests, or change billing.
   Documents, evidence, and status changes under native permission rules. Messages never
   become Activities or Documents automatically; Save as Document is offered.
 - **Retention and recovery.** History and queued input are saved automatically. Archive
-  hides a Chat while work continues; trash stops work and is recoverable. Backups
-  include Chat records but not harness credentials or native resume files. Uncertain
-  deliveries are never resent automatically.
+  hides a Chat while work continues; trash stops work and is recoverable. Complete
+  Workspace backups preserve Chat records and the captured files on queued and sent
+  messages. Harness credentials and native resume files stay with the harness.
+  Uncertain deliveries are never resent automatically.
 
 ### Automations
 

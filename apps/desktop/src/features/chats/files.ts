@@ -22,16 +22,40 @@ export const SentLinksContext = createContext<{
 }>({ links: [], trashed: [] });
 
 /**
- * The name to show for each path: its last part, or its folder and last part when
- * another path shares that name ("auth/index.ts", "api/index.ts").
+ * A path as its folder and its file name, cut from the start: a long folder keeps its
+ * last parts behind "…/", and the name is never cut. `folder` ends in "/" (or is empty
+ * for a bare name), so `folder + name` reads as the path.
  */
-export function shownNames(paths: string[]): string[] {
-  const parts = paths.map((path) => path.split("/").filter(Boolean));
-  const base = (each: string[]) => each.at(-1) ?? "";
-  return parts.map((each, index) => {
-    const repeated = parts.some(
-      (other, at) => at !== index && base(other) === base(each),
-    );
-    return repeated && each.length > 1 ? each.slice(-2).join("/") : base(each);
-  });
+export function splitPath(
+  path: string,
+  max = 48,
+): { folder: string; name: string } {
+  const whole = path.length > 1 ? path.replace(/\/+$/, "") : path;
+  const at = whole.lastIndexOf("/");
+  const name = whole.slice(at + 1);
+  const folder = whole.slice(0, at + 1);
+  if (whole.length <= max || !folder) return { folder, name };
+  // Keep the folder's last parts that fit beside the name and the "…/".
+  const room = max - name.length - 2;
+  const parts = folder.split("/").filter(Boolean);
+  let kept = "";
+  for (let i = parts.length - 1; i >= 0; i -= 1) {
+    const next = `${parts[i]}/${kept}`;
+    if (next.length > room) break;
+    kept = next;
+  }
+  return { folder: `…/${kept}`, name };
 }
+
+// A search scope that names a place; a glob (one with * ? [ or {) is a pattern.
+export const scopeIsPath = (scope: string) => !/[*?[{]/.test(scope);
+
+/**
+ * The end of a name that always shows, so its extension survives: the extension
+ * (at most twelve characters), or the last six of a name without one. Short of
+ * room a file name gives way to "…" plus this, never less.
+ */
+export const tailLength = (name: string) => {
+  const dot = name.lastIndexOf(".");
+  return dot > 0 ? Math.min(12, name.length - dot) : 6;
+};
