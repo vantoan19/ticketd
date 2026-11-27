@@ -156,12 +156,7 @@ function WorkingLine({
   const name = (agent: TicketAgent) => (
     <AgentName agent={agent} onOpen={() => open(agent, true)} />
   );
-  if (!second)
-    return (
-      <>
-        {name(first)} is working on this ticket
-      </>
-    );
+  if (!second) return <>{name(first)} is working on this ticket</>;
   if (rest.length === 0)
     return (
       <>

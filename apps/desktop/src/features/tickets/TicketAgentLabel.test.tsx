@@ -29,7 +29,11 @@ const ticket = ticketFor("T-KQ29");
 /** What the ticket asked Chat to open, as the Chats screen would read it. */
 function Asked() {
   const { chatRequest } = useChatFeature();
-  return <output aria-label="asked">{JSON.stringify(chatRequest?.request ?? null)}</output>;
+  return (
+    <output aria-label="asked">
+      {JSON.stringify(chatRequest?.request ?? null)}
+    </output>
+  );
 }
 
 function open(agents = ticketAgentFixtures().one) {
@@ -133,7 +137,9 @@ test("a main agent's name opens its Chat, a sub-agent's name its view", async ()
   open(ticketAgentFixtures().two);
   const strip = await label();
   await user.click(
-    within(strip).getByRole("button", { name: "Claude Opus 5.5, open its Chat" }),
+    within(strip).getByRole("button", {
+      name: "Claude Opus 5.5, open its Chat",
+    }),
   );
   expect(asked()).toEqual({
     kind: "open",
@@ -160,7 +166,9 @@ test("a sub-agent's request names it, shows the command and opens its view to re
     "npm test -- rate-limit",
   );
   expect(within(strip).queryByText(/is working on this ticket/)).toBeNull();
-  await user.click(within(strip).getByRole("button", { name: "Review request" }));
+  await user.click(
+    within(strip).getByRole("button", { name: "Review request" }),
+  );
   expect(asked().subAgent).toBe("sa-tests");
 });
 

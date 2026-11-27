@@ -124,7 +124,11 @@ test("a nested sub-agent opens with its parent in the crumbs", async () => {
 
 test("opening the Chat itself leaves a sub-agent's view", async () => {
   const chat = subAgentFixtures().running;
-  const base = { kind: "open", chatId: chat.chat.id, retention: "active" } as const;
+  const base = {
+    kind: "open",
+    chatId: chat.chat.id,
+    retention: "active",
+  } as const;
   show(chat, { ...base, subAgent: "sa-tests" }, base);
   await ask(chat.chat.title);
   await screen.findByRole("heading", { name: "Check limiter test coverage" });

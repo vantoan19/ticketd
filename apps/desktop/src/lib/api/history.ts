@@ -1,5 +1,8 @@
 import { invoke } from "@/lib/api/bridge-failure";
-import { creditedSubAgentSchema, type CreditedSubAgent } from "@/lib/api/credit";
+import {
+  creditedSubAgentSchema,
+  type CreditedSubAgent,
+} from "@/lib/api/credit";
 export type Entry = {
   kind: string;
   from_value: string;
@@ -24,7 +27,9 @@ function parseEntries(value: unknown): Entry[] {
       !(entry.editing_agent === null || typeof entry.editing_agent === "string")
     )
       throw new Error("Invalid history entry");
-    const credited = creditedSubAgentSchema.nullish().safeParse(entry.credited_to);
+    const credited = creditedSubAgentSchema
+      .nullish()
+      .safeParse(entry.credited_to);
     return {
       ...(credited.success && credited.data && { credited_to: credited.data }),
       kind: entry.kind,

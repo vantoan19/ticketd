@@ -77,9 +77,7 @@ export function TicketAgentSession({
       failure !== null ||
       (latest.value !== undefined && latest.current));
   const agents = useTicketAgents(ticket && enabled ? ticket.id : null);
-  const ready = Boolean(
-    ticket && answered && (!enabled || (list && agents)),
-  );
+  const ready = Boolean(ticket && answered && (!enabled || (list && agents)));
   const chats = list?.chats ?? [];
   const projected =
     attention?.chats.filter((chat) =>
@@ -203,10 +201,7 @@ export function TicketAgentStrip({
         className="ticket-agent-strip ui-agent-strip"
       >
         {agent.agents.length > 0 ? (
-          <TicketAgentsLabel
-            agents={agent.agents}
-            reference={reference}
-          />
+          <TicketAgentsLabel agents={agent.agents} reference={reference} />
         ) : agent.chat ? (
           <LiveAgent
             key={agent.chat.id}

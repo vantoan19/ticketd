@@ -51,7 +51,11 @@ const status = (credited?: typeof creditedTests) => ({
 
 function Asked() {
   const { chatRequest } = useChatFeature();
-  return <output aria-label="asked">{JSON.stringify(chatRequest?.request ?? null)}</output>;
+  return (
+    <output aria-label="asked">
+      {JSON.stringify(chatRequest?.request ?? null)}
+    </output>
+  );
 }
 
 function show(feed: unknown[], chat = true) {
@@ -87,7 +91,9 @@ test("an update credited to a sub-agent keeps its author and opens the sub-agent
     author.closest(".activity-author"),
   );
   fireEvent.click(credit);
-  expect(JSON.parse(screen.getByLabelText("asked").textContent ?? "null")).toEqual({
+  expect(
+    JSON.parse(screen.getByLabelText("asked").textContent ?? "null"),
+  ).toEqual({
     kind: "open",
     chatId: "c-limiter",
     retention: "active",
@@ -114,7 +120,10 @@ test("an Activity with no credit shows only its author", async () => {
 });
 
 test("with Chat off a credit is not shown", async () => {
-  show([{ type: "authored", activity: { ...note, credited_to: creditedTests } }], false);
+  show(
+    [{ type: "authored", activity: { ...note, credited_to: creditedTests } }],
+    false,
+  );
   await screen.findByText("claude-code");
   expect(screen.queryByText("Check limiter test coverage")).toBeNull();
 });
