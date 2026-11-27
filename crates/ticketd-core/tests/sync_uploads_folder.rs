@@ -208,16 +208,21 @@ fn replacing_and_disconnecting_leave_the_uploads_folder_untouched() {
 
 /// A folder of the person's own in Drive, chosen for Files before sync was set up.
 fn chosen_folder(sim: &DriveSim, workspace: &mut Workspace) {
+    chosen_folder_in(sim, workspace, CONNECTION);
+}
+
+/// [`chosen_folder`], in the Google account signed in as `connection`.
+fn chosen_folder_in(sim: &DriveSim, workspace: &mut Workspace, connection: &str) {
     sim.insert(
         json!({"id": "team-files", "name": "Team files", "mimeType": FOLDER, "parents": [],
             "appProperties": {}}),
         b"",
     );
-    let provider = GoogleDrive::new(CONNECTION, &Vault, sim);
+    let provider = GoogleDrive::new(connection, &Vault, sim);
     workspace
         .set_drive_upload_destination_for(
             &DriveUploadDestination {
-                connection_id: CONNECTION.into(),
+                connection_id: connection.into(),
                 folder_id: "team-files".into(),
                 resource_key: None,
             },
@@ -408,4 +413,148 @@ fn sync_will_not_sign_in_as_another_account_than_the_files_folder_uses() {
     );
     assert_eq!(files_only.sync_status().unwrap().connection_id, None);
     files_only.sync_connect(CONNECTION, ACCOUNT).unwrap();
+}
+
+/// A backup made with its Files folder in `connection`'s account, in a folder of its own.
+fn backup_with_files_in(connection: &str) -> (tempfile::TempDir, std::path::PathBuf) {
+    let directory = tempfile::tempdir().unwrap();
+    let mut other = Workspace::open(directory.path().join("Elsewhere")).unwrap();
+    chosen_folder_in(&DriveSim::default(), &mut other, connection);
+    let backup = directory.path().join("backup.sqlite3");
+    other.backup(&backup).unwrap();
+    (directory, backup)
+}
+
+/// A restore keeps this computer's Google sign-in, so a Files folder the backup holds in
+/// another account would leave Files and sync on two accounts: it goes back to this
+/// computer, as when the account is switched. A folder in the kept account stays.
+#[test]
+fn a_restore_keeps_files_and_sync_on_this_computers_one_google_account() {
+    let sim = DriveSim::default();
+    let (directory, a, _) = synced(&sim);
+    let path = directory.path().join("Desk A");
+    drop(a);
+
+    let (_kept, elsewhere) = backup_with_files_in(OTHER);
+    Workspace::restore(&path, &elsewhere).unwrap();
+    let mut a = Workspace::open(&path).unwrap();
+    assert_eq!(
+        a.attachment_upload_destination().unwrap(),
+        AttachmentUploadDestination::Local
+    );
+    let signed_in = a.google_sign_in().unwrap().unwrap();
+    assert_eq!(
+        (
+            signed_in.connection_id.as_str(),
+            signed_in.account.as_deref()
+        ),
+        (CONNECTION, Some(ACCOUNT))
+    );
+    // Sync's setup is not blocked by a Files folder on the other account.
+    a.sync_connect(CONNECTION, ACCOUNT).unwrap();
+    drop(a);
+
+    let (_same, here) = backup_with_files_in(CONNECTION);
+    Workspace::restore(&path, &here).unwrap();
+    let a = Workspace::open(&path).unwrap();
+    assert!(matches!(
+        a.attachment_upload_destination().unwrap(),
+        AttachmentUploadDestination::GoogleDrive { destination, .. } if destination.connection_id == CONNECTION
+    ));
+}
+
+/// Without a sign-in of sync's, the backup's Files folder is the only sign-in there is.
+#[test]
+fn a_restore_onto_a_computer_without_sync_sign_in_keeps_the_backups_drive_folder() {
+    let directory = tempfile::tempdir().unwrap();
+    let path = directory.path().join("Desk");
+    drop(Workspace::open(&path).unwrap());
+    let (_kept, elsewhere) = backup_with_files_in(OTHER);
+
+    Workspace::restore(&path, &elsewhere).unwrap();
+    let a = Workspace::open(&path).unwrap();
+
+    assert!(matches!(
+        a.attachment_upload_destination().unwrap(),
+        AttachmentUploadDestination::GoogleDrive { destination, .. } if destination.connection_id == OTHER
+    ));
+}
+
+/// Another handle on the same Workspace file signing in to Google while a Files folder is
+/// being checked with Drive: the folder is refused when it is saved, not accepted on the
+/// strength of a check made before.
+struct SignsInDuringCheck<'a> {
+    other_handle: std::cell::RefCell<&'a mut Workspace>,
+}
+
+impl ticketd_core::drive::DriveUploadProvider for SignsInDuringCheck<'_> {
+    fn folder(
+        &self,
+        id: &str,
+        _: Option<&str>,
+    ) -> Result<ticketd_core::drive::DriveFolder, ticketd_core::drive::DriveError> {
+        self.other_handle
+            .borrow_mut()
+            .sync_connect(CONNECTION, ACCOUNT)
+            .unwrap();
+        Ok(ticketd_core::drive::DriveFolder {
+            id: id.into(),
+            name: "Team files".into(),
+            can_add_children: true,
+        })
+    }
+    fn reserve_file_id(&self) -> Result<String, ticketd_core::drive::DriveError> {
+        unreachable!("a folder check uploads nothing")
+    }
+    fn uploaded_file(
+        &self,
+        _: &str,
+    ) -> Result<Option<ticketd_core::drive::DriveUploadedFile>, ticketd_core::drive::DriveError>
+    {
+        unreachable!("a folder check uploads nothing")
+    }
+    fn upload_blob(
+        &self,
+        _: &ticketd_core::drive::DriveUploadOperation,
+        _: &mut dyn std::io::Read,
+        _: &mut dyn FnMut(u64, u64) -> bool,
+    ) -> Result<(), ticketd_core::drive::DriveError> {
+        unreachable!("a folder check uploads nothing")
+    }
+}
+
+#[test]
+fn a_files_folder_is_checked_against_sync_again_when_it_is_saved() {
+    let directory = tempfile::tempdir().unwrap();
+    let path = directory.path().join("Desk");
+    let mut files = Workspace::open(&path).unwrap();
+    let mut sync = Workspace::open(&path).unwrap();
+    let provider = SignsInDuringCheck {
+        other_handle: std::cell::RefCell::new(&mut sync),
+    };
+
+    let error = files
+        .set_drive_upload_destination_for(
+            &DriveUploadDestination {
+                connection_id: OTHER.into(),
+                folder_id: "team-files".into(),
+                resource_key: None,
+            },
+            None,
+            &provider,
+        )
+        .unwrap_err();
+
+    assert!(
+        error.to_string().contains("another Google account"),
+        "{error}"
+    );
+    assert_eq!(
+        files.attachment_upload_destination().unwrap(),
+        AttachmentUploadDestination::Local
+    );
+    assert_eq!(
+        files.google_sign_in().unwrap().unwrap().connection_id,
+        CONNECTION
+    );
 }

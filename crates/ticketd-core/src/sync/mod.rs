@@ -19,13 +19,13 @@ pub use engine::{
     SyncChoice, SyncConflict, SyncConflictField, SyncNotice, SyncNoticeKind, SyncResolution,
 };
 pub(crate) use engine::{migrate_source_state_conflicts, removed_by_sync};
-pub(crate) use setup::other_google_account;
 pub use setup::{
     AttachmentDownload, ExistingWorkspace, FirstSync, MIN_POLL_INTERVAL_SECS, S3Binding,
     SetupOptions, SyncBinding, SyncConnection, SyncCounts, SyncDevice, SyncDirection, SyncFolder,
     SyncItem, SyncProvider, SyncRecovery, SyncRecoveryAction, SyncSettings, SyncState, SyncStatus,
     s3_service_changed,
 };
+pub(crate) use setup::{google_sign_in_of, other_google_account};
 
 pub(crate) fn migrate(connection: &rusqlite::Connection) -> Result<(), crate::Error> {
     capture::migrate(connection)?;
