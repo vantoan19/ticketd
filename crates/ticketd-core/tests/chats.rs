@@ -3756,6 +3756,38 @@ fn a_resume_keeps_what_the_sub_agent_was_first_asked() {
 }
 
 #[test]
+fn a_late_announcement_fills_in_whose_sub_agent_it_is_without_another_run() {
+    let dir = tempfile::tempdir().unwrap();
+    let (mut workspace, chat) = workspace_with_chat(&dir);
+    let started = |parent: Option<&str>, tool: Option<&str>| ChatObservation::SubAgentStarted {
+        native_id: "agent-g".into(),
+        parent: parent.map(str::to_owned),
+        tool_id: tool.map(str::to_owned),
+        turn_id: None,
+        native_run_id: Some("run-a".into()),
+        background: true,
+        payload: "{}".into(),
+    };
+    workspace
+        .record_chat_observations(
+            &chat.id,
+            vec![
+                started(None, None),
+                end_sub_agent("agent-g", Some("run-a"), ChatSubAgentState::Completed),
+                started(Some("agent-c"), Some("tool-spawn")),
+                // What is known stays: a later guess does not replace it.
+                started(Some("agent-x"), Some("tool-other")),
+            ],
+        )
+        .unwrap();
+    let record = &sub_agents(&workspace, &chat)[0];
+    assert_eq!(record.parent.as_deref(), Some("agent-c"));
+    assert_eq!(record.tool_id.as_deref(), Some("tool-spawn"));
+    assert_eq!(record.runs.len(), 1);
+    assert_eq!(record.runs[0].state, ChatSubAgentState::Completed);
+}
+
+#[test]
 fn a_stopped_run_records_who_stopped_it_and_an_ended_run_stays_ended() {
     let dir = tempfile::tempdir().unwrap();
     let (mut workspace, chat) = workspace_with_chat(&dir);
