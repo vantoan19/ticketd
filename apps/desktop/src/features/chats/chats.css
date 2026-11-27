@@ -350,6 +350,7 @@
   padding-bottom: 40px;
 }
 .chat-part[data-kind="user"] + *,
+.chat-part[data-kind="brief"] + *,
 .chat-divider + .chat-turn-unit {
   margin-top: -24px;
 }
@@ -1742,4 +1743,144 @@
   .chat-row-more {
     top: 4px;
   }
+}
+
+/* Sub-agents (#609). A sub-agent's row is a step row: [bot] Title · suffix ›.
+   The title gives way with an ellipsis; the clock or outcome never does. */
+.chat-subagent {
+  text-align: left;
+  color: var(--muted-foreground);
+}
+.chat-subagent .chat-step-words[data-line] {
+  display: inline-flex;
+  flex-wrap: nowrap;
+  align-items: baseline;
+  min-width: 0;
+  overflow: hidden;
+}
+.chat-subagent .chat-step-words[data-line] > .chat-subagent-title {
+  flex: 0 1 auto;
+}
+.chat-subagent-title {
+  min-width: 0;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  color: var(--foreground);
+}
+.chat-subagent .chat-step-suffix {
+  flex: none;
+  display: inline-flex;
+  gap: 0;
+  white-space: pre;
+}
+.chat-subagent [data-outcome] {
+  font-weight: 500;
+  color: var(--foreground);
+}
+/* Rows stay under a folded turn's work line, like receipts. */
+.chat-subagent-kept {
+  padding-left: 16px;
+  margin-top: 4px;
+}
+/* A sub-agent's view: the brief the main agent gave it, in place of a message. */
+.chat-brief {
+  margin: 0;
+  padding: 2px 0 2px 12px;
+  border-left: 2px solid var(--border);
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+.chat-brief-source {
+  color: var(--muted-foreground);
+  font-size: var(--text-caption);
+  line-height: 16px;
+}
+.chat-brief-text {
+  margin: 0;
+  color: var(--foreground);
+  display: -webkit-box;
+  -webkit-line-clamp: 4;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+}
+.chat-brief-text[data-open] {
+  -webkit-line-clamp: unset;
+  display: block;
+}
+.chat-brief-text[data-unreported] {
+  color: var(--muted-foreground);
+}
+.chat-brief-more {
+  align-self: flex-start;
+  color: var(--muted-foreground);
+  font-size: var(--text-caption);
+  line-height: 16px;
+}
+/* The header's bot mark sits where a Chat's harness mark does. */
+.chat-subagent-mark {
+  display: inline-flex;
+  flex: none;
+  align-items: center;
+  justify-content: center;
+  width: 16px;
+  height: 16px;
+  color: var(--muted-foreground);
+}
+.ui-return-crumb + .ui-return-crumb {
+  margin-left: -4px;
+}
+/* ticketd's own note under the brief, and how a sub-agent ended: step-style rows. */
+.chat-subagent-note {
+  margin: 0;
+}
+.chat-end-marker {
+  min-height: 28px;
+  color: var(--muted-foreground);
+}
+.chat-end-marker .chat-stop-mark {
+  width: 10px;
+  height: 10px;
+}
+/* The quiet line between a sub-agent's runs. */
+.chat-run-divider {
+  align-items: center;
+  min-height: 28px;
+  margin: 0;
+}
+.chat-run-divider > svg {
+  margin-top: 0;
+}
+/* A sub-agent's view, in the composer's place: one 44px line, its state then Stop. */
+.chat-subagent-foot {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-height: 44px;
+  padding: 0 8px 0 16px;
+  color: var(--muted-foreground);
+}
+.chat-subagent-foot-words {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.chat-subagent-foot .chat-spacer {
+  flex: 1;
+}
+.chat-subagent-foot .chat-stop-mark {
+  width: 10px;
+  height: 10px;
+}
+.chat-turn-unit + .chat-run-divider {
+  margin-top: -34px;
+}
+.chat-run-divider + .chat-turn-unit {
+  margin-top: -9px;
+}
+/* How a sub-agent ended sits 12px under its last words, as the end of a turn's parts do. */
+.chat-turn-unit + .chat-end {
+  margin-top: -28px;
 }

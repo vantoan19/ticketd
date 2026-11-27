@@ -370,8 +370,100 @@ const requestOptionSchema = z.object({
   warning: z.string().nullish(),
 });
 
-/** `turn_id`: the turn that owns the item, when one does. */
-const item = { id: z.string(), at: z.string(), turn_id: z.string().nullish() };
+/**
+ * `turn_id`: the turn that owns the item, when one does (a sub-agent's run is a
+ * turn of its own, so its items carry the run's id). `owner`: the id of the
+ * sub-agent (`SubAgent.id`) whose work the item is; absent or null means the
+ * Chat's main agent. The main transcript shows only the main agent's items.
+ */
+const item = {
+  id: z.string(),
+  at: z.string(),
+  turn_id: z.string().nullish(),
+  owner: z.string().nullish(),
+};
+
+/** How a sub-agent, or one run of it, stands. */
+export const subAgentStatusSchema = z.enum([
+  "running",
+  "completed",
+  "failed",
+  "stopped",
+  /** ticketd quit while it ran: nothing says whether it still does. */
+  "lost",
+]);
+export type SubAgentStatus = z.infer<typeof subAgentStatusSchema>;
+
+/** Who ended a stopped sub-agent. */
+export const subAgentStopperSchema = z.enum([
+  "person",
+  "ticketd",
+  "main_agent",
+]);
+
+/** What the Chat's harness lets ticketd show of its sub-agents. Defaults are a full-featured harness. */
+export const subAgentCapabilitiesSchema = z.object({
+  /** The harness reports the prompt the sub-agent was given (Codex does not). */
+  brief: z.boolean().default(true),
+  /** It reports the sub-agent's own messages and reasoning (Antigravity does not). */
+  text: z.boolean().default(true),
+  /** It reports when the sub-agent finishes (Antigravity does not: it ends with the turn). */
+  end: z.boolean().default(true),
+  /** One sub-agent can be stopped alone (Stop one). */
+  stop: z.boolean().default(false),
+  /** A lost sub-agent can be resumed by the main agent (Claude Code). */
+  resume: z.boolean().default(false),
+});
+export type SubAgentCapabilities = z.infer<typeof subAgentCapabilitiesSchema>;
+
+/**
+ * One sub-agent of a Chat: started by the Chat's harness, not by the person. It
+ * keeps one record across its runs (a resume adds a run); `status`, `started_at`
+ * and `ended_at` are those of its latest run.
+ */
+export const subAgentSchema = z.object({
+  /** Stable within the Chat; what `owner` and `parent` name. */
+  id: z.string(),
+  /** The harness's own id for it. */
+  native_id: z.string().nullish(),
+  /** The sub-agent that started this one; null or absent when the main agent did. */
+  parent: z.string().nullish(),
+  /** What the sub-agent is called: the harness's own description of the work. */
+  title: z.string(),
+  /** The kind the harness gave it ("Explore"). */
+  type: z.string().nullish(),
+  /** The model it ran, as readable words ("Claude Haiku 5.5"). */
+  model: z.string().nullish(),
+  status: subAgentStatusSchema,
+  /** Who stopped it, when `status` is `stopped`. */
+  stopped_by: subAgentStopperSchema.nullish(),
+  /**
+   * Why ticketd stopped it (`stopped_by` is `ticketd`): the host's StopReason
+   * key, such as `turned_off`, `restore`, `time_limit`, `run_ended`, `trashed`,
+   * `explicit_resume` or `storage_failed`. Absent: no reason is said.
+   */
+  stop_reason: z.string().nullish(),
+  started_at: z.string(),
+  ended_at: z.string().nullish(),
+  /** How many runs it has had: 2 or more once it was resumed. */
+  runs: z.number().int().positive().default(1),
+  /** What it was asked. `text` is absent when the harness does not report it. */
+  brief: z
+    .object({
+      text: z.string().nullish(),
+      /** Who asked: the main agent, or the sub-agent named by `parent`. */
+      source: z.enum(["main_agent", "sub_agent"]),
+    })
+    .nullish(),
+  capabilities: subAgentCapabilitiesSchema.default({
+    brief: true,
+    text: true,
+    end: true,
+    stop: false,
+    resume: false,
+  }),
+});
+export type SubAgent = z.infer<typeof subAgentSchema>;
 
 const planStepSchema = z.object({
   text: z.string(),
@@ -537,6 +629,26 @@ export const transcriptItemSchema = z.discriminatedUnion("kind", [
     text: z.string().nullish(),
     /** A heading the harness itself marked. */
     heading: z.string().nullish(),
+  }),
+  /**
+   * One run of a sub-agent, as the row in its parent's transcript says it. The
+   * row's `owner` is the parent sub-agent (absent: the main agent), so the main
+   * transcript shows only direct sub-agents. A resumed sub-agent has one row
+   * for each run, in the turn that started it.
+   */
+  z.object({
+    ...item,
+    kind: z.literal("sub_agent"),
+    /** `SubAgent.id`; the record is in `ChatState.sub_agents`. */
+    sub_agent: z.string(),
+    /** Which run of the sub-agent this row is: 1, or 2 after a resume. */
+    run: z.number().int().positive().default(1),
+    /** Where this run stands. */
+    status: subAgentStatusSchema,
+    stopped_by: subAgentStopperSchema.nullish(),
+    stop_reason: z.string().nullish(),
+    started_at: z.string(),
+    ended_at: z.string().nullish(),
   }),
   /** A turn's plan as the harness last reported it. */
   z.object({
@@ -729,6 +841,8 @@ export const chatStateSchema = z.object({
     .default([]),
   /** The last transcript item the person had in view, kept by the host: the New marker goes after it. */
   read_through: z.string().nullish(),
+  /** Every sub-agent the harness started in this Chat, oldest first. */
+  sub_agents: z.array(subAgentSchema).default([]),
 });
 export type ChatState = z.infer<typeof chatStateSchema>;
 
