@@ -406,7 +406,9 @@ fn a_packaged_point_that_lost_its_inventory_table_deletes_no_shared_file() {
     let files_before = shared_files(&workspace);
     {
         let point = Connection::open(&database).unwrap();
-        point.execute("DROP TABLE ticketd_backup_files", []).unwrap();
+        point
+            .execute("DROP TABLE ticketd_backup_files", [])
+            .unwrap();
     }
 
     save_more_than_seven_points(&workspace);
@@ -446,7 +448,10 @@ fn a_retained_point_whose_record_names_a_wrong_hash_keeps_the_files_its_database
     // The record parses, so the point is listed (an unreadable one would not be).
     let list = workspace.restore_points().unwrap().points;
     assert_eq!(list.len(), RESTORE_POINTS_KEPT);
-    assert_eq!(list[RESTORE_POINTS_KEPT - 1].path, database.to_string_lossy());
+    assert_eq!(
+        list[RESTORE_POINTS_KEPT - 1].path,
+        database.to_string_lossy()
+    );
     assert_eq!(shared_files(&workspace), files_before);
 }
 
