@@ -18,7 +18,7 @@
     "muted": false,
     "created_at": "2026-11-27T10:00:00.000Z"
   },
-  "sequence": 44,
+  "sequence": 45,
   "items": [
     {
       "kind": "message",
@@ -30,6 +30,9 @@
         "attachments": [],
         "complete": true,
         "turn_id": null,
+        "owner": {
+          "kind": "main"
+        },
         "queued": false,
         "editing": false,
         "requires_link_context": false,
@@ -230,13 +233,37 @@
     {
       "kind": "message",
       "value": {
-        "id": "00000000-0000-4000-8000-000000000004:text-1",
-        "position": 30,
+        "id": "00000000-0000-4000-8000-000000000004:task_c:text-1",
+        "position": 29,
+        "role": "assistant",
+        "text": "Two typos fixed in docs/api.md.",
+        "attachments": [],
+        "complete": true,
+        "turn_id": "00000000-0000-4000-8000-000000000004:local-turn-1",
+        "owner": {
+          "kind": "sub_agent",
+          "native_id": "task_c"
+        },
+        "queued": false,
+        "editing": false,
+        "requires_link_context": false,
+        "attempts": [],
+        "created_at": "2026-11-27T10:00:00.000Z"
+      }
+    },
+    {
+      "kind": "message",
+      "value": {
+        "id": "00000000-0000-4000-8000-000000000004:text-2",
+        "position": 31,
         "role": "assistant",
         "text": "I started three reviewers. They run in the background, and I'll put their findings together when they finish.",
         "attachments": [],
         "complete": true,
         "turn_id": "00000000-0000-4000-8000-000000000004:local-turn-1",
+        "owner": {
+          "kind": "main"
+        },
         "queued": false,
         "editing": false,
         "requires_link_context": false,
@@ -248,7 +275,7 @@
       "kind": "tool",
       "value": {
         "id": "00000000-0000-4000-8000-000000000004:toolu_read_a",
-        "position": 34,
+        "position": 35,
         "turn_id": null,
         "owner": {
           "kind": "sub_agent",
@@ -266,7 +293,7 @@
       "kind": "tool",
       "value": {
         "id": "00000000-0000-4000-8000-000000000004:toolu_read_b",
-        "position": 37,
+        "position": 38,
         "turn_id": null,
         "owner": {
           "kind": "sub_agent",
@@ -284,7 +311,7 @@
       "kind": "notice",
       "value": {
         "id": "00000000-0000-4000-8000-000000000006",
-        "position": 43,
+        "position": 44,
         "text": "You stopped 2 sub-agents.",
         "created_at": "2026-11-27T10:00:00.000Z",
         "from_harness": false,

@@ -30,6 +30,9 @@
         "attachments": [],
         "complete": true,
         "turn_id": null,
+        "owner": {
+          "kind": "main"
+        },
         "queued": false,
         "editing": false,
         "requires_link_context": false,
@@ -139,6 +142,9 @@
         "attachments": [],
         "complete": true,
         "turn_id": "00000000-0000-4000-8000-000000000004:turn_1",
+        "owner": {
+          "kind": "main"
+        },
         "queued": false,
         "editing": false,
         "requires_link_context": false,
