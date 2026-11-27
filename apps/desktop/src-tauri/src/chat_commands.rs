@@ -304,23 +304,14 @@ fn watch_overview(app: &AppHandle) {
             let digest = (rows, trashed);
             // Lists are fetched again on this event, so it fires only when a row or the
             // counts would read differently; a text checkpoint alone changes neither.
+            let mut sent = None;
             if shown.as_ref() != Some(&digest) || announced {
                 shown = Some(digest);
                 update_tray(&app, &overview);
                 set_badge(&app, overview.app_icon);
-                let sent = app.emit(OVERVIEW_EVENT, overview).is_ok();
-                if announced {
-                    if sent {
-                        labels.sent(current);
-                    } else {
-                        labels.failed();
-                    }
-                }
-            } else if current.is_none() {
-                labels.failed();
-            } else {
-                labels.settled();
+                sent = Some(app.emit(OVERVIEW_EVENT, overview).is_ok());
             }
+            labels.after_overview(current, sent);
             label_retry = labels
                 .retry_due()
                 .then(|| Instant::now() + OVERVIEW_INTERVAL);
@@ -382,6 +373,18 @@ impl LabelWatch {
     /// Nothing is pending any more.
     fn settled(&mut self) {
         self.failures = 0;
+    }
+
+    /// What the labels `current` came to after an overview pass: `sent` is whether that
+    /// pass's event went out (`None`: it sent none). A label read that failed is a failure
+    /// whether or not rows changed too.
+    fn after_overview(&mut self, current: Option<LabelDigest>, sent: Option<bool>) {
+        match (self.changed(&current), sent) {
+            _ if current.is_none() => self.failed(),
+            (true, Some(true)) => self.sent(current),
+            (true, _) => self.failed(),
+            (false, _) => self.settled(),
+        }
     }
 
     fn failed(&mut self) {
@@ -1225,6 +1228,26 @@ mod tests {
             Announced::Sent
         );
         assert!(!watch.retry_due());
+    }
+
+    #[test]
+    fn a_failed_label_read_is_a_failure_even_when_rows_changed_in_the_same_pass() {
+        let mut watch = LabelWatch::new(Some(labels("T-1")));
+
+        // The rows changed and their event went out, but the labels could not be read.
+        watch.after_overview(None, Some(true));
+        assert!(watch.retry_due());
+
+        // A pass that sends nothing and reads fine settles it; a label change whose
+        // event went out is announced.
+        let mut watch = LabelWatch::new(Some(labels("T-1")));
+        watch.after_overview(Some(labels("T-1")), None);
+        assert!(!watch.retry_due());
+        watch.after_overview(Some(labels("T-2")), Some(true));
+        assert!(!watch.changed(&Some(labels("T-2"))));
+        watch.after_overview(Some(labels("T-3")), Some(false));
+        assert!(watch.changed(&Some(labels("T-3"))));
+        assert!(watch.retry_due());
     }
 
     #[test]
