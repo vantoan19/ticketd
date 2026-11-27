@@ -468,7 +468,9 @@ the runner words the first message around it and cannot place them raw. The host
 model, allowed tools and turn limit. An adapter given one never asks for approval
 and never widens to full access. Claude Code runs in the Agent SDK's `dontAsk`
 permission mode with the allowed tools as its allowlist and the tools of each
-switch that is off disallowed; "Edit files" also allows `Read`, since Claude Code
+switch that is off disallowed, and the `Agent` tool always disallowed, so an
+Automation's agent starts no sub-agents (the rule applies inside sub-agents too);
+"Edit files" also allows `Read`, since Claude Code
 edits only a file it has read. File tools are kept to the step's folder, Claude
 Code's only working directory: the bridge turns on
 `permissions.blockReadsOutsideWorkingDirectories` and
@@ -485,7 +487,7 @@ Codex runs with approval policy `on-request`, and ticketd declines every approva
 request at once (with `never`, Codex reports a patch its policy rejects as no item at all, so
 the step could not fail), with no network unless the web is allowed, and with
 the person's MCP servers, plugins and apps turned off. The same overrides also switch off
-their hooks, notify program, project `AGENTS.md`, memories, sub-agents, computer and browser
+their hooks, notify program, project `AGENTS.md`, memories, sub-agents (`agents.enabled` and both `features.multi_agent` flags, since Codex picks the multi-agent version from several of them), computer and browser
 use, and Codex's bundled skills (the agent editor does not list these). The switches map as follows. "Edit
 files" off is a `readOnly` sandbox; on, a `workspaceWrite` sandbox whose only writable place
 is the step's folder. Codex can run any command inside the sandbox when both

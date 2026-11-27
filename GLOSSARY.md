@@ -21,11 +21,23 @@ A local snapshot of an image or file attached to a draft, queued, or sent messag
 The person's own installed agent program, such as Claude Code or Codex, that a Chat runs in. It owns authentication, billing, its settings and its native session; ticketd starts, supervises and answers it but never signs in for it or changes how it bills.
 _Avoid_: Provider, model, agent (for the program itself)
 
+**Model**:
+The AI model a harness runs, as the harness reports it, such as Claude Opus 5.5. It names the agent on tickets. When the harness reports none, the harness name stands in. It is distinct from the Harness: one harness can run several models, and a sub-agent can run a different model from the main agent.
+_Avoid_: Harness (for the model), provider
+
 **Turn**:
-One run of the harness from a message the person sent until it ends: completed, failed, stopped by the person, or cut off. A steer joins the running turn instead of starting another. A turn that ended is not evidence that its task succeeded.
+One run of the harness from a message the person sent, from the main agent resuming by itself, or from ticketd waking it, until it ends: completed, failed, stopped by the person, or cut off. A turn the person did not start says who did. A steer joins the running turn instead of starting another. A sub-agent's activity never opens or ends a turn. A turn that ended is not evidence that its task succeeded.
 
 **Step**:
-One thing the harness did in a turn, in ticketd's words, whatever the harness called it.
+One thing the main agent or a sub-agent did, in ticketd's words, whatever the harness called it. A step belongs to the agent that did it, and not necessarily to a turn: a sub-agent can keep working after the turn that started it has ended.
+
+**Main agent**:
+The agent a Chat's harness runs for the person, the one the person's messages go to. Sub-agents work for it. Say "main agent" where a harness name would be ambiguous.
+_Avoid_: Parent, lead
+
+**Sub-agent**:
+An agent the Chat's harness starts by itself to do part of the work. It runs under the Chat's session, permissions and billing. It is not a Chat, and the person cannot message it. ticketd shows it, can stop it where the harness allows, and credits ticket writes to it, but never starts one. A sub-agent the main agent resumes is the same sub-agent with a new run. Background commands and monitors are Steps, not sub-agents.
+_Avoid_: Subagent, helper, child, task, thread, worker
 
 **Steer**:
 A message sent while a turn runs that the harness takes into that turn, where its capabilities allow, instead of waiting for the turn to end. What steering does to running tools is the harness's own behaviour and is said before the person chooses it.
