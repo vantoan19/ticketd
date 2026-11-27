@@ -1863,6 +1863,105 @@ mod sub_agents {
     }
 
     #[test]
+    fn frames_waiting_for_their_task_are_bounded_by_bytes_and_the_budget_is_given_back() {
+        use crate::claude::session::HELD_BYTES;
+        let big = |tool_use: &str| {
+            said(
+                tool_use,
+                json!({"type": "text", "text": "x".repeat(128 * 1024)}),
+            )
+        };
+        let mut session = Session::default();
+        // Twice the budget from one tool use: far under the count limits.
+        for _ in 0..(2 * HELD_BYTES / (128 * 1024)) {
+            session.event("assistant_content", &big("toolu_x"));
+        }
+        let (events, _) = session
+            .event("sub_agent_started", &started("t1", "toolu_x", true))
+            .expect("modeled");
+        let replayed: usize = messages(&events).iter().map(String::len).sum();
+        assert!(replayed > 0, "ordinary early frames are still replayed");
+        assert!(replayed <= HELD_BYTES, "{replayed} bytes were held");
+        // What was replayed was given back: a later frame is held again.
+        session.event("assistant_content", &big("toolu_late"));
+        let (events, _) = session
+            .event("sub_agent_started", &started("t_late", "toolu_late", true))
+            .expect("modeled");
+        assert_eq!(messages(&events).len(), 1, "{events:?}");
+    }
+
+    #[test]
+    fn a_late_frame_of_a_superseded_launch_is_dropped_and_the_resumed_one_routes_normally() {
+        let launch = |tool_use: &str, run: &str| {
+            json!({"task_id": "t1", "run_id": run, "tool_use_id": tool_use, "parent_task_id": null,
+                   "description": "Look", "subagent_type": "Explore", "background": true,
+                   "prompt": "Look around.", "spawn_depth": 1})
+        };
+        let mut session = Session::default();
+        session.event("sub_agent_started", &launch("toolu_a", "r1"));
+        session.event("sub_agent_started", &launch("toolu_b", "r2"));
+        let (events, _) = session
+            .event(
+                "assistant_content",
+                &said("toolu_a", json!({"type": "text", "text": "Stale."})),
+            )
+            .expect("modeled");
+        assert!(messages(&events).is_empty(), "{events:?}");
+        let (events, _) = session
+            .event("thinking", &json!({"phase": "started", "index": 0, "redacted": false, "at": 1, "parent_tool_use_id": "toolu_a"}))
+            .expect("modeled");
+        assert!(events.is_empty(), "{events:?}");
+        let (events, _) = session
+            .event(
+                "assistant_content",
+                &said("toolu_b", json!({"type": "text", "text": "Fresh."})),
+            )
+            .expect("modeled");
+        assert_eq!(messages(&events), ["Fresh."]);
+        let (events, _) = session
+            .event("thinking", &json!({"phase": "started", "index": 0, "redacted": false, "at": 1, "parent_tool_use_id": "toolu_b"}))
+            .expect("modeled");
+        assert!(
+            matches!(events.as_slice(), [EventKind::SubAgentReasoningUpdated { run, .. }] if run.as_deref() == Some("r2")),
+            "{events:?}"
+        );
+    }
+
+    #[test]
+    fn a_question_a_sub_agent_asks_is_its_own_and_goes_with_it() {
+        let mut session = Session::default();
+        session.event("sub_agent_started", &started("t1", "toolu_a", true));
+        let asked = json!({
+            "request_id": "q1", "tool_use_id": "toolu_ask", "agent_id": "t1",
+            "questions": [{"question": "Which color?", "options": [{"label": "Blue"}]}],
+        });
+        let (events, _) = session.event("question_request", &asked).expect("modeled");
+        assert!(
+            !events
+                .iter()
+                .any(|event| matches!(event, EventKind::TurnStarted { .. })),
+            "{events:?}"
+        );
+        let Some(EventKind::InteractionRequested(request)) = events.last() else {
+            panic!("{events:?}");
+        };
+        assert_eq!(request.owner, Some(NativeSubAgentId::new("t1")));
+        assert_eq!(request.turn, None);
+        // It stays answerable until the sub-agent ends, then it is withdrawn.
+        let (events, _) = session
+            .event(
+                "sub_agent_ended",
+                &json!({"task_id": "t1", "run_id": "r1", "tool_use_id": "toolu_a", "status": "completed"}),
+            )
+            .expect("modeled");
+        assert!(
+            events.iter().any(|event| matches!(event,
+                EventKind::InteractionResolved { request, .. } if request.0 == "q1")),
+            "{events:?}"
+        );
+    }
+
+    #[test]
     fn frames_that_wait_for_their_task_are_dropped_with_the_turn_not_kept_for_ever() {
         let mut session = Session::default();
         session.event(

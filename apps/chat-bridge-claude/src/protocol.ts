@@ -344,6 +344,7 @@ type EventBody =
       generation: number;
       request_id: string;
       tool_use_id: string;
+      agent_id: string | null;
       questions: unknown;
     }
   | {

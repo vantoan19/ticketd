@@ -65,6 +65,9 @@ pub(super) struct Session {
 /// how many sub-agents are waited for.
 const HELD_FRAMES: usize = 256;
 const HELD_AGENTS: usize = 32;
+/// The most the frames waiting for an announcement keep in all, as the bytes they were
+/// sent in: the counts alone would let a session hold a gigabyte.
+pub(super) const HELD_BYTES: usize = 4 * 1024 * 1024;
 
 /// What the session knows of its sub-agents. Claude Code tags each frame of a sub-agent
 /// with the tool use that started it (`parent_tool_use_id`); `task_started` says which
@@ -73,15 +76,25 @@ const HELD_AGENTS: usize = 32;
 struct SubAgents {
     /// By task ID.
     known: HashMap<String, Agent>,
-    /// The task a tool use started or resumed, by tool-use ID.
-    by_tool_use: HashMap<String, String>,
+    /// The launch a tool use started or resumed, by tool-use ID.
+    by_tool_use: HashMap<String, Launch>,
     /// The sub-agent that ran each of its tool calls, by tool-use ID.
     owner: HashMap<String, String>,
-    /// Frames of a tool use not announced as a sub-agent yet: (event name, event).
-    held: HashMap<String, Vec<(String, Value)>>,
+    /// Frames of a tool use not announced as a sub-agent yet: (event name, event, bytes).
+    held: HashMap<String, Vec<(String, Value, usize)>>,
+    /// What the held frames keep, in bytes: charged on hold, given back on replay or drop.
+    held_bytes: usize,
     /// The sub-agent that finished last while no turn ran, until a turn opens: the one
     /// the turn Claude Code starts by itself follows.
     finished_at_rest: Option<String>,
+}
+
+/// What a tool use started: the task, and the run it opened. A task resumed through
+/// another tool use has a newer run; frames of the earlier launch are late.
+#[derive(Debug, Clone)]
+struct Launch {
+    task: String,
+    run: Option<String>,
 }
 
 impl SubAgents {
@@ -91,6 +104,7 @@ impl SubAgents {
     /// Returns the foreground sub-agents that were over with it.
     fn turn_ended(&mut self) -> Vec<String> {
         self.held.clear();
+        self.held_bytes = 0;
         self.finished_at_rest = None;
         let mut over = Vec::new();
         for (task, agent) in self.known.iter_mut().filter(|(_, agent)| !agent.background) {
@@ -510,9 +524,14 @@ impl Session {
         let Some(parent) = text(event, "parent_tool_use_id") else {
             return;
         };
-        let Some(task) = self.sub_agents.by_tool_use.get(parent).cloned() else {
+        let Some(launch) = self.sub_agents.by_tool_use.get(parent).cloned() else {
             return self.hold(parent, "thinking", event);
         };
+        // A frame of a launch a resume superseded changes nothing about the run now.
+        if self.late_run(&launch.task, launch.run.as_deref()) {
+            return;
+        }
+        let task = launch.task;
         let run = self.sub_agents.known.get(&task).and_then(|a| a.run.clone());
         events.extend(
             self.reports
@@ -523,9 +542,13 @@ impl Session {
     /// A frame of the sub-agent the tool use `parent` started: its messages, reasoning
     /// and tool calls are its own, and open no turn.
     fn sub_agent_content(&mut self, parent: &str, event: &Value, events: &mut Vec<EventKind>) {
-        let Some(task) = self.sub_agents.by_tool_use.get(parent).cloned() else {
+        let Some(launch) = self.sub_agents.by_tool_use.get(parent).cloned() else {
             return self.hold(parent, "assistant_content", event);
         };
+        if self.late_run(&launch.task, launch.run.as_deref()) {
+            return;
+        }
+        let task = launch.task;
         let turn = self.active_turn().cloned();
         let run = self
             .sub_agents
@@ -614,14 +637,27 @@ impl Session {
     /// Keeps a frame of a tool use that no `task_started` has named yet, until one does.
     /// A tool use that never becomes a sub-agent is dropped with its turn.
     fn hold(&mut self, parent: &str, name: &str, event: &Value) {
-        let held = &mut self.sub_agents.held;
-        if !held.contains_key(parent) && held.len() >= HELD_AGENTS {
+        let sub_agents = &mut self.sub_agents;
+        if !sub_agents.held.contains_key(parent) && sub_agents.held.len() >= HELD_AGENTS {
             return;
         }
-        let frames = held.entry(parent.to_owned()).or_default();
-        if frames.len() < HELD_FRAMES {
-            frames.push((name.to_owned(), event.clone()));
+        if sub_agents
+            .held
+            .get(parent)
+            .is_some_and(|frames| frames.len() >= HELD_FRAMES)
+        {
+            return;
         }
+        let bytes = event.to_string().len();
+        if sub_agents.held_bytes + bytes > HELD_BYTES {
+            return;
+        }
+        sub_agents.held_bytes += bytes;
+        sub_agents.held.entry(parent.to_owned()).or_default().push((
+            name.to_owned(),
+            event.clone(),
+            bytes,
+        ));
     }
 
     /// The person stops one background sub-agent: remembered, so that its end is theirs.
@@ -679,9 +715,13 @@ impl Session {
         agent.run.clone_from(&run);
         agent.tool_use = tool_use.map(str::to_owned);
         if let Some(tool_use) = tool_use {
-            self.sub_agents
-                .by_tool_use
-                .insert(tool_use.to_owned(), task.to_owned());
+            self.sub_agents.by_tool_use.insert(
+                tool_use.to_owned(),
+                Launch {
+                    task: task.to_owned(),
+                    run: run.clone(),
+                },
+            );
         }
         events.push(EventKind::SubAgentStarted(SubAgentStart {
             sub_agent: NativeSubAgentId::new(task),
@@ -699,7 +739,8 @@ impl Session {
         if let Some(tool_use) = tool_use
             && let Some(frames) = self.sub_agents.held.remove(tool_use)
         {
-            for (name, frame) in frames {
+            for (name, frame, bytes) in frames {
+                self.sub_agents.held_bytes = self.sub_agents.held_bytes.saturating_sub(bytes);
                 if let Some((more, _)) = self.event(&name, &frame) {
                     events.extend(more);
                 }
@@ -833,17 +874,17 @@ impl Session {
         after_interrupt: bool,
         events: &mut Vec<EventKind>,
     ) {
-        let Some(task) = self.sub_agents.by_tool_use.get(tool_use) else {
+        let Some(launch) = self.sub_agents.by_tool_use.get(tool_use) else {
             return;
         };
-        let Some(agent) = self.sub_agents.known.get_mut(task) else {
+        let Some(agent) = self.sub_agents.known.get_mut(&launch.task) else {
             return;
         };
         if !agent.running || agent.background || agent.tool_use.as_deref() != Some(tool_use) {
             return;
         }
         agent.running = false;
-        let (task, run) = (task.clone(), agent.run.clone());
+        let (task, run) = (launch.task.clone(), agent.run.clone());
         self.reports.sub_agent_ended(&task);
         events.extend(self.runtime.withdraw_owned(&NativeSubAgentId::new(&task)));
         events.push(EventKind::SubAgentEnded {
@@ -1105,27 +1146,35 @@ impl Session {
                 "decision": {"kind": "deny", "message": "ticketd could not show this question"},
             }));
         }
-        // The bridge does not say which agent asks a question: it is the main agent's.
-        let turn = self.turn(events);
-        if !self.runtime.register_request(
-            request.clone(),
-            Some(&turn),
-            Request {
-                questions: Some(
-                    questions
-                        .iter()
-                        .map(|question| (question.id.clone(), question.multi_select))
-                        .collect(),
-                ),
-                tool_use: None,
-            },
-        ) {
+        // A sub-agent's question is its own, like its permission requests (`agent_id` is
+        // its task ID): no turn is opened for it, and only its end withdraws it.
+        let owner = text(event, "agent_id").map(NativeSubAgentId::new);
+        let turn = owner.is_none().then(|| self.turn(events));
+        let payload = Request {
+            questions: Some(
+                questions
+                    .iter()
+                    .map(|question| (question.id.clone(), question.multi_select))
+                    .collect(),
+            ),
+            tool_use: None,
+        };
+        let registered = match &owner {
+            Some(owner) => {
+                self.runtime
+                    .register_owned_request(request.clone(), owner.clone(), payload)
+            }
+            None => self
+                .runtime
+                .register_request(request.clone(), turn.as_ref(), payload),
+        };
+        if !registered {
             return None;
         }
         events.push(EventKind::InteractionRequested(InteractionRequest {
             request,
-            turn: Some(turn),
-            owner: None,
+            turn,
+            owner,
             // The AskUserQuestion tool use it was asked from: its row waits with it.
             item: text(event, "tool_use_id").map(NativeItemId::new),
             kind: InteractionKind::Question { questions },

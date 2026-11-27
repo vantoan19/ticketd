@@ -648,6 +648,7 @@ export function createBridge(deps: BridgeDeps) {
           generation: current.generation,
           request_id: requestId,
           tool_use_id: context.toolUseID,
+          agent_id: context.agentID ?? null,
           questions: input.questions ?? [],
         });
       }
