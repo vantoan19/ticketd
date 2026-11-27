@@ -218,11 +218,17 @@ export function AgentSkillsCard({
   const [commandMissing, setCommandMissing] = useState(false);
   // An action just finished; its button may be gone, so focus moves to the status.
   const focusAfterLoad = useRef(false);
+  // Only the newest command check sets the flag: the native checks answer in any order.
+  const cliCheck = useRef(0);
 
   const refresh = () => {
     // The command is a hint for the status row only: a failed read says nothing.
+    const mine = ++cliCheck.current;
     void cliClient.check().then(
-      (cli) => setCommandMissing(!cli.found || !cli.on_path),
+      (cli) => {
+        if (mine === cliCheck.current)
+          setCommandMissing(!cli.found || !cli.on_path);
+      },
       () => {},
     );
     return agentSkillsClient.list().then(

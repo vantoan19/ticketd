@@ -310,6 +310,30 @@ test("a command that cannot be read does not change the skill status", async () 
   await waitFor(() => expect(skillStatus()).toBe("Installed"));
 });
 
+test("an older command check that answers last does not replace the newer one", async () => {
+  bridge([[{ ...claude, ...installed }]]);
+  const base = invoke.getMockImplementation() as (c: string) => Promise<unknown>;
+  let answerFirst: (value: object) => void = () => {};
+  let checks = 0;
+  invoke.mockImplementation(async (command: string) => {
+    if (command !== "check_cli") return base(command);
+    checks += 1;
+    if (checks === 1)
+      return new Promise<object>((resolve) => {
+        answerFirst = resolve;
+      });
+    return cliFound;
+  });
+  render(<AgentSkillsCard />);
+  fireEvent.click(await screen.findByRole("button", { name: "Check again" }));
+  await waitFor(() => expect(checks).toBe(2));
+  // The first check answers last, with what was true before the command was installed.
+  answerFirst({ ...cliFound, found: false, on_path: false, version: null });
+  await waitFor(() => expect(skillStatus()).toBe("Installed"));
+  await new Promise((resolve) => setTimeout(resolve, 20));
+  expect(skillStatus()).toBe("Installed");
+});
+
 test("an unreadable folder or a linked SKILL.md stays in its row with no Replace", async () => {
   bridge([
     [
