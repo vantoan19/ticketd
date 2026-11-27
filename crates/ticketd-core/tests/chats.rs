@@ -3669,6 +3669,41 @@ fn the_note_is_stored_on_the_message_that_carries_it_and_clears_the_notice() {
 }
 
 #[test]
+fn a_resumed_run_keeps_the_step_that_resumed_it_and_the_first_run_leaves_it_to_the_record() {
+    let dir = tempfile::tempdir().unwrap();
+    let (mut workspace, chat) = workspace_with_chat(&dir);
+    let resume = |run: &str, tool: &str| ChatObservation::SubAgentStarted {
+        native_id: "agent-1".into(),
+        parent: None,
+        tool_id: Some(tool.into()),
+        turn_id: None,
+        native_run_id: Some(run.into()),
+        background: true,
+        payload: "{}".into(),
+    };
+    workspace
+        .record_chat_observations(
+            &chat.id,
+            vec![
+                resume("run-a", "tool-agent"),
+                end_sub_agent("agent-1", Some("run-a"), ChatSubAgentState::Completed),
+                resume("run-b", "tool-send"),
+            ],
+        )
+        .unwrap();
+    let record = &sub_agents(&workspace, &chat)[0];
+    assert_eq!(record.tool_id.as_deref(), Some("tool-agent"));
+    assert_eq!(
+        record
+            .runs
+            .iter()
+            .map(|run| run.tool_id.as_deref())
+            .collect::<Vec<_>>(),
+        [None, Some("tool-send")]
+    );
+}
+
+#[test]
 fn a_stopped_run_records_who_stopped_it_and_an_ended_run_stays_ended() {
     let dir = tempfile::tempdir().unwrap();
     let (mut workspace, chat) = workspace_with_chat(&dir);

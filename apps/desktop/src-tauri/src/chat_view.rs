@@ -824,7 +824,14 @@ impl Tracker {
     fn starts_sub_agent(&self, tool: &ChatTool, harness: &str) -> bool {
         self.sub_agents
             .iter()
-            .any(|record| record.tool_id.as_deref() == Some(tool.id.as_str()))
+            .any(|record| {
+                record.tool_id.as_deref() == Some(tool.id.as_str())
+                    // The main agent's `SendMessage` that resumed a run.
+                    || record
+                        .runs
+                        .iter()
+                        .any(|run| run.tool_id.as_deref() == Some(tool.id.as_str()))
+            })
             || (harness == "claude-code"
                 && matches!(tool.name.as_str(), "Agent" | "Task")
                 && tool.state == ChatToolState::Running)
@@ -4485,6 +4492,7 @@ mod tests {
             run,
             native_run_id: Some(format!("r{run}")),
             turn_id: Some("turn".to_owned()),
+            tool_id: None,
             state,
             stopped_by: None,
             stop_reason: None,
@@ -5211,6 +5219,73 @@ mod tests {
             // While the turn that started them still runs, it is the turn that works.
             let no_turn = (running > 0 && name != "in_turn").then_some(false);
             assert_eq!(state.turn_running, no_turn, "{name}");
+        }
+    }
+
+    /// What the host sends of a Claude Chat after ticketd restarted with background
+    /// sub-agents running, and after the person's next message: the host's stored history
+    /// of each (`sub_agent_restart*.stored.json`, written by the host's tests) and the live
+    /// state it has then. Regenerated only with `TICKETD_UPDATE_VIEW_FIXTURES=1`.
+    #[test]
+    fn the_views_after_a_restart_are_the_contract_the_interface_parses() {
+        for (name, working) in [("restart", false), ("restart_sent", true)] {
+            let stored_file = format!(
+                "{}/../../../crates/ticketd-chat-host/tests/fixtures/claude/sub_agent_{name}.stored.json",
+                env!("CARGO_MANIFEST_DIR")
+            );
+            let view_file = format!(
+                "{}/../src/features/chats/claude-{name}-view.json",
+                env!("CARGO_MANIFEST_DIR")
+            );
+            let stored: ticketd_core::ChatSnapshot =
+                serde_json::from_str(&std::fs::read_to_string(&stored_file).expect("stored"))
+                    .expect("the stored history reads");
+            let tracker = Tracker::from_snapshot(&stored.items, &stored.sub_agents);
+            let live = ChatLive {
+                activity: if working {
+                    Activity::Working
+                } else {
+                    Activity::Idle
+                },
+                running: working,
+                sub_agents: if working { 2 } else { 0 },
+                ..ChatLive::idle()
+            };
+            let state = super::chat_state(&stored.chat, &live, &tracker, &Surroundings::default());
+            let rows: Vec<Item> = stored
+                .items
+                .iter()
+                .flat_map(|record| items(record, &stored.chat, &live, None, &tracker))
+                .collect();
+            let view = serde_json::to_string_pretty(&json!({
+                "chat": state,
+                "items": rows,
+                "cursor": 0,
+            }))
+            .unwrap();
+            if std::env::var_os("TICKETD_UPDATE_VIEW_FIXTURES").is_some() {
+                std::fs::write(&view_file, format!("{view}\n")).expect("the view is written");
+            }
+            let kept = std::fs::read_to_string(&view_file).expect(
+                "the view; regenerate it with TICKETD_UPDATE_VIEW_FIXTURES=1 cargo test -p ticketd-desktop --lib chat_view",
+            );
+            assert!(
+                kept.trim_end() == view,
+                "the view changed; if that is intended, regenerate {view_file} with TICKETD_UPDATE_VIEW_FIXTURES=1"
+            );
+            let summary = super::summary(&stored.chat, &live, &tracker, &Surroundings::default());
+            if working {
+                assert!(state.restart_notice.is_none());
+                assert_eq!(summary.status.line(), "Working · 2 sub-agents");
+                let noted = rows.iter().any(|row| {
+                    serde_json::to_value(row).unwrap()["note"]["kind"] == "lost_sub_agents"
+                });
+                assert!(noted, "the message that carried the note shows it");
+            } else {
+                let held = state.restart_notice.expect("the notice is held");
+                assert_eq!((held.sub_agents.len(), held.resume), (2, true));
+                assert_eq!(summary.status.line(), "2 sub-agents lost contact");
+            }
         }
     }
 

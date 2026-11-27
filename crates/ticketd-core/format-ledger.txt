@@ -1198,6 +1198,7 @@ TICKETD_UPDATE_FORMAT_LEDGER=1 cargo test -p ticketd-core --lib format::
 + column chat_sub_agent_runs.stop_reason
 + column chat_sub_agent_runs.stopped_by
 + column chat_sub_agent_runs.sub_agent_id
++ column chat_sub_agent_runs.tool_id
 + column chat_sub_agent_runs.turn_id
 + column chat_sub_agents.background
 + column chat_sub_agents.chat_id

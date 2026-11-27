@@ -90,6 +90,32 @@ async fn a_sub_agent_the_main_agent_resumes_is_the_same_record_with_a_new_run_an
     h.finish().await;
 }
 
+/// The Chat's stored history now must equal the file (made stable), which the desktop
+/// builds the view of a Chat at that moment from.
+fn pinned(h: &HostScript, name: &str) {
+    let snapshot = h
+        .core()
+        .chat_snapshot(h.chat_id(), 5_000)
+        .expect("the Chat's history");
+    let stored = super::sub_agents::made_stable(
+        &serde_json::to_string_pretty(&snapshot).expect("it serializes"),
+    );
+    let file = format!(
+        "{}/tests/fixtures/claude/sub_agent_{name}.stored.json",
+        env!("CARGO_MANIFEST_DIR")
+    );
+    if std::env::var_os("TICKETD_UPDATE_VIEW_FIXTURES").is_some() {
+        std::fs::write(&file, format!("{stored}\n")).expect("the file is written");
+    }
+    let kept = std::fs::read_to_string(&file).expect(
+        "the stored history; regenerate it with TICKETD_UPDATE_VIEW_FIXTURES=1 cargo test -p ticketd-chat-host --lib host_script::resume",
+    );
+    assert!(
+        kept.trim_end() == stored,
+        "the stored history changed; if that is intended, regenerate {file} with TICKETD_UPDATE_VIEW_FIXTURES=1"
+    );
+}
+
 /// What the person sees of the notice: the Chat's row, and the stored note of a message.
 fn note_of(h: &HostScript, text: &str) -> Option<ticketd_core::ChatMessageNote> {
     h.items().into_iter().find_map(|item| match item {
@@ -121,6 +147,7 @@ async fn after_a_restart_the_running_sub_agents_are_lost_and_the_next_message_sa
     h.core().mark_chat_seen(h.chat_id()).unwrap();
 
     h.restart_ticketd().await;
+    pinned(&h, "restart");
 
     // The two that ran are lost; the one that finished is not. Nothing is running.
     let lost: Vec<_> = h
@@ -156,18 +183,20 @@ async fn after_a_restart_the_running_sub_agents_are_lost_and_the_next_message_sa
     // It was told once: the row is back to what the Chat did, and the next message has no note.
     assert!(h.core().chat_snapshot(h.chat_id(), 500).unwrap().chat.restart_notice.is_empty());
     assert_ne!(h.attention().await.line(), "2 sub-agents lost contact");
+    h.play_to("both sub-agents run again").await;
+    pinned(&h, "restart_sent");
+    // Both have a new run of the same record, in the turn the message started.
+    let records = h.sub_agents();
+    for record in &records[..2] {
+        assert_eq!(
+            states(record),
+            [ChatSubAgentState::Lost, ChatSubAgentState::Running],
+            "{}",
+            record.title()
+        );
+    }
+    assert_eq!(states(&records[2]), [ChatSubAgentState::Completed]);
     h.play_to("the second turn ended").await;
-    // The sub-agent the main agent resumed has a new run; the other is still lost.
-    let runs: Vec<_> = h
-        .sub_agents()
-        .iter()
-        .map(|record| (record.title(), states(record)))
-        .collect();
-    assert_eq!(
-        runs[0].1,
-        [ChatSubAgentState::Lost, ChatSubAgentState::Running]
-    );
-    assert_eq!(runs[1].1, [ChatSubAgentState::Lost]);
     h.send("And the docs?").await;
     h.play_all().await;
     assert_eq!(note_of(&h, "And the docs?"), None);

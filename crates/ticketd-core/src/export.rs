@@ -140,7 +140,7 @@ const EXPORTED: &[(&str, &str)] = &[
     ),
     (
         "chat_sub_agent_runs",
-        "id, chat_id, sub_agent_id, position, run, native_run_id, turn_id, state, stopped_by, stop_reason, detail, started_at, ended_at",
+        "id, chat_id, sub_agent_id, position, run, native_run_id, turn_id, state, stopped_by, stop_reason, detail, started_at, ended_at, tool_id",
     ),
     ("automations", "id, name, definition, trashed, created_at"),
     (

@@ -59,6 +59,10 @@ pub struct ChatSubAgentRun {
     pub native_run_id: Option<String>,
     /// The turn that was active when the run began, if any.
     pub turn_id: Option<String>,
+    /// For a run after the first, the Step that resumed it (the main agent's `SendMessage`);
+    /// the first run's is the sub-agent's own `tool_id`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub tool_id: Option<String>,
     pub state: ChatSubAgentState,
     pub stopped_by: Option<ChatSubAgentStopper>,
     /// For `Ticketd`: the host's stop reason key (`turned_off`, `time_limit`, ...).
@@ -148,6 +152,8 @@ pub(crate) fn migrate(connection: &Connection) -> Result<(), Error> {
         // about (a JSON array of native IDs), and what a message told it.
         ("chats", "restart_notice", "TEXT"),
         ("chat_messages", "note", "TEXT"),
+        // The Step that resumed a run after the first.
+        ("chat_sub_agent_runs", "tool_id", "TEXT"),
     ] {
         let has: bool = connection.query_row(
             "SELECT EXISTS(SELECT 1 FROM pragma_table_info(?1) WHERE name = ?2)",
@@ -167,7 +173,7 @@ pub(super) fn record_id(chat_id: &str, native_id: &str) -> String {
     format!("{chat_id}:sub-agent:{native_id}")
 }
 
-const RUN_COLUMNS: &str = "id, position, sub_agent_id, run, native_run_id, turn_id, state, stopped_by, stop_reason, detail, started_at, ended_at";
+const RUN_COLUMNS: &str = "id, position, sub_agent_id, run, native_run_id, turn_id, state, stopped_by, stop_reason, detail, started_at, ended_at, tool_id";
 
 fn run_from_row(row: &Row<'_>) -> rusqlite::Result<ChatSubAgentRun> {
     Ok(ChatSubAgentRun {
@@ -195,6 +201,7 @@ fn run_from_row(row: &Row<'_>) -> rusqlite::Result<ChatSubAgentRun> {
         detail: row.get(9)?,
         started_at: row.get(10)?,
         ended_at: row.get(11)?,
+        tool_id: row.get(12)?,
     })
 }
 
@@ -209,7 +216,7 @@ pub(super) fn read_run(
                 "SELECT {RUN_COLUMNS}, (SELECT native_id FROM chat_sub_agents WHERE id = sub_agent_id) FROM chat_sub_agent_runs WHERE id = ?1"
             ),
             [id],
-            |row| Ok((run_from_row(row)?, row.get::<_, String>(12)?)),
+            |row| Ok((run_from_row(row)?, row.get::<_, String>(13)?)),
         )
         .optional()?;
     Ok(run.map(|(mut run, native)| {
@@ -224,7 +231,7 @@ fn read_runs(connection: &Connection, record: &str) -> Result<Vec<ChatSubAgentRu
     ))?;
     let runs = statement
         .query_map([record], |row| {
-            Ok((run_from_row(row)?, row.get::<_, String>(12)?))
+            Ok((run_from_row(row)?, row.get::<_, String>(13)?))
         })?
         .map(|row| {
             row.map(|(mut run, native)| {
@@ -375,8 +382,17 @@ pub(super) fn observe(connection: &Connection, chat_id: &str, change: Change) ->
                     let id = format!("{record}:run-{run}");
                     let position = log(connection, chat_id, "sub_agent_run", &id)?;
                     connection.execute(
-                        "INSERT INTO chat_sub_agent_runs (id, chat_id, sub_agent_id, position, run, native_run_id, turn_id, state) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, 'running')",
-                        params![id, chat_id, record, position, run, native_run_id, turn_id],
+                        "INSERT INTO chat_sub_agent_runs (id, chat_id, sub_agent_id, position, run, native_run_id, turn_id, tool_id, state) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, 'running')",
+                        params![
+                            id,
+                            chat_id,
+                            record,
+                            position,
+                            run,
+                            native_run_id,
+                            turn_id,
+                            tool_id.filter(|_| run > 1)
+                        ],
                     )?;
                     // Resumed before the person wrote: there is nothing to tell about it.
                     forget(connection, chat_id, &native_id)?;
