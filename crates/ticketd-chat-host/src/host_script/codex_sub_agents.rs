@@ -267,3 +267,179 @@ async fn what_a_child_does_is_stored_with_its_owner_and_opens_no_turn() {
     assert_eq!(owned, 3);
     assert_eq!(h.turns().len(), 1);
 }
+
+#[tokio::test(start_paused = true)]
+async fn a_child_of_a_child_is_nested_under_it() {
+    let mut h = HostScript::codex()
+        .process([
+            fixture!("codex", "handshake"),
+            fixture!("codex", "sub_agent_nested"),
+        ])
+        .start();
+    h.send("Review the refund calls with sub-agents").await;
+    h.play_to("the nested sub-agent runs its command").await;
+    let records = h.sub_agents();
+    let native = |path: &str| {
+        records
+            .iter()
+            .find(|record| record.said("agentPath").as_deref() == Some(path))
+            .unwrap_or_else(|| panic!("no sub-agent at {path}: {records:?}"))
+            .clone()
+    };
+    let outer = native("/root/refund_calls");
+    let inner = native("/root/refund_calls/payment_tests");
+    assert_eq!(outer.parent, None);
+    assert_eq!(inner.parent.as_deref(), Some(outer.native_id.as_str()));
+    assert_eq!(inner.said("description").as_deref(), Some("Payment tests"));
+
+    h.play_all().await;
+    h.finish().await;
+
+    // The Chat shows the one it started; the nested one is in its parent's view.
+    assert_eq!(
+        h.transcript()
+            .iter()
+            .filter(|line| line.starts_with("sub-agent"))
+            .collect::<Vec<_>>(),
+        ["sub-agent \"Refund calls\" completed"]
+    );
+    let outer_view = h.sub_agent_transcript(&outer.native_id);
+    assert_eq!(
+        outer_view,
+        [
+            "sub-agent \"Payment tests\" completed",
+            "agent: The refund calls are updated and the payment tests pass."
+        ]
+    );
+    let inner_view = h.sub_agent_transcript(&inner.native_id);
+    assert_eq!(inner_view.len(), 2, "{inner_view:?}");
+    assert_eq!(inner_view[1], "agent: The payment tests pass.");
+    assert_eq!(h.turns().len(), 1);
+}
+
+#[tokio::test(start_paused = true)]
+async fn multi_agent_v1_names_the_child_in_the_spawn_call() {
+    let mut h = HostScript::codex()
+        .process([
+            fixture!("codex", "handshake"),
+            fixture!("codex", "sub_agent_v1"),
+        ])
+        .start();
+    h.send("Run the payment tests with a sub-agent").await;
+    h.play_to("the sub-agent runs its command").await;
+
+    let record = only_sub_agent(&h);
+    assert_eq!(record.native_id, "thr_a");
+    assert_eq!(record.parent, None);
+    assert_eq!(
+        record.said("description").as_deref(),
+        Some("Run the payment tests and report what fails")
+    );
+    assert_eq!(record.said("model").as_deref(), Some("gpt-test"));
+    // The spawn call is the Step the row stands for.
+    assert!(
+        record
+            .tool_id
+            .as_deref()
+            .is_some_and(|tool| tool.ends_with(":call_1"))
+    );
+    assert_eq!(latest(&h), ChatSubAgentState::Running);
+
+    h.play_all().await;
+    h.finish().await;
+    assert_eq!(latest(&h), ChatSubAgentState::Completed);
+    assert_eq!(
+        h.sub_agent_transcript("thr_a"),
+        ["tool /bin/zsh -lc 'npm test' completed", "agent: Two payment tests fail."]
+    );
+    assert_eq!(h.turns().len(), 1);
+}
+
+#[tokio::test(start_paused = true)]
+async fn a_child_that_fails_says_why_and_the_parents_turn_carries_on() {
+    let mut h = HostScript::codex()
+        .process([
+            fixture!("codex", "handshake"),
+            fixture!("codex", "sub_agent_failed"),
+        ])
+        .start();
+    h.send("Review the retry backoff with a sub-agent").await;
+    h.play_all().await;
+    h.finish().await;
+
+    let record = only_sub_agent(&h);
+    assert_eq!(runs(&record), [(ChatSubAgentState::Failed, None)]);
+    assert_eq!(
+        record.runs[0].detail.as_deref(),
+        Some("The usage limit was reached.")
+    );
+    assert_eq!(h.turns().len(), 1);
+    assert_eq!(h.turns()[0].state, ChatTurnState::Completed);
+}
+
+#[tokio::test(start_paused = true)]
+async fn what_a_child_asks_never_opens_a_turn_and_is_not_answered_yet() {
+    let mut h = HostScript::codex()
+        .process([
+            fixture!("codex", "handshake"),
+            fixture!("codex", "sub_agent_approval"),
+        ])
+        .start();
+    h.send("Have a sub-agent change a file").await;
+    h.play_to("the sub-agent asks for approval").await;
+
+    // Today's handling: nothing to answer, and a notice that says so.
+    assert!(h.live().await.interactions.is_empty());
+    assert_eq!(
+        h.notices(),
+        ["A Codex sub-agent asked for approval. ticketd cannot offer it yet, so it was not answered."]
+    );
+    h.play_all().await;
+    h.finish().await;
+    assert_eq!(h.turns().len(), 1, "a child's request opens no turn");
+    assert_eq!(h.turns()[0].state, ChatTurnState::Completed);
+}
+
+// --- The stored history, pinned for the desktop ----------------------------------------
+
+/// The stored history of the nested fixture while both sub-agents run, with ids and times
+/// made stable: the file the desktop's view of it is built from
+/// (`apps/desktop/src-tauri/src/chat_view.rs` reads it and writes the view the interface's
+/// tests parse). Regenerated only with `TICKETD_UPDATE_VIEW_FIXTURES=1`.
+const STORED: &str = concat!(
+    env!("CARGO_MANIFEST_DIR"),
+    "/tests/fixtures/codex/sub_agent_nested.stored.json"
+);
+
+#[tokio::test(start_paused = true)]
+async fn the_stored_history_of_nested_codex_sub_agents_is_the_file_the_desktop_builds_its_view_from()
+ {
+    let mut h = HostScript::codex()
+        .process([
+            fixture!("codex", "handshake"),
+            fixture!("codex", "sub_agent_nested"),
+        ])
+        .start();
+    h.send("Review the refund calls with sub-agents").await;
+    h.play_to("the nested sub-agent runs its command").await;
+
+    let snapshot = h
+        .core()
+        .chat_snapshot(h.chat_id(), 5_000)
+        .expect("the Chat's history");
+    let stored = super::sub_agents::made_stable(
+        &serde_json::to_string_pretty(&snapshot).expect("it serializes"),
+    );
+    if std::env::var_os("TICKETD_UPDATE_VIEW_FIXTURES").is_some() {
+        std::fs::write(STORED, format!("{stored}\n")).expect("the file is written");
+    }
+    let kept = std::fs::read_to_string(STORED).expect(
+        "the stored history; regenerate it with TICKETD_UPDATE_VIEW_FIXTURES=1 cargo test -p ticketd-chat-host --lib host_script::codex_sub_agents",
+    );
+    assert!(
+        kept.trim_end() == stored,
+        "the stored history changed; if that is intended, regenerate {STORED} with TICKETD_UPDATE_VIEW_FIXTURES=1"
+    );
+    h.play_all().await;
+    h.finish().await;
+}
