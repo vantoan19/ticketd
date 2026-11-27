@@ -547,6 +547,56 @@ test("another Google account is one switch for Files and sync, said before it st
   expect(api.disconnect).not.toHaveBeenCalled();
 });
 
+test("another account's storage is read before its choices are offered, and the old account's are dropped", async () => {
+  api.status.mockResolvedValue(choosing());
+  let finish: (read: SyncSetupOptions) => void = () => {};
+  api.setupOptions
+    .mockResolvedValueOnce(holdsWorkspace)
+    .mockReturnValueOnce(new Promise((resolve) => (finish = resolve)));
+  api.switchAccount.mockResolvedValue(
+    syncStatus({
+      connection: "choosing",
+      folder: null,
+      account: "mira@example.com",
+    }),
+  );
+  show();
+  expect(await radio(/Join “ticketd”/)).toBeTruthy();
+  fireEvent.click(
+    screen.getByRole("button", { name: "Use another account…" }),
+  );
+  const dialog = await screen.findByRole("dialog", {
+    name: "Use another Google account?",
+  });
+  fireEvent.click(
+    within(dialog).getByRole("button", { name: "Use another account" }),
+  );
+
+  // Until the new account is read, nothing of the old one can be joined.
+  expect(await screen.findByText(/mira@example.com/)).toBeTruthy();
+  expect(screen.queryByRole("radio", { name: /Join “ticketd”/ })).toBeNull();
+  const start = screen.getByRole("button", { name: "Start syncing" });
+  expect(
+    start.hasAttribute("disabled") || start.hasAttribute("aria-disabled"),
+  ).toBe(true);
+
+  finish({
+    ...holdsWorkspace,
+    existing: [
+      {
+        folder_id: "folder-9",
+        folder_name: "mira-workspace",
+        last_synced_by: null,
+        last_synced_at: null,
+        counts: { tickets: 3, documents: 1, attachments: 0 },
+      },
+    ],
+  });
+  const joined = await radio(/Join “mira-workspace”/);
+  expect(joined.getAttribute("aria-checked")).toBe("true");
+  expect(screen.queryByRole("radio", { name: /Join “ticketd”/ })).toBeNull();
+});
+
 test("the Replace dialog says the Uploads folder is never touched", async () => {
   api.status.mockResolvedValue(choosing());
   api.setupOptions.mockResolvedValue(holdsWorkspace);

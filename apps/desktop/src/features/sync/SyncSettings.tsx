@@ -108,6 +108,8 @@ export function SyncSettings({
           <SyncSetup intent={intent} onIntent={setIntent} />
         ) : status.connection === "choosing" ? (
           <Choose
+            // Another account has other storage: nothing read, chosen or confirmed for the old one stays.
+            key={`${status.provider}:${status.account}`}
             status={status}
             intent={intent}
             onDownloaded={setSafetyBackup}
