@@ -1956,6 +1956,36 @@ mod sub_agents {
     }
 
     #[test]
+    fn a_late_frame_of_a_launch_that_named_no_run_is_dropped_after_a_resume() {
+        let launch = |tool_use: &str, run: Value| {
+            json!({"task_id": "t1", "run_id": run, "tool_use_id": tool_use, "parent_task_id": null,
+                   "description": "Look", "subagent_type": "Explore", "background": true,
+                   "prompt": "Look around.", "spawn_depth": 1})
+        };
+        let mut session = Session::default();
+        session.event("sub_agent_started", &launch("toolu_a", Value::Null));
+        session.event("sub_agent_started", &launch("toolu_b", json!("r2")));
+        let (events, _) = session
+            .event(
+                "assistant_content",
+                &said("toolu_a", json!({"type": "text", "text": "Stale."})),
+            )
+            .expect("modeled");
+        assert!(messages(&events).is_empty(), "{events:?}");
+        let (events, _) = session
+            .event("thinking", &json!({"phase": "started", "index": 0, "redacted": false, "at": 1, "parent_tool_use_id": "toolu_a"}))
+            .expect("modeled");
+        assert!(events.is_empty(), "{events:?}");
+        let (events, _) = session
+            .event(
+                "assistant_content",
+                &said("toolu_b", json!({"type": "text", "text": "Fresh."})),
+            )
+            .expect("modeled");
+        assert_eq!(messages(&events), ["Fresh."]);
+    }
+
+    #[test]
     fn a_question_a_sub_agent_asks_is_its_own_and_goes_with_it() {
         let mut session = Session::default();
         session.event("sub_agent_started", &started("t1", "toolu_a", true));

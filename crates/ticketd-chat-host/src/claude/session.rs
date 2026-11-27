@@ -534,7 +534,7 @@ impl Session {
             return self.hold(parent, "thinking", event);
         };
         // A frame of a launch a resume superseded changes nothing about the run now.
-        if self.late_run(&launch.task, launch.run.as_deref()) {
+        if self.superseded(parent, &launch) {
             return;
         }
         let task = launch.task;
@@ -551,7 +551,7 @@ impl Session {
         let Some(launch) = self.sub_agents.by_tool_use.get(parent).cloned() else {
             return self.hold(parent, "assistant_content", event);
         };
-        if self.late_run(&launch.task, launch.run.as_deref()) {
+        if self.superseded(parent, &launch) {
             return;
         }
         let task = launch.task;
@@ -756,6 +756,18 @@ impl Session {
                 }
             }
         }
+    }
+
+    /// Whether the tool use `parent` is no longer how its task is launched: a resume went
+    /// through another tool use, or opened a newer run. The earlier launch may have named
+    /// no run, so the tool use is what tells.
+    fn superseded(&self, parent: &str, launch: &Launch) -> bool {
+        self.late_run(&launch.task, launch.run.as_deref())
+            || self
+                .sub_agents
+                .known
+                .get(&launch.task)
+                .is_some_and(|agent| agent.tool_use.as_deref() != Some(parent))
     }
 
     /// Whether a frame naming run `incoming` of `task` is late: the run it names sorts

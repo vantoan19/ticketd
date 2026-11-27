@@ -690,11 +690,17 @@ impl Session {
         if !prompt.thought.is_empty() {
             events.push(prompt.take_thought(false));
         }
+        let outcome = match (prompt_outcome(reply), prompt.quota_diagnostic) {
+            (TurnOutcome::Completed, Some(diagnostic)) => {
+                TurnOutcome::Failed(problem(ProblemKind::QuotaExhausted, diagnostic))
+            }
+            (outcome, _) => outcome,
+        };
         // Antigravity says nothing of when a sub-agent finishes, and holds the Prompt open
-        // until they all have: they end with it. A Stop cancels them with it, and who
-        // stopped it is the supervisor's to say (the person, or ticketd and why), so the
-        // children of an interrupted Prompt end with the turn, as they do in every harness.
-        if !matches!(prompt_outcome(reply), TurnOutcome::Interrupted) {
+        // until they all have: they end with it. Only a Prompt that succeeded says they
+        // did. A Stop cancels them with it, and a failed Prompt says nothing of them: both
+        // are left to end with the turn, the way it ended, as in every harness.
+        if outcome == TurnOutcome::Completed {
             events.extend(
                 prompt
                     .children
@@ -707,12 +713,6 @@ impl Session {
                     }),
             );
         }
-        let outcome = match (prompt_outcome(reply), prompt.quota_diagnostic) {
-            (TurnOutcome::Completed, Some(diagnostic)) => {
-                TurnOutcome::Failed(problem(ProblemKind::QuotaExhausted, diagnostic))
-            }
-            (outcome, _) => outcome,
-        };
         events.extend(self.runtime.end_turn(turn, outcome, |_| Default::default()));
         events
     }
