@@ -2683,13 +2683,9 @@ impl Supervisor {
         }
         let permission_restart =
             why == StopReason::ExplicitResume && self.permission_restart_pending;
-        // Losing the event stream does not prove that the previous process exited.
-        let unconfirmed =
-            if permission_restart || self.unattended.is_some() || self.runtime.is_some() {
-                self.drive(bounded_close(handle.as_ref())).await
-            } else {
-                None
-            };
+        // Losing the event stream, even while this waited for the interrupt, does not
+        // prove that the process exited: the retained handle is always closed.
+        let unconfirmed = self.drive(bounded_close(handle.as_ref())).await;
         self.keep_unanswered_permission();
         self.runtime = None;
         // Recorded as stopped only when the harness is known to have exited. Otherwise
@@ -5631,5 +5627,42 @@ mod tests {
         });
         assert!(answered.await.unwrap().is_ok());
         assert!(supervisor.interactions.is_empty());
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn closing_after_the_event_stream_is_lost_mid_stop_still_confirms_the_exit() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("workspace.sqlite3");
+        let fake = FakeAdapter::codex();
+        fake.set_close_outcome(CloseOutcome::Unconfirmed {
+            reason: "the process did not exit".to_owned(),
+        });
+        let (mut supervisor, chat) = supervisor_with(path.clone(), fake.clone());
+        let generation = open(&mut supervisor, &chat).await;
+        start_child(&mut supervisor, generation, "child", None);
+        // A turn runs; the stream is lost while ticketd waits for its interrupt.
+        fake.emit(EventKind::TurnStarted {
+            turn: NativeTurnId::new("turn-1"),
+            origin: None,
+        })
+        .await;
+        let started = next_event(&mut supervisor.runtime).await;
+        supervisor.on_event(started);
+        assert!(supervisor.active.is_some());
+        fake.emit(EventKind::RuntimeLost {
+            exit_code: None,
+            diagnostics: "stream ended".to_owned(),
+        })
+        .await;
+
+        let unconfirmed = supervisor.close_runtime(StopReason::TurnedOff).await;
+
+        // The retained handle was closed, found not to have exited, and nothing claims
+        // the child stopped.
+        assert!(unconfirmed.is_some());
+        assert_eq!(
+            latest_run(&path, &chat, "child"),
+            (ChatSubAgentState::Lost, None)
+        );
     }
 }
