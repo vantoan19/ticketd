@@ -30,6 +30,7 @@ import { SourcesPage } from "@/features/settings/pages/SourcesPage";
 import { useFadeThrough } from "@/features/settings/fade-through";
 import { showSetting } from "@/features/settings/settings-highlight";
 import { useSettingsState } from "@/features/settings/use-settings-state";
+import { useIsMobile } from "@/hooks/use-mobile";
 // The keyframes of the page's own entrance (settings-layout.css plays them).
 import "@/components/ui/enter";
 import "@/features/settings/settings.css";
@@ -99,7 +100,7 @@ export function SettingsView({
   // A result of Search opens its page and shows the setting there. The page
   // is `selected` once the old one has faded out. Going elsewhere first drops
   // the request, so it never fires on a later visit.
-  const { target, clearTarget } = useSettingsState();
+  const { target, clearTarget, setNavOpen } = useSettingsState();
   const shownSetting = useRef<(() => void) | null>(null);
   useEffect(() => {
     if (target && target.page !== chosen) clearTarget?.();
@@ -112,19 +113,35 @@ export function SettingsView({
   }, [target, selected, clearTarget]);
   useEffect(() => () => shownSetting.current?.(), []);
   // ⌘F and Ctrl+F search the settings, not the page, while Settings is open.
+  // On a narrow window the field is in the nav sheet, which is closed: open it,
+  // then focus the field once the sheet has mounted it.
+  const mobile = useIsMobile();
+  const focusing = useRef(0);
+  useEffect(() => () => cancelAnimationFrame(focusing.current), []);
   useEffect(() => {
+    function focusField(framesLeft: number) {
+      const field = document.getElementById(SEARCH_INPUT_ID);
+      if (field) {
+        field.focus();
+        if (field instanceof HTMLInputElement) field.select();
+      } else if (framesLeft > 0) {
+        focusing.current = requestAnimationFrame(() =>
+          focusField(framesLeft - 1),
+        );
+      }
+    }
     function onKeyDown(event: KeyboardEvent) {
       if (!isFindShortcut(event)) return;
       event.preventDefault();
       onSelect?.("search");
-      // The field is in the nav, which stays mounted: focus it and select what it holds.
-      const field = document.getElementById(SEARCH_INPUT_ID);
-      field?.focus();
-      if (field instanceof HTMLInputElement) field.select();
+      if (mobile && !document.getElementById(SEARCH_INPUT_ID))
+        setNavOpen?.(true);
+      cancelAnimationFrame(focusing.current);
+      focusField(mobile ? 20 : 0);
     }
     window.addEventListener("keydown", onKeyDown);
     return () => window.removeEventListener("keydown", onKeyDown);
-  }, [onSelect]);
+  }, [onSelect, mobile, setNavOpen]);
   return (
     <div
       ref={scroller}

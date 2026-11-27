@@ -437,6 +437,28 @@ test("elsewhere only Ctrl+F focuses the search field; the Windows key does not",
   expect(document.activeElement).toBe(field());
 });
 
+test("below 768px Cmd+F opens the nav sheet and focuses the search field in it", async () => {
+  onPlatform("MacIntel");
+  vi.spyOn(window, "matchMedia").mockImplementation(
+    (query: string) =>
+      ({
+        matches: query === "(max-width: 767px)",
+        media: query,
+        addEventListener: () => {},
+        removeEventListener: () => {},
+      }) as unknown as MediaQueryList,
+  );
+  render(<Settings initial="about" />);
+  await act(async () => {});
+  // The field lives in the sheet, which is closed.
+  expect(screen.queryByRole("searchbox")).toBeNull();
+  fireEvent.keyDown(window, { key: "f", metaKey: true });
+  const sheet = await screen.findByRole("dialog", { name: "Settings" });
+  await vi.waitFor(() =>
+    expect(document.activeElement).toBe(within(sheet).getByRole("searchbox")),
+  );
+});
+
 test("typing in the search field shows the results in place of the page and selects no entry", async () => {
   render(<Settings initial="about" />);
   await act(async () => {});

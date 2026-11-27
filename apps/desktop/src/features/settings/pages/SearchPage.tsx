@@ -102,7 +102,11 @@ export function SearchPage() {
 
   // The first result is selected; a new query starts over.
   const [selection, setSelection] = useState({ needle, index: 0 });
-  const selected = selection.needle === needle ? selection.index : 0;
+  // A list that shrinks under the same words (a connection removed) keeps the selection on its last result.
+  const selected =
+    selection.needle === needle
+      ? Math.min(selection.index, Math.max(0, results.length - 1))
+      : 0;
   const open = (index: number) => {
     const result = results[index];
     if (result) openSetting?.(result.page.id, result.entry.title);
@@ -112,10 +116,16 @@ export function SearchPage() {
   useEffect(() => {
     keys.current = { needle, results: results.length, selected, open };
   });
+  // On the document, not on the field: a narrow window moves the field into
+  // the nav sheet, and closing the sheet drops it, so any element found now
+  // may be replaced. Only the nav's field (by its id) drives the results.
   useEffect(() => {
-    const field = document.getElementById(SEARCH_INPUT_ID);
-    if (!field) return;
     const onKeyDown = (event: KeyboardEvent) => {
+      if (
+        !(event.target instanceof Element) ||
+        event.target.id !== SEARCH_INPUT_ID
+      )
+        return;
       const {
         needle: typed,
         results: count,
@@ -135,18 +145,22 @@ export function SearchPage() {
         });
       }
     };
-    field.addEventListener("keydown", onKeyDown);
-    return () => field.removeEventListener("keydown", onKeyDown);
+    document.addEventListener("keydown", onKeyDown);
+    return () => document.removeEventListener("keydown", onKeyDown);
   }, []);
-  // The field keeps the focus, so it names the selected result for screen readers.
+  // The field keeps the focus, so it names the selected result for screen
+  // readers. Set on every render: the field may be a new element since the last.
   useEffect(() => {
     const field = document.getElementById(SEARCH_INPUT_ID);
     if (!field || results.length === 0) return;
     field.setAttribute("aria-activedescendant", `${resultId}-${selected}`);
+    return () => field.removeAttribute("aria-activedescendant");
+  });
+  useEffect(() => {
+    if (results.length === 0) return;
     document
       .getElementById(`${resultId}-${selected}`)
       ?.scrollIntoView?.({ block: "nearest" });
-    return () => field.removeAttribute("aria-activedescendant");
   }, [resultId, selected, results.length]);
 
   const status = !needle

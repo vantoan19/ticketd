@@ -31,9 +31,12 @@ afterEach(() => {
 function Harness({
   openSetting,
   query = "",
+  fieldKey = "one",
 }: {
   openSetting: (page: SettingsPageId, title: string) => void;
   query?: string;
+  /** A new key replaces the field with a new element, as a narrow window moves it into the sheet. */
+  fieldKey?: string;
 }) {
   return (
     <SettingsStateContext.Provider
@@ -46,7 +49,12 @@ function Harness({
         refreshIndicators: () => {},
       }}
     >
-      <input id={SEARCH_INPUT_ID} type="search" aria-label="Search settings" />
+      <input
+        key={fieldKey}
+        id={SEARCH_INPUT_ID}
+        type="search"
+        aria-label="Search settings"
+      />
       <SearchPage />
     </SettingsStateContext.Provider>
   );
@@ -209,4 +217,54 @@ test("a connection is a result on Ticket sources, and its own rows open its page
   expect(openSetting).toHaveBeenLastCalledWith("ticket-sources", "GitHub");
   fireEvent.click(screen.getByRole("link", { name: /^Discovery/ }));
   expect(openSetting).toHaveBeenLastCalledWith("source-github", "Discovery");
+});
+
+test("arrows and Enter still drive the results after the nav replaces the search field", () => {
+  const openSetting = vi.fn();
+  const { rerender } = render(
+    <Harness openSetting={openSetting} query="report" />,
+  );
+  rerender(
+    <Harness openSetting={openSetting} query="report" fieldKey="sheet" />,
+  );
+  fireEvent.keyDown(field(), { key: "ArrowDown" });
+  expect(selected()).toEqual([results()[1]]);
+  fireEvent.keyDown(field(), { key: "Enter" });
+  expect(openSetting).toHaveBeenCalledTimes(1);
+  expect(openSetting.mock.calls[0]?.[1]).toBe(titles()[1]);
+  // The new field names the selected result for screen readers.
+  expect(field().getAttribute("aria-activedescendant")).toBe(results()[1]?.id);
+});
+
+test("a selection past the end of a shortened result list falls back to the last result", () => {
+  const second: SourceEntry = {
+    ...githubSource,
+    saved: {
+      id: "github-work",
+      name: "GitHub work",
+      provider: "github",
+      config: {},
+      account: "octo",
+      saved_at: "2026-01-01T00:00:00Z",
+    },
+  };
+  sourceList = [githubSource, second];
+  const openSetting = vi.fn();
+  const { rerender } = render(
+    <Harness openSetting={openSetting} query="github" />,
+  );
+  const many = results().length;
+  for (let step = 0; step < many; step += 1)
+    fireEvent.keyDown(field(), { key: "ArrowDown" });
+  expect(selected()).toEqual([results()[many - 1]]);
+  // A connection goes away while the same words are typed.
+  sourceList = [githubSource];
+  rerender(<Harness openSetting={openSetting} query="github" />);
+  expect(results().length).toBeLessThan(many);
+  expect(selected()).toEqual([results()[results().length - 1]]);
+  fireEvent.keyDown(field(), { key: "Enter" });
+  expect(openSetting).toHaveBeenCalledTimes(1);
+  expect(field().getAttribute("aria-activedescendant")).toBe(
+    results()[results().length - 1]?.id,
+  );
 });
