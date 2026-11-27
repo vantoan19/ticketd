@@ -181,31 +181,33 @@ function WorkingLine({
           align="start"
           alignOffset={-12}
           sideOffset={6}
-          className="w-80 p-2"
           aria-label="Agents working on this ticket"
         >
-          {many.map((agent) => (
-            <DropdownMenuItem
-              key={agent.id}
-              className="ticket-agents-item"
-              onSelect={() => open(agent, true)}
-            >
-              <HarnessMark
-                harness={agent.harness_id}
-                name={agent.harness_name}
-                decorative
-              />
-              <span className="ticket-agents-who">{agentName(agent)}</span>
-              <span className="ticket-agents-time" aria-hidden="true">
-                <Clock started={agent.started_at} />
-              </span>
-              <span className="ticket-agents-what">
-                {agent.sub_agent
-                  ? `${agent.title} · sub-agent in ${agent.chat_title}`
-                  : agent.title}
-              </span>
-            </DropdownMenuItem>
-          ))}
+          <div className="ticket-agents-menu">
+            {many.map((agent) => (
+              <DropdownMenuItem
+                key={agent.id}
+                onSelect={() => open(agent, true)}
+              >
+                <span className="ticket-agents-item">
+                  <HarnessMark
+                    harness={agent.harness_id}
+                    name={agent.harness_name}
+                    decorative
+                  />
+                  <span className="ticket-agents-who">{agentName(agent)}</span>
+                  <span className="ticket-agents-time" aria-hidden="true">
+                    <Clock started={agent.started_at} />
+                  </span>
+                  <span className="ticket-agents-what">
+                    {agent.sub_agent
+                      ? `${agent.title} · sub-agent in ${agent.chat_title}`
+                      : agent.title}
+                  </span>
+                </span>
+              </DropdownMenuItem>
+            ))}
+          </div>
         </DropdownMenuContent>
       </DropdownMenu>{" "}
       are working on this ticket

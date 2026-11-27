@@ -372,12 +372,18 @@
 }
 
 /* The agents menu: one row per agent at work: mark, model, clock, then what it does. */
+.ticket-agents-menu {
+  box-sizing: content-box;
+  width: 304px;
+  padding: 4px;
+}
 .ticket-agents-item {
   display: grid;
+  flex: 1;
+  min-width: 0;
   grid-template-columns: 16px minmax(0, 1fr) auto;
   align-items: center;
   gap: 4px 8px;
-  padding: 6px 8px;
 }
 .ticket-agents-who {
   line-height: 20px;
