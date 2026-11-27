@@ -325,7 +325,7 @@ fn a_sub_agent_is_titled_by_one_rule_everywhere() {
 #[test]
 fn the_sub_agent_step_may_run_again_on_a_workspace_that_has_it() {
     let dir = tempfile::tempdir().unwrap();
-    let workspace = Workspace::open(&dir.path().join("workspace.sqlite3")).unwrap();
+    let workspace = Workspace::open(dir.path().join("workspace.sqlite3")).unwrap();
     sub_agents::migrate(&workspace.connection).unwrap();
     sub_agents::migrate(&workspace.connection).unwrap();
     for (table, column) in [

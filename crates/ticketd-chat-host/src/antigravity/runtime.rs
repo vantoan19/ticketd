@@ -26,8 +26,8 @@ use crate::{
     InterruptRequest, NativeItemId, NativeRequestId, NativeSessionId, NativeSubAgentId,
     NativeTurnId, NoticeKind, OpenRequest, OpenedRuntime, Plan, PlanStep, PlanStepStatus, Problem,
     ProblemKind, ProviderDetail, Refusal, RespondOutcome, RuntimeEvent, SessionStart,
-    SettingChange, SettingKey, SettingOutcome, SubAgentOutcome, SubAgentStart, SubAgentStopper,
-    Submission, SubmissionId, TurnOutcome,
+    SettingChange, SettingKey, SettingOutcome, SubAgentOutcome, SubAgentStart, Submission,
+    SubmissionId, TurnOutcome,
 };
 
 use super::{capabilities, problem, settings, steps};
