@@ -91,8 +91,11 @@ beforeEach(() => {
     throw new Error(`Unexpected ${command}`);
   });
 });
-afterEach(() => {
+afterEach(async () => {
   cleanup();
+  // A read batched in the test's last turn is sent one microtask later: let it
+  // answer before the mocks are reset, or it reads an unmocked call.
+  await Promise.resolve();
   vi.resetAllMocks();
 });
 
