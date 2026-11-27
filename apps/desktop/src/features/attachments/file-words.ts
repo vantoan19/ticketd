@@ -2,7 +2,15 @@ import type { Attachment, AttachmentUsage } from "@/lib/api/attachments";
 
 /** What a file is, for its icon: one glyph per family (shell AT-24). */
 export type FileFamily =
-  "image" | "audio" | "video" | "text" | "pdf" | "archive" | "file";
+  | "image"
+  | "audio"
+  | "video"
+  | "text"
+  | "code"
+  | "table"
+  | "pdf"
+  | "archive"
+  | "file";
 
 const TYPES: Record<string, [string, FileFamily]> = {
   png: ["PNG image", "image"],
@@ -25,12 +33,13 @@ const TYPES: Record<string, [string, FileFamily]> = {
   txt: ["Text", "text"],
   md: ["Markdown", "text"],
   log: ["Log", "text"],
-  csv: ["CSV", "text"],
-  json: ["JSON", "text"],
-  yaml: ["YAML", "text"],
-  yml: ["YAML", "text"],
-  xml: ["XML", "text"],
-  html: ["HTML", "text"],
+  csv: ["CSV", "table"],
+  json: ["JSON", "code"],
+  yaml: ["YAML", "code"],
+  yml: ["YAML", "code"],
+  xml: ["XML", "code"],
+  html: ["HTML", "code"],
+  har: ["HAR file", "code"],
   zip: ["ZIP archive", "archive"],
   gz: ["Gzip archive", "archive"],
   tgz: ["Gzip archive", "archive"],
@@ -59,17 +68,27 @@ function extension(name: string) {
   return dot > 0 ? name.slice(dot + 1).toLowerCase() : "";
 }
 
+/** The tile's word: the extension in capitals ("HTML", "ZIP"), or "FILE" without one. */
+export function extensionLabel(name: string): string {
+  const ext = extension(name);
+  return ext ? ext.toUpperCase() : "FILE";
+}
+
 /**
  * The file's type in human words ("PNG image", "WAV audio", "PDF") and its
- * family, from the detected media type when the core knows it, else from the
- * original name. Never a MIME type (shell AT-09).
+ * family. The family comes from the detected media type when the core knows it,
+ * else from the original name; the word comes from the name first, so a `.mov`
+ * reads "QuickTime video" wherever it appears, whatever its container says.
+ * Never a MIME type (shell AT-09).
  */
 export function fileType(
   name: string,
   mediaType?: string | null,
 ): { word: string; family: FileFamily } {
-  const known = (mediaType && MEDIA[mediaType]) || TYPES[extension(name)];
-  if (known) return { word: known[0], family: known[1] };
+  const byName = TYPES[extension(name)];
+  const byMedia = mediaType ? MEDIA[mediaType] : undefined;
+  const known = byMedia ?? byName;
+  if (known) return { word: (byName ?? known)[0], family: known[1] };
   const ext = extension(name);
   return {
     word: ext && ext.length <= 5 ? `${ext.toUpperCase()} file` : "File",

@@ -14,6 +14,7 @@ import { open } from "@tauri-apps/plugin-dialog";
 import { AttachmentPicker } from "./AttachmentPicker";
 import { AttachmentLink } from "./AttachmentLink";
 import { AttachmentPreview } from "./AttachmentPreview";
+import { setPreference } from "@/lib/preferences";
 vi.mock("@tauri-apps/api/core", () => ({
   invoke: vi.fn(),
   convertFileSrc: (path: string) => path,
@@ -22,6 +23,8 @@ vi.mock("@tauri-apps/api/core", () => ({
   },
 }));
 beforeEach(() => {
+  // The viewer keeps the facts behind "…" until asked; these tests read them.
+  setPreference("attachmentDetails", true);
   vi.stubGlobal("indexedDB", new IDBFactory());
 });
 vi.mock("@tauri-apps/plugin-dialog", () => ({ open: vi.fn(), save: vi.fn() }));

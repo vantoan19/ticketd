@@ -79,6 +79,69 @@ pub fn restore_attachment(id: String, request_id: String) -> Result<Attachment, 
     }
 }
 
+/// The whole text of a stored HTML report, for the viewer's isolated frame.
+#[tauri::command]
+pub async fn attachment_html(workspace: String, id: String) -> Result<String, BridgeFailure> {
+    tauri::async_runtime::spawn_blocking(move || {
+        open_workspace()
+            .and_then(|w| w.attachment_html(&workspace, &id))
+            .map_err(BridgeFailure::from)
+    })
+    .await
+    .map_err(BridgeFailure::from)?
+}
+
+/// The display text of a stored plain-text file (the whole file, or its end when it is very
+/// long), for the viewer's log stage. It crosses as one raw binary response of UTF-8, not a
+/// JSON string, because it can be 20 MiB.
+#[tauri::command]
+pub async fn attachment_text(
+    workspace: String,
+    id: String,
+) -> Result<tauri::ipc::Response, BridgeFailure> {
+    tauri::async_runtime::spawn_blocking(move || {
+        open_workspace()
+            .and_then(|w| w.attachment_text(&workspace, &id))
+            .map(|text| tauri::ipc::Response::new(text.into_bytes()))
+            .map_err(BridgeFailure::from)
+    })
+    .await
+    .map_err(BridgeFailure::from)?
+}
+
+/// The number of the first line `attachment_text` returns, so a log's end keeps the file's
+/// own line numbers.
+#[tauri::command]
+pub async fn attachment_text_first_line(
+    workspace: String,
+    id: String,
+) -> Result<u64, BridgeFailure> {
+    tauri::async_runtime::spawn_blocking(move || {
+        open_workspace()
+            .and_then(|w| w.attachment_text_first_line(&workspace, &id))
+            .map_err(BridgeFailure::from)
+    })
+    .await
+    .map_err(BridgeFailure::from)?
+}
+
+/// The bytes of a stored PDF, for the viewer to render page by page. They cross as one
+/// raw binary response (not JSON), read through the checked snapshot and capped by core.
+#[tauri::command]
+pub async fn attachment_pdf(
+    workspace: String,
+    id: String,
+) -> Result<tauri::ipc::Response, BridgeFailure> {
+    tauri::async_runtime::spawn_blocking(move || {
+        open_workspace()
+            .and_then(|w| w.attachment_pdf(&workspace, &id))
+            .map(tauri::ipc::Response::new)
+            .map_err(BridgeFailure::from)
+    })
+    .await
+    .map_err(BridgeFailure::from)?
+}
+
 #[tauri::command]
 pub async fn attachment_preview(
     workspace: String,

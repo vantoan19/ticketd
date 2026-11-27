@@ -172,6 +172,16 @@ export const SHORTCUTS = [
       ["attachments-add", [["Mod", "Shift", "U"]], "Add files"],
       ["attachments-open", [["O"]], "Open file"],
       ["attachments-more", [["."]], "More file actions"],
+      ["attachments-details", [["I"]], "Show file details"],
+      ["attachments-next", [["J"]], "Next file in the viewer"],
+      ["attachments-previous", [["K"]], "Previous file in the viewer"],
+      [
+        "attachments-zoom",
+        [["+"], ["-"], ["0"]],
+        "Zoom a PDF or picture in, out, or to fit",
+      ],
+      ["attachments-find", [["Mod", "F"], ["/"]], "Find in a log or text file"],
+      ["attachments-wrap", [["W"]], "Wrap or unwrap the lines of a log"],
       ["attachments-back", [["Esc"]], "Back to Attachments"],
     ] as const
   ).map(([id, keys, label]) => ({

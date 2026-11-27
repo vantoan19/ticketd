@@ -415,11 +415,22 @@ fn downloaded_bytes_that_are_not_the_uploaded_ones_are_refused() {
     assert_eq!(status.state, SyncState::NeedsAttention);
     // Given up on, so it no longer counts as a download still to come (F35).
     assert_eq!(status.attachment_downloads.count, 0);
+    let availability = b
+        .attachment_availability(std::slice::from_ref(&attachment))
+        .unwrap()
+        .remove(0);
     assert_eq!(
-        b.attachment_availability(std::slice::from_ref(&attachment))
-            .unwrap()[0]
-            .state,
+        availability.state,
         AttachmentAvailabilityState::NotDownloaded
+    );
+    // The viewer says it couldn't download, with the reason the Inbox tells.
+    assert!(
+        availability
+            .failure
+            .as_deref()
+            .is_some_and(|reason| reason.contains("not the ones that were uploaded")),
+        "{:?}",
+        availability.failure
     );
     assert!(b.attachment_open_path(&attachment).is_err());
     let notices = b.sync_notices().unwrap();
@@ -2059,6 +2070,13 @@ fn an_attachment_that_cannot_be_saved_here_is_not_downloaded_again_by_every_run(
     assert_eq!(fetched, 0);
     assert_eq!(status.attachment_downloads.count, 0);
     assert_eq!(unreadable(&b), ["attachments/notes.txt"]);
+    // The viewer is told why, from the same notice.
+    let failure = b
+        .attachment_availability(std::slice::from_ref(&attachment))
+        .unwrap()
+        .remove(0)
+        .failure;
+    assert!(failure.is_some_and(|reason| !reason.is_empty()));
 
     // With the way clear, asking for it fetches it and withdraws the notice.
     std::fs::remove_dir_all(&taken).unwrap();

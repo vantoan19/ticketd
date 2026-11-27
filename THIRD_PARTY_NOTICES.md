@@ -116,6 +116,15 @@ publisher's brand guidelines.
 licensed under Apache-2.0. Its exact version is pinned in `Cargo.lock`. The
 desktop starts the Antigravity CLI installed by the person.
 
+## PDF.js
+
+The desktop viewer renders PDF attachments with
+[PDF.js](https://github.com/mozilla/pdf.js) (`pdfjs-dist`, legacy build, with its
+worker), copyright Mozilla Foundation, licensed under the Apache License 2.0. Its
+exact version is pinned in `package-lock.json`, and the license text ships in the
+package (`node_modules/pdfjs-dist/LICENSE`). It is bundled with the app and loads no
+code, fonts or data from the network.
+
 ## Package dependencies and distribution
 
 Rust dependencies are recorded in `Cargo.lock`; JavaScript dependencies are

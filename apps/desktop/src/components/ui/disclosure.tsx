@@ -103,6 +103,7 @@ export function Clamp({
         id={id}
         className="ui-clamp-body"
         data-clamped={expanded ? undefined : ""}
+        data-overflows={overflows && !expanded ? "" : undefined}
         style={{ "--clamp-lines": lines } as React.CSSProperties}
       >
         {children}

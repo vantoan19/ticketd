@@ -18,8 +18,8 @@ export function useTicketAttachments() {
     loadFailure: read.failure,
     error,
     setError,
-    /** Reports that a file was attached, detached or replaced. */
-    changed: () => void report(),
+    /** Reports that a file was attached, detached or replaced; settles once the files shown are current. */
+    changed: () => report(),
     retry: read.retry,
   };
 }

@@ -6,16 +6,29 @@ import {
   useMemo,
   useRef,
   useState,
+  useSyncExternalStore,
+  type ReactElement,
   type ReactNode,
+  type RefObject,
 } from "react";
-import { ArrowLeft, Download, Ellipsis, Link, X } from "lucide-react";
 import {
-  Alert,
-  AlertActions,
-  AlertTitle,
-  AlertDescription,
-} from "@/components/ui/alert";
+  ArrowLeft,
+  ChevronLeft,
+  ChevronRight,
+  CloudDownload,
+  Download,
+  Ellipsis,
+  Info,
+  Link,
+  PanelRight,
+  Pencil,
+  RefreshCw,
+  RotateCcw,
+  X,
+} from "lucide-react";
+import { Alert, AlertDescription } from "@/components/ui/alert";
 import { Button } from "@/components/ui/button";
+import { Kbd } from "@/components/ui/kbd";
 import { useDialogPresence } from "@/components/ui/use-dialog-presence";
 import { CopyButton } from "@/components/ui/copy-button";
 import {
@@ -32,17 +45,19 @@ import {
   DropdownMenuSeparator,
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
-import { EmptyState } from "@/components/ui/empty-state";
 import { FailureAlert, FailureState } from "@/components/ui/failure-alert";
-import { PaneHeader } from "@/components/ui/list-header";
+import { PaneHeader, ShellSlotProvider } from "@/components/ui/list-header";
 import {
   ariaKeyShortcuts,
   matchesShortcut,
   shortcutLabel,
 } from "@/lib/shortcuts";
 import { IconButton } from "@/components/ui/icon-button";
+import { Progress } from "@/components/ui/progress";
+import { useCopy } from "@/components/ui/use-copy";
+import { useStatusLine } from "@/components/ui/use-status-line";
+import { setPreference, usePreferences } from "@/lib/preferences";
 import { RecordLink } from "@/components/ui/record-link";
-import { Skeleton } from "@/components/ui/skeleton";
 import { Time } from "@/components/ui/time";
 import { Tooltip } from "@/components/ui/tooltip";
 import {
@@ -70,9 +85,16 @@ import { DriveReferenceDetails } from "./DriveReferenceDetails";
 import { DriveAccessRecovery } from "./DriveAccessRecovery";
 import { ExportMarkdownButton } from "./ExportMarkdown";
 import { FileIcon } from "./AttachmentThumbnail";
+import { FittedTitle } from "./FittedTitle";
+import { HtmlStage } from "./HtmlStage";
+import { ImageStage } from "./ImageStage";
+import { PdfStage, type StageKeys } from "./PdfStage";
+import { SVG_LIMIT, SvgStage } from "./SvgStage";
+import { TextStage } from "./TextStage";
+import { PreviewLoading, PreviewState, RetryActions } from "./PreviewState";
 import { RenameAttachment } from "./RenameAttachment";
-import { fileType, purged } from "./file-words";
-import { formatSize } from "./format-size";
+import { extensionLabel, fileType, purged } from "./file-words";
+import { formatProgress, formatSize } from "./format-size";
 import "./attachment-preview.css";
 
 export type AttachmentPreviewCommands = {
@@ -86,6 +108,9 @@ export type ReferenceReplacement = (
   requestId: string,
   signal: AbortSignal,
 ) => Promise<void>;
+
+/** The largest file the app previews at all (100 MiB); a picture under it that is too large has too many pixels. */
+const PREVIEW_BYTES = 100 * 1024 * 1024;
 
 /** Where a file is used, as the "Used in" list names each place. */
 const usageKinds: Record<string, string> = {
@@ -109,31 +134,17 @@ function Media({
   onError: () => void;
 }) {
   const media = useRef<HTMLMediaElement>(null);
-  const image = useRef<HTMLImageElement>(null);
   useEffect(() => {
     const element = media.current;
-    const picture = image.current;
-    // Strict Mode rehearses cleanup/setup; restore sources on each setup too.
-    picture?.setAttribute("src", url);
+    // Strict Mode rehearses cleanup/setup; restore the source on each setup too.
     element?.setAttribute("src", url);
     return () => {
-      picture?.removeAttribute("src");
       if (!element) return;
       element.pause();
       element.removeAttribute("src");
       element.load();
     };
   }, [url]);
-  if (mime.startsWith("image/"))
-    return (
-      <img
-        ref={image}
-        className="attachment-preview-image"
-        src={url}
-        alt={file.display_name}
-        onError={onError}
-      />
-    );
   const props = {
     src: url,
     controls: true,
@@ -162,10 +173,9 @@ function Media({
  * Everything the preview knows and does about one file, shared by the viewer
  * dialog and the library's detail pane. Viewing never edits content.
  */
-function usePreview(target: PreviewTarget) {
-  const [file, setFile] = useState<Attachment | null>(
-    "initial" in target ? (target.initial ?? null) : null,
-  );
+function usePreview(target: PreviewTarget, warm?: Map<string, PreviewInfo>) {
+  const initial = "initial" in target ? (target.initial ?? null) : null;
+  const [file, setFile] = useState<Attachment | null>(initial);
   const [info, setInfo] = useState<PreviewInfo | null>(null);
   const [copy, setCopy] = useState<DriveCopyInspection | null>(null);
   const [workspace, setWorkspace] = useState("");
@@ -177,21 +187,57 @@ function usePreview(target: PreviewTarget) {
   const generation = useRef(0);
   const id = "id" in target ? target.id : undefined;
   const uri = "uri" in target ? target.uri : undefined;
+  // The viewer steps through files without remounting: a new target starts from
+  // nothing of the last one's state. A neighbor read ahead shows at once and is
+  // still read again, so the state shown is never older than this open.
+  const identity = `${id ?? ""}|${uri ?? ""}`;
+  const [shown, setShown] = useState(identity);
+  // Counts the viewer's visits: stepping away and back to a file is a new visit, so an
+  // action started on the first cannot settle the second's state.
+  const [visit, setVisit] = useState(0);
+  // What the viewer shows now, for work that finishes later: it must not touch
+  // the state of a file that was stepped to in the meantime.
+  const latest = useRef({
+    identity,
+    visit,
+    fileId: undefined as string | undefined,
+  });
+  if (shown !== identity) {
+    setShown(identity);
+    setVisit((value) => value + 1);
+    setFile(initial);
+    setInfo((id && warm?.get(id)) || null);
+    setCopy(null);
+    setFailed(false);
+    setError(null);
+    setBusy(false);
+  }
   const availability = useAvailability(
     file && file.kind !== "external_reference" ? [file.id] : [],
   );
+  useEffect(() => {
+    latest.current = { identity, visit, fileId: file?.id };
+  });
   const stored = file ? availability.of(file.id) : undefined;
   // The bytes are still in the sync storage, or on their way: there is nothing to preview
   // yet. Once they arrive the preview is read again.
   const awaited = stored !== undefined && stored.state !== "downloaded";
   const absent = stored?.state === "not_downloaded" ? stored.id : "";
+  const sync = useSyncStatus();
+  // The storage wants the person back before it hands the file over.
+  const signedOut =
+    absent !== "" &&
+    (sync.status?.recovery === "authorization_expired" ||
+      error?.code === "not_signed_in" ||
+      error?.code === "unauthenticated");
   const { download } = availability;
   // Where Attachments download when opened, opening one is what fetches it:
-  // once per file, so a download that failed waits for the Download button.
-  const fetched = useRef("");
+  // once per file, so a download that failed waits for the Download button, even
+  // after the viewer stepped away and came back.
+  const fetched = useRef(new Set<string>());
   useEffect(() => {
-    if (!absent || fetched.current === absent) return;
-    fetched.current = absent;
+    if (!absent || fetched.current.has(absent)) return;
+    fetched.current.add(absent);
     void syncApi
       .settings()
       .then((settings) =>
@@ -199,12 +245,15 @@ function usePreview(target: PreviewTarget) {
           ? download(absent)
           : undefined,
       )
-      .catch((reason: unknown) =>
-        setError(describeFailure(reason, "download the file")),
-      );
+      .catch((reason: unknown) => {
+        // The failure belongs to the file that started the download.
+        if (latest.current.fileId === absent)
+          setError(describeFailure(reason, "download"));
+      });
   }, [absent, download]);
   useEffect(() => {
     const current = ++generation.current;
+    let read = false;
     void (async () => {
       const owningWorkspace = await attachments.workspaceId();
       const resolvedFile = id ? null : await attachments.resolve(uri ?? "");
@@ -215,30 +264,36 @@ function usePreview(target: PreviewTarget) {
       setWorkspace(owningWorkspace);
       setFile(preview.attachment);
       setInfo(preview);
+      read = true;
       setCopy(null);
       if (preview.attachment.kind === "external_reference") {
         const inspection = await attachments.inspectDriveCopy(resolved);
         if (generation.current === current) setCopy(inspection);
       }
     })().catch((reason: unknown) => {
-      if (generation.current === current)
-        setError(describeFailure(reason, "load the preview"));
+      if (generation.current !== current) return;
+      // A neighbor read ahead is not kept over a read of the file itself that failed.
+      if (!read) setInfo(null);
+      setError(describeFailure(reason, "load the preview"));
     });
     return () => {
       generation.current += 1;
     };
   }, [id, uri, attempt, awaited]);
   async function action(verb: string, run: () => Promise<void>) {
-    const current = generation.current;
+    // The same file's metadata may reload while this runs (its download finished);
+    // only a new visit (stepping to a file, even back to this one) hands the viewer's
+    // state over.
+    const target = latest.current.visit;
     setBusy(true);
     setError(null);
     try {
       await run();
     } catch (reason) {
-      if (generation.current === current)
+      if (latest.current.visit === target)
         setError(describeFailure(reason, verb));
     } finally {
-      if (generation.current === current) setBusy(false);
+      if (latest.current.visit === target) setBusy(false);
     }
   }
   function mediaFailed() {
@@ -263,6 +318,10 @@ function usePreview(target: PreviewTarget) {
     setError(null);
     setAttempt((value) => value + 1);
   }
+  /** Reads the file again, but only while it is still the one shown. */
+  function retryIfShown(fileId: string) {
+    if (latest.current.fileId === fileId) retry();
+  }
   function renamed(next: Attachment) {
     setFile(next);
     setInfo((previous) =>
@@ -284,6 +343,7 @@ function usePreview(target: PreviewTarget) {
     failed,
     mediaFailed,
     retry,
+    retryIfShown,
     renamed,
     error,
     setError,
@@ -292,6 +352,7 @@ function usePreview(target: PreviewTarget) {
     availability,
     stored,
     awaited,
+    signedOut,
     external,
     uploadedCopy,
     gone: file ? purged(file) : false,
@@ -316,14 +377,133 @@ function storedWord(preview: Preview) {
   return storageWord(preview.stored);
 }
 
+/** Why neither Open nor Export can work right now, or null when the bytes are here. */
+function storedBlocked(preview: Preview): string | null {
+  if (preview.gone) return "Its stored copy was deleted.";
+  if (preview.missing) return "It’s missing from this computer.";
+  if (preview.stored?.state === "downloading") return "Downloading…";
+  if (preview.signedOut) return "Sign in to download it.";
+  if (preview.awaited) return "Download it first.";
+  if (!preview.external && preview.info?.status === "unavailable")
+    return "ticketd can’t read the stored copy.";
+  return null;
+}
+
 /** Why Open can't work right now, or null when it can. */
 function openBlocked(preview: Preview): string | null {
-  if (preview.gone) return "Its stored copy was deleted.";
-  if (preview.missing) return "The file is missing from this computer.";
-  if (preview.awaited) return "Download the file first.";
-  if (preview.info?.can_open === false)
-    return "No app on this computer opens it.";
-  return null;
+  return (
+    storedBlocked(preview) ??
+    (preview.info?.can_open === false
+      ? "No app on this computer opens it."
+      : null)
+  );
+}
+
+/** Under 880px wide the viewer is a sheet 12px from the window's edges. */
+const COMPACT = "(max-width: 879px)";
+function useCompact(): boolean {
+  return useSyncExternalStore(
+    (notify) => {
+      if (typeof window.matchMedia !== "function") return () => {};
+      const media = window.matchMedia(COMPACT);
+      media.addEventListener("change", notify);
+      return () => media.removeEventListener("change", notify);
+    },
+    () =>
+      typeof window.matchMedia === "function" &&
+      window.matchMedia(COMPACT).matches,
+    () => false,
+  );
+}
+
+/** Export, the tray icon (the one Drive references use too); while the bytes are not here it keeps its place and says why. */
+function exportButton(
+  file: Attachment,
+  busy: boolean,
+  blocked: string | null,
+  preview: Preview,
+) {
+  const button = (
+    <IconButton
+      label="Export file"
+      disabled={busy || blocked !== null}
+      onClick={() =>
+        void preview.action("export the file", () => attachments.export(file))
+      }
+    >
+      <Download />
+    </IconButton>
+  );
+  return blocked ? (
+    <Tooltip content={blocked}>
+      {/* A disabled button takes no pointer events; its wrapper keeps the reason. */}
+      <span tabIndex={0} className="inline-flex">
+        {button}
+      </span>
+    </Tooltip>
+  ) : (
+    button
+  );
+}
+
+/** Where the viewer stands among the files of the place it was opened from. */
+type Position = {
+  /** 1-based. */
+  index: number;
+  total: number;
+  step: (delta: -1 | 1) => void;
+};
+
+/**
+ * "2 of 6", then Previous and Next. At an end the button that would go
+ * further stays in place, disabled, and says why; the keys do nothing there.
+ */
+function BrowseControls({ position }: { position: Position }) {
+  const { index, total, step } = position;
+  const button = (delta: -1 | 1) => {
+    const previous = delta < 0;
+    const label = previous ? "Previous file" : "Next file";
+    const key = previous ? "attachments-previous" : "attachments-next";
+    const edge = previous ? index <= 1 : index >= total;
+    const control = (
+      <IconButton
+        label={label}
+        shortcut={shortcutLabel(key)}
+        aria-keyshortcuts={ariaKeyShortcuts(key)}
+        disabled={edge}
+        onClick={() => step(delta)}
+      >
+        {previous ? (
+          <ChevronLeft aria-hidden="true" />
+        ) : (
+          <ChevronRight aria-hidden="true" />
+        )}
+      </IconButton>
+    );
+    return edge ? (
+      <Tooltip content={previous ? "First file" : "Last file"}>
+        {/* A disabled button takes no pointer events; its wrapper keeps the reason. */}
+        <span tabIndex={0} className="inline-flex">
+          {control}
+        </span>
+      </Tooltip>
+    ) : (
+      control
+    );
+  };
+  return (
+    <span
+      className="attachment-preview-browse"
+      role="group"
+      aria-label="Browse files"
+    >
+      <span className="attachment-preview-position">
+        {index} of {total}
+      </span>
+      {button(-1)}
+      {button(1)}
+    </span>
+  );
 }
 
 /**
@@ -341,11 +521,20 @@ function PreviewHeader({
   renaming,
   onRenamingChange,
   pane = false,
+  details,
+  compact = false,
+  position,
   onCommandsChange,
 }: {
   preview: Preview;
+  /** Set when the viewer steps through several files. */
+  position?: Position | undefined;
+  /** The viewer's Details panel: shown or not, and the switch. */
+  details?: { shown: boolean; toggle: () => void };
+  /** A compact window: Export moves under "…". */
+  compact?: boolean;
   /** The heading element: the dialog's title, or the pane's h2. */
-  title: (name: string) => ReactNode;
+  title: (name: ReactNode) => ReactElement;
   onClose: () => void;
   /** The close button: DialogClose in the viewer, a plain button in a pane. */
   close: (button: ReactNode) => ReactNode;
@@ -364,6 +553,20 @@ function PreviewHeader({
     info?.media_type,
   ).family;
   const blocked = openBlocked(preview);
+  const exportBlocked = storedBlocked(preview);
+  const statusLine = useStatusLine();
+  const { copy } = useCopy();
+  const copyLink = async () => {
+    const done = await copy("link", preview.link);
+    statusLine.show(
+      done
+        ? { message: "Copied link" }
+        : {
+            tone: "error",
+            message: "Couldn’t copy the link.",
+          },
+    );
+  };
   const canRestore = Boolean(file?.quarantined) && !preview.gone;
   const notDownloaded = preview.stored?.state === "not_downloaded";
   const [moreOpen, setMoreOpen] = useState(false);
@@ -439,14 +642,16 @@ function PreviewHeader({
             }}
           />
         ) : (
-          <span className="attachment-preview-title">
-            {title(file?.display_name ?? "Attachment")}
-          </span>
+          <FittedTitle
+            name={file?.display_name ?? "Attachment"}
+            heading={title}
+          />
         )
       }
       actions={
         !renaming && (
           <span className="attachment-preview-actions">
+            {position && <BrowseControls position={position} />}
             {openButton &&
               (blocked ? (
                 <Tooltip content={blocked}>
@@ -473,20 +678,11 @@ function PreviewHeader({
                 }}
               />
             )}
-            {file && !external && (
-              <IconButton
-                label="Export file"
-                disabled={busy || preview.gone}
-                onClick={() =>
-                  void preview.action("export the file", () =>
-                    attachments.export(file),
-                  )
-                }
-              >
-                <Download />
-              </IconButton>
-            )}
-            {preview.link && !preview.gone && !file?.quarantined && (
+            {file &&
+              !external &&
+              !compact &&
+              exportButton(file, busy, exportBlocked, preview)}
+            {pane && preview.link && !preview.gone && !file?.quarantined && (
               <CopyButton
                 text={preview.link}
                 label="Copy link"
@@ -507,15 +703,49 @@ function PreviewHeader({
                   </IconButton>
                 </DropdownMenuTrigger>
                 <DropdownMenuContent align="end">
+                  {details && (
+                    <DropdownMenuItem onSelect={details.toggle}>
+                      <PanelRight aria-hidden="true" />
+                      {details.shown ? "Hide details" : "Show details"}
+                      <Kbd aria-hidden="true" className="ml-auto">
+                        {shortcutLabel("attachments-details")}
+                      </Kbd>
+                    </DropdownMenuItem>
+                  )}
+                  {compact && file && !external && (
+                    <DropdownMenuItem
+                      disabled={exportBlocked !== null}
+                      onSelect={() =>
+                        void preview.action("export the file", () =>
+                          attachments.export(file),
+                        )
+                      }
+                    >
+                      <Download aria-hidden="true" />
+                      Export file
+                    </DropdownMenuItem>
+                  )}
+                  {!pane &&
+                    preview.link &&
+                    !preview.gone &&
+                    !file.quarantined && (
+                      <DropdownMenuItem onSelect={() => void copyLink()}>
+                        <Link aria-hidden="true" />
+                        Copy link
+                      </DropdownMenuItem>
+                    )}
                   <DropdownMenuItem onSelect={() => onRenamingChange(true)}>
+                    <Pencil aria-hidden="true" />
                     Rename…
                   </DropdownMenuItem>
-                  {onReplace && (
+                  {/* While the file is missing the stage offers Replace itself. */}
+                  {onReplace && !(preview.missing && !pane) && (
                     <DropdownMenuItem onSelect={onReplace}>
+                      <RefreshCw aria-hidden="true" />
                       Replace…
                     </DropdownMenuItem>
                   )}
-                  {notDownloaded && (
+                  {pane && notDownloaded && (
                     <DropdownMenuItem
                       onSelect={() =>
                         void preview.action("download the file", () =>
@@ -523,10 +753,11 @@ function PreviewHeader({
                         )
                       }
                     >
+                      <CloudDownload aria-hidden="true" />
                       Download
                     </DropdownMenuItem>
                   )}
-                  {canRestore && (
+                  {pane && canRestore && (
                     <DropdownMenuItem
                       onSelect={() =>
                         void preview.action("restore the file", async () => {
@@ -534,11 +765,12 @@ function PreviewHeader({
                             file.id,
                             crypto.randomUUID(),
                           );
-                          preview.retry();
+                          preview.retryIfShown(file.id);
                           onChanged?.();
                         })
                       }
                     >
+                      <RotateCcw aria-hidden="true" />
                       Restore
                     </DropdownMenuItem>
                   )}
@@ -570,28 +802,58 @@ function PreviewStage({
   onReplace,
   onRestoreBackup,
   onChanged,
+  stageRef,
+  place,
+  fading = false,
 }: {
   preview: Preview;
+  /** The viewer's stage takes focus when it opens, so the reading keys work at once. */
+  stageRef?: RefObject<HTMLDivElement | null>;
+  /** "2 of 6", when the viewer steps through files. */
+  place?: string | undefined;
+  /** A file reached by Previous or Next fades in; the first one does not. */
+  fading?: boolean;
   onReplace: (() => void) | undefined;
   onRestoreBackup: (() => void) | undefined;
   onChanged: (() => void) | undefined;
 }) {
   const { file, info, busy, error, external, awaited, failed } = preview;
+  const { apply, status: syncStatus } = useSyncStatus();
+  const scroller = useRef<HTMLDivElement | null>(null);
+  const stageKeys: StageKeys = useRef(null);
+  // The stage is also the scroller the formats lay themselves out in.
+  const stage = useCallback(
+    (element: HTMLDivElement | null) => {
+      scroller.current = element;
+      if (stageRef) stageRef.current = element;
+    },
+    [stageRef],
+  );
   const type = fileType(file?.original_filename ?? "", info?.media_type);
-  const storage = storageName(useSyncStatus().status?.provider);
+  const provider = syncStatus?.provider;
+  const storage = storageName(provider);
+  const label = extensionLabel(file?.original_filename ?? "");
+  // What the one sentence says a person can do with a file that has no preview.
+  const see =
+    type.family === "video"
+      ? "watch it"
+      : type.family === "audio"
+        ? "listen to it"
+        : "see it";
   const notice = file?.quarantined && !preview.gone && (
     <Alert size="compact">
+      <Info aria-hidden="true" />
       <AlertDescription>
         Quarantined. Restore it to use it in new places.
       </AlertDescription>
       <Button
         variant="outline"
-        size="sm"
+        size="compact"
         disabled={busy}
         onClick={() =>
           void preview.action("restore the file", async () => {
             await attachments.restore(file.id, crypto.randomUUID());
-            preview.retry();
+            preview.retryIfShown(file.id);
             onChanged?.();
           })
         }
@@ -601,6 +863,10 @@ function PreviewStage({
     </Alert>
   );
   let body: ReactNode;
+  let reportShown = false;
+  let pdfShown = false;
+  let pictureShown = false;
+  let textShown = false;
   if (external && file)
     body = (
       <DriveAccessRecovery
@@ -608,43 +874,49 @@ function PreviewStage({
         onRefresh={preview.refreshDrive}
         uploadedCopy={preview.uploadedCopy}
         copy={preview.copy}
+        family={type.family}
+        label={`${label === "FILE" ? "DRIVE" : label} ↗`}
       />
     );
   else if (file?.purge_state === "purged")
     body = (
-      <EmptyState
+      <PreviewState
+        family={type.family}
+        label={label}
         title="Deleted permanently"
-        description="Its name stays in ticketd. The file itself can only come back from an older backup."
-        {...(onRestoreBackup && {
-          action: (
+        sentence="Its name stays in ticketd. The file itself can only come back from an older backup."
+        action={
+          onRestoreBackup && (
             <Button variant="outline" size="sm" onClick={onRestoreBackup}>
               Restore from a backup…
             </Button>
-          ),
-        })}
+          )
+        }
       />
     );
   else if (file?.purge_state === "pending")
     body = (
-      <EmptyState
+      <PreviewState
+        family={type.family}
+        label={label}
         title="Deleting permanently"
-        description="ticketd started deleting its stored copy. Finish deleting it from the Attachments library."
+        sentence="ticketd started deleting its stored copy. Finish deleting it from the Attachments library."
       />
     );
   else if (preview.missing)
     body = (
-      <Alert tone="attention" className="max-w-120">
-        <AlertTitle>
-          {info?.status === "incomplete"
-            ? "This file is incomplete on this computer"
-            : "This file is missing from this computer"}
-        </AlertTitle>
-        <AlertDescription>
-          It may have been moved or deleted outside ticketd. Its name and the
-          places that use it are kept.
-        </AlertDescription>
-        {(onReplace || onRestoreBackup) && (
-          <AlertActions>
+      <PreviewState
+        family={type.family}
+        label={label}
+        attention
+        title={
+          info?.status === "incomplete"
+            ? "Incomplete on this computer"
+            : "Missing from this computer"
+        }
+        sentence="It may have been moved or deleted outside ticketd. Its name and the places that use it are kept."
+        action={
+          <>
             {onReplace && (
               <Button variant="outline" size="sm" onClick={onReplace}>
                 Replace file…
@@ -655,76 +927,223 @@ function PreviewStage({
                 Restore from a backup…
               </Button>
             )}
-          </AlertActions>
-        )}
-      </Alert>
+          </>
+        }
+      />
     );
-  else if (awaited && file)
-    body = (
-      <div className="attachment-preview-awaited">
-        <EmptyState
-          icon={<FileIcon family={type.family} />}
-          title={storageWord(preview.stored)}
-          description={`This file is in ${storage.place}.`}
+  else if (awaited && file) {
+    const downloading = preview.stored?.state === "downloading";
+    const size = file.size_bytes;
+    const percent = preview.stored?.progress ?? null;
+    const download = () =>
+      void preview.action("download", () =>
+        preview.availability.download(file.id),
+      );
+    const failure = preview.stored?.failure ?? null;
+    const where = provider === "s3" ? storage.place : storage.full;
+    if (preview.signedOut && !downloading)
+      body = (
+        <PreviewState
+          family={type.family}
+          label={label}
           role="status"
-          {...(preview.stored?.state === "not_downloaded" && {
-            action: (
-              <Button
-                size="sm"
-                disabled={busy}
-                onClick={() =>
-                  void preview.action("download the file", () =>
-                    preview.availability.download(file.id),
-                  )
-                }
-              >
-                <Download aria-hidden="true" />
-                Download
-              </Button>
-            ),
-          })}
+          attention
+          title="Needs sign-in"
+          sentence={`Sign in to ${provider === "s3" ? "AWS" : "Google"} to download this file.`}
+          action={
+            <Button
+              size="sm"
+              disabled={busy}
+              onClick={() =>
+                void preview.action("sign in", async () => {
+                  apply(await syncApi.recover());
+                })
+              }
+            >
+              Sign in
+            </Button>
+          }
+          extra={error && <FailureAlert size="compact" failure={error} />}
         />
-        {error && <FailureAlert size="compact" failure={error} />}
-      </div>
-    );
+      );
+    else if (error && !downloading)
+      body = (
+        <PreviewState
+          family={type.family}
+          label={label}
+          role="alert"
+          title={error.title}
+          sentence={error.sentence}
+          action={<RetryActions onRetry={download} details={error.details} />}
+        />
+      );
+    else if (failure !== null && !downloading)
+      body = (
+        <PreviewState
+          family={type.family}
+          label={label}
+          role="alert"
+          title="Couldn’t download"
+          sentence={`${storage.full} didn’t answer. Nothing changed on this computer.`}
+          action={
+            <RetryActions
+              onRetry={download}
+              details={failure}
+              disabled={busy}
+            />
+          }
+        />
+      );
+    else
+      body = (
+        <PreviewState
+          family={type.family}
+          label={label}
+          role="status"
+          title={downloading ? "Downloading…" : "Not downloaded"}
+          sentence={
+            downloading
+              ? size !== null && percent !== null
+                ? formatProgress((size * Math.min(percent, 100)) / 100, size)
+                : ""
+              : `It’s in ${where}. Download it to preview it here.`
+          }
+          action={
+            downloading ? (
+              size !== null && percent !== null ? (
+                <span className="attachment-state-progress">
+                  <Progress value={percent} aria-label="Download progress" />
+                </span>
+              ) : null
+            ) : preview.stored?.state === "not_downloaded" ? (
+              <Button size="sm" disabled={busy} onClick={download}>
+                <CloudDownload aria-hidden="true" />
+                Download{size !== null && ` · ${formatSize(size)}`}
+              </Button>
+            ) : null
+          }
+        />
+      );
+  } else if (info && !preview.availability.known)
+    // Until the storage says where the bytes are, a file read ahead must not
+    // be read, nor taken for one with no preview: it may still be in Drive.
+    body = <PreviewLoading shape={type.family === "pdf" ? "page" : "block"} />;
   else if (failed && file)
     body = (
-      <FailureState
-        failure={{
-          code: "failed",
-          title: `Couldn't show this ${type.word.toLowerCase()}`,
-          sentence:
-            "ticketd may not play how it was saved. Open it in its app, or retry.",
-          action: "retry",
-          details: "",
-        }}
-        onRetry={preview.retry}
+      <PreviewState
+        family={type.family}
+        label={label}
+        role="alert"
+        title={`Couldn’t show this ${type.word.toLowerCase()}`}
+        sentence="ticketd may not play how it was saved. Open it in its app, or retry."
+        action={<RetryActions onRetry={preview.retry} />}
       />
     );
-  else if (info?.status === "available" && file && info.media_type)
+  else if (info?.status === "available" && file && info.media_type) {
+    const mediaKey = `${preview.workspace}/${file.id}/${preview.attempt}`;
+    const mediaUrl = attachments.mediaUrl(preview.workspace, file.id);
+    if (info.media_type.startsWith("image/")) {
+      pictureShown = true;
+      body = (
+        <ImageStage
+          key={mediaKey}
+          file={file}
+          url={mediaUrl}
+          onError={preview.mediaFailed}
+          scrollerRef={scroller}
+          keysRef={stageKeys}
+        />
+      );
+    } else
+      body = (
+        <Media
+          key={mediaKey}
+          file={file}
+          mime={info.media_type}
+          url={mediaUrl}
+          onError={preview.mediaFailed}
+        />
+      );
+  } else if (info?.status === "unavailable")
     body = (
-      <Media
-        key={`${preview.workspace}/${file.id}/${preview.attempt}`}
+      <PreviewState
+        family={type.family}
+        label={label}
+        role="alert"
+        title="Couldn’t read this file"
+        sentence="ticketd can’t read its stored copy on this computer."
+        action={
+          <RetryActions onRetry={preview.retry} details={info.message ?? ""} />
+        }
+      />
+    );
+  else if (info?.status === "unsupported" && file?.size_bytes === 0)
+    body = (
+      <PreviewState
+        family={type.family}
+        label={label}
+        title="Empty file"
+        sentence="It has no content, so there’s nothing to show."
+      />
+    );
+  else if (info?.pdf && file) {
+    pdfShown = true;
+    body = (
+      <PdfStage
+        workspace={preview.workspace}
         file={file}
-        mime={info.media_type}
-        url={attachments.mediaUrl(preview.workspace, file.id)}
-        onError={preview.mediaFailed}
+        attempt={preview.attempt}
+        onRetry={preview.retry}
+        scrollerRef={scroller}
+        keysRef={stageKeys}
       />
     );
-  else if (info?.status === "unavailable")
+  } else if (info?.html && file) {
+    reportShown = true;
     body = (
-      <FailureState
-        failure={{
-          code: "failed",
-          title: "Couldn't read this file",
-          sentence: "ticketd can't read its stored copy on this computer.",
-          action: "retry",
-          details: info.message ?? "",
-        }}
+      <HtmlStage
+        workspace={preview.workspace}
+        file={file}
+        attempt={preview.attempt}
         onRetry={preview.retry}
       />
     );
-  else if (info?.text_excerpt)
+  } else if (
+    info?.text &&
+    file &&
+    !info.text.partial &&
+    info.text.total_bytes <= SVG_LIMIT &&
+    /\.svg$/i.test(file.original_filename)
+  ) {
+    // An SVG is a picture, drawn as an image (never as a document).
+    pictureShown = true;
+    body = (
+      <SvgStage
+        key={`${preview.workspace}/${file.id}/${preview.attempt}`}
+        workspace={preview.workspace}
+        file={file}
+        attempt={preview.attempt}
+        onRetry={preview.retry}
+        onError={preview.mediaFailed}
+        scrollerRef={scroller}
+        keysRef={stageKeys}
+      />
+    );
+  } else if (info?.text && file) {
+    textShown = true;
+    body = (
+      <TextStage
+        workspace={preview.workspace}
+        file={file}
+        scope={info.text}
+        attempt={preview.attempt}
+        onRetry={preview.retry}
+        scrollerRef={scroller}
+        keysRef={stageKeys}
+        reachable={!stageRef}
+      />
+    );
+  } else if (info?.text_excerpt)
     body = (
       <div className="attachment-preview-textual">
         <pre
@@ -743,50 +1162,64 @@ function PreviewStage({
     );
   else if (info?.status === "too_large")
     body = (
-      <EmptyState
-        icon={<FileIcon family={type.family} />}
+      <PreviewState
+        family={type.family}
+        label={label}
         title="Too large to preview"
-        description="Open it in its app to see it."
+        sentence={
+          // A picture within the file-size limit is held back by its pixels, not its bytes.
+          type.family === "image" &&
+          file?.size_bytes != null &&
+          file.size_bytes <= PREVIEW_BYTES
+            ? "Its picture has too many pixels to show here. Open it in its app to see it."
+            : `${file?.size_bytes != null ? `It’s ${formatSize(file.size_bytes)}. ` : ""}Open it in its app to ${see}.`
+        }
       />
     );
   else if (info)
     body = (
-      <EmptyState
-        icon={<FileIcon family={type.family} />}
+      <PreviewState
+        family={type.family}
+        label={label}
         title={
           type.family === "file"
             ? "No preview for this file"
-            : `No preview for ${type.word} files`
+            : `No preview for ${type.family === "archive" ? `${type.word}s` : `${type.word} files`}`
         }
-        description="Open it in its app to see it."
+        sentence={`Open it in its app to ${type.family === "archive" ? "see what’s inside" : see}.`}
       />
     );
   else if (error && !awaited)
     body = <FailureState failure={error} onRetry={preview.retry} />;
   else
-    body = (
-      <div
-        role="status"
-        aria-label="Loading preview"
-        className="attachment-preview-loading"
-      >
-        <Skeleton className="h-full w-full" />
-      </div>
-    );
+    body = <PreviewLoading shape={type.family === "pdf" ? "page" : "block"} />;
   return (
     <div
+      ref={stage}
       className="attachment-preview-stage"
-      data-image={
-        type.family === "image" &&
-        !preview.missing &&
-        !preview.gone &&
-        !external
-          ? ""
-          : undefined
-      }
+      // The format showing in the stage (a PDF's or picture's zoom keys) hears the keys first.
+      onKeyDown={(event) => stageKeys.current?.(event)}
+      {...(stageRef && {
+        tabIndex: -1,
+        role: "group",
+        "aria-label": [file?.display_name ?? "File", type.word, place]
+          .filter(Boolean)
+          .join(", "),
+      })}
+      data-report={reportShown ? "" : undefined}
+      data-pdf={pdfShown ? "" : undefined}
+      data-picture={pictureShown ? "" : undefined}
+      data-text={textShown ? "" : undefined}
     >
       {notice}
-      <div className="attachment-preview-canvas">{body}</div>
+      <div
+        // Another file is another canvas: it fades in rather than swapping.
+        key={place ? (file?.id ?? "") : undefined}
+        className="attachment-preview-canvas"
+        data-fading={fading ? "" : undefined}
+      >
+        {body}
+      </div>
     </div>
   );
 }
@@ -795,11 +1228,9 @@ function PreviewStage({
 function PreviewFacts({
   preview,
   onNavigate,
-  actions,
 }: {
   preview: Preview;
   onNavigate: () => void;
-  actions: ReactNode;
 }) {
   const { file, info, external, uploadedCopy, attempt } = preview;
   const openDocument = useContext(DocumentNavigation);
@@ -841,6 +1272,12 @@ function PreviewFacts({
           <>
             <dt>Original name</dt>
             <dd className="attachment-facts-name">{file.original_filename}</dd>
+          </>
+        )}
+        {info?.html && (
+          <>
+            <dt>Preview</dt>
+            <dd>Read-only, offline · Scripts and network are off</dd>
           </>
         )}
         <dt>Used in</dt>
@@ -891,7 +1328,6 @@ function PreviewFacts({
           )}
         </dd>
       </dl>
-      {actions && <div className="attachment-preview-extra">{actions}</div>}
     </div>
   );
 }
@@ -907,6 +1343,103 @@ function PreviewFailure({ preview }: { preview: Preview }) {
   );
 }
 
+type Origin = {
+  /** What had focus when the viewer opened: the card or link that opened it. */
+  focus: HTMLElement | null;
+  /** Every ancestor of it, and the document, with their positions (the top included). */
+  scroll: [Element, number][];
+};
+
+/**
+ * macOS WebKit does not focus a button or link that is clicked: focus stays on
+ * the body, or lands on the nearest focusable container. So the opener of a
+ * mouse-opened viewer is what was last pressed, not what has focus.
+ */
+let pressed: { target: Element; at: number } | null = null;
+if (typeof document !== "undefined")
+  document.addEventListener(
+    "pointerdown",
+    (event) => {
+      if (event.target instanceof Element)
+        pressed = { target: event.target, at: event.timeStamp };
+    },
+    true,
+  );
+const OPENER_MS = 5000;
+
+/** What opened the viewer: what has focus, or the control just pressed that took none. */
+function captureOpener(): HTMLElement | null {
+  const active = document.activeElement;
+  const focused =
+    active instanceof HTMLElement && active !== document.body ? active : null;
+  if (pressed && performance.now() - pressed.at < OPENER_MS) {
+    const control = pressed.target.closest<HTMLElement>(
+      "button, a[href], [role='button'], [tabindex]",
+    );
+    if (
+      control?.isConnected &&
+      (!focused || (focused !== control && focused.contains(control)))
+    )
+      return control;
+  }
+  return focused;
+}
+
+/** Reads where the reviewer is, so closing the viewer can put them back. */
+function captureOrigin(): Origin {
+  const focus = captureOpener();
+  const scroll: [Element, number][] = [];
+  for (let node: Element | null = focus; node; node = node.parentElement)
+    scroll.push([node, node.scrollTop]);
+  const root = document.scrollingElement;
+  if (root) scroll.push([root, root.scrollTop]);
+  return { focus, scroll };
+}
+
+function restoreScroll(scroll: [Element, number][]) {
+  for (const [element, top] of scroll)
+    if (element.isConnected && element.scrollTop !== top)
+      element.scrollTop = top;
+}
+
+/** The files of the place the viewer was opened from, and the way to move among them. */
+export type Browse = {
+  /** In the order that place shows them. */
+  files: Attachment[];
+  /** The file that should now be shown; the caller changes the viewer's target. */
+  onSelect: (file: Attachment) => void;
+};
+
+/** Reads the neighbors' previews ahead of a step, so the next file shows at once. */
+function useReadAhead(
+  ids: string[],
+  ready: boolean,
+  warm: Map<string, PreviewInfo>,
+) {
+  const key = ids.join("\n");
+  useEffect(() => {
+    if (!ready || !key) return;
+    let active = true;
+    void attachments
+      .workspaceId()
+      .then(async (workspace) => {
+        for (const id of key.split("\n")) {
+          if (!active || warm.has(id)) continue;
+          // One neighbor that will not read does not stop the others.
+          try {
+            warm.set(id, await attachments.preview(workspace, id));
+          } catch {
+            // A step to it reads it again and shows why.
+          }
+        }
+      })
+      .catch(() => {});
+    return () => {
+      active = false;
+    };
+  }, [key, ready, warm]);
+}
+
 /**
  * The viewer: a file opened from a ticket, a Document or a Chat. The `viewer`
  * dialog size with one header (Open, Export, Copy link, "…", Close), the
@@ -917,17 +1450,75 @@ export function AttachmentPreview({
   target,
   onClose,
   onReplace,
-  actions,
+  menuItems,
+  notice,
+  fallbackFocus,
+  browse,
 }: {
   target: PreviewTarget;
   onClose: () => void;
+  /**
+   * Previous and Next walk these files (J and K); with fewer than two, or when
+   * the target is not one of them, there is nothing to walk.
+   */
+  browse?: Browse;
   onReplace?: ReferenceReplacement | undefined;
-  actions?: ReactNode;
+  /** Actions of the place that opened it, after a separator in "…" (Detach from ticket). */
+  menuItems?: ReactNode;
+  /** The last failure of one of those actions, shown above the stage. */
+  notice?: ReactNode;
+  /** Where focus goes on close when what opened the viewer is gone. */
+  fallbackFocus?: () => HTMLElement | null;
 }) {
-  const preview = usePreview(target);
+  const [warm] = useState(() => new Map<string, PreviewInfo>());
+  const preview = usePreview(target, warm);
   const presence = useDialogPresence(onClose);
   const [picking, setPicking] = useState(false);
   const [renaming, setRenaming] = useState(false);
+  const [commands, setCommands] = useState<AttachmentPreviewCommands | null>(
+    null,
+  );
+  const compact = useCompact();
+  const { attachmentDetails: detailsShown } = usePreferences();
+  const stage = useRef<HTMLDivElement>(null);
+  // What the reviewer was looking at when the viewer opened, to put back on close.
+  // It stays the opener while files are stepped through.
+  const [origin] = useState(captureOrigin);
+  const ids = browse?.files.map((entry) => entry.id) ?? [];
+  const at = "id" in target ? ids.indexOf(target.id) : -1;
+  const walking = browse !== undefined && ids.length > 1 && at >= 0;
+  const [fading, setFading] = useState(false);
+  const [announcement, setAnnouncement] = useState("");
+  const step = (delta: -1 | 1) => {
+    const next = browse?.files[at + delta];
+    if (!browse || !walking || !next) return;
+    setFading(true);
+    setRenaming(false);
+    setAnnouncement(
+      `${next.display_name}, ${fileType(next.original_filename).word}, ${at + delta + 1} of ${ids.length}`,
+    );
+    browse.onSelect(next);
+  };
+  useReadAhead(
+    walking ? [ids[at - 1], ids[at + 1]].filter((id) => id !== undefined) : [],
+    preview.info !== null,
+    warm,
+  );
+  const shownId = "id" in target ? target.id : "";
+  // Each file opens at its top, and focus that has nowhere useful to stay goes to the stage.
+  useLayoutEffect(() => {
+    if (!fading) return;
+    if (stage.current) stage.current.scrollTop = 0;
+    const active = document.activeElement;
+    // Focus on the viewer itself is what a click on Previous or Next leaves in
+    // WebKit, which does not focus buttons: the reading keys should still work.
+    if (
+      active === document.body ||
+      active === stage.current?.closest("[role='dialog']") ||
+      (active instanceof HTMLButtonElement && active.disabled)
+    )
+      stage.current?.focus({ preventScroll: true });
+  }, [shownId, fading]);
   const replacementRequest = useRef<AbortController | null>(null);
   const openSettings = useContext(SettingsNavigation);
   useEffect(() => () => replacementRequest.current?.abort(), []);
@@ -968,6 +1559,13 @@ export function AttachmentPreview({
         }}
       />
     );
+  const position: Position | undefined = walking
+    ? { index: at + 1, total: ids.length, step }
+    : undefined;
+  const details = {
+    shown: detailsShown,
+    toggle: () => setPreference("attachmentDetails", !detailsShown),
+  };
   return (
     <Dialog
       open={presence.dialog.open}
@@ -980,49 +1578,132 @@ export function AttachmentPreview({
         size="viewer"
         showCloseButton={false}
         inert={!presence.dialog.open || undefined}
+        // The opener, unless it is gone (the file was detached meanwhile).
+        resolveReturnFocus={() =>
+          origin.focus?.isConnected ? origin.focus : (fallbackFocus?.() ?? null)
+        }
+        onEscapeKeyDown={(event) => {
+          // Renaming is a field too: Esc cancels it first. The dialog hears the key
+          // before the form does, so it cancels here and keeps the viewer open.
+          if (renaming) {
+            event.preventDefault();
+            setRenaming(false);
+            return;
+          }
+          // In a field of the format (the PDF's page number), Esc leaves the field first.
+          const field =
+            event.target instanceof HTMLElement &&
+            event.target.closest("[data-view-field]");
+          if (!field) return;
+          event.preventDefault();
+          stage.current?.focus({ preventScroll: true });
+        }}
+        onOpenAutoFocus={(event) => {
+          // The stage takes focus, so Space and the reading keys work at once.
+          event.preventDefault();
+          stage.current?.focus({ preventScroll: true });
+        }}
         onCloseAutoFocus={() => {
+          // Put the ticket back where it was, whichever file was shown last.
+          const restore = () => restoreScroll(origin.scroll);
+          restore();
+          queueMicrotask(restore);
           if (!presence.dialog.open) presence.dialog.onExitComplete();
         }}
+        onKeyDown={(event) => {
+          if (
+            event.target instanceof HTMLElement &&
+            event.target.closest(
+              "input, textarea, select, [contenteditable], [role='menu']",
+            )
+          )
+            return;
+          if (matchesShortcut(event, "attachments-details")) {
+            event.preventDefault();
+            details.toggle();
+          } else if (matchesShortcut(event, "attachments-open")) {
+            event.preventDefault();
+            commands?.open?.();
+          } else if (matchesShortcut(event, "attachments-more")) {
+            event.preventDefault();
+            commands?.more?.();
+          } else if (walking && matchesShortcut(event, "attachments-next")) {
+            // At the last file the key does nothing; it never wraps around.
+            event.preventDefault();
+            step(1);
+          } else if (
+            walking &&
+            matchesShortcut(event, "attachments-previous")
+          ) {
+            event.preventDefault();
+            step(-1);
+          }
+        }}
       >
-        <div className="attachment-preview" data-layout="viewer">
-          <PreviewHeader
-            preview={preview}
-            title={(name) => <DialogTitle>{name}</DialogTitle>}
-            onClose={close}
-            close={(button) => <DialogClose asChild>{button}</DialogClose>}
-            onReplace={replace}
-            onChanged={undefined}
-            menuItems={null}
-            renaming={renaming}
-            onRenamingChange={setRenaming}
-          />
-          <DialogDescription className="sr-only">
-            {file
-              ? `${fileType(file.original_filename).word} preview`
-              : "Preview"}
-          </DialogDescription>
-          <div className="attachment-preview-body">
-            <PreviewStage
+        {/* The viewer is a dialog in a portal: it takes none of the shell's header controls. */}
+        <ShellSlotProvider nav={null} crumb={null}>
+          <div
+            className="attachment-preview"
+            data-layout="viewer"
+            data-details={detailsShown ? "" : undefined}
+          >
+            <PreviewHeader
               preview={preview}
+              title={(name) => <DialogTitle>{name}</DialogTitle>}
+              onClose={close}
+              close={(button) => <DialogClose asChild>{button}</DialogClose>}
               onReplace={replace}
-              onRestoreBackup={
-                openSettings
-                  ? () => {
-                      close();
-                      openSettings("backups-export");
-                    }
-                  : undefined
-              }
               onChanged={undefined}
+              menuItems={menuItems}
+              renaming={renaming}
+              onRenamingChange={setRenaming}
+              details={details}
+              compact={compact}
+              position={position}
+              onCommandsChange={setCommands}
             />
-            <PreviewFacts
-              preview={preview}
-              onNavigate={close}
-              actions={actions}
-            />
-            <PreviewFailure preview={preview} />
+            <DialogDescription className="sr-only">
+              {file
+                ? `${fileType(file.original_filename).word} preview`
+                : "Preview"}
+            </DialogDescription>
+            <div aria-live="polite" className="sr-only">
+              {announcement}
+            </div>
+            <div className="attachment-preview-body">
+              <div className="attachment-preview-main">
+                {notice && (
+                  <div className="attachment-preview-failure">{notice}</div>
+                )}
+                <PreviewFailure preview={preview} />
+                <PreviewStage
+                  preview={preview}
+                  stageRef={stage}
+                  place={position && `${position.index} of ${position.total}`}
+                  fading={fading}
+                  onReplace={replace}
+                  onRestoreBackup={
+                    openSettings
+                      ? () => {
+                          close();
+                          openSettings("backups-export");
+                        }
+                      : undefined
+                  }
+                  onChanged={undefined}
+                />
+              </div>
+              {detailsShown && (
+                <aside
+                  className="attachment-preview-details"
+                  aria-label="Details"
+                >
+                  <PreviewFacts preview={preview} onNavigate={close} />
+                </aside>
+              )}
+            </div>
           </div>
-        </div>
+        </ShellSlotProvider>
       </DialogContent>
     </Dialog>
   );
@@ -1121,7 +1802,7 @@ export function AttachmentPreviewPane({
           }
           onChanged={onChanged}
         />
-        <PreviewFacts preview={preview} onNavigate={() => {}} actions={null} />
+        <PreviewFacts preview={preview} onNavigate={() => {}} />
         <PreviewFailure preview={preview} />
       </div>
     </section>

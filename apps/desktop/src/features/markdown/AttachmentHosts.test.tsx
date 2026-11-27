@@ -167,11 +167,8 @@ test("reader replacement follows description autosave and retains the chosen occ
     <TicketEditor ticket={{ ...ticket, body: original }} onSaved={vi.fn()} />,
   );
   fireEvent.click(screen.getByRole("button", { name: "Trace" }));
-  fireEvent.pointerDown(
-    await screen.findByRole("button", { name: "More actions" }),
-    { button: 0, ctrlKey: false },
-  );
-  fireEvent.click(await screen.findByRole("menuitem", { name: "Replace…" }));
+  // A missing file offers Replace in the stage, not in "…".
+  fireEvent.click(await screen.findByRole("button", { name: "Replace file…" }));
   expect(invoke).not.toHaveBeenCalledWith("change_ticket", expect.anything());
   fireEvent.click(screen.getByRole("radio", { name: "Existing files" }));
   fireEvent.click(
@@ -257,11 +254,10 @@ test.each(["reader", "rich"])(
       );
     } else
       fireEvent.click(await screen.findByRole("button", { name: "Trace" }));
-    fireEvent.pointerDown(
-      await screen.findByRole("button", { name: "More actions" }),
-      { button: 0, ctrlKey: false },
+    // A missing file offers Replace in the stage, not in "…".
+    fireEvent.click(
+      await screen.findByRole("button", { name: "Replace file…" }),
     );
-    fireEvent.click(await screen.findByRole("menuitem", { name: "Replace…" }));
     fireEvent.click(screen.getByRole("radio", { name: "Existing files" }));
     fireEvent.click(
       await screen.findByRole("radio", { name: "Select Replacement" }),

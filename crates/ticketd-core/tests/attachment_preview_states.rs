@@ -1,4 +1,10 @@
-use ticketd_core::{AttachmentQuery, PreviewStatus, TEXT_EXCERPT_BYTES, Workspace};
+use ticketd_core::{
+    AttachmentQuery, HTML_PREVIEW_BYTES, PDF_PREVIEW_BYTES, PreviewStatus, TEXT_EXCERPT_BYTES,
+    TEXT_TAIL_BYTES, TEXT_WHOLE_BYTES, Workspace,
+};
+
+/// The size past which a file is too large to preview as media (100 MiB).
+const MEDIA_LIMIT: usize = 100 * 1024 * 1024;
 
 const PNG: &[u8] =
     b"\x89PNG\r\n\x1a\n\0\0\0\x0dIHDR\0\0\0\x01\0\0\0\x01\x08\x06\0\0\0\x1f\x15\xc4\x89";
@@ -79,4 +85,395 @@ fn the_library_flags_a_kept_file_whose_stored_copy_is_gone() {
     assert!(missing(&workspace));
     std::fs::write(&stored, PNG).unwrap();
     assert!(!missing(&workspace));
+}
+
+#[test]
+fn an_html_report_reads_whole_for_the_viewer_and_never_as_media() {
+    let dir = tempfile::tempdir().unwrap();
+    let mut workspace = Workspace::open(dir.path().join("workspace.sqlite3")).unwrap();
+    let identity = workspace.attachment_workspace_id().unwrap();
+    let report = "<!doctype html><title>Run</title><style>td{color:red}</style><table><tr><td>é</td></tr></table>";
+    let mut bytes = b"\xef\xbb\xbf".to_vec();
+    bytes.extend_from_slice(report.as_bytes());
+    let file = workspace
+        .import_attachment_bytes("report", "Report.HTML", &bytes, |_, _| true)
+        .unwrap();
+    let preview = workspace.attachment_preview(&identity, &file.id).unwrap();
+    assert!(preview.html);
+    // Never media: the passive-media protocol keeps refusing it.
+    assert_eq!(preview.status, PreviewStatus::Unsupported);
+    assert!(preview.media_type.is_none());
+    assert!(workspace.attachment_media(&identity, &file.id).is_err());
+    assert_eq!(
+        workspace.attachment_html(&identity, &file.id).unwrap(),
+        report
+    );
+
+    // Only an HTML file, and only under this workspace's identity.
+    let notes = workspace
+        .import_attachment_bytes("notes", "notes.txt", b"<p>hi</p>", |_, _| true)
+        .unwrap();
+    assert!(
+        !workspace
+            .attachment_preview(&identity, &notes.id)
+            .unwrap()
+            .html
+    );
+    assert!(workspace.attachment_html(&identity, &notes.id).is_err());
+    assert!(workspace.attachment_html("other", &file.id).is_err());
+
+    // A report that is not UTF-8 text has no rendered preview.
+    let latin = workspace
+        .import_attachment_bytes("latin", "latin.htm", b"<p>caf\xe9</p>", |_, _| true)
+        .unwrap();
+    assert!(
+        !workspace
+            .attachment_preview(&identity, &latin.id)
+            .unwrap()
+            .html
+    );
+    assert!(workspace.attachment_html(&identity, &latin.id).is_err());
+
+    // A missing stored copy falls back, with no path in the failure.
+    std::fs::remove_file(
+        dir.path()
+            .join("workspace.sqlite3.attachments")
+            .join(&file.locator),
+    )
+    .unwrap();
+    let failure = workspace
+        .attachment_html(&identity, &file.id)
+        .unwrap_err()
+        .to_string();
+    assert!(!failure.contains(dir.path().to_str().unwrap()));
+    assert!(
+        !workspace
+            .attachment_preview(&identity, &file.id)
+            .unwrap()
+            .html
+    );
+}
+
+#[test]
+fn a_report_over_the_limit_is_too_large_to_preview() {
+    let dir = tempfile::tempdir().unwrap();
+    let mut workspace = Workspace::open(dir.path().join("workspace.sqlite3")).unwrap();
+    let identity = workspace.attachment_workspace_id().unwrap();
+    let mut big = b"<p>".to_vec();
+    big.resize(HTML_PREVIEW_BYTES as usize + 1, b'a');
+    let file = workspace
+        .import_attachment_bytes("big", "big.html", &big, |_, _| true)
+        .unwrap();
+    let preview = workspace.attachment_preview(&identity, &file.id).unwrap();
+    assert_eq!(preview.status, PreviewStatus::TooLarge);
+    assert!(!preview.html);
+    assert!(workspace.attachment_html(&identity, &file.id).is_err());
+}
+
+#[test]
+fn a_pdf_reads_whole_for_the_viewer_by_its_header_and_never_as_media() {
+    let dir = tempfile::tempdir().unwrap();
+    let mut workspace = Workspace::open(dir.path().join("workspace.sqlite3")).unwrap();
+    let identity = workspace.attachment_workspace_id().unwrap();
+    let pdf = b"%PDF-1.7\n1 0 obj<<>>endobj\n%%EOF\n";
+    // The header decides, not the name; stray leading bytes are allowed.
+    let mut padded = b"\r\n\r\n".to_vec();
+    padded.extend_from_slice(pdf);
+    for (name, bytes) in [("plan.pdf", pdf.to_vec()), ("scan", padded)] {
+        let file = workspace
+            .import_attachment_bytes(name, name, &bytes, |_, _| true)
+            .unwrap();
+        let preview = workspace.attachment_preview(&identity, &file.id).unwrap();
+        assert!(preview.pdf);
+        assert!(!preview.html);
+        // Never media: the passive-media protocol keeps refusing it.
+        assert_eq!(preview.status, PreviewStatus::Unsupported);
+        assert!(preview.media_type.is_none());
+        assert!(workspace.attachment_media(&identity, &file.id).is_err());
+        assert_eq!(
+            workspace.attachment_pdf(&identity, &file.id).unwrap(),
+            bytes
+        );
+        assert!(workspace.attachment_pdf("other", &file.id).is_err());
+    }
+
+    // A file named .pdf that is not one has no PDF preview and cannot be read as one.
+    let fake = workspace
+        .import_attachment_bytes("fake", "fake.pdf", b"<html>not a pdf</html>", |_, _| true)
+        .unwrap();
+    assert!(
+        !workspace
+            .attachment_preview(&identity, &fake.id)
+            .unwrap()
+            .pdf
+    );
+    assert!(workspace.attachment_pdf(&identity, &fake.id).is_err());
+
+    // A missing stored copy falls back, with no path in the failure.
+    let gone = workspace
+        .import_attachment_bytes("gone", "gone.pdf", pdf, |_, _| true)
+        .unwrap();
+    std::fs::remove_file(
+        dir.path()
+            .join("workspace.sqlite3.attachments")
+            .join(&gone.locator),
+    )
+    .unwrap();
+    let failure = workspace
+        .attachment_pdf(&identity, &gone.id)
+        .unwrap_err()
+        .to_string();
+    assert!(!failure.contains(dir.path().to_str().unwrap()));
+    assert!(
+        !workspace
+            .attachment_preview(&identity, &gone.id)
+            .unwrap()
+            .pdf
+    );
+}
+
+#[test]
+fn a_pdf_over_the_limit_is_too_large_to_preview() {
+    let dir = tempfile::tempdir().unwrap();
+    let mut workspace = Workspace::open(dir.path().join("workspace.sqlite3")).unwrap();
+    let identity = workspace.attachment_workspace_id().unwrap();
+    let mut big = b"%PDF-1.7\n".to_vec();
+    big.resize(PDF_PREVIEW_BYTES as usize + 1, b'a');
+    let file = workspace
+        .import_attachment_bytes("big", "big.pdf", &big, |_, _| true)
+        .unwrap();
+    let preview = workspace.attachment_preview(&identity, &file.id).unwrap();
+    assert_eq!(preview.status, PreviewStatus::TooLarge);
+    assert!(!preview.pdf);
+    assert!(workspace.attachment_pdf(&identity, &file.id).is_err());
+}
+
+#[test]
+fn a_log_reads_whole_with_its_colours_removed_and_never_as_media_or_html() {
+    let dir = tempfile::tempdir().unwrap();
+    let mut workspace = Workspace::open(dir.path().join("workspace.sqlite3")).unwrap();
+    let identity = workspace.attachment_workspace_id().unwrap();
+    let coloured = "\u{1b}[31mFAIL\u{1b}[0m  checkout  timeout after 30s\nnext line\n".repeat(3);
+    let log = workspace
+        .import_attachment_bytes("run", "run.log", coloured.as_bytes(), |_, _| true)
+        .unwrap();
+    let preview = workspace.attachment_preview(&identity, &log.id).unwrap();
+    assert_eq!(preview.status, PreviewStatus::Unsupported);
+    assert!(preview.media_type.is_none() && !preview.html && !preview.pdf);
+    let scope = preview.text.unwrap();
+    assert!(!scope.partial);
+    assert_eq!(scope.total_bytes, coloured.len() as u64);
+    assert_eq!(scope.shown_bytes, scope.total_bytes);
+    // The excerpt for other callers is readable now too, without the escapes.
+    let excerpt = preview.text_excerpt.unwrap();
+    assert!(excerpt.text.starts_with("FAIL  checkout"));
+    let text = workspace.attachment_text(&identity, &log.id).unwrap();
+    assert_eq!(
+        text,
+        "FAIL  checkout  timeout after 30s\nnext line\n".repeat(3)
+    );
+    assert!(workspace.attachment_text("other", &log.id).is_err());
+
+    // Binary and HTML files have no text read.
+    for (name, bytes) in [
+        ("blob.bin", b"PK\x03\x04\0\x01".to_vec()),
+        ("report.html", b"<p>hi</p>".to_vec()),
+    ] {
+        let file = workspace
+            .import_attachment_bytes(name, name, &bytes, |_, _| true)
+            .unwrap();
+        assert!(
+            workspace
+                .attachment_preview(&identity, &file.id)
+                .unwrap()
+                .text
+                .is_none()
+        );
+    }
+}
+
+#[test]
+fn a_log_over_the_limit_shows_its_last_five_megabytes_from_a_line_start() {
+    let dir = tempfile::tempdir().unwrap();
+    let mut workspace = Workspace::open(dir.path().join("workspace.sqlite3")).unwrap();
+    let identity = workspace.attachment_workspace_id().unwrap();
+    let line = "2026-11-26 12:00:00 INFO request done in 12ms\n";
+    let mut big = line
+        .repeat(TEXT_WHOLE_BYTES as usize / line.len() + 2)
+        .into_bytes();
+    big.extend_from_slice(b"the last line\n");
+    let file = workspace
+        .import_attachment_bytes("big", "big.log", &big, |_, _| true)
+        .unwrap();
+    let scope = workspace
+        .attachment_preview(&identity, &file.id)
+        .unwrap()
+        .text
+        .unwrap();
+    assert!(scope.partial);
+    assert_eq!(scope.total_bytes, big.len() as u64);
+    assert_eq!(scope.shown_bytes, TEXT_TAIL_BYTES);
+    let text = workspace.attachment_text(&identity, &file.id).unwrap();
+    assert!(text.len() as u64 <= TEXT_TAIL_BYTES);
+    assert!(text.len() as u64 > TEXT_TAIL_BYTES - 200);
+    assert!(text.starts_with("2026-11-26 12:00:00 INFO request done"));
+    assert!(text.ends_with("the last line\n"));
+    // The tail keeps the file's own numbering: its first line follows the dropped ones.
+    let newlines = |bytes: &[u8]| bytes.iter().filter(|b| **b == b'\n').count() as u64;
+    assert_eq!(
+        workspace
+            .attachment_text_first_line(&identity, &file.id)
+            .unwrap(),
+        newlines(&big) - newlines(text.as_bytes()) + 1
+    );
+    assert!(
+        workspace
+            .attachment_text_first_line("other", &file.id)
+            .is_err()
+    );
+
+    // Exactly at the limit it is still whole.
+    let at_limit = "x\n".repeat(TEXT_WHOLE_BYTES as usize / 2);
+    let file = workspace
+        .import_attachment_bytes("edge", "edge.txt", at_limit.as_bytes(), |_, _| true)
+        .unwrap();
+    assert!(
+        !workspace
+            .attachment_preview(&identity, &file.id)
+            .unwrap()
+            .text
+            .unwrap()
+            .partial
+    );
+    assert_eq!(
+        workspace
+            .attachment_text(&identity, &file.id)
+            .unwrap()
+            .len(),
+        at_limit.len()
+    );
+    // A whole file starts at line 1.
+    assert_eq!(
+        workspace
+            .attachment_text_first_line(&identity, &file.id)
+            .unwrap(),
+        1
+    );
+}
+
+#[test]
+fn a_log_over_the_media_limit_still_shows_its_end_as_text() {
+    let dir = tempfile::tempdir().unwrap();
+    let mut workspace = Workspace::open(dir.path().join("workspace.sqlite3")).unwrap();
+    let identity = workspace.attachment_workspace_id().unwrap();
+    // The upload limit is a setting: a larger one lets a log past the media limit in.
+    workspace
+        .set_attachment_upload_limit(MEDIA_LIMIT as u64 * 2)
+        .unwrap();
+    let line = "2026-11-26 12:00:00 INFO request done in 12ms\n";
+    let mut big = line.repeat(MEDIA_LIMIT / line.len() + 2).into_bytes();
+    big.extend_from_slice(b"the last line\n");
+    let file = workspace
+        .import_attachment_bytes("huge", "huge.log", &big, |_, _| true)
+        .unwrap();
+    let preview = workspace.attachment_preview(&identity, &file.id).unwrap();
+    assert_eq!(preview.status, PreviewStatus::Unsupported);
+    assert!(preview.message.is_none() && preview.media_type.is_none());
+    let scope = preview.text.unwrap();
+    assert!(scope.partial);
+    assert_eq!(scope.total_bytes, big.len() as u64);
+    let text = workspace.attachment_text(&identity, &file.id).unwrap();
+    assert!(text.ends_with("the last line\n"));
+    // It is still not media: that read stays refused.
+    assert!(workspace.attachment_media(&identity, &file.id).is_err());
+}
+
+#[test]
+fn an_unfinished_escape_sequence_never_swallows_the_lines_after_it() {
+    let dir = tempfile::tempdir().unwrap();
+    let mut workspace = Workspace::open(dir.path().join("workspace.sqlite3")).unwrap();
+    let identity = workspace.attachment_workspace_id().unwrap();
+    // A title that never ends, a colour code with no final byte, a charset code cut off
+    // by a line break: each loses only itself.
+    let log = "one\n\u{1b}]0;a title nobody closed\ntwo\n\u{1b}[31;1\nthree\n\u{1b}(\nfour\n\u{1b}\nfive\n\u{1b}[32mgreen\u{1b}[0m\n";
+    let file = workspace
+        .import_attachment_bytes("cut", "cut.log", log.as_bytes(), |_, _| true)
+        .unwrap();
+    assert_eq!(
+        workspace.attachment_text(&identity, &file.id).unwrap(),
+        "one\n\ntwo\n\nthree\n\nfour\n\nfive\ngreen\n"
+    );
+    let excerpt = workspace
+        .attachment_preview(&identity, &file.id)
+        .unwrap()
+        .text_excerpt
+        .unwrap();
+    assert!(excerpt.text.contains("five"));
+}
+
+#[test]
+fn an_html_report_with_a_bad_byte_past_its_excerpt_stays_text() {
+    let dir = tempfile::tempdir().unwrap();
+    let mut workspace = Workspace::open(dir.path().join("workspace.sqlite3")).unwrap();
+    let identity = workspace.attachment_workspace_id().unwrap();
+    // Valid UTF-8 for the whole excerpt, then an invalid byte past it.
+    let mut report = b"<p>".to_vec();
+    report.resize(TEXT_EXCERPT_BYTES + 16 * 1024, b'a');
+    report.push(0xff);
+    let file = workspace
+        .import_attachment_bytes("late", "late.html", &report, |_, _| true)
+        .unwrap();
+    let preview = workspace.attachment_preview(&identity, &file.id).unwrap();
+    assert!(!preview.html);
+    assert!(preview.text_excerpt.is_some() && preview.text.is_some());
+    assert!(workspace.attachment_html(&identity, &file.id).is_err());
+}
+
+#[test]
+fn a_log_that_quotes_the_pdf_token_is_text_not_a_pdf() {
+    let dir = tempfile::tempdir().unwrap();
+    let mut workspace = Workspace::open(dir.path().join("workspace.sqlite3")).unwrap();
+    let identity = workspace.attachment_workspace_id().unwrap();
+    let file = workspace
+        .import_attachment_bytes("log", "build.log", b"missing %PDF- marker\n", |_, _| true)
+        .unwrap();
+    let preview = workspace.attachment_preview(&identity, &file.id).unwrap();
+    assert!(!preview.pdf && preview.text.is_some());
+}
+
+#[test]
+fn a_text_read_of_a_missing_stored_copy_reports_the_storage_not_a_format() {
+    let dir = tempfile::tempdir().unwrap();
+    let mut workspace = Workspace::open(dir.path().join("workspace.sqlite3")).unwrap();
+    let identity = workspace.attachment_workspace_id().unwrap();
+    let file = workspace
+        .import_attachment_bytes("log", "run.log", b"hello\n", |_, _| true)
+        .unwrap();
+    let binary = workspace
+        .import_attachment_bytes("bin", "bin.dat", &[0u8; 64], |_, _| true)
+        .unwrap();
+    std::fs::remove_file(
+        dir.path()
+            .join("workspace.sqlite3.attachments")
+            .join(&file.locator),
+    )
+    .unwrap();
+    for failure in [
+        workspace
+            .attachment_text(&identity, &file.id)
+            .unwrap_err()
+            .to_string(),
+        workspace
+            .attachment_text_first_line(&identity, &file.id)
+            .unwrap_err()
+            .to_string(),
+    ] {
+        assert!(!failure.contains("not plain text"), "{failure}");
+    }
+    // A readable file that is not text still gets the format error.
+    let failure = workspace
+        .attachment_text(&identity, &binary.id)
+        .unwrap_err()
+        .to_string();
+    assert!(failure.contains("not plain text"), "{failure}");
 }

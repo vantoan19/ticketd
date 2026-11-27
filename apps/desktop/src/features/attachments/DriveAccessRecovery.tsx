@@ -1,5 +1,4 @@
 import { useEffect, useRef, useState } from "react";
-import { File } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { FailureAlert } from "@/components/ui/failure-alert";
 import {
@@ -13,6 +12,8 @@ import {
   type FailureDescription,
 } from "@/lib/api/describe-failure";
 import { DriveSetupNotice } from "./DriveSetupNotice";
+import { PreviewState } from "./PreviewState";
+import type { FileFamily } from "./file-words";
 
 const headings = {
   unconfigured: "Google Drive setup is required",
@@ -34,11 +35,16 @@ export function DriveAccessRecovery({
   onRefresh,
   uploadedCopy = false,
   copy = null,
+  family = "file",
+  label = "DRIVE ↗",
 }: {
   id: string;
   onRefresh: () => void;
   uploadedCopy?: boolean;
   copy?: DriveCopyInspection | null;
+  /** The tile's glyph and word ("SHEET ↗"). */
+  family?: FileFamily;
+  label?: string;
 }) {
   const [access, setAccess] = useState<DriveAccess | null>(null);
   const [configuration, setConfiguration] = useState<DriveConfiguration | null>(
@@ -135,94 +141,112 @@ export function DriveAccessRecovery({
   }
 
   const kind = access?.failure?.kind;
+  const title = copy
+    ? {
+        changed: "This copy has changed in Drive",
+        unchanged: "Uploaded copy · Metadata matches upload",
+        unknown: "Original-upload comparison unknown",
+        unsupported: "Original-byte download unsupported",
+        unavailable: "Uploaded copy unavailable",
+      }[copy.status]
+    : kind
+      ? headings[kind]
+      : access
+        ? uploadedCopy
+          ? "Uploaded copy in Google Drive"
+          : "Current source in Google Drive"
+        : "Checking Drive access…";
+  const sentence =
+    copy?.message ??
+    access?.failure?.message ??
+    (uploadedCopy
+      ? "Uploaded copy · Content can change in Drive. Export verifies original bytes; remote content is not cached automatically."
+      : "Current source content · No local snapshot. Open this file in Drive; its content can change independently. Remote bytes are not cached automatically.");
   return (
-    <div className="attachment-preview-fallback" aria-busy={busy}>
-      <File aria-hidden="true" />
-      <h3>
-        {copy
-          ? {
-              changed: "This copy has changed in Drive",
-              unchanged: "Uploaded copy · Metadata matches upload",
-              unknown: "Original-upload comparison unknown",
-              unsupported: "Original-byte download unsupported",
-              unavailable: "Uploaded copy unavailable",
-            }[copy.status]
-          : kind
-            ? headings[kind]
-            : access
-              ? uploadedCopy
-                ? "Uploaded copy in Google Drive"
-                : "Current source in Google Drive"
-              : "Checking Drive access…"}
-      </h3>
-      <p role="status">
-        {copy?.message ??
-          access?.failure?.message ??
-          (uploadedCopy
-            ? "Uploaded copy · Content can change in Drive. Export verifies original bytes; remote content is not cached automatically."
-            : "Current source content · No local snapshot. Open this file in Drive; its content can change independently. Remote bytes are not cached automatically.")}
-      </p>
-      {(kind === "permission_denied" || kind === "inaccessible_or_missing") && (
+    <PreviewState
+      family={family}
+      label={label}
+      title={title}
+      sentence={sentence}
+      busy={busy}
+      role="status"
+      action={
         <>
-          <p>
-            Open in Drive and request access from its owner, then retry. ticketd
-            does not change sharing.
-          </p>
+          {(kind === "reauthorize" ||
+            kind === "select_file" ||
+            kind === "inaccessible_or_missing") && (
+            <Button
+              size="sm"
+              disabled={busy || !configuration?.configured}
+              onClick={() => void check(true)}
+            >
+              {kind === "reauthorize" ? "Reconnect" : "Authorize file"}
+            </Button>
+          )}
+          {(kind === "permission_denied" ||
+            kind === "inaccessible_or_missing") && (
+            <Button
+              variant="outline"
+              size="sm"
+              disabled={busy}
+              onClick={() => void requestAccess()}
+            >
+              Request access in Drive
+            </Button>
+          )}
           <Button
             variant="outline"
+            size="sm"
             disabled={busy}
-            onClick={() => void requestAccess()}
+            onClick={() => void check(false)}
           >
-            Request access in Drive
+            {kind || uploadedCopy ? "Retry" : "Refresh details"}
           </Button>
+          {selecting && (
+            <Button
+              variant="ghost"
+              size="sm"
+              onClick={() => {
+                const currentGeneration = generation.current;
+                const operationId = operation.current;
+                if (operationId)
+                  void attachments
+                    .cancelDriveSelection(operationId)
+                    .catch((reason: unknown) => {
+                      if (generation.current === currentGeneration)
+                        setError(
+                          describeFailure(reason, "cancel the selection"),
+                        );
+                    });
+              }}
+            >
+              Cancel selection
+            </Button>
+          )}
         </>
-      )}
-      {kind === "select_file" && (
-        <p>
-          Account access and ticketd authorization are separate. Select only
-          this original file in the Drive Picker.
-        </p>
-      )}
-      {(kind === "reauthorize" ||
-        kind === "select_file" ||
-        kind === "inaccessible_or_missing") && (
-        <Button
-          disabled={busy || !configuration?.configured}
-          onClick={() => void check(true)}
-        >
-          {kind === "reauthorize" ? "Reconnect" : "Authorize file"}
-        </Button>
-      )}
-      {configuration && <DriveSetupNotice configuration={configuration} />}
-      <Button
-        variant="outline"
-        disabled={busy}
-        onClick={() => void check(false)}
-      >
-        {kind || uploadedCopy ? "Retry" : "Refresh details"}
-      </Button>
-      {selecting && (
-        <Button
-          variant="ghost"
-          onClick={() => {
-            const currentGeneration = generation.current;
-            const operationId = operation.current;
-            if (operationId)
-              void attachments
-                .cancelDriveSelection(operationId)
-                .catch((reason: unknown) => {
-                  if (generation.current === currentGeneration)
-                    setError(describeFailure(reason, "cancel the selection"));
-                });
-          }}
-        >
-          Cancel selection
-        </Button>
-      )}
-      <small className="attachment-hint">
-        Last-known details and authored references are preserved.
-      </small>
-      {error && <FailureAlert size="compact" failure={error} />}
-    </div>
+      }
+      extra={
+        <>
+          {(kind === "permission_denied" ||
+            kind === "inaccessible_or_missing") && (
+            <p className="attachment-hint">
+              Open in Drive and request access from its owner, then retry.
+              ticketd does not change sharing.
+            </p>
+          )}
+          {kind === "select_file" && (
+            <p className="attachment-hint">
+              Account access and ticketd authorization are separate. Select only
+              this original file in the Drive Picker.
+            </p>
+          )}
+          {configuration && <DriveSetupNotice configuration={configuration} />}
+          <small className="attachment-hint">
+            Last-known details and authored references are preserved.
+          </small>
+          {error && <FailureAlert size="compact" failure={error} />}
+        </>
+      }
+    />
   );
 }

@@ -4,6 +4,42 @@ import { useWorkspaceChange } from "@/lib/workspace-change";
 
 const POLL_MS = 2000;
 
+type Waiting = {
+  ids: string[];
+  resolve: (items: Availability[]) => void;
+  reject: (reason: unknown) => void;
+};
+let batch: Waiting[] | null = null;
+
+/**
+ * Reads availability for `ids`, joined with every other read asked for in the same turn
+ * (each saved update's card asks on a Workspace change, all at once): one call to the
+ * host answers them all, and each asker gets only the files it named.
+ */
+function readAvailability(ids: string[]): Promise<Availability[]> {
+  return new Promise((resolve, reject) => {
+    if (!batch) {
+      const waiting: Waiting[] = (batch = []);
+      void Promise.resolve().then(() => {
+        batch = null;
+        const all = [...new Set(waiting.flatMap((item) => item.ids))];
+        syncReview.availability(all).then(
+          (items) => {
+            for (const item of waiting)
+              item.resolve(
+                items.filter((entry) => item.ids.includes(entry.id)),
+              );
+          },
+          (reason: unknown) => {
+            for (const item of waiting) item.reject(reason);
+          },
+        );
+      });
+    }
+    batch.push({ ids, resolve, reject });
+  });
+}
+
 /**
  * Where a managed Attachment's file is, in the app's storage words (set
  * CO-16): "On this computer", or "Not downloaded" while its bytes are only in
@@ -42,7 +78,7 @@ export function useAvailability(ids: string[]): {
     const again = () => {
       timer = window.setTimeout(() => setTick((v) => v + 1), POLL_MS);
     };
-    syncReview.availability(key.split("\n")).then(
+    readAvailability(key.split("\n")).then(
       (next) => {
         if (!active) return;
         setFound(next);

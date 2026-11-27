@@ -2,14 +2,16 @@ import { useContext } from "react";
 import { FileText, MessageSquareText, Pencil, X } from "lucide-react";
 import { DocumentNavigation } from "@/features/documents/navigation";
 import { IconButton } from "@/components/ui/icon-button";
-import { FileRow } from "./FileRow";
+import { FileCard } from "@/features/attachments/FileCard";
+import { useNearViewport } from "@/features/attachments/use-near-viewport";
+import { DocumentPage } from "./DocumentPage";
 import type { DocumentLink } from "@/features/documents/api";
 
 /**
- * A Document in the rail's Files: its title on one line, a caption naming
- * where it comes from ("Linked", "In the description", "In an update"), and
- * one action revealed on hover: Remove, Edit the description, or Go to the
- * update that mentions it.
+ * A Document in the rail's Files: the same card as a file, its title for the
+ * name, its first page as paper in the frame and a caption naming where it comes from ("Document · Linked", "Document ·
+ * In the description"), with one action revealed on hover: Remove, Edit the
+ * description, or Go to the update that mentions it.
  */
 export function DocumentRow({
   link,
@@ -25,6 +27,7 @@ export function DocumentRow({
   ticketReference: string;
 }) {
   const openDocument = useContext(DocumentNavigation);
+  const [ref, near] = useNearViewport<HTMLDivElement>();
   const origin = link.explicit
     ? "Linked"
     : link.activity_id
@@ -66,12 +69,23 @@ export function DocumentRow({
     </IconButton>
   );
   return (
-    <FileRow
-      icon={<FileText aria-hidden="true" />}
-      name={link.target_label}
-      caption={caption}
-      onOpen={() => openDocument?.(link.target_id)}
-      action={action}
-    />
+    <li className="file-card-item">
+      <FileCard
+        ref={ref}
+        glyph={<FileText aria-hidden="true" />}
+        label="DOC"
+        name={link.target_label}
+        caption={`Document · ${caption}`}
+        still={
+          <DocumentPage
+            id={link.target_id}
+            title={link.target_label}
+            wanted={near}
+          />
+        }
+        onOpen={() => openDocument?.(link.target_id)}
+        action={action}
+      />
+    </li>
   );
 }

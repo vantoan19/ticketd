@@ -1,4 +1,4 @@
-import { useRef, useState, type ReactNode } from "react";
+import { useLayoutEffect, useRef, useState, type ReactNode } from "react";
 import { createPortal } from "react-dom";
 import { Button } from "@/components/ui/button";
 import { FileText, Paperclip, Plus } from "lucide-react";
@@ -20,11 +20,12 @@ import type { Attachment } from "@/lib/api/attachments";
 import { useOpenTicket } from "./open-ticket";
 import { DocumentPicker } from "./DocumentPicker";
 import { RailRow, RailSection } from "./RailSection";
-import { AttachmentDialogs, AttachmentRows } from "./TicketAttachments";
+import { FileGrid } from "@/features/attachments/FileCard";
+import { AttachmentDialogs } from "./TicketAttachments";
+import { useAttachmentItems } from "./use-attachment-items";
 import { useTicketAttachments } from "./use-ticket-attachments";
 import { DocumentRow } from "./TicketDocuments";
 import { useTicketDocuments } from "./use-ticket-documents";
-import "./ticket-files.css";
 
 /**
  * The rail's Files (S12): the ticket's Documents and attached files in one
@@ -47,6 +48,7 @@ export function TicketFiles({
   const [picker, setPicker] = useState(false);
   const [choosing, setChoosing] = useState(false);
   const [selected, setSelected] = useState<Attachment | null>(null);
+  const section = useRef<HTMLDivElement>(null);
   // Choosing "Document…" closes the menu and opens the picker in its place;
   // the menu must not hand focus back to its trigger on the way out.
   const toPicker = useRef(false);
@@ -54,6 +56,19 @@ export function TicketFiles({
   const loaded = files.found !== null && docs.links !== null;
   const empty = loaded && !files.found?.length && !docs.links?.length;
   const failed = files.loadFailure ?? docs.loadFailure;
+  // With nothing attached the section is hidden and its File button sits in the header.
+  const hidden = empty && Boolean(emptyTarget);
+  useLayoutEffect(() => {
+    // Focus that was on the section's heading would be lost with it.
+    if (hidden && section.current?.contains(document.activeElement))
+      emptyTarget?.querySelector<HTMLElement>("button")?.focus({
+        preventScroll: true,
+      });
+  }, [hidden, emptyTarget]);
+  const fileItems = useAttachmentItems(files.found ?? [], (file) => {
+    files.setError(null);
+    setSelected(file);
+  });
   if (readOnly && empty) return null;
   const menu = (trigger: ReactNode) => (
     <Popover open={choosing} onOpenChange={setChoosing}>
@@ -119,7 +134,7 @@ export function TicketFiles({
           ),
           emptyTarget,
         )}
-      <div hidden={empty && Boolean(emptyTarget)}>
+      <div ref={section} hidden={hidden}>
         <RailSection
           label="Files"
           count={
@@ -141,7 +156,7 @@ export function TicketFiles({
             />
           )}
           {!empty && (
-            <ul className="rail-files" aria-label="Files">
+            <FileGrid label="Files">
               {(docs.links ?? []).map((link) => (
                 <DocumentRow
                   key={link.target_id}
@@ -152,14 +167,8 @@ export function TicketFiles({
                   onOpenUpdate={onOpenUpdate}
                 />
               ))}
-              <AttachmentRows
-                files={files.found ?? []}
-                onOpen={(file) => {
-                  files.setError(null);
-                  setSelected(file);
-                }}
-              />
-            </ul>
+              {fileItems}
+            </FileGrid>
           )}
           {empty &&
             !emptyTarget &&
@@ -180,6 +189,18 @@ export function TicketFiles({
             onPickerChange={setPicker}
             selected={selected}
             onSelected={setSelected}
+            fallbackFocus={() => {
+              // The file that opened the viewer was detached. With nothing left the
+              // section is hidden, and the File button in the header is the place.
+              if (section.current?.hidden)
+                return (
+                  emptyTarget?.querySelector<HTMLElement>("button") ?? null
+                );
+              // Otherwise land on the heading.
+              const heading = section.current?.querySelector<HTMLElement>("h3");
+              heading?.setAttribute("tabindex", "-1");
+              return heading ?? null;
+            }}
           />
         </RailSection>
       </div>

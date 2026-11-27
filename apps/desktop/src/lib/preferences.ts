@@ -17,6 +17,10 @@ const preferencesSchema = z.object({
   chat: z.boolean().catch(false),
   /** Settings > Attention > Chat notifications. On by default; it takes effect once notifications are allowed. */
   notifyChats: z.boolean().catch(true),
+  /** The viewer's Details panel (I, or "…" > Show details), kept between files. */
+  attachmentDetails: z.boolean().catch(false),
+  /** The log stage's Wrap lines, kept between files. On by default. */
+  attachmentWrap: z.boolean().catch(true),
   /** What Documents opens on: the work in progress, or the Documents opened lately. */
   documentsView: z.enum(["current", "recent"]).catch("current"),
   /** The order of Recent. */
@@ -46,6 +50,8 @@ const DEFAULTS: Preferences = {
   followCreated: true,
   chat: false,
   notifyChats: true,
+  attachmentDetails: false,
+  attachmentWrap: true,
   documentsView: "current",
   documentsSort: "opened",
   documentGroups: {},
