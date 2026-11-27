@@ -592,3 +592,48 @@ fn a_files_folder_is_checked_against_sync_again_when_it_is_saved() {
         CONNECTION
     );
 }
+
+/// Another handle on the same Workspace file switching Google account while the Uploads
+/// folder is being found: the folder belongs to the account it was found with.
+struct SwitchesAccountDuringLookup<'a> {
+    other_handle: std::cell::RefCell<&'a mut Workspace>,
+}
+
+impl ticketd_core::drive::SyncUploadsFolder for SwitchesAccountDuringLookup<'_> {
+    fn uploads_folder(
+        &self,
+        _: &str,
+    ) -> Result<ticketd_core::drive::DriveFolder, ticketd_core::sync::remote::RemoteError> {
+        self.other_handle
+            .borrow_mut()
+            .switch_google_account(OTHER, "other@example.com")
+            .unwrap();
+        Ok(ticketd_core::drive::DriveFolder {
+            id: "uploads-folder".into(),
+            name: "Uploads".into(),
+            can_add_children: true,
+        })
+    }
+}
+
+#[test]
+fn the_uploads_folder_is_not_saved_for_an_account_sync_left_while_it_was_looked_up() {
+    let sim = DriveSim::default();
+    let (directory, mut a, _) = synced(&sim);
+    let mut other_handle = Workspace::open(directory.path().join("Desk A")).unwrap();
+    let provider = SwitchesAccountDuringLookup {
+        other_handle: std::cell::RefCell::new(&mut other_handle),
+    };
+
+    let error = a.use_sync_uploads_folder(&provider).unwrap_err();
+
+    assert!(
+        error.to_string().contains("another Google account"),
+        "{error}"
+    );
+    assert_eq!(
+        a.attachment_upload_destination().unwrap(),
+        AttachmentUploadDestination::Local
+    );
+    assert_eq!(a.google_sign_in().unwrap().unwrap().connection_id, OTHER);
+}
