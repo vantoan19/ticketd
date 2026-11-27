@@ -294,6 +294,9 @@ pub enum Item {
         /// For each net change, as `gone` is for `changes`.
         net_gone: Vec<Option<&'static str>>,
         turn_id: Option<String>,
+        /// The sub-agent whose run's changes these are; absent for the main agent's.
+        #[serde(skip_serializing_if = "Option::is_none")]
+        owner: Option<String>,
     },
     /// When a turn started and ended, and how. It has no row of its own: the view folds
     /// the turn's items under one line that says this.
@@ -383,6 +386,9 @@ pub enum Item {
         ended_at: Option<i64>,
         text: Option<String>,
         heading: Option<String>,
+        /// The sub-agent whose reasoning it is; absent for the main agent's.
+        #[serde(skip_serializing_if = "Option::is_none")]
+        owner: Option<String>,
     },
     /// A turn's plan, as the harness last reported it.
     Plan {
@@ -400,6 +406,9 @@ pub enum Item {
         turn_id: String,
         state: &'static str,
         files: Vec<FileView>,
+        /// The sub-agent whose run's files these are; absent for the main agent's.
+        #[serde(skip_serializing_if = "Option::is_none")]
+        owner: Option<String>,
     },
 }
 
@@ -793,6 +802,37 @@ impl Tracker {
                 && tool.state == ChatToolState::Running)
     }
 
+    /// What a sub-agent's run did to ticketd's records, netted by the Chat host's rule:
+    /// the changes of every call of that run noted so far, with `changes` for `tool`.
+    fn sub_agent_net(
+        &self,
+        tool: &ChatTool,
+        changes: &[ChatAgentChange],
+        native_id: &str,
+        run: Option<&ChatSubAgentRun>,
+    ) -> Vec<ChatAgentChange> {
+        let mut calls: Vec<&ChatTool> = self
+            .sub_agent_tools
+            .values()
+            .filter(|kept| {
+                kept.id != tool.id
+                    && kept.owner == owner_of(native_id)
+                    && self
+                        .run_at(native_id, kept.position)
+                        .map(|run| run.id.as_str())
+                        == run.map(|run| run.id.as_str())
+            })
+            .collect();
+        calls.sort_by_key(|call| call.position);
+        let mut all: Vec<ChatAgentChange> = calls
+            .into_iter()
+            .filter_map(agent_changes)
+            .flatten()
+            .collect();
+        all.extend(changes.iter().cloned());
+        attention::net_changes(&all)
+    }
+
     /// The Steps a sub-agent ran, to read again when its run changes.
     pub fn sub_agent_steps(&self, native_id: &str) -> Vec<ChatItem> {
         let mut tools: Vec<&ChatTool> = self
@@ -850,6 +890,11 @@ impl Tracker {
                 {
                     *self.steers.entry(turn_id).or_default() += 1;
                 }
+            }
+            // A sub-agent's words are its own: they are not the Chat's last response, and
+            // change nothing the turn's records say.
+            ChatItem::Message(message) if message.owner != ChatOwner::Main => {
+                self.touch(Some(message.created_at.as_str()));
             }
             ChatItem::Message(message) => {
                 self.touch(Some(message.created_at.as_str()));
@@ -1059,6 +1104,7 @@ impl Tracker {
             attachments: Vec::new(),
             complete: false,
             turn_id: Some(turn_id.to_owned()),
+            owner: ChatOwner::Main,
             queued: false,
             editing: false,
             requires_link_context: false,
@@ -1693,6 +1739,24 @@ pub fn item(
                 .last()
                 .is_some_and(|attempt| attempt.intent == ChatSubmissionIntent::Steer),
         },
+        // A sub-agent's message is one of its run's, and complete when it was said.
+        ChatItem::Message(message) if let ChatOwner::SubAgent { native_id } = &message.owner => {
+            Item::Response {
+                id: message.id.clone(),
+                at: message.created_at.clone(),
+                text: message.text.clone(),
+                state: if message.complete {
+                    "complete"
+                } else {
+                    "partial"
+                },
+                turn_id: Some(run_id(
+                    native_id,
+                    tracker.run_at(native_id, message.position),
+                )),
+                owner: Some(native_id.clone()),
+            }
+        }
         ChatItem::Message(message) => {
             let active = chat.active_turn.as_ref().map(|turn| &turn.id);
             Item::Response {
@@ -1743,14 +1807,25 @@ pub fn item(
         ChatItem::Tool(tool) if let ChatOwner::SubAgent { native_id } = &tool.owner => {
             let run = tracker.run_at(native_id, tool.position);
             let running = run.is_some_and(|run| run.state == ChatSubAgentState::Running);
-            // What the sub-agent said: its words, not a Step.
-            if tool.name == ticketd_chat_host::records::MESSAGE_RECORD_NAME {
-                return Some(Item::Response {
+            let this_run = run_id(native_id, run);
+            // Its reasoning and files, and the records it changed, are its run's report.
+            if let Some(report) =
+                chat_reports::sub_agent_report(tool, this_run.clone(), running, chat, &|path| {
+                    shown_path(path, &chat.execution_folder, home_folder().as_deref())
+                })
+            {
+                return Some(report_item(tool, report, Some(native_id.clone())));
+            }
+            if let Some(changes) = agent_changes(tool) {
+                let net = tracker.sub_agent_net(tool, &changes, native_id, run);
+                return Some(Item::Records {
                     id: tool.id.clone(),
-                    at: tool.started_at.clone().unwrap_or_default(),
-                    text: tool.output.clone().unwrap_or_default(),
-                    state: "complete",
-                    turn_id: Some(run_id(native_id, run)),
+                    at: String::new(),
+                    gone: vec![None; changes.len()],
+                    net_gone: vec![None; net.len()],
+                    net,
+                    changes,
+                    turn_id: Some(this_run),
                     owner: Some(native_id.clone()),
                 });
             }
@@ -1775,7 +1850,7 @@ pub fn item(
                 shown_path(path, &chat.execution_folder, home_folder().as_deref())
             }) =>
         {
-            report_item(tool, report)
+            report_item(tool, report, None)
         }
         ChatItem::Tool(tool) if let Some(changes) = agent_changes(tool) => {
             let net = tracker.turn_net(tool, &changes);
@@ -1787,6 +1862,7 @@ pub fn item(
                 net,
                 changes,
                 turn_id: tool.turn_id.clone(),
+                owner: None,
             }
         }
         ChatItem::Tool(tool) => Item::Steps {
@@ -1828,7 +1904,7 @@ pub fn item(
     })
 }
 
-fn report_item(tool: &ChatTool, report: Report) -> Item {
+fn report_item(tool: &ChatTool, report: Report, owner: Option<String>) -> Item {
     let (id, at) = (tool.id.clone(), String::new());
     match report {
         Report::Reasoning {
@@ -1844,6 +1920,7 @@ fn report_item(tool: &ChatTool, report: Report) -> Item {
             ended_at: record.ended_at,
             text: record.text,
             heading: record.heading,
+            owner,
         },
         Report::Plan {
             turn_id,
@@ -1868,6 +1945,7 @@ fn report_item(tool: &ChatTool, report: Report) -> Item {
             turn_id,
             state,
             files,
+            owner,
         },
     }
 }
@@ -4212,6 +4290,7 @@ mod tests {
             attachments: Vec::new(),
             complete: true,
             turn_id: Some("t1".to_owned()),
+            owner: ChatOwner::Main,
             queued: false,
             editing: false,
             requires_link_context: false,
@@ -4318,6 +4397,7 @@ mod tests {
             attachments: Vec::new(),
             complete: true,
             turn_id: Some("turn".to_owned()),
+            owner: ChatOwner::Main,
             queued: false,
             editing: false,
             requires_link_context: false,
@@ -4706,6 +4786,142 @@ mod tests {
         assert_eq!(view.kind, None);
     }
 
+    fn said_by(native: &str, id: &str, position: i64, text: &str) -> ticketd_core::ChatMessage {
+        ticketd_core::ChatMessage {
+            id: id.to_owned(),
+            position,
+            role: ticketd_core::ChatRole::Assistant,
+            text: text.to_owned(),
+            attachments: Vec::new(),
+            complete: true,
+            turn_id: Some("turn".to_owned()),
+            owner: super::owner_of(native),
+            queued: false,
+            editing: false,
+            requires_link_context: false,
+            attempts: Vec::new(),
+            created_at: "2026-11-27T10:00:30.000Z".to_owned(),
+        }
+    }
+
+    fn report_by(native: &str, id: &str, position: i64, name: &str, input: &str) -> ChatTool {
+        ChatTool {
+            name: name.to_owned(),
+            input: input.to_owned(),
+            ..owned_by(native, id, position, ChatToolState::Completed)
+        }
+    }
+
+    #[test]
+    fn a_sub_agents_words_reasoning_and_files_are_its_runs_and_not_the_main_agents() {
+        let chat = claude_chat(Some("turn"));
+        let record = sub_agent_record(
+            "a",
+            None,
+            json!({"description": "Check the limit"}),
+            vec![
+                sub_agent_run("a", 1, 10, ChatSubAgentState::Completed),
+                sub_agent_run("a", 2, 30, ChatSubAgentState::Running),
+            ],
+        );
+        let mut tracker = Tracker::from_snapshot(&[], &[record]);
+        let words = ChatItem::Message(said_by("a", "m1", 12, "Looking at the limiter."));
+        tracker.note(&words);
+        let later = ChatItem::Message(said_by("a", "m2", 32, "Resumed."));
+        tracker.note(&later);
+        // Each belongs to the run it was said in, as the sub-agent's own, complete.
+        let first = view_of(&words, &tracker, &chat);
+        assert_eq!(first.len(), 1);
+        assert_eq!(first[0]["kind"], "response");
+        assert_eq!(first[0]["owner"], "a");
+        assert_eq!(first[0]["turn_id"], "a:run-1");
+        assert_eq!(first[0]["state"], "complete");
+        assert_eq!(view_of(&later, &tracker, &chat)[0]["turn_id"], "a:run-2");
+        // The main agent's last response is its own.
+        assert_eq!(tracker.last_response, None);
+
+        // Reasoning runs while its run does; the files of a run that ended have ended.
+        let thinking = ChatItem::Tool(ChatTool {
+            state: ChatToolState::Running,
+            ..report_by(
+                "a",
+                "r1",
+                32,
+                "ticketd reasoning",
+                r#"{"running":true,"started_at":1,"ended_at":null,"text":"Check the tests.","heading":null}"#,
+            )
+        });
+        tracker.note(&thinking);
+        let shown = view_of(&thinking, &tracker, &chat);
+        assert_eq!(
+            (
+                shown[0]["kind"].as_str(),
+                shown[0]["state"].as_str(),
+                shown[0]["owner"].as_str(),
+                shown[0]["turn_id"].as_str()
+            ),
+            (
+                Some("reasoning"),
+                Some("running"),
+                Some("a"),
+                Some("a:run-2")
+            )
+        );
+        let files = ChatItem::Tool(report_by(
+            "a",
+            "f1",
+            14,
+            "ticketd files",
+            r#"{"files":[{"path":"/work/limiter/note.txt","kind":"added","from":null,"added_lines":1,"removed_lines":0,"confirmed":true}]}"#,
+        ));
+        tracker.note(&files);
+        let shown = view_of(&files, &tracker, &chat);
+        assert_eq!(
+            (
+                shown[0]["kind"].as_str(),
+                shown[0]["state"].as_str(),
+                shown[0]["turn_id"].as_str()
+            ),
+            (Some("files"), Some("ended"), Some("a:run-1"))
+        );
+        assert_eq!(shown[0]["files"][0]["path"], "note.txt");
+        assert_eq!(shown[0]["files"][0]["open_path"], "/work/limiter/note.txt");
+        assert_eq!(tracker.files_changed(), None, "not the turn's files");
+    }
+
+    #[test]
+    fn the_records_a_sub_agent_changed_are_its_runs_and_not_the_turns() {
+        let chat = claude_chat(None);
+        let record = sub_agent_record(
+            "a",
+            None,
+            json!({}),
+            vec![sub_agent_run("a", 1, 10, ChatSubAgentState::Completed)],
+        );
+        let mut tracker = Tracker::from_snapshot(&[], &[record]);
+        let status =
+            r#"[{"kind":"status","reference":"T-12","title":"Demo","from":"Todo","to":"Done"}]"#;
+        let changed = ChatItem::Tool(report_by(
+            "a",
+            "c1",
+            12,
+            ticketd_chat_host::AGENT_CHANGES_RECORD_NAME,
+            status,
+        ));
+        tracker.note(&changed);
+        let shown = view_of(&changed, &tracker, &chat);
+        assert_eq!(
+            (
+                shown[0]["kind"].as_str(),
+                shown[0]["owner"].as_str(),
+                shown[0]["turn_id"].as_str()
+            ),
+            (Some("records"), Some("a"), Some("a:run-1"))
+        );
+        assert_eq!(shown[0]["net"].as_array().map(Vec::len), Some(1));
+        assert!(tracker.first_change().is_none(), "not the turn's records");
+    }
+
     #[test]
     fn a_codex_sub_agent_has_its_name_and_model_and_no_brief() {
         let chat = chat(None);
@@ -4746,15 +4962,8 @@ mod tests {
                 sub_agent_run("a", 2, 20, ChatSubAgentState::Running),
             ],
         );
-        let said = |id: &str, position, text: &str| {
-            ChatItem::Tool(ChatTool {
-                name: ticketd_chat_host::records::MESSAGE_RECORD_NAME.to_owned(),
-                input: String::new(),
-                output: Some(text.to_owned()),
-                state: ChatToolState::Completed,
-                ..owned_by("a", id, position, ChatToolState::Completed)
-            })
-        };
+        let said =
+            |id: &str, position, text: &str| ChatItem::Message(said_by("a", id, position, text));
         let first = said("m1", 11, "The first findings.");
         let second = said("m2", 21, "More findings.");
         let tracker = Tracker::from_snapshot(
@@ -4776,7 +4985,7 @@ mod tests {
         // The main agent's last response and everything it keeps stay its own.
         let mut main = Tracker::default();
         main.note(&first);
-        assert_eq!(main.sub_agent_steps("a").len(), 1);
+        assert_eq!(main.last_response, None);
         assert!(main.dependents().is_empty());
     }
 
@@ -4787,6 +4996,14 @@ mod tests {
     const STORED: &str = concat!(
         env!("CARGO_MANIFEST_DIR"),
         "/../../../crates/ticketd-chat-host/tests/fixtures/claude/sub_agent_nested.stored.json"
+    );
+    const STORED_MESSAGES: &str = concat!(
+        env!("CARGO_MANIFEST_DIR"),
+        "/../../../crates/ticketd-chat-host/tests/fixtures/claude/sub_agent_messages.stored.json"
+    );
+    const VIEW_MESSAGES: &str = concat!(
+        env!("CARGO_MANIFEST_DIR"),
+        "/../src/features/chats/claude-sub-agent-messages-view.json"
     );
     const CODEX_STORED: &str = concat!(
         env!("CARGO_MANIFEST_DIR"),
@@ -4801,10 +5018,14 @@ mod tests {
         "/../src/features/chats/claude-sub-agent-view.json"
     );
 
-    #[test]
-    fn the_view_of_a_nested_sub_agent_is_the_contract_the_interface_parses() {
+    /// The view of the stored history at `stored`, compared with the file at `view` (or
+    /// written to it when asked). Returns what was built, to say what it holds.
+    fn pinned_view(
+        stored: &str,
+        view: &str,
+    ) -> (ticketd_core::ChatSnapshot, super::ChatState, Vec<Item>) {
         let stored: ticketd_core::ChatSnapshot =
-            serde_json::from_str(&std::fs::read_to_string(STORED).expect("the stored history"))
+            serde_json::from_str(&std::fs::read_to_string(stored).expect("the stored history"))
                 .expect("the stored history reads");
         let tracker = Tracker::from_snapshot(&stored.items, &stored.sub_agents);
         let live = ChatLive::idle();
@@ -4814,22 +5035,28 @@ mod tests {
             .iter()
             .flat_map(|record| items(record, &stored.chat, &live, None, &tracker))
             .collect();
-        let view = serde_json::to_string_pretty(&json!({
+        let built = serde_json::to_string_pretty(&json!({
             "chat": state,
             "items": rows,
             "cursor": 0,
         }))
         .unwrap();
         if std::env::var_os("TICKETD_UPDATE_VIEW_FIXTURES").is_some() {
-            std::fs::write(VIEW, format!("{view}\n")).expect("the view is written");
+            std::fs::write(view, format!("{built}\n")).expect("the view is written");
         }
-        let kept = std::fs::read_to_string(VIEW).expect(
+        let kept = std::fs::read_to_string(view).expect(
             "the view; regenerate it with TICKETD_UPDATE_VIEW_FIXTURES=1 cargo test -p ticketd-desktop --lib chat_view",
         );
         assert!(
-            kept.trim_end() == view,
-            "the view changed; if that is intended, regenerate {VIEW} with TICKETD_UPDATE_VIEW_FIXTURES=1"
+            kept.trim_end() == built,
+            "the view changed; if that is intended, regenerate {view} with TICKETD_UPDATE_VIEW_FIXTURES=1"
         );
+        (stored, state, rows)
+    }
+
+    #[test]
+    fn the_view_of_a_nested_sub_agent_is_the_contract_the_interface_parses() {
+        let (_, state, rows) = pinned_view(STORED, VIEW);
 
         // What the contract says of it, in words: the parent's turn holds one row and none of
         // the sub-agents' own Steps; each sub-agent owns its run's items.
@@ -4856,6 +5083,48 @@ mod tests {
             "a sub-agent's Read is in the main transcript"
         );
         assert_eq!(state.sub_agents.len(), 2);
+    }
+
+    #[test]
+    fn the_view_of_a_sub_agent_that_speaks_is_the_contract_the_interface_parses() {
+        let (_, state, rows) = pinned_view(STORED_MESSAGES, VIEW_MESSAGES);
+        let all: Vec<serde_json::Value> = rows
+            .iter()
+            .map(|row| serde_json::to_value(row).unwrap())
+            .collect();
+        let of = |kind: &str, owner: Option<&str>| -> Vec<&serde_json::Value> {
+            all.iter()
+                .filter(|row| row["kind"] == kind && row["owner"].as_str() == owner)
+                .collect()
+        };
+        // The sub-agent's run holds its reasoning, message, files and report, in order.
+        let own: Vec<&str> = all
+            .iter()
+            .filter(|row| row["owner"] == "task_a1")
+            .map(|row| row["kind"].as_str().unwrap())
+            .collect();
+        assert_eq!(
+            own,
+            [
+                "turn",
+                "reasoning",
+                "response",
+                "steps",
+                "steps",
+                "files",
+                "response"
+            ]
+        );
+        assert!(
+            all.iter()
+                .filter(|row| row["owner"] == "task_a1")
+                .all(|row| row["turn_id"] == "task_a1:run-1")
+        );
+        // The main agent's own: one reply and one files report, none of the sub-agent's.
+        assert_eq!(of("response", None).len(), 1);
+        assert_eq!(of("files", None).len(), 1);
+        assert_eq!(of("reasoning", None).len(), 0);
+        assert_eq!(state.sub_agents.len(), 1);
     }
 
     #[test]
