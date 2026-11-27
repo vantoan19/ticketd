@@ -30,7 +30,7 @@
     "stopping": false,
     "links": [],
     "queue": [],
-    "queue_paused": true,
+    "queue_paused": false,
     "context": null,
     "settings": null,
     "unseen": true,

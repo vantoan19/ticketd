@@ -279,7 +279,9 @@ harness's, not the person's: the turn records its origin (`chat_turns.origin_by`
 harness has not shown it processing, and a failure of such a turn shows and notifies but
 does not pause the person's queue. Stop with no turn running ends the running sub-agents as
 stopped by the person, notes how many (a Chat notice carrying `sub_agents_stopped`) and ends
-the harness process; Stop during a turn interrupts it and stops every sub-agent with it.
+the harness process, which is not lost contact (a frame the process still sends while it ends
+opens nothing). It leaves the queue unpaused, so the next message and any later wake still go
+out; Stop during a turn interrupts it and stops every sub-agent with it.
 
 Codex never resumes the main agent when a sub-agent finishes, so ticketd does (the
 descriptor's `sub_agents.wake`). When a direct sub-agent (not a nested one) finishes or fails
