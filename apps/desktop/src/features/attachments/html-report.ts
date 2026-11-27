@@ -44,8 +44,9 @@ function external(value: string | null): boolean {
  * inside a `<style>` or `<noscript>` can become elements (a mutation XSS payload hides a
  * `<meta http-equiv=refresh>` this way). The frame parses the markup a second time, so it is
  * stripped again until it comes out the same, leaving only the policy meta that was added.
+ * Markup still changing after the last pass was never checked, so it returns `null`.
  */
-export function settle(markup: string): string {
+export function settle(markup: string): string | null {
   let current = markup;
   for (let pass = 0; pass < 4; pass += 1) {
     const doc = new DOMParser().parseFromString(current, "text/html");
@@ -86,7 +87,7 @@ export function settle(markup: string): string {
     if (!changed) return current;
     current = `<!doctype html>${doc.documentElement.outerHTML}`;
   }
-  return current;
+  return null;
 }
 
 export function prepareReport(source: string): PreparedReport {
@@ -169,11 +170,12 @@ export function prepareReport(source: string): PreparedReport {
       !external(image.getAttribute("src")) && image.hasAttribute("src"),
   );
   const visible = text || picture || body.querySelector(MEDIA) !== null;
+  const srcdoc = settle(`<!doctype html>${doc.documentElement.outerHTML}`);
   return {
-    srcdoc: settle(`<!doctype html>${doc.documentElement.outerHTML}`),
+    srcdoc: srcdoc ?? "",
     scripts,
     external: outside,
-    // Empty, or only stylesheets that are not part of the attachment.
-    unusable: !visible || (stylesheets && !styled && outside),
+    // Empty, only stylesheets that are not part of the attachment, or markup that never settled.
+    unusable: srcdoc === null || !visible || (stylesheets && !styled && outside),
   };
 }

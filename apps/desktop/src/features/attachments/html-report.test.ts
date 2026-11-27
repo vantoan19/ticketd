@@ -1,5 +1,5 @@
 // @vitest-environment jsdom
-import { expect, test } from "vitest";
+import { expect, test, vi } from "vitest";
 import report from "@/test/fixtures/attachment-report.html?raw";
 import { prepareReport, REPORT_CSP, settle } from "./html-report";
 
@@ -37,6 +37,7 @@ test("markup that turns into a refresh, a frame or a handler when parsed again i
     `<!doctype html><html><head>${csp}<meta http-equiv="refresh" content="0;url=https://example.com"></head>` +
       `<body><p onclick="x()">a<a href="https://example.com" target="_blank">l</a></p><iframe src="https://example.com"></iframe></body></html>`,
   );
+  if (settled === null) throw new Error("the markup did not settle");
   const doc = frame(settled);
   expect(doc.querySelectorAll("meta[http-equiv]")).toHaveLength(1);
   expect(
@@ -47,6 +48,26 @@ test("markup that turns into a refresh, a frame or a handler when parsed again i
   expect(doc.querySelector("a")?.hasAttribute("href")).toBe(false);
   // Markup that is already clean comes back as it was.
   expect(settle(settled)).toBe(settled);
+});
+
+test("markup that is still changing after the last pass is not trusted", () => {
+  const parse = DOMParser.prototype.parseFromString;
+  // Every parse brings a handler back, so no pass ever finds the markup clean.
+  const spy = vi
+    .spyOn(DOMParser.prototype, "parseFromString")
+    .mockImplementation(function (this: DOMParser, text, type) {
+      const doc = parse.call(this, text, type);
+      doc.body.setAttribute("onclick", "x()");
+      return doc;
+    });
+  try {
+    expect(settle("<!doctype html><p>a</p>")).toBeNull();
+    const prepared = prepareReport("<p>text</p>");
+    expect(prepared.srcdoc).toBe("");
+    expect(prepared.unusable).toBe(true);
+  } finally {
+    spy.mockRestore();
+  }
 });
 
 test("scripts, handlers, links and the network stay off", () => {
