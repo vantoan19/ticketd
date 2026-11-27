@@ -346,6 +346,13 @@ impl Workspace {
                     ));
                 }
             };
+            // The Uploads folder belongs to the folder it was found in: sync could have
+            // moved to another folder on this account while Drive was asked.
+            if crate::sync::sync_folder_of(scope)?.as_deref() != Some(binding.folder_id.as_str()) {
+                return Err(Error::Attachment(
+                    "Workspace sync uses another folder now; try again".into(),
+                ));
+            }
             let chosen = AttachmentUploadDestination::GoogleDrive {
                 destination: DriveUploadDestination {
                     connection_id: connection_id.clone(),

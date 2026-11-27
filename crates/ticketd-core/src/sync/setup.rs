@@ -305,6 +305,11 @@ pub(crate) fn google_sign_in_of(
     })
 }
 
+/// The folder Workspace sync uses now, if any.
+pub(crate) fn sync_folder_of(connection: &Connection) -> Result<Option<String>, Error> {
+    Ok(state(connection)?.folder)
+}
+
 /// Why a sign-in as another Google account is refused while Files or Workspace sync is
 /// already on one.
 pub(crate) fn other_google_account() -> Error {
