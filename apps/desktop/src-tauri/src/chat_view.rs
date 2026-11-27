@@ -3754,7 +3754,12 @@ mod tests {
     #[test]
     fn the_frontends_markers_are_the_ones_ticketd_stops_a_turn_with() {
         let client = include_str!("../../src/features/chats/client.ts");
-        let transcript = include_str!("../../src/features/chats/Transcript.tsx");
+        // The wording moved from Transcript.tsx to model.ts with the sub-agent view.
+        let transcript = [
+            include_str!("../../src/features/chats/Transcript.tsx"),
+            include_str!("../../src/features/chats/model.ts"),
+        ]
+        .join("\n");
         let list = client
             .split("reason: z.enum([")
             .nth(1)
@@ -3780,7 +3785,7 @@ mod tests {
         for marker in &ticketd {
             assert!(
                 transcript.contains(&format!("case \"{marker}\":")),
-                "Transcript.tsx has no wording for {marker}"
+                "Transcript.tsx and model.ts have no wording for {marker}"
             );
         }
     }
