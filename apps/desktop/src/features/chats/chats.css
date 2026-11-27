@@ -666,6 +666,13 @@
 .chat-turnpart[data-fold] {
   margin-block: -8px;
 }
+/* A turn that holds sub-agent rows is always laid out. Back focuses the row that
+   opened a view; WebKit keeps the turn skipped once that focus leaves, so its
+   rows go blank and stop answering clicks until the Chat is reopened. These
+   turns are a few small rows, not the long history the rule above is for. */
+.chat-turnpart[data-subagents] {
+  content-visibility: visible;
+}
 .chat-foldline + .chat-turn-rows {
   margin-top: 8px;
 }

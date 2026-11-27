@@ -7,6 +7,8 @@ import {
   waitFor,
   within,
 } from "@testing-library/react";
+import { readFileSync } from "node:fs";
+import { join } from "node:path";
 import { afterEach, expect, test, vi } from "vitest";
 import { ChatClientContext } from "@/features/chats/client";
 import { ChatProvider } from "@/features/chats/ChatProvider";
@@ -45,6 +47,7 @@ async function open(chat: MockChat) {
   return client;
 }
 
+const chatsCss = readFileSync(join(__dirname, "chats.css"), "utf8");
 const fixtures = () => subAgentPartFixtures();
 
 test("while sub-agents run after the reply, one pill counts them in the tray", async () => {
@@ -404,4 +407,21 @@ test("Esc in a sub-agent's view goes back and stops nothing", async () => {
   await screen.findByRole("heading", { name: "Review the rate limiter" });
   expect(stop).not.toHaveBeenCalled();
   expect(stopOne).not.toHaveBeenCalled();
+});
+
+test("a turn that holds sub-agent rows is never skipped by content-visibility", async () => {
+  // WebKit keeps such a turn skipped after Back focuses its row and focus then
+  // leaves: the rows go blank and dead (T-UB282, WK-1). Other turns keep the rule.
+  await open(fixtures().reply);
+  const holding = document
+    .querySelector(".chat-subagent")
+    ?.closest(".chat-turnpart");
+  expect(holding?.hasAttribute("data-subagents")).toBe(true);
+  const others = [...document.querySelectorAll(".chat-turnpart")].filter(
+    (part) => part !== holding,
+  );
+  for (const part of others) expect(part.hasAttribute("data-subagents")).toBe(false);
+  expect(chatsCss).toMatch(
+    /\.chat-turnpart\[data-subagents\] \{\s*content-visibility: visible/,
+  );
 });

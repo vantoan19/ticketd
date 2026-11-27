@@ -1254,6 +1254,11 @@ const TurnView = memo(function TurnView({
           ref={part}
           className="chat-turnpart"
           data-fold={showRow ? "" : undefined}
+          data-subagents={
+            turn.rows.some((each) => each.kind === "sub_agent")
+              ? ""
+              : undefined
+          }
           data-anchor=""
         >
           {showRow && (
