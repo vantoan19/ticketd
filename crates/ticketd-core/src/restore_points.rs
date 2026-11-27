@@ -361,7 +361,7 @@ fn scan(folder: &Path) -> Result<Found, Error> {
         else {
             continue;
         };
-        if !point_file(folder, stem).is_file() {
+        if !is_file(&point_file(folder, stem))? {
             continue;
         }
         match fs::read(&path)
@@ -398,7 +398,7 @@ fn clear_unfinished(folder: &Path) -> Result<(), Error> {
         let Some(name) = path.file_name().and_then(|name| name.to_str()) else {
             continue;
         };
-        let unfinished = if name == LOCK || path.is_dir() {
+        let unfinished = if name == LOCK || is_directory(&path)? {
             false
         } else if let Some(stem) = name.strip_suffix(".sqlite3") {
             !finished.contains(stem)
@@ -417,7 +417,8 @@ fn clear_unfinished(folder: &Path) -> Result<(), Error> {
 
 /// Keeps the newest seven daily and saved-by-you points, then deletes the attachment files
 /// that none of the rest needs. A point whose record cannot be read still needs its files:
-/// they are read from the point itself, and when even that fails none are deleted.
+/// they are read from the point itself, and when that fails or its inventory is not the one
+/// its container vouches for, none are deleted.
 fn prune(folder: &Path) -> Result<(), Error> {
     let Found {
         points: all,
@@ -434,7 +435,7 @@ fn prune(folder: &Path) -> Result<(), Error> {
         .flat_map(|(_, record)| record.files.iter().cloned())
         .collect();
     for stem in &unreadable {
-        match shared_hashes(&point_file(folder, stem)) {
+        match trusted_shared_hashes(&point_file(folder, stem)) {
             Ok(hashes) => needed.extend(hashes),
             Err(_) => return Ok(()),
         }
@@ -464,14 +465,48 @@ fn check(path: &Path) -> Result<(Option<WorkspaceSummary>, Option<String>), Erro
     })
 }
 
+/// Whether `path` is a file. Only "not there" means no: a path that cannot be read at all
+/// is an error, so that nothing is cleared on the strength of it.
+fn is_file(path: &Path) -> Result<bool, Error> {
+    match fs::metadata(path) {
+        Ok(metadata) => Ok(metadata.is_file()),
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => Ok(false),
+        Err(error) => Err(io(error)),
+    }
+}
+
+/// [`is_file`], for a folder.
+fn is_directory(path: &Path) -> Result<bool, Error> {
+    match fs::metadata(path) {
+        Ok(metadata) => Ok(metadata.is_dir()),
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => Ok(false),
+        Err(error) => Err(io(error)),
+    }
+}
+
 /// The attachment files a saved point needs, by checksum.
 fn shared_hashes(path: &Path) -> Result<Vec<String>, Error> {
+    read_shared_hashes(path, false)
+}
+
+/// [`shared_hashes`] for a point whose record is lost: its inventory is believed only when it
+/// is the one the container's header vouches for, as a restore checks it.
+fn trusted_shared_hashes(path: &Path) -> Result<Vec<String>, Error> {
+    read_shared_hashes(path, true)
+}
+
+fn read_shared_hashes(path: &Path, verify: bool) -> Result<Vec<String>, Error> {
     let connection = Connection::open_with_flags(
         path,
         OpenFlags::SQLITE_OPEN_READ_ONLY | OpenFlags::SQLITE_OPEN_NO_MUTEX,
     )?;
     if !crate::backup::table_exists(&connection, "ticketd_backup_files")? {
         return Ok(Vec::new());
+    }
+    if verify && !crate::backup_archive::inventory_is_intact(&connection)? {
+        return Err(Error::Backup(
+            "the file inventory of a restore point is incomplete or damaged".into(),
+        ));
     }
     let mut query = connection.prepare("SELECT DISTINCT sha256 FROM ticketd_backup_files")?;
     let hashes = query

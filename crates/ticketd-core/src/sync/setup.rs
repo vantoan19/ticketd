@@ -294,6 +294,17 @@ pub struct S3Binding {
     pub endpoint: Option<String>,
 }
 
+/// [`Workspace::sync_google_sign_in`] on a connection, for a check made inside a write lock.
+pub(crate) fn google_sign_in_of(
+    connection: &Connection,
+) -> Result<Option<(String, Option<String>)>, Error> {
+    let state = state(connection)?;
+    Ok(match (state.provider, state.connection) {
+        (SyncProvider::GoogleDrive, Some(connection)) => Some((connection, state.account)),
+        _ => None,
+    })
+}
+
 /// Why a sign-in as another Google account is refused while Files or Workspace sync is
 /// already on one.
 pub(crate) fn other_google_account() -> Error {
@@ -720,6 +731,12 @@ pub(super) fn remember_replaced_folder(
             label(was.attachment_download)?,
         ],
     )?;
+    // Files and sync share the sign-in kept above: a Files folder in another account goes.
+    let kept = was
+        .connection
+        .as_deref()
+        .filter(|_| was.provider == SyncProvider::GoogleDrive);
+    crate::upload_destination::follow_kept_google_sign_in(restored, kept)?;
     if !same_workspace {
         return Ok(());
     }
@@ -931,8 +948,7 @@ impl Workspace {
         connection_id: &str,
         account: &str,
     ) -> Result<SyncStatus, Error> {
-        self.refuse_other_files_google_sign_in(connection_id)?;
-        self.connect_google(connection_id, account)
+        self.bind_google(connection_id, account, true)
     }
 
     /// [`Workspace::sync_connect`] without the shared-account check on the Files folder, for
@@ -942,10 +958,24 @@ impl Workspace {
         connection_id: &str,
         account: &str,
     ) -> Result<SyncStatus, Error> {
+        self.bind_google(connection_id, account, false)
+    }
+
+    fn bind_google(
+        &mut self,
+        connection_id: &str,
+        account: &str,
+        files_must_match: bool,
+    ) -> Result<SyncStatus, Error> {
         // Read, checked and written under one write lock, as `sync_connect_s3` does: another
         // connection to this Workspace file could bind an S3 folder in between otherwise, and
         // this update would keep that folder while clearing the S3 settings.
+        // The Files folder is checked in the same lock: a Files folder chosen through another
+        // handle in between would otherwise end up on another account than this sign-in.
         crate::write_scope::run(&self.connection, |scope| {
+            if files_must_match {
+                crate::upload_destination::refuse_other_files_google_sign_in(scope, connection_id)?;
+            }
             let state = state(scope)?;
             if state.folder.is_some() && state.provider != SyncProvider::GoogleDrive {
                 return Err(Error::Sync(format!(
@@ -1093,11 +1123,7 @@ impl Workspace {
     /// The Google sign-in Workspace sync holds, with the account it shows: a connection
     /// id and an email address. `None` while sync is not signed in to Google Drive.
     pub(crate) fn sync_google_sign_in(&self) -> Result<Option<(String, Option<String>)>, Error> {
-        let state = state(&self.connection)?;
-        Ok(match (state.provider, state.connection) {
-            (SyncProvider::GoogleDrive, Some(connection)) => Some((connection, state.account)),
-            _ => None,
-        })
+        google_sign_in_of(&self.connection)
     }
 
     /// How many records in review and notices are unread.

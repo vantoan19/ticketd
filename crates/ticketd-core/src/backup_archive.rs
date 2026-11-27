@@ -406,6 +406,21 @@ pub(crate) fn validate(connection: &Connection) -> Result<(), Error> {
     Ok(())
 }
 
+/// Whether a packaged backup's file inventory is the one its container header vouches for.
+/// A restore point whose record is lost is read through this: an inventory that lost rows
+/// would otherwise name fewer files than the point needs.
+pub(crate) fn inventory_is_intact(connection: &Connection) -> Result<bool, Error> {
+    if container_version(connection)?.is_none() {
+        return Ok(false);
+    }
+    let expected: String = connection.query_row(
+        "SELECT inventory_sha256 FROM ticketd_backup_container",
+        [],
+        |r| r.get(0),
+    )?;
+    Ok(inventory_digest(connection)? == expected)
+}
+
 fn inventory_digest(connection: &Connection) -> Result<String, Error> {
     let mut hash = Sha256::new();
     let mut query = connection

@@ -232,7 +232,7 @@ export function S3Setup({
           title={<Label htmlFor="s3-profile">AWS profile</Label>}
           description="From your AWS CLI configuration."
           trailing={
-            <Select value={profile} onValueChange={choose}>
+            <Select value={profile} onValueChange={choose} disabled={busy}>
               <SelectTrigger id="s3-profile" className="w-60">
                 <SelectValue placeholder="Choose a profile" />
               </SelectTrigger>
@@ -267,6 +267,7 @@ export function S3Setup({
             <BucketField
               buckets={buckets}
               signedIn={signedIn}
+              busy={busy}
               value={bucket}
               typing={typing}
               onChange={(value) => {
@@ -293,7 +294,7 @@ export function S3Setup({
               id="s3-prefix"
               className="w-60"
               value={prefix}
-              disabled={!signedIn}
+              disabled={!signedIn || busy}
               spellCheck={false}
               autoComplete="off"
               onChange={(event) => {
@@ -442,6 +443,7 @@ const OTHER_BUCKET = "\u0000other";
 function BucketField({
   buckets,
   signedIn,
+  busy,
   value,
   typing,
   onChange,
@@ -450,6 +452,8 @@ function BucketField({
 }: {
   buckets: string[] | null | undefined;
   signedIn: boolean;
+  /** A connect is in flight: the bucket it was sent with must stay the one shown. */
+  busy: boolean;
   value: string;
   typing: boolean;
   onChange: (value: string) => void;
@@ -463,6 +467,7 @@ function BucketField({
     return (
       <Select
         value={value}
+        disabled={busy}
         onValueChange={(chosen) =>
           chosen === OTHER_BUCKET ? onOther() : onChange(chosen)
         }
@@ -496,7 +501,7 @@ function BucketField({
       <Input
         id="s3-bucket"
         value={value}
-        disabled={!signedIn}
+        disabled={!signedIn || busy}
         placeholder="my-bucket"
         spellCheck={false}
         autoComplete="off"
@@ -507,6 +512,7 @@ function BucketField({
         <IconButton
           label="Choose from the list"
           className="shrink-0"
+          disabled={busy}
           onClick={onList}
         >
           <ChevronDownIcon />
