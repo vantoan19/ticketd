@@ -562,9 +562,7 @@ test("another account's storage is read before its choices are offered, and the 
   );
   show();
   expect(await radio(/Join “ticketd”/)).toBeTruthy();
-  fireEvent.click(
-    screen.getByRole("button", { name: "Use another account…" }),
-  );
+  fireEvent.click(screen.getByRole("button", { name: "Use another account…" }));
   const dialog = await screen.findByRole("dialog", {
     name: "Use another Google account?",
   });
@@ -735,5 +733,7 @@ test("while Connect S3 is pending the storage cannot be switched to Google Drive
   await waitFor(() => expect(drive.hasAttribute("disabled")).toBe(true));
   fireEvent.click(drive);
   expect(screen.getByRole("button", { name: "Connect S3" })).toBeTruthy();
-  expect(screen.queryByRole("button", { name: "Connect Google Drive" })).toBeNull();
+  expect(
+    screen.queryByRole("button", { name: "Connect Google Drive" }),
+  ).toBeNull();
 });

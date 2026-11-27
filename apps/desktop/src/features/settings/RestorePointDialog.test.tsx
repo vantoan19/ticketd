@@ -325,8 +325,8 @@ test("a point that cannot be restored hands over to the file review when another
     name: "Replace this workspace?",
   });
   await within(file).findByText(/Integrity checked/);
-  expect(within(file).getByLabelText("Chosen backup file").textContent).toContain(
-    "other.db",
-  );
+  expect(
+    within(file).getByLabelText("Chosen backup file").textContent,
+  ).toContain("other.db");
   expect(file.textContent).not.toContain("With the restore point from");
 });

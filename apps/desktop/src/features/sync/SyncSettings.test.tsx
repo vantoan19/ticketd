@@ -625,7 +625,9 @@ test("disconnecting a Workspace set up on this page starts the next setup at Sta
   api.uploadWorkspace.mockResolvedValue(syncStatus());
   api.disconnect.mockResolvedValue(notConnected());
   show();
-  fireEvent.click(await screen.findByRole("radio", { name: /Start with this/ }));
+  fireEvent.click(
+    await screen.findByRole("radio", { name: /Start with this/ }),
+  );
   fireEvent.click(screen.getByRole("button", { name: "Continue" }));
   fireEvent.click(
     await screen.findByRole("button", { name: /Connect Google Drive/ }),
