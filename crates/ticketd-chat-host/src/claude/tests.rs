@@ -1501,6 +1501,60 @@ mod sub_agents {
 
     use crate::claude::session::Session;
 
+    fn turn_origin(events: &[EventKind]) -> Option<Option<crate::TurnOrigin>> {
+        events.iter().find_map(|event| match event {
+            EventKind::TurnStarted { origin, .. } => Some(origin.clone()),
+            _ => None,
+        })
+    }
+
+    #[test]
+    fn output_with_no_input_behind_it_is_a_turn_the_harness_started_and_names_the_last_sub_agent_to_finish()
+     {
+        let mut session = Session::default();
+        session.event("sub_agent_started", &started("t1", "toolu_a", true));
+        let (events, _) = session
+            .event(
+                "sub_agent_ended",
+                &json!({"task_id": "t1", "run_id": "r1", "tool_use_id": "toolu_a", "status": "completed"}),
+            )
+            .expect("modeled");
+        assert!(turn_origin(&events).is_none(), "ending opens no turn");
+        let (events, _) = session
+            .event(
+                "assistant_content",
+                &json!({"parent_tool_use_id": null, "model": "claude-haiku-5-5",
+                        "blocks": [{"type": "text", "text": "Done."}]}),
+            )
+            .expect("modeled");
+        let origin = turn_origin(&events)
+            .expect("a turn opened")
+            .expect("and it says who started it");
+        assert_eq!(origin.by, crate::TurnStarter::Harness);
+        assert_eq!(origin.sub_agent, Some(NativeSubAgentId::new("t1")));
+    }
+
+    #[test]
+    fn a_turn_the_persons_input_started_is_not_labelled_even_when_its_output_comes_first() {
+        let mut session = Session::default();
+        session.input_written("sub-1");
+        let (events, _) = session
+            .event(
+                "assistant_content",
+                &json!({"parent_tool_use_id": null, "model": "claude-haiku-5-5",
+                        "blocks": [{"type": "text", "text": "Here"}]}),
+            )
+            .expect("modeled");
+        assert_eq!(turn_origin(&events), Some(None));
+        // Nor one whose input the harness shows processing first.
+        let mut session = Session::default();
+        session.input_written("sub-2");
+        let (events, _) = session
+            .event("input_processing", &json!({"submission_ids": ["sub-2"]}))
+            .expect("modeled");
+        assert_eq!(turn_origin(&events), Some(None));
+    }
+
     fn started(task: &str, tool_use: &str, background: bool) -> Value {
         json!({"task_id": task, "run_id": "r1", "tool_use_id": tool_use, "parent_task_id": null,
                "description": "Look", "subagent_type": "Explore", "background": background,

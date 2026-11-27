@@ -4496,6 +4496,117 @@ mod tests {
             .collect()
     }
 
+    fn started_by_the_harness(turn_id: &str, sub_agent: Option<&str>) -> ChatItem {
+        ChatItem::Turn(ChatTurn {
+            id: turn_id.to_owned(),
+            position: 30,
+            native_turn_id: None,
+            state: ChatTurnState::Completed,
+            detail: None,
+            problem: None,
+            problem_resets_at: None,
+            ending: Some("completed".to_owned()),
+            started_at: "2026-11-27T10:05:00Z".to_owned(),
+            ended_at: Some("2026-11-27T10:06:00Z".to_owned()),
+            origin: Some(ticketd_core::ChatTurnOrigin {
+                by: ChatTurnStarter::Harness,
+                sub_agent: sub_agent.map(str::to_owned),
+            }),
+        })
+    }
+
+    #[test]
+    fn a_turn_the_harness_started_says_who_and_which_sub_agent_it_follows() {
+        let chat = claude_chat(None);
+        let tracker = Tracker::default();
+        let rows = view_of(&started_by_the_harness("t2", Some("a")), &tracker, &chat);
+        assert_eq!(rows[0]["kind"], "turn");
+        assert_eq!(
+            rows[0]["origin"],
+            json!({"by": "harness", "sub_agent": "a"})
+        );
+        let rows = view_of(&started_by_the_harness("t3", None), &tracker, &chat);
+        assert_eq!(rows[0]["origin"], json!({"by": "harness"}));
+        // A turn the person started says nothing.
+        let mut person = started_by_the_harness("t4", None);
+        if let ChatItem::Turn(turn) = &mut person {
+            turn.origin = None;
+        }
+        assert!(view_of(&person, &tracker, &chat)[0].get("origin").is_none());
+    }
+
+    #[test]
+    fn stopping_sub_agents_with_no_turn_is_a_counted_marker_and_the_rows_second_line() {
+        let chat = claude_chat(None);
+        let notice = ticketd_core::ChatNotice {
+            id: "n1".to_owned(),
+            position: 40,
+            text: "You stopped 2 sub-agents.".to_owned(),
+            created_at: "2026-11-27T10:07:00Z".to_owned(),
+            from_harness: false,
+            sub_agents_stopped: Some(2),
+        };
+        let mut tracker = Tracker::default();
+        let record = ChatItem::Notice(notice);
+        tracker.note(&started_by_the_harness("t2", None));
+        tracker.note(&record);
+        let rows = view_of(&record, &tracker, &chat);
+        assert_eq!(rows[0]["kind"], "marker");
+        assert_eq!(rows[0]["reason"], "sub_agents_stopped");
+        assert_eq!(rows[0]["count"], 2);
+        assert!(
+            rows[0]
+                .get("turn_id")
+                .is_none_or(serde_json::Value::is_null)
+        );
+        assert_eq!(tracker.stopped_sub_agents(), Some(2));
+        // A turn that starts after it takes the words back.
+        let mut later = started_by_the_harness("t3", None);
+        if let ChatItem::Turn(turn) = &mut later {
+            turn.position = 50;
+        }
+        tracker.note(&later);
+        assert_eq!(tracker.stopped_sub_agents(), None);
+    }
+
+    #[test]
+    fn with_only_sub_agents_running_no_turn_does() {
+        let chat = chat(None);
+        let tracker = Tracker::default();
+        let around = Surroundings::default();
+        let working = ChatLive {
+            activity: Activity::Working,
+            sub_agents: 2,
+            ..ChatLive::idle()
+        };
+        let state = chat_state(&chat, &working, &tracker, &around);
+        assert_eq!(
+            (state.activity, state.turn_running),
+            ("working", Some(false))
+        );
+        assert!(state.doing.is_none(), "no working line without a turn");
+        // The main agent about to resume counts as the same.
+        let waking = ChatLive {
+            activity: Activity::Working,
+            waking: true,
+            ..ChatLive::idle()
+        };
+        assert_eq!(
+            chat_state(&chat, &waking, &tracker, &around).turn_running,
+            Some(false)
+        );
+        // Nothing runs, or a turn does: the field is absent.
+        let idle = chat_state(&chat, &ChatLive::idle(), &tracker, &around);
+        assert_eq!(idle.turn_running, None);
+        let with_turn = chat_state(
+            &super::tests::chat(Some("turn")),
+            &working,
+            &tracker,
+            &around,
+        );
+        assert_eq!(with_turn.turn_running, None);
+    }
+
     #[test]
     fn a_run_is_one_row_for_the_agent_that_started_it_and_a_turn_of_its_own() {
         let chat = claude_chat(Some("turn"));

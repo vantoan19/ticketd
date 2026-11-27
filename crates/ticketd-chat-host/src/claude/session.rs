@@ -55,6 +55,10 @@ pub(super) struct Session {
     reports: Reports,
     /// The sub-agents of this session, by task ID, and the tool uses frames name them by.
     sub_agents: SubAgents,
+    /// Inputs of the person's written to the harness whose processing was not shown yet.
+    /// Output can come before the harness says it is processing them, and a turn they
+    /// start is not one the harness started by itself.
+    pending_inputs: HashSet<String>,
 }
 
 /// How many frames of a sub-agent that has not been announced yet are held for it, and
@@ -183,6 +187,11 @@ impl Session {
         self.runtime.active_turn_id()
     }
 
+    /// An input of the person's is being written to the harness.
+    pub fn input_written(&mut self, submission: &str) {
+        self.pending_inputs.insert(submission.to_owned());
+    }
+
     pub fn interrupt_written(&mut self) {
         if let Some(turn) = self.active_turn().cloned() {
             let _ = self.runtime.mark_interrupt(&turn);
@@ -198,6 +207,7 @@ impl Session {
     /// The runtime is gone: nothing is live any more.
     pub fn clear_live(&mut self) {
         self.runtime.disconnected();
+        self.pending_inputs.clear();
         self.turn_error = None;
         self.tools.clear();
         self.declined.clear();
@@ -228,7 +238,7 @@ impl Session {
         // resumed by itself, which it does when a sub-agent in the background finishes.
         // What that sub-agent was is the last one that finished since the last turn.
         let finished = self.sub_agents.finished_at_rest.take();
-        let origin = by_itself.then(|| TurnOrigin {
+        let origin = (by_itself && self.pending_inputs.is_empty()).then(|| TurnOrigin {
             by: TurnStarter::Harness,
             sub_agent: finished.map(NativeSubAgentId),
         });
@@ -259,6 +269,9 @@ impl Session {
         match name {
             "session_info" => self.session_info(event, &mut events),
             "input_processing" => {
+                for submission in strings(event, "submission_ids") {
+                    self.pending_inputs.remove(&submission);
+                }
                 let turn = self.turn_for_input(&mut events);
                 for submission in strings(event, "submission_ids") {
                     events.push(EventKind::SubmissionEvidence {
@@ -1049,6 +1062,9 @@ impl Session {
         self.declined.clear();
         self.streams.clear();
         self.sub_agents.turn_ended();
+        self.pending_inputs = strings(event, "pending_submission_ids")
+            .into_iter()
+            .collect();
         // The tool calls of a sub-agent still running in the background go on.
         let sub_agents = &self.sub_agents;
         self.tools

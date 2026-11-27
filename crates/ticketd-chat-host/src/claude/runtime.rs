@@ -1100,6 +1100,7 @@ impl HarnessRuntime for ClaudeRuntime {
                             active: Some(active.clone()),
                         });
                     }
+                    session.input_written(&submission.submission.0);
                     let mut command = json!({
                         "cmd": "submit",
                         "generation": generation,
