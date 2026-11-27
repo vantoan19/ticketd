@@ -6203,7 +6203,8 @@ mod tests {
         };
         assert_eq!(agent.title, "Session Auditor");
         assert_eq!(agent.status, "completed");
-        assert_eq!(agent.model, "gemini-3.1-pro");
+        // The name Antigravity gave the model when the sub-agent started, kept with it.
+        assert_eq!(agent.model, "Gemini 3.1 Pro");
         let capabilities = &agent.capabilities;
         assert_eq!(
             (
