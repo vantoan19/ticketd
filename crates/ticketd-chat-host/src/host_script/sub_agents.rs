@@ -275,3 +275,292 @@ async fn the_stored_history_of_a_nested_sub_agent_is_the_file_the_desktop_builds
         "the stored history changed; if that is intended, regenerate {STORED} with TICKETD_UPDATE_VIEW_FIXTURES=1"
     );
 }
+
+// --- Sub-agents in the background, outside any turn -------------------------------------
+
+mod background {
+    use super::*;
+    use crate::attention::{Alert, Notifier, Rank, Row, Status};
+    use std::collections::HashSet;
+    use std::time::{Duration as Std, Instant};
+    use ticketd_core::{ChatSubAgentStopper, ChatTurnStarter};
+
+    const PROMPT: &str = "Review the rate limiter";
+
+    /// What the Chats list shows for the Chat, in words.
+    async fn row(h: &HostScript) -> String {
+        h.attention().await.line()
+    }
+
+    /// Feeds the statuses the Chats list showed, one per step and a little apart, to the
+    /// system's notifier, and returns every alert it showed.
+    struct Watch {
+        notifier: Notifier,
+        base: Instant,
+        shown: Vec<String>,
+        in_view: HashSet<String>,
+        at: u64,
+    }
+
+    impl Watch {
+        fn new(in_view: bool) -> Self {
+            Self {
+                notifier: Notifier::default(),
+                base: Instant::now(),
+                shown: Vec::new(),
+                in_view: if in_view {
+                    HashSet::from(["chat".to_owned()])
+                } else {
+                    HashSet::new()
+                },
+                at: 0,
+            }
+        }
+
+        /// The status now, `after_ms` after the last one.
+        fn see(&mut self, status: &Status, after_ms: u64) {
+            self.at += after_ms;
+            let rows = [Row {
+                id: "chat",
+                title: "Review the rate limiter",
+                status,
+                muted: false,
+            }];
+            let now = self.base + Std::from_millis(self.at);
+            for alert in self.notifier.update(&rows, &self.in_view, true, now) {
+                if let Alert::Show { body, .. } = alert {
+                    self.shown.push(body);
+                }
+            }
+        }
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn a_sub_agent_keeps_working_after_the_turn_without_opening_one() {
+        let mut h = HostScript::claude()
+            .process([
+                fixture!("claude", "handshake"),
+                fixture!("claude", "sub_agent_background"),
+            ])
+            .start();
+        h.send(PROMPT).await;
+        h.play_to("the SDK took the input").await;
+        h.play_to("the turn ended").await;
+
+        // The turn is over, and the Chat is still working: two sub-agents run.
+        assert_eq!(h.turns().len(), 1);
+        assert_eq!(h.turns()[0].state, ChatTurnState::Completed);
+        assert_eq!(h.live().await.sub_agents, 2);
+        assert_eq!(row(&h).await, "Working · 2 sub-agents");
+        assert_eq!(h.attention().await.rank, Rank::Working);
+
+        // What the sub-agent does after the turn ended is its own Step: no turn opens,
+        // and nothing is said about a tool result the turn did not start.
+        h.play_to("a sub-agent works after the turn ended").await;
+        h.play_to("both sub-agents work").await;
+        assert_eq!(h.turns().len(), 1, "{:?}", h.transcript());
+        assert!(h.notices().is_empty(), "{:?}", h.notices());
+        assert_eq!(
+            h.sub_agent_transcript("task_a"),
+            ["tool Read completed"],
+            "its result is its own, though the turn that started it is over"
+        );
+        assert_eq!(h.sub_agent_transcript("task_b"), ["tool Read running"]);
+        let records = h.sub_agents();
+        assert!(records.iter().all(|record| record.background));
+        assert!(records.iter().all(|record| {
+            record.latest().map(|run| run.state) == Some(ChatSubAgentState::Running)
+        }));
+        h.play_all().await;
+        h.finish().await;
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn the_main_agent_resuming_by_itself_is_a_labelled_turn_and_done_comes_once() {
+        resumes_by_itself(true).await;
+    }
+
+    /// The person left before the first turn's reply was seen: that turn's Done is held
+    /// back while sub-agents run, and still only one Done is told, at the very end.
+    #[tokio::test(start_paused = true)]
+    async fn done_comes_once_also_when_the_first_turn_was_never_seen() {
+        resumes_by_itself(false).await;
+    }
+
+    async fn resumes_by_itself(seen_first_turn: bool) {
+        let mut h = HostScript::claude()
+            .process([
+                fixture!("claude", "handshake"),
+                fixture!("claude", "sub_agent_background"),
+            ])
+            .start();
+        let mut watch = Watch::new(false);
+        watch.see(&h.attention().await, 0);
+        h.send(PROMPT).await;
+        h.play_to("the SDK took the input").await;
+        h.play_to("the turn ended").await;
+        // The person looks at the Chat while the sub-agents run, then leaves it.
+        if seen_first_turn {
+            h.core().mark_chat_seen(h.chat_id()).expect("seen");
+        }
+        watch.see(&h.attention().await, 100);
+        h.play_to("a sub-agent works after the turn ended").await;
+        h.play_to("both sub-agents work").await;
+        watch.see(&h.attention().await, 100);
+
+        // One of two finishes: still working, and nothing is told.
+        h.play_to("the first sub-agent finished").await;
+        assert_eq!(row(&h).await, "Working · 1 sub-agent");
+        watch.see(&h.attention().await, 100);
+
+        // The last one finishes. The main agent has not resumed yet, which takes
+        // seconds: the Chat does not go quiet in between.
+        h.play_to("the last sub-agent finished").await;
+        assert_eq!(h.live().await.sub_agents, 0);
+        assert_eq!(h.attention().await.rank, Rank::Working);
+        for _ in 0..6 {
+            h.pass(Std::from_millis(500)).await;
+            watch.see(&h.attention().await, 500);
+        }
+        assert_eq!(h.turns().len(), 1);
+
+        // Claude Code resumes the main agent by itself: a turn the person did not start,
+        // that follows the sub-agent that finished last.
+        h.play_to("Claude resumed by itself and the turn ended")
+            .await;
+        let turns = h.turns();
+        assert_eq!(turns.len(), 2, "{:?}", h.transcript());
+        assert_eq!(turns[0].origin, None);
+        let origin = turns[1].origin.clone().expect("the turn is labelled");
+        assert_eq!(origin.by, ChatTurnStarter::Harness);
+        assert_eq!(origin.sub_agent.as_deref(), Some("task_b"));
+        assert_eq!(turns[1].state, ChatTurnState::Completed);
+        assert!(
+            h.transcript()
+                .contains(&"agent: Both reviews are in.".to_owned())
+        );
+        assert_eq!(h.live().await.sub_agents, 0);
+
+        // The Chat is quiet: Done, unseen (the person saw the first turn, not this one),
+        // and the system was told exactly once, however long the sub-agents ran.
+        let status = h.attention().await;
+        assert_eq!((status.rank, status.word.as_str()), (Rank::Done, "Done"));
+        assert!(status.unseen);
+        watch.see(&status, 100);
+        watch.see(&status, 2_000);
+        watch.see(&status, 2_000);
+        assert_eq!(
+            watch.shown,
+            ["Done · Both reviews are in."],
+            "{:?}",
+            watch.shown
+        );
+        h.play_all().await;
+        h.finish().await;
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn a_chat_the_person_is_looking_at_notifies_nothing() {
+        let mut h = HostScript::claude()
+            .process([
+                fixture!("claude", "handshake"),
+                fixture!("claude", "sub_agent_background"),
+            ])
+            .start();
+        let mut watch = Watch::new(true);
+        watch.see(&h.attention().await, 0);
+        h.send(PROMPT).await;
+        h.play_all().await;
+        watch.see(&h.attention().await, 100);
+        watch.see(&h.attention().await, 5_000);
+        assert!(watch.shown.is_empty(), "{:?}", watch.shown);
+        h.finish().await;
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn a_turn_the_harness_starts_that_fails_notifies_and_does_not_pause_the_queue() {
+        let mut h = HostScript::claude()
+            .process([
+                fixture!("claude", "handshake"),
+                fixture!("claude", "sub_agent_background_failed_wake"),
+            ])
+            .start();
+        let mut watch = Watch::new(false);
+        watch.see(&h.attention().await, 0);
+        h.send(PROMPT).await;
+        h.play_to("the SDK took the input").await;
+        h.play_to("the turn ended").await;
+        h.play_all().await;
+
+        let turns = h.turns();
+        assert_eq!(turns.len(), 2);
+        assert_eq!(turns[1].state, ChatTurnState::Failed);
+        assert!(turns[1].origin.is_some());
+        // It shows as failed and tells the person ...
+        let status = h.attention().await;
+        assert_eq!(status.rank, Rank::Failed, "{status:?}");
+        watch.see(&status, 100);
+        assert_eq!(watch.shown.len(), 1, "{:?}", watch.shown);
+        // ... and the person's own queue still goes on: it is not paused.
+        assert!(!h.core().chat(h.chat_id()).expect("the Chat").queue_paused);
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn stop_with_no_turn_stops_the_sub_agents_and_ends_the_harness() {
+        let mut h = HostScript::claude()
+            .process([
+                fixture!("claude", "handshake"),
+                fixture!("claude", "sub_agent_background_at_rest"),
+            ])
+            .start();
+        h.send(PROMPT).await;
+        h.play_all().await;
+        assert_eq!(h.live().await.sub_agents, 2);
+
+        h.stop().await;
+        // The harness process was asked to end, and does.
+        h.lose_process(0).await;
+
+        let live = h.live().await;
+        assert_eq!(live.sub_agents, 0);
+        assert!(!live.running);
+        assert_eq!(h.attention().await.word, "You stopped 2 sub-agents");
+        assert_eq!(h.notices(), ["You stopped 2 sub-agents."]);
+        for record in h.sub_agents() {
+            let run = record.latest().expect("a run");
+            assert_eq!(run.state, ChatSubAgentState::Stopped);
+            assert_eq!(run.stopped_by, Some(ChatSubAgentStopper::Person));
+        }
+        // The turn that started them is not touched: it ended long before.
+        assert_eq!(h.turns().len(), 1);
+        assert_eq!(h.turns()[0].state, ChatTurnState::Completed);
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn stop_in_a_turn_stops_the_turn_and_every_sub_agent() {
+        let mut h = HostScript::claude()
+            .process([
+                fixture!("claude", "handshake"),
+                fixture!("claude", "sub_agent_background_in_turn"),
+            ])
+            .start();
+        h.send(PROMPT).await;
+        h.play_to("the SDK took the input").await;
+        h.play_to("two sub-agents run in the turn").await;
+        assert_eq!(h.live().await.sub_agents, 2);
+
+        h.stop().await;
+        h.play_all().await;
+        h.finish().await;
+
+        assert_eq!(h.turns()[0].state, ChatTurnState::Interrupted);
+        assert_eq!(h.live().await.sub_agents, 0);
+        for record in h.sub_agents() {
+            let run = record.latest().expect("a run");
+            assert_eq!(run.state, ChatSubAgentState::Stopped);
+            assert_eq!(run.stopped_by, Some(ChatSubAgentStopper::Person));
+        }
+        // The turn's own stop says it: no separate note.
+        assert!(h.notices().is_empty(), "{:?}", h.notices());
+    }
+}

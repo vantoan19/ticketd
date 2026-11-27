@@ -513,7 +513,11 @@ async fn a_claude_like_harness_never_acknowledges_a_new_turn_so_it_stays_unconfi
 
     // Processing correlates the input with a turn, which is only known now. It is
     // evidence the input arrived, not an acknowledgment.
-    f.emit(EventKind::TurnStarted { turn: turn_1() }).await;
+    f.emit(EventKind::TurnStarted {
+        turn: turn_1(),
+        origin: None,
+    })
+    .await;
     f.emit(EventKind::SubmissionEvidence {
         submission: SubmissionId(attempt.id),
         evidence: DeliveryEvidence::Processing { turn: turn_1() },

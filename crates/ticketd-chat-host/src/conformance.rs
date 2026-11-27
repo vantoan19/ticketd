@@ -38,6 +38,18 @@ pub(crate) enum NewTurn {
     WrittenThenProcessing,
 }
 
+/// How a harness shows what a sub-agent does while no turn runs.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum SubAgentFrames {
+    /// The adapter tells a sub-agent's activity apart from the turn's: a sub-agent that
+    /// starts, works and ends while no turn runs opens no turn (Claude Code).
+    Separate,
+    /// The adapter does not model sub-agents yet (Codex until its sub-agent ticket,
+    /// Antigravity until its own, and the fake): the property asserts nothing for it, and
+    /// moves to `Separate` when the adapter does.
+    NotModelled,
+}
+
 /// The request every provider opens its runtime with.
 pub(crate) fn open_request() -> OpenRequest {
     OpenRequest {
@@ -97,6 +109,17 @@ pub(crate) trait Provider: Send {
     fn runtime(&self) -> Arc<dyn HarnessRuntime>;
 
     fn events(&mut self) -> &mut EventStream;
+
+    /// What the adapter does with a sub-agent's frames while no turn runs.
+    fn sub_agent_frames(&self) -> SubAgentFrames {
+        SubAgentFrames::NotModelled
+    }
+
+    /// Plays a sub-agent that starts, runs a tool and ends while no turn runs. Only called
+    /// for a provider that declares [`SubAgentFrames::Separate`].
+    async fn play_sub_agent_at_rest(&mut self) {
+        unimplemented!("declared SubAgentFrames::Separate without playing a sub-agent")
+    }
 
     /// Submits a new turn and plays the provider's usual reply to it.
     async fn start_turn(&mut self, id: &str) -> DispatchOutcome;
@@ -296,6 +319,41 @@ async fn a_new_turn_is_acknowledged_as_the_adapter_declares(p: &mut dyn Provider
     p.assert_nothing_else_written().await;
 }
 
+/// A sub-agent's frames never open a turn, whichever harness it is: with no turn running,
+/// a sub-agent that starts, works and ends shows as sub-agent events, and no turn starts
+/// or ends and no text or request is made up for the main agent. Only the main agent's own
+/// output can open a turn.
+async fn a_sub_agents_frames_never_open_a_turn(p: &mut dyn Provider) {
+    if p.sub_agent_frames() == SubAgentFrames::NotModelled {
+        return;
+    }
+    p.play_sub_agent_at_rest().await;
+
+    let shown = drain(p.events()).await;
+    assert!(
+        shown
+            .iter()
+            .any(|event| matches!(event, EventKind::SubAgentStarted(_))),
+        "the sub-agent is shown: {shown:?}"
+    );
+    let opened = shown.iter().find(|event| {
+        matches!(
+            event,
+            EventKind::TurnStarted { .. }
+                | EventKind::TurnEnded { .. }
+                | EventKind::TextDelta { .. }
+                | EventKind::MessageCompleted { .. }
+                | EventKind::ToolUpdated { .. }
+                | EventKind::SubmissionEvidence { .. }
+        )
+    });
+    assert!(
+        opened.is_none(),
+        "a sub-agent's frames opened or ended a turn: {opened:?} in {shown:?}"
+    );
+    p.assert_nothing_else_written().await;
+}
+
 // ---------------------------------------------------------------------------
 // Providers and the suite's cases
 // ---------------------------------------------------------------------------
@@ -348,7 +406,10 @@ impl Provider for FakeProvider {
         let turn = NativeTurnId::new("turn-1");
         assert!(
             self.fake
-                .emit(EventKind::TurnStarted { turn: turn.clone() })
+                .emit(EventKind::TurnStarted {
+                    turn: turn.clone(),
+                    origin: None
+                })
                 .await
         );
         assert!(
@@ -456,6 +517,12 @@ macro_rules! conformance {
             async fn each_request_accepts_one_answer_from_its_own_generation() {
                 let mut p = $provider.await;
                 super::each_request_accepts_one_answer_from_its_own_generation(&mut *p).await;
+            }
+
+            #[tokio::test(start_paused = true)]
+            async fn a_sub_agents_frames_never_open_a_turn() {
+                let mut p = $provider.await;
+                super::a_sub_agents_frames_never_open_a_turn(&mut *p).await;
             }
 
             #[tokio::test(start_paused = true)]

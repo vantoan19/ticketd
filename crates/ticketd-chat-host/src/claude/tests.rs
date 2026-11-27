@@ -14,7 +14,7 @@ use tokio::time::{sleep, timeout};
 
 use super::runtime::{Options, open_over, probe, probe_options};
 use super::{BRIDGE_SIDECAR_NAME, ClaudeAdapter, candidates, locate, verdict};
-use crate::conformance::{NewTurn, Provider};
+use crate::conformance::{NewTurn, Provider, SubAgentFrames};
 use crate::install::{LaunchEnvironment, Os};
 use crate::outcome::read_end;
 use crate::scripted::{Peer, brief, pipes};
@@ -2186,6 +2186,21 @@ impl Provider for Bridge {
 
     fn events(&mut self) -> &mut EventStream {
         &mut self.events
+    }
+
+    fn sub_agent_frames(&self) -> SubAgentFrames {
+        SubAgentFrames::Separate
+    }
+
+    async fn play_sub_agent_at_rest(&mut self) {
+        self.peer.load(
+            r#"{"server":{"v":1,"event":"sub_agent_started","generation":7,"task_id":"task_bg","run_id":"run_bg_1","tool_use_id":"toolu_bg","parent_task_id":null,"description":"Find limiter bypasses","subagent_type":"Explore","background":true,"prompt":"Look for ways around the rate limiter.","prompt_truncated":false,"spawn_depth":1}}
+{"server":{"v":1,"event":"assistant_content","generation":7,"uuid":"uuid-bg1","message_id":"msg-bg1","parent_tool_use_id":"toolu_bg","model":"claude-haiku-5-5","blocks":[{"type":"tool_use","id":"toolu_bg_read","name":"Read","input":{"file_path":"/work/chat-1/src/api/rate-limit.ts"}}],"error":null,"aborted":false}}
+{"server":{"v":1,"event":"tool_result","generation":7,"tool_use_id":"toolu_bg_read","parent_tool_use_id":"toolu_bg","is_error":false,"text":"1\texport const LIMIT = 5;","truncated":false,"outcome":null}}
+{"server":{"v":1,"event":"sub_agent_ended","generation":7,"task_id":"task_bg","run_id":"run_bg_1","tool_use_id":"toolu_bg","status":"completed","reason":null,"summary":"Done."}}
+"#,
+        );
+        self.peer.play().await;
     }
 
     async fn start_turn(&mut self, id: &str) -> DispatchOutcome {

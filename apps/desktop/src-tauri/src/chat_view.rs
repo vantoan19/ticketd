@@ -18,8 +18,8 @@ use ticketd_core::{
     Chat, ChatAgentChange, ChatAttachment, ChatDelivery, ChatInputStanding, ChatInteraction,
     ChatInteractionKind, ChatInteractionState, ChatItem, ChatMessage, ChatOwner, ChatRole,
     ChatSessionOrigin, ChatSubAgent, ChatSubAgentRun, ChatSubAgentState, ChatSubAgentStopper,
-    ChatSubmissionIntent, ChatSuggestion, ChatTool, ChatToolState, ChatTurn, ChatTurnState,
-    SuggestedTicket,
+    ChatSubmissionIntent, ChatSuggestion, ChatTool, ChatToolState, ChatTurn, ChatTurnStarter,
+    ChatTurnState, SuggestedTicket,
 };
 
 use crate::chat_reports::{self, ContextView, FileView, PlanStepView, Report, SettingsView};
@@ -308,6 +308,9 @@ pub enum Item {
         /// the main agent's turns.
         #[serde(skip_serializing_if = "Option::is_none")]
         owner: Option<String>,
+        /// Who started the turn when the person did not; absent when their message did.
+        #[serde(skip_serializing_if = "Option::is_none")]
+        origin: Option<TurnOriginView>,
     },
     Request {
         id: String,
@@ -345,6 +348,9 @@ pub enum Item {
         /// The sub-agent it is about; absent for the main agent's.
         #[serde(skip_serializing_if = "Option::is_none")]
         owner: Option<String>,
+        /// For `sub_agents_stopped`: how many.
+        #[serde(skip_serializing_if = "Option::is_none")]
+        count: Option<i64>,
     },
     Session {
         id: String,
@@ -398,6 +404,16 @@ pub enum Item {
         state: &'static str,
         files: Vec<FileView>,
     },
+}
+
+/// Who started a turn the person did not: the Chat's harness resuming the main agent by
+/// itself (`harness`) or ticketd waking it (`ticketd`), and the sub-agent whose finish it
+/// follows when that is known.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+pub struct TurnOriginView {
+    pub by: &'static str,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub sub_agent: Option<String>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
@@ -501,6 +517,10 @@ pub struct ChatState {
     pub folder: Folder,
     pub retention: &'static str,
     pub activity: &'static str,
+    /// `false` while only sub-agents run: no turn does. Absent otherwise (a turn runs, or
+    /// nothing does).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub turn_running: Option<bool>,
     pub problem: Option<Problem>,
     pub doing: Option<Doing>,
     /// Working while the harness session opens: "resume" or "start".
@@ -653,6 +673,9 @@ pub struct Surroundings {
 #[derive(Debug, Clone, Default)]
 pub struct Tracker {
     last_turn: Option<ChatTurn>,
+    /// The latest note that the person stopped sub-agents with no turn running: where it
+    /// stands in the history and how many.
+    sub_agents_stopped: Option<(i64, i64)>,
     /// A submission whose delivery the person has to decide about, and why the resend
     /// they asked for was not accepted, when that is how it came back to them.
     uncertain: Option<(String, Option<String>)>,
@@ -946,8 +969,23 @@ impl Tracker {
                     .retain(|_, kept| kept.turn_id == tool.turn_id);
                 self.turn_tools.insert(tool.id.clone(), tool.clone());
             }
-            ChatItem::Session(_) | ChatItem::Notice(_) => {}
+            ChatItem::Notice(notice) => {
+                if let Some(count) = notice.sub_agents_stopped {
+                    self.sub_agents_stopped = Some((notice.position, count));
+                }
+            }
+            ChatItem::Session(_) => {}
         }
+    }
+
+    /// How many sub-agents the person stopped, while that is the Chat's last event: no
+    /// turn has started since.
+    pub fn stopped_sub_agents(&self) -> Option<i64> {
+        let (position, count) = self.sub_agents_stopped?;
+        self.last_turn
+            .as_ref()
+            .is_none_or(|turn| turn.position < position)
+            .then_some(count)
     }
 
     /// What the latest turn did to ticketd's records, the first sentence of the records
@@ -1669,6 +1707,7 @@ pub fn item(
                     message: Some(format!("Continued in a fresh {harness} session.")),
                     turn_id: None,
                     owner: None,
+                    count: None,
                 },
             }
         }
@@ -1731,6 +1770,7 @@ pub fn item(
                 message,
                 turn_id: Some(turn.id.clone()),
                 owner: None,
+                count: None,
             }
         }
         // The call that started a sub-agent is told by the sub-agent's own row.
@@ -1797,6 +1837,16 @@ pub fn item(
                 .unwrap_or_default();
             request(interaction, live, harness, &rows)
         }
+        // The person stopped sub-agents while no turn ran: the row counts them.
+        ChatItem::Notice(notice) if notice.sub_agents_stopped.is_some() => Item::Marker {
+            id: notice.id.clone(),
+            at: notice.created_at.clone(),
+            reason: "sub_agents_stopped",
+            message: None,
+            turn_id: None,
+            owner: None,
+            count: notice.sub_agents_stopped,
+        },
         ChatItem::Notice(notice) => Item::Marker {
             id: notice.id.clone(),
             at: notice.created_at.clone(),
@@ -1809,6 +1859,7 @@ pub fn item(
             message: Some(notice.text.clone()),
             turn_id: None,
             owner: None,
+            count: None,
         },
     })
 }
@@ -1875,6 +1926,13 @@ fn turn_item(turn: &ChatTurn) -> Item {
             Some(TurnEnding::ContactLost(_)) => "lost",
         },
         owner: None,
+        origin: turn.origin.as_ref().map(|origin| TurnOriginView {
+            by: match origin.by {
+                ChatTurnStarter::Harness => "harness",
+                ChatTurnStarter::Ticketd => "ticketd",
+            },
+            sub_agent: origin.sub_agent.clone(),
+        }),
     }
 }
 
@@ -1975,6 +2033,7 @@ fn sub_agent_run_items(run: &ChatSubAgentRun, chat: &Chat, tracker: &Tracker) ->
                 ChatSubAgentState::Lost => "lost",
             },
             owner: Some(native.to_owned()),
+            origin: None,
         },
     ];
     if run.state == ChatSubAgentState::Failed {
@@ -1992,6 +2051,7 @@ fn sub_agent_run_items(run: &ChatSubAgentRun, chat: &Chat, tracker: &Tracker) ->
                 .map(|detail| format!("{harness} ended it with an error: {detail}")),
             turn_id: Some(this_run),
             owner: Some(native.to_owned()),
+            count: None,
         });
     }
     items
@@ -2458,6 +2518,14 @@ pub fn chat_state(
         },
         retention: retention(chat),
         activity,
+        // Only sub-agents run (or the main agent is about to resume): no turn does.
+        turn_running: (activity == "working"
+            && chat.active_turn.is_none()
+            && opening.is_none()
+            && !live.delivery_unconfirmed
+            && live.sending.is_empty()
+            && (live.sub_agents > 0 || live.waking))
+            .then_some(false),
         problem,
         doing: chat
             .active_turn
@@ -2547,6 +2615,7 @@ pub fn summary(chat: &Chat, live: &ChatLive, tracker: &Tracker, around: &Surroun
         first_change: first_change.as_ref(),
         files_changed: tracker.files_changed(),
         last_response: tracker.last_response.as_deref(),
+        stopped_sub_agents: tracker.stopped_sub_agents(),
     });
     let interruption = match tracker.last_turn.as_ref().and_then(TurnEnding::of) {
         _ if activity != "interrupted" => None,

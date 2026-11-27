@@ -467,6 +467,10 @@ pub enum EventKind {
     },
     TurnStarted {
         turn: NativeTurnId,
+        /// Who started the turn when the person did not: the harness, resuming the main
+        /// agent by itself (naming the sub-agent whose finish it follows when it is
+        /// known), or ticketd waking it. `None`: the person's message did.
+        origin: Option<TurnOrigin>,
     },
     /// Streamed text. May be coalesced or lost; `MessageCompleted` is authoritative.
     TextDelta {
@@ -591,6 +595,22 @@ pub enum EventKind {
         summary: String,
         detail: ProviderDetail,
     },
+}
+
+/// Who started a turn the person did not, as the harness or ticketd said.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct TurnOrigin {
+    pub by: TurnStarter,
+    /// The sub-agent whose finish this turn follows, when that is known.
+    pub sub_agent: Option<NativeSubAgentId>,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum TurnStarter {
+    /// The harness resumed the main agent by itself.
+    Harness,
+    /// ticketd sent the message that woke the main agent.
+    Ticketd,
 }
 
 /// A sub-agent run beginning.

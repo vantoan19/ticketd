@@ -860,6 +860,19 @@ impl HostScript {
             first_change: None,
             files_changed: None,
             last_response,
+            stopped_sub_agents: view
+                .snapshot
+                .items
+                .iter()
+                .filter_map(|item| match item {
+                    ChatItem::Notice(notice) => notice
+                        .sub_agents_stopped
+                        .map(|count| (notice.position, count)),
+                    _ => None,
+                })
+                .next_back()
+                .filter(|(position, _)| last_turn.is_none_or(|turn| turn.position < *position))
+                .map(|(_, count)| count),
         })
     }
 

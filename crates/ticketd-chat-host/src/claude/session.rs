@@ -13,7 +13,7 @@ use crate::{
     InteractionKind, InteractionRequest, InteractionResolution, NativeItemId, NativeRequestId,
     NativeSessionId, NativeSubAgentId, NativeTurnId, NoticeKind, Problem, ProblemKind,
     ProviderDetail, Question, Refusal, SettingKey, SubAgentOutcome, SubAgentStart, SubAgentStopper,
-    SubmissionId, ToolStatus, TurnEvidence, TurnOutcome, reset_time,
+    SubmissionId, ToolStatus, TurnEvidence, TurnOrigin, TurnOutcome, TurnStarter, reset_time,
 };
 
 use super::report::{PLAN_TOOLS, Reports};
@@ -75,6 +75,9 @@ struct SubAgents {
     owner: HashMap<String, String>,
     /// Frames of a tool use not announced as a sub-agent yet: (event name, event).
     held: HashMap<String, Vec<(String, Value)>>,
+    /// The sub-agent that finished last while no turn ran, until a turn opens: the one
+    /// the turn Claude Code starts by itself follows.
+    finished_at_rest: Option<String>,
 }
 
 impl SubAgents {
@@ -82,10 +85,18 @@ impl SubAgents {
     /// a foreground sub-agent ran in the turn is over with it.
     fn turn_ended(&mut self) {
         self.held.clear();
-        self.owner.clear();
+        self.finished_at_rest = None;
         for agent in self.known.values_mut().filter(|agent| !agent.background) {
             agent.running = false;
         }
+        // A sub-agent in the background goes on past the turn, and so do its tool calls.
+        let running: HashSet<&str> = self
+            .known
+            .iter()
+            .filter(|(_, agent)| agent.running)
+            .map(|(task, _)| task.as_str())
+            .collect();
+        self.owner.retain(|_, task| running.contains(task.as_str()));
     }
 }
 
@@ -197,13 +208,34 @@ impl Session {
     /// The open turn, opening one when Claude Code shows activity outside a turn.
     /// Claude Code has no turn identity, so the id is local to this runtime.
     fn turn(&mut self, events: &mut Vec<EventKind>) -> NativeTurnId {
+        self.open_turn(events, true)
+    }
+
+    /// The turn the person's input started, opened as soon as the harness says it took the
+    /// input. Not labelled: the person started it.
+    fn turn_for_input(&mut self, events: &mut Vec<EventKind>) -> NativeTurnId {
+        self.open_turn(events, false)
+    }
+
+    fn open_turn(&mut self, events: &mut Vec<EventKind>, by_itself: bool) -> NativeTurnId {
         if let Some(turn) = self.active_turn() {
             return turn.clone();
         }
         self.turns_started += 1;
         let id = NativeTurnId(format!("local-turn-{}", self.turns_started));
         self.runtime.turn_started(&id);
-        events.push(EventKind::TurnStarted { turn: id.clone() });
+        // Output of the main agent with no input of the person's behind it: Claude Code
+        // resumed by itself, which it does when a sub-agent in the background finishes.
+        // What that sub-agent was is the last one that finished since the last turn.
+        let finished = self.sub_agents.finished_at_rest.take();
+        let origin = by_itself.then(|| TurnOrigin {
+            by: TurnStarter::Harness,
+            sub_agent: finished.map(NativeSubAgentId),
+        });
+        events.push(EventKind::TurnStarted {
+            turn: id.clone(),
+            origin,
+        });
         id
     }
 
@@ -227,7 +259,7 @@ impl Session {
         match name {
             "session_info" => self.session_info(event, &mut events),
             "input_processing" => {
-                let turn = self.turn(&mut events);
+                let turn = self.turn_for_input(&mut events);
                 for submission in strings(event, "submission_ids") {
                     events.push(EventKind::SubmissionEvidence {
                         submission: SubmissionId(submission),
@@ -611,6 +643,11 @@ impl Session {
             && agent.running
         {
             agent.running = false;
+            if !matches!(outcome, SubAgentOutcome::Stopped(_))
+                && self.runtime.active_turn_id().is_none()
+            {
+                self.sub_agents.finished_at_rest = Some(task.to_owned());
+            }
             events.push(EventKind::SubAgentEnded {
                 sub_agent: NativeSubAgentId::new(task),
                 run: text(event, "run_id").map(str::to_owned),
@@ -634,7 +671,16 @@ impl Session {
             return;
         };
         if run.is_none() || agent.run.is_none() || agent.run == run {
-            agent.running = false;
+            if agent.running
+                && !matches!(outcome, SubAgentOutcome::Stopped(_))
+                && self.runtime.active_turn_id().is_none()
+            {
+                self.sub_agents.finished_at_rest = Some(task.to_owned());
+            }
+            let agent = self.sub_agents.known.get_mut(task);
+            if let Some(agent) = agent {
+                agent.running = false;
+            }
         }
         events.push(EventKind::SubAgentEnded {
             sub_agent: NativeSubAgentId::new(task),
@@ -1000,10 +1046,13 @@ impl Session {
         self.identify(text(event, "session_id"), events);
         let id = self.turn(events);
         let last_error = self.turn_error.take();
-        self.tools.clear();
         self.declined.clear();
         self.streams.clear();
         self.sub_agents.turn_ended();
+        // The tool calls of a sub-agent still running in the background go on.
+        let sub_agents = &self.sub_agents;
+        self.tools
+            .retain(|tool, _| sub_agents.owner.contains_key(tool));
         self.reports.turn_ended();
         let subtype = text(event, "subtype").unwrap_or("unknown");
         let failed = event["is_error"] == true || subtype.starts_with("error");
