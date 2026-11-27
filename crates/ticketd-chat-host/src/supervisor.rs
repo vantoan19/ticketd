@@ -1615,6 +1615,32 @@ impl Supervisor {
         observations: &mut Vec<ChatObservation>,
         note: Option<usize>,
     ) {
+        self.end_sub_agents(observations, note, ChatSubAgentStopper::Person, None);
+    }
+
+    /// ticketd is stopping the harness for `why`: every sub-agent still running ends as
+    /// stopped by ticketd, with the reason. Quitting is not that: it leaves the sub-agents
+    /// as contact lost, which is all anyone knows when ticketd goes away. Nor is a storage
+    /// failure, after which nothing more can be written.
+    fn end_sub_agents_by_ticketd(&mut self, why: StopReason) {
+        if matches!(why, StopReason::Quit | StopReason::StorageFailed) {
+            return;
+        }
+        self.end_sub_agents(
+            &mut Vec::new(),
+            None,
+            ChatSubAgentStopper::Ticketd,
+            Some(why.marker().to_owned()),
+        );
+    }
+
+    fn end_sub_agents(
+        &mut self,
+        observations: &mut Vec<ChatObservation>,
+        note: Option<usize>,
+        stopped_by: ChatSubAgentStopper,
+        stop_reason: Option<String>,
+    ) {
         let mut running: Vec<String> = self.sub_agents.keys().cloned().collect();
         running.sort();
         self.sub_agents.clear();
@@ -1625,8 +1651,8 @@ impl Supervisor {
                     native_id,
                     native_run_id: None,
                     state: ChatSubAgentState::Stopped,
-                    stopped_by: Some(ChatSubAgentStopper::Person),
-                    stop_reason: None,
+                    stopped_by: Some(stopped_by),
+                    stop_reason: stop_reason.clone(),
                     detail: None,
                 }),
         );
@@ -2249,6 +2275,7 @@ impl Supervisor {
             };
         self.keep_unanswered_permission();
         self.runtime = None;
+        self.end_sub_agents_by_ticketd(why);
         self.runtime_gone(TurnEnding::StoppedByTicketd(why), false);
         if let Some(reason) = &unconfirmed {
             if permission_restart || self.unattended.is_some() {

@@ -124,6 +124,65 @@ mod claude {
     }
 }
 
+mod ticketd {
+    use super::*;
+    use crate::StopReason;
+
+    async fn two_running(h: &mut HostScript) {
+        h.send(PROMPT).await;
+        h.play_to("the SDK took the input").await;
+        h.play_to("the turn ended").await;
+        h.play_to("a sub-agent works after the turn ended").await;
+        h.play_to("both sub-agents work").await;
+        assert_eq!(h.live().await.sub_agents, 2);
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn ticketd_stopping_the_chat_records_its_reason_on_the_sub_agents_it_ended() {
+        for (why, key) in [
+            (StopReason::TurnedOff, "turned_off"),
+            (StopReason::Restore, "restore"),
+            (StopReason::Trashed, "trashed"),
+        ] {
+            let mut h = HostScript::claude()
+                .process([
+                    fixture!("claude", "handshake"),
+                    fixture!("claude", "sub_agent_stop_one"),
+                ])
+                .start();
+            two_running(&mut h).await;
+
+            h.stop_all(why).await;
+            h.lose_process(0).await;
+
+            for native_id in ["task_a", "task_b"] {
+                let run = run(&h, native_id);
+                assert_eq!(run.state, ChatSubAgentState::Stopped, "{key}");
+                assert_eq!(run.stopped_by, Some(ChatSubAgentStopper::Ticketd), "{key}");
+                assert_eq!(run.stop_reason.as_deref(), Some(key));
+            }
+            // ticketd's own stop is not the person's: no note of "You stopped".
+            assert!(h.notices().is_empty(), "{:?}", h.notices());
+        }
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn quitting_loses_contact_with_the_sub_agents_instead_of_stopping_them() {
+        let mut h = HostScript::claude()
+            .process([
+                fixture!("claude", "handshake"),
+                fixture!("claude", "sub_agent_stop_one"),
+            ])
+            .start();
+        two_running(&mut h).await;
+        h.stop_all(StopReason::Quit).await;
+        h.lose_process(0).await;
+        for native_id in ["task_a", "task_b"] {
+            assert_eq!(run(&h, native_id).state, ChatSubAgentState::Lost);
+        }
+    }
+}
+
 mod codex {
     use super::*;
 

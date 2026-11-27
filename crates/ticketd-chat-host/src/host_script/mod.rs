@@ -590,6 +590,16 @@ impl HostScript {
             .await;
     }
 
+    /// ticketd itself stops every running Chat, for `why`.
+    pub async fn stop_all(&mut self, why: crate::StopReason) {
+        let host = self.host.clone();
+        self.call("stop all", async move {
+            host.stop_all(why).await;
+            Ok(())
+        })
+        .await;
+    }
+
     /// The person presses Stop on one sub-agent, by its native ID.
     pub async fn stop_sub_agent(&mut self, native_id: &str) {
         let (host, chat, native_id) = (

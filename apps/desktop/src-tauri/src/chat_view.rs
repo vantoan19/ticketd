@@ -2114,7 +2114,11 @@ fn sub_agent_view(record: &ChatSubAgent, chat: &Chat, live: &ChatLive) -> Option
             brief: support.brief,
             text: support.text,
             end: support.end,
-            stop: support.stop,
+            // Only while it runs: in the background, in a session that is live.
+            stop: support.stop
+                && latest.state == ChatSubAgentState::Running
+                && record.background
+                && live.sub_agents > 0,
             resume: support.resume,
         },
     );
@@ -4731,6 +4735,54 @@ mod tests {
         assert_eq!(stop[0]["stopped_by"], "ticketd");
         assert_eq!(stop[0]["stop_reason"], "turned_off");
         assert_eq!(stop.len(), 2);
+    }
+
+    /// Stop one is offered where the harness declares it and only for a sub-agent that
+    /// runs now and runs in the background; a foreground one ends with its turn.
+    #[test]
+    fn stop_one_is_offered_only_for_a_live_background_sub_agent_of_a_harness_that_declares_it() {
+        let capability = |harness: &str, background: bool, state, sub_agents: usize| {
+            let chat = Chat {
+                harness: harness.to_owned(),
+                ..chat(None)
+            };
+            let mut record =
+                sub_agent_record("a", None, json!({}), vec![sub_agent_run("a", 1, 10, state)]);
+            record.background = background;
+            let tracker = Tracker::from_snapshot(&[], std::slice::from_ref(&record));
+            let mut live = ChatLive::idle();
+            live.sub_agents = sub_agents;
+            tracker.sub_agent_views(&chat, &live)[0].capabilities.stop
+        };
+        let running = ChatSubAgentState::Running;
+        for harness in ["claude-code", "codex"] {
+            assert!(
+                capability(harness, true, running, 1),
+                "{harness} background and live"
+            );
+            assert!(
+                !capability(harness, false, running, 1),
+                "{harness} foreground"
+            );
+            assert!(
+                !capability(harness, true, ChatSubAgentState::Completed, 1),
+                "{harness} finished"
+            );
+            assert!(
+                !capability(harness, true, ChatSubAgentState::Stopped, 1),
+                "{harness} stopped"
+            );
+            assert!(
+                !capability(harness, true, ChatSubAgentState::Lost, 0),
+                "{harness} lost"
+            );
+            // Nothing runs in the harness any more: the record is not evidence of a live one.
+            assert!(!capability(harness, true, running, 0), "{harness} not live");
+        }
+        assert!(
+            !capability("antigravity", true, running, 1),
+            "Antigravity cannot stop one"
+        );
     }
 
     #[test]

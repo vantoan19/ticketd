@@ -988,6 +988,21 @@ async fn steering_says_its_effect_stop_shows_progress_and_send_now_takes_one_que
 }
 
 #[tokio::test(start_paused = true)]
+async fn stopping_a_sub_agent_that_does_not_run_is_a_stale_view_and_touches_nothing() {
+    let f = Fixture::new().await;
+    let id = f.chat().await;
+    let (opened, _) = f.open(&id).await;
+    assert!(!opened.snapshot.chat.stopping);
+
+    let refused = f.chats.stop_sub_agent(&id, "no-such-sub-agent").await;
+    assert_eq!(refused.unwrap_err().code, "stale");
+    // Not a Stop of the Chat: its turn and queue are as they were.
+    let (opened, _) = f.open(&id).await;
+    assert!(!opened.snapshot.chat.stopping);
+    assert!(!opened.snapshot.chat.queue_paused);
+}
+
+#[tokio::test(start_paused = true)]
 async fn an_uncertain_submission_waits_for_the_person_and_is_resent_only_when_they_say_so() {
     let f = Fixture::new().await;
     f.fake.script_submit(SubmitReply::LoseProcess);

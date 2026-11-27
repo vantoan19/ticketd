@@ -175,7 +175,8 @@ pub struct SubAgentSupport {
     pub text: bool,
     /// It reports when a sub-agent finishes.
     pub end: bool,
-    /// One sub-agent can be stopped without the others.
+    /// One sub-agent can be stopped without the others, while it runs in the background
+    /// (a foreground one ends with its turn).
     pub stop: bool,
     /// A sub-agent that was lost can be resumed.
     pub resume: bool,
@@ -238,12 +239,12 @@ pub static CLAUDE_CODE: HarnessDescriptor = HarnessDescriptor {
             is_default: false,
         },
     ],
-    // Stop for one sub-agent (`stopTask`, background only) is added with its command.
+    // Stop one goes through the SDK's `stopTask`, for sub-agents in the background only.
     sub_agents: SubAgentSupport {
         brief: true,
         text: true,
         end: true,
-        stop: false,
+        stop: true,
         resume: true,
     },
 };
@@ -293,11 +294,12 @@ pub static CODEX: HarnessDescriptor = HarnessDescriptor {
         },
     ],
     // Codex does not report what a child was asked.
+    // Stop one interrupts the child's own turn and cleans its terminals.
     sub_agents: SubAgentSupport {
         brief: false,
         text: true,
         end: true,
-        stop: false,
+        stop: true,
         resume: false,
     },
 };
@@ -368,6 +370,7 @@ pub static ANTIGRAVITY: HarnessDescriptor = HarnessDescriptor {
         brief: true,
         text: false,
         end: false,
+        // `session/cancel` ends everything; there is no stop for one child.
         stop: false,
         resume: false,
     },
