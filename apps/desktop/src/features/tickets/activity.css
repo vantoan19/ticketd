@@ -154,3 +154,25 @@
 .activity-composer > .markdown-editor .cm-content {
   padding-block: 12px;
 }
+
+/* An Activity credited to a sub-agent: a quiet second name after its author. */
+.activity-subagent {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  min-width: 0;
+  color: var(--muted-foreground);
+  border-radius: var(--radius-segment);
+}
+.activity-subagent svg {
+  width: 14px;
+  height: 14px;
+  flex-shrink: 0;
+}
+.activity-subagent:hover {
+  color: var(--foreground);
+}
+.activity-subagent:focus-visible {
+  outline: 2px solid var(--ring);
+  outline-offset: 2px;
+}
