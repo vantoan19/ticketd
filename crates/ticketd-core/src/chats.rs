@@ -2948,6 +2948,18 @@ impl Workspace {
     /// is not this Chat's, or is earlier than what was read, changes nothing. No Chat
     /// change is logged: reading is not a change the views have to follow.
     pub fn mark_chat_read_through(&mut self, id: &str, record: &str) -> Result<Chat, Error> {
+        self.mark_chat_read_through_at(id, record, record)
+    }
+
+    /// Like [`Self::mark_chat_read_through`] for an item a view shows under an ID of its
+    /// own, such as a sub-agent's row: `record` is kept as the item read, and its place in
+    /// the history is that of the stored record `anchor` (the sub-agent's run).
+    pub fn mark_chat_read_through_at(
+        &mut self,
+        id: &str,
+        record: &str,
+        anchor: &str,
+    ) -> Result<Chat, Error> {
         let chat = self.chat(id)?;
         let position: Option<i64> = self
             .connection
@@ -2958,9 +2970,10 @@ impl Workspace {
                      UNION ALL SELECT position, id, chat_id FROM chat_turns
                      UNION ALL SELECT position, id, chat_id FROM chat_tools
                      UNION ALL SELECT position, id, chat_id FROM chat_interactions
-                     UNION ALL SELECT position, id, chat_id FROM chat_notices)
+                     UNION ALL SELECT position, id, chat_id FROM chat_notices
+                     UNION ALL SELECT position, id, chat_id FROM chat_sub_agent_runs)
                  WHERE chat_id = ?1 AND id = ?2",
-                params![id, record],
+                params![id, anchor],
                 |row| row.get(0),
             )
             .optional()?;

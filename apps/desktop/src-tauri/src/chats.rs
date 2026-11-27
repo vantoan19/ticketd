@@ -1416,7 +1416,18 @@ impl Chats {
     pub fn read_through(&self, chat_id: &str, item_id: &str) -> Outcome<()> {
         // A turn's timing item is named after its turn.
         let record = item_id.strip_prefix("turn:").unwrap_or(item_id);
-        self.workspace()?.mark_chat_read_through(chat_id, record)?;
+        let mut workspace = self.workspace()?;
+        // A sub-agent's row has an ID of the view's own (`{sub-agent}:row-{run}`): it is
+        // kept as the item read, and placed where the run it shows began.
+        if let Some((native_id, run)) = record.rsplit_once(":row-")
+            && let Ok(run) = run.parse::<i64>()
+            && let Some(sub_agent) = workspace.chat_sub_agent(chat_id, native_id)?
+            && let Some(run) = sub_agent.runs.iter().find(|stored| stored.run == run)
+        {
+            workspace.mark_chat_read_through_at(chat_id, record, &run.id)?;
+            return Ok(());
+        }
+        workspace.mark_chat_read_through(chat_id, record)?;
         Ok(())
     }
 
