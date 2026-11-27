@@ -70,6 +70,7 @@ export function SettingsPage({
   children: ReactNode;
 }) {
   const heading = useRef<HTMLHeadingElement>(null);
+  const shell = useRef<HTMLDivElement>(null);
   const { navOpen = false, setNavOpen } = useSettingsState();
   // The trigger carries the dot while any page does.
   const setup = useNeeds().length > 0;
@@ -78,8 +79,48 @@ export function SettingsPage({
   useEffect(() => {
     if (!hidden && focusTitle) heading.current?.focus({ preventScroll: true });
   }, [hidden, focusTitle]);
+  // An in-place action (Install, Continue, Allow) can remove the very control
+  // that held focus, which drops it on the body: the next Tab would start at the
+  // top of the window. Land on what replaced it: the page's marked step heading,
+  // else its title.
+  useEffect(() => {
+    const root = shell.current;
+    if (hidden || !focusTitle || !root) return;
+    let inside = false;
+    const track = (event: FocusEvent) => {
+      inside = event.target instanceof Node && root.contains(event.target);
+    };
+    // A click on empty space puts focus nowhere on purpose; a click on a
+    // control that is already focused fires no focus event; a removed control
+    // reports nothing at all, which is the case to repair.
+    const press = (event: PointerEvent) => {
+      const control =
+        event.target instanceof Element
+          ? event.target.closest(
+              'button, a[href], input, select, textarea, summary, [role="button"], [tabindex]',
+            )
+          : null;
+      inside = !!control && root.contains(control);
+    };
+    const observer = new MutationObserver(() => {
+      const active = document.activeElement;
+      if (!inside || (active && active !== document.body)) return;
+      const target =
+        root.querySelector<HTMLElement>("[data-focus-target]") ??
+        heading.current;
+      target?.focus({ preventScroll: true });
+    });
+    document.addEventListener("focusin", track);
+    document.addEventListener("pointerdown", press, true);
+    observer.observe(root, { childList: true, subtree: true });
+    return () => {
+      document.removeEventListener("focusin", track);
+      document.removeEventListener("pointerdown", press, true);
+      observer.disconnect();
+    };
+  }, [hidden, focusTitle]);
   return (
-    <div className="settings-shell" hidden={hidden}>
+    <div className="settings-shell" hidden={hidden} ref={shell}>
       <div className="settings-panel-bar">
         {drillIn && (
           <Button

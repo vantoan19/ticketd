@@ -70,6 +70,8 @@ function PointRow({
 }) {
   const when = restorePointWhen(point.saved_at);
   const label = labelOf(point);
+  // The time stays on one line; the row's badge and counts give way instead.
+  const time = <span className="whitespace-nowrap">{when}</span>;
   const counts = point.summary
     ? `${plural(point.summary.tickets, "ticket")} · ${plural(point.summary.documents, "Document")}`
     : null;
@@ -78,12 +80,12 @@ function PointRow({
       tight={!point.problem}
       title={
         label ? (
-          <span className="inline-flex items-center gap-2">
-            {when}
+          <span className="inline-flex flex-wrap items-center gap-x-2">
+            {time}
             <Badge size="sm">{label}</Badge>
           </span>
         ) : (
-          when
+          time
         )
       }
       description={point.problem ? sentence(point.problem) : undefined}
@@ -216,7 +218,7 @@ export function BackupsSection({
             type="button"
             variant="ghost"
             size="sm"
-            disabled={busy}
+            busy={busy}
             onClick={() => void backUp()}
           >
             <Plus aria-hidden="true" />

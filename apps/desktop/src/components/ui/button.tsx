@@ -4,7 +4,7 @@ import { cn } from "cn";
 import { Slot } from "radix-ui";
 
 const buttonVariants = cva(
-  "ui-button inline-flex shrink-0 items-center justify-center gap-2 whitespace-nowrap disabled:pointer-events-none [&_svg]:pointer-events-none [&_svg]:shrink-0 [&_svg]:size-4",
+  "ui-button inline-flex shrink-0 items-center data-busy:pointer-events-none justify-center gap-2 whitespace-nowrap disabled:pointer-events-none [&_svg]:pointer-events-none [&_svg]:shrink-0 [&_svg]:size-4",
   {
     variants: {
       variant: {
@@ -51,22 +51,61 @@ function Button({
   size = "default",
   asChild = false,
   readOnly = false,
+  busy = false,
+  onClick,
+  ref,
   ...props
 }: React.ComponentProps<"button"> &
   VariantProps<typeof buttonVariants> & {
     asChild?: boolean;
     /** Shows a disabled control at full strength, for content that is viewable but locked. */
     readOnly?: boolean;
+    /**
+     * An action is under way. The button looks disabled and does nothing, but
+     * stays focusable (so focus is not dropped on the page) and keeps the width
+     * it had, so a shorter label ("Installing…") does not move its neighbours.
+     */
+    busy?: boolean;
   }) {
   const Comp = asChild ? Slot.Root : "button";
+  const own = React.useRef<HTMLElement | null>(null);
+  const idleWidth = React.useRef(0);
+  React.useLayoutEffect(() => {
+    const node = own.current;
+    if (!node) return;
+    if (busy) {
+      if (idleWidth.current) node.style.minWidth = `${idleWidth.current}px`;
+    } else {
+      node.style.minWidth = "";
+      idleWidth.current = node.getBoundingClientRect().width;
+    }
+  });
+  const setRef = React.useCallback(
+    (node: HTMLButtonElement | null) => {
+      own.current = node;
+      if (typeof ref === "function") ref(node);
+      else if (ref) ref.current = node;
+    },
+    [ref],
+  );
 
   return (
     <Comp
+      ref={setRef}
       data-slot="button"
       data-variant={variant}
       data-size={size}
       data-readonly={readOnly || undefined}
+      data-busy={busy || undefined}
       className={cn(buttonVariants({ variant, size, className }))}
+      {...(busy && { "aria-disabled": true, "aria-busy": true })}
+      {...((onClick || busy) && {
+        onClick: (event: React.MouseEvent<HTMLButtonElement>) => {
+          // Also stops a busy submit button from submitting its form again.
+          if (busy) event.preventDefault();
+          else onClick?.(event);
+        },
+      })}
       {...props}
     />
   );

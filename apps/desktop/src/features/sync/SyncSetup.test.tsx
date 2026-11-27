@@ -269,11 +269,11 @@ test("waiting for the Google sign-in says so and holds the buttons", async () =>
   expect(
     screen
       .getByRole("button", { name: "Connect Google Drive" })
-      .hasAttribute("disabled"),
-  ).toBe(true);
+      .getAttribute("aria-disabled"),
+  ).toBe("true");
   expect(
-    screen.getByRole("button", { name: "Back" }).hasAttribute("disabled"),
-  ).toBe(true);
+    screen.getByRole("button", { name: "Back" }).getAttribute("aria-disabled"),
+  ).toBe("true");
 });
 
 test("a build without a Drive app configuration says so and holds back sign-in", async () => {

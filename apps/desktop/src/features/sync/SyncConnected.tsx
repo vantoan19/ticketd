@@ -108,7 +108,7 @@ function StatusRow({ status }: { status: SyncStatus }) {
     <Button
       size="sm"
       variant={variant}
-      disabled={busy}
+      busy={busy}
       onClick={() => void run(syncApi.recover, "sync")}
     >
       Retry
@@ -121,7 +121,7 @@ function StatusRow({ status }: { status: SyncStatus }) {
   ) : !copy ? null : moved ? (
     <>
       {retry("outline")}
-      <Button size="sm" disabled={busy} onClick={() => setDisconnecting(true)}>
+      <Button size="sm" busy={busy} onClick={() => setDisconnecting(true)}>
         Disconnect…
       </Button>
     </>
@@ -130,7 +130,7 @@ function StatusRow({ status }: { status: SyncStatus }) {
       {retry("outline")}
       <Button
         size="sm"
-        disabled={busy}
+        busy={busy}
         onClick={() => void run(chooseProgram, "use that program")}
       >
         {copy.action}
@@ -144,7 +144,7 @@ function StatusRow({ status }: { status: SyncStatus }) {
           ? "outline"
           : "default"
       }
-      disabled={busy}
+      busy={busy}
       onClick={() =>
         void run(
           syncApi.recover,
@@ -652,7 +652,7 @@ function StopSyncing({ status }: { status: SyncStatus }) {
             <Button
               variant="outline"
               size="sm"
-              disabled={busy}
+              busy={busy}
               onClick={() => setDisconnecting(true)}
             >
               Disconnect…

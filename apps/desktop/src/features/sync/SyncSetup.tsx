@@ -149,6 +149,7 @@ function StartOrJoin({
         </SettingsList>
       </div>
       <SettingsSection
+        focusTarget
         title="Start or join"
         caption="Two Workspaces can't be merged later, so join the one you already sync."
       >
@@ -230,6 +231,7 @@ function WhereItSyncs({ onBack }: { onBack: () => void }) {
   return (
     <>
       <SettingsSection
+        focusTarget
         title="Where it syncs"
         caption="Use the same one on each computer."
       >
@@ -264,14 +266,15 @@ function WhereItSyncs({ onBack }: { onBack: () => void }) {
                     <Button
                       variant="ghost"
                       size="sm"
-                      disabled={busy}
+                      busy={busy}
                       onClick={onBack}
                     >
                       Back
                     </Button>
                     <Button
                       size="sm"
-                      disabled={busy || configured === false}
+                      disabled={configured === false}
+                      busy={busy}
                       onClick={() =>
                         void run(syncApi.connect, "connect Google Drive")
                       }
@@ -407,7 +410,7 @@ export function Choose({
               <Button
                 variant="ghost"
                 size="sm"
-                disabled={busy}
+                busy={busy}
                 onClick={() => setSwitching(true)}
               >
                 {s3 ? "Use another bucket…" : "Use another account…"}
@@ -425,6 +428,7 @@ export function Choose({
       )}
       {options && holdsWorkspace && (
         <SettingsSection
+          focusTarget
           title={
             options.existing.length > 1
               ? `Your ${where} already has Workspaces`
@@ -482,6 +486,7 @@ export function Choose({
       )}
       {options && startsAlone && (
         <SettingsSection
+          focusTarget
           title={`Your ${where} has no Workspace yet`}
           caption="Start with this one, and your other computers join it later."
         >
@@ -496,7 +501,7 @@ export function Choose({
                 <Button
                   variant="ghost"
                   size="sm"
-                  disabled={busy}
+                  busy={busy}
                   onClick={() =>
                     void run(
                       syncApi.disconnect,
@@ -508,7 +513,11 @@ export function Choose({
                 </Button>
                 <Button
                   size="sm"
-                  disabled={!options || busy}
+                  // Join…, Reconnect and Start syncing share one width, so Back
+                  // stays where it is when the choice changes.
+                  className="min-w-28"
+                  disabled={!options}
+                  busy={busy}
                   onClick={() =>
                     download
                       ? setConfirming(true)

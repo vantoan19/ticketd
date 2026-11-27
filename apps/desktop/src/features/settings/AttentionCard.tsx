@@ -121,7 +121,7 @@ export function AttentionCard() {
                   type="button"
                   variant="outline"
                   size="sm"
-                  disabled={asking}
+                  busy={asking}
                   onClick={() => void allow()}
                 >
                   Allow notifications

@@ -51,7 +51,7 @@ export function CommandBlock({
         className,
       )}
     >
-      <code className="min-w-0 flex-1 overflow-x-auto font-mono text-(length:--text-code) leading-5 whitespace-nowrap">
+      <code className="min-w-0 flex-1 font-mono text-(length:--text-code) leading-5 break-words">
         {!plain && (
           <span
             aria-hidden="true"

@@ -40,10 +40,14 @@ const FIND_READY = {
 
 /** "Bring in …" with the mark of an optional step, as the guide draws it. */
 function Title({ step }: { step: SetupStep }) {
+  if (!step.optional) return <>{step.title}</>;
+  // Non-breaking spaces tie the mark to the title's last word, so a wrapped
+  // title never leaves "· optional" alone on a line.
   return (
     <>
-      {step.optional ? `${step.title} ` : step.title}
-      {step.optional && <span className="ui-guide-optional">· optional</span>}
+      {step.title}
+      {"\u00a0"}
+      <span className="ui-guide-optional">·&nbsp;optional</span>
     </>
   );
 }
@@ -140,7 +144,7 @@ function AgentsStep({ step, state }: { step: SetupStep; state: SetupState }) {
           <Button
             size="sm"
             variant="outline"
-            disabled={busy}
+            busy={busy}
             onClick={() => void run(true)}
           >
             Use {homeRelative(declined)} instead
@@ -149,7 +153,7 @@ function AgentsStep({ step, state }: { step: SetupStep; state: SetupState }) {
           <Button
             size="sm"
             variant={current ? "default" : "ghost"}
-            disabled={busy}
+            busy={busy}
             onClick={() => void run(false)}
           >
             {busy ? "Installing…" : action.label}

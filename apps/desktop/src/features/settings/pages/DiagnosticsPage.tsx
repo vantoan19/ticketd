@@ -243,7 +243,7 @@ function ReportSection() {
                   type="button"
                   variant="ghost"
                   size="sm"
-                  disabled={busy !== null}
+                  busy={busy !== null}
                   onClick={() =>
                     void change("cancel", diagnosticsClient.cancelReport)
                   }
@@ -253,7 +253,7 @@ function ReportSection() {
                 <Button
                   type="button"
                   size="sm"
-                  disabled={busy !== null}
+                  busy={busy !== null}
                   onClick={() => void saveReport()}
                 >
                   {busy === "save" ? "Saving…" : "Save report…"}
@@ -285,7 +285,8 @@ function ReportSection() {
                 type="button"
                 variant="outline"
                 size="sm"
-                disabled={current === null || overridden || busy !== null}
+                disabled={current === null || overridden}
+                busy={busy !== null}
                 onClick={() =>
                   void change("start", diagnosticsClient.startReport)
                 }

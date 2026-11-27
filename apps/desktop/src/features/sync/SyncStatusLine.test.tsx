@@ -250,12 +250,10 @@ test("an ended AWS session asks quietly on the line and signs in from the popove
   fireEvent.click(within(dialog).getByRole("button", { name: "Sign in" }));
   await waitFor(() => expect(api.recover).toHaveBeenCalled());
   expect(
-    (
-      within(dialog).getByRole("button", {
-        name: "Waiting for sign-in…",
-      }) as HTMLButtonElement
-    ).disabled,
-  ).toBe(true);
+    within(dialog)
+      .getByRole("button", { name: "Waiting for sign-in…" })
+      .getAttribute("aria-disabled"),
+  ).toBe("true");
 
   // Signed in: sync ran again and what waited is uploaded.
   finish(syncStatus({ provider: "s3" }));

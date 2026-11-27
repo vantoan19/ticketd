@@ -340,7 +340,7 @@ test("an ended AWS session is the status row, signed in again through the profil
   const waitingButton = await within(row).findByRole("button", {
     name: /Waiting for sign-in…/,
   });
-  expect((waitingButton as HTMLButtonElement).disabled).toBe(true);
+  expect(waitingButton.getAttribute("aria-disabled")).toBe("true");
 
   finish(connected());
   await waitFor(() => expect(screen.queryByRole("alert")).toBeNull());

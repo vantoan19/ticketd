@@ -237,7 +237,7 @@ function CheckAgain({
       type="button"
       variant="ghost"
       size="sm"
-      disabled={busy || checking}
+      busy={busy || checking}
       onClick={onClick}
     >
       <RefreshCw aria-hidden="true" />
@@ -380,7 +380,7 @@ export function CommandLineCard({
                     <Button
                       type="button"
                       size="sm"
-                      disabled={fixing || checking}
+                      busy={fixing || checking}
                       onClick={() => void apply(false)}
                     >
                       {fixing
