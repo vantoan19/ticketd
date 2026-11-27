@@ -19,6 +19,7 @@ export function SectionHeader({
   actions,
   caption,
   bar = false,
+  focusTarget = false,
   className,
 }: {
   title: ReactNode;
@@ -31,6 +32,8 @@ export function SectionHeader({
   caption?: ReactNode;
   /** A fixed 44px band that opens a panel, with a hairline under it. */
   bar?: boolean;
+  /** The heading takes focus when the control that held it goes away (a step's heading). */
+  focusTarget?: boolean;
   className?: string;
 }) {
   const Heading = `h${level}` as const;
@@ -41,7 +44,10 @@ export function SectionHeader({
       className={cn("ui-section-header", className)}
     >
       {/* The count is part of the heading, so the name stays “Evidence 2”. */}
-      <Heading id={titleId}>
+      <Heading
+        id={titleId}
+        {...(focusTarget && { tabIndex: -1, "data-focus-target": "" })}
+      >
         {title}
         {count != null && (
           <>

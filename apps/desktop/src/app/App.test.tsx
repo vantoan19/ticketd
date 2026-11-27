@@ -10754,8 +10754,8 @@ test.each(["Command line"])(
     expect(
       screen
         .getByRole("button", { name: "Checking…" })
-        .hasAttribute("disabled"),
-    ).toBe(true);
+        .getAttribute("aria-disabled"),
+    ).toBe("true");
     await act(async () => release());
     expect(await screen.findByRole("button", { name: "Retry" })).toBeTruthy();
     expect(screen.getByText(known)).toBeTruthy();

@@ -72,7 +72,13 @@ function NeedLine({
           <small id={id}>{detail}</small>
         </button>
       </Tooltip>
-      <Button variant="ghost" size="sm" aria-label={actionName} onClick={onAct}>
+      <Button
+        variant="ghost"
+        size="sm"
+        data-rail-hidden=""
+        aria-label={actionName}
+        onClick={onAct}
+      >
         {action}
       </Button>
     </div>
@@ -292,6 +298,8 @@ export function SourceStatusFooter() {
               <Button
                 variant="ghost"
                 size="sm"
+                // "Sign in" opens the line's page, so the rail drops the word.
+                data-rail-hidden={signedOut ? "" : undefined}
                 onClick={() =>
                   signedOut ? openSettings(connection) : void refreshAll()
                 }

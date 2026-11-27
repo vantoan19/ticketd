@@ -172,9 +172,7 @@ function Comparison({
         <tr>
           <th scope="row">
             <Tooltip content={LAST_CHANGE}>
-              <span tabIndex={0} aria-description={LAST_CHANGE}>
-                Last change
-              </span>
+              <span aria-description={LAST_CHANGE}>Last change</span>
             </Tooltip>
           </th>
           <td>
@@ -251,9 +249,7 @@ function PointComparison({
         <tr>
           <th scope="row">
             <Tooltip content={LAST_CHANGE}>
-              <span tabIndex={0} aria-description={LAST_CHANGE}>
-                Last change
-              </span>
+              <span aria-description={LAST_CHANGE}>Last change</span>
             </Tooltip>
           </th>
           <td>{cell(current, () => changed(current))}</td>

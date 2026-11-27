@@ -11,6 +11,7 @@ export function SettingsSection({
   title,
   caption,
   actions,
+  focusTarget,
   className,
   children,
 }: {
@@ -19,6 +20,8 @@ export function SettingsSection({
   caption?: ReactNode;
   /** Controls at the end of the heading row. */
   actions?: ReactNode;
+  /** A step of a flow: when its button goes away, focus lands on this heading. */
+  focusTarget?: boolean;
   className?: string;
   children: ReactNode;
 }) {
@@ -34,6 +37,7 @@ export function SettingsSection({
         title={title}
         caption={caption}
         actions={actions}
+        {...(focusTarget && { focusTarget })}
       />
       {children}
     </section>

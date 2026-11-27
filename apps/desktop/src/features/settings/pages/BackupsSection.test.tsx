@@ -207,10 +207,11 @@ test("Back up now saves a point with no file dialog and shows it", async () => {
   renderPage();
   await screen.findByText("No restore points yet");
   fireEvent.click(backUpButton());
-  expect(screen.getByRole("button", { name: "Backing up…" })).toHaveProperty(
-    "disabled",
-    true,
-  );
+  expect(
+    screen
+      .getByRole("button", { name: "Backing up…" })
+      .getAttribute("aria-disabled"),
+  ).toBe("true");
   vi.mocked(workspaceClient.restorePoints).mockResolvedValue(
     listOf([point(0, { kind: "manual" })]),
   );

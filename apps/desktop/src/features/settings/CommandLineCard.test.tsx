@@ -415,9 +415,10 @@ test("Check again is disabled while checking", async () => {
   bridge([matching]);
   fireEvent.click(screen.getByRole("button", { name: "Check again" }));
   expect(
-    (screen.getByRole("button", { name: "Checking…" }) as HTMLButtonElement)
-      .disabled,
-  ).toBe(true);
+    screen
+      .getByRole("button", { name: "Checking…" })
+      .getAttribute("aria-disabled"),
+  ).toBe("true");
   await screen.findByRole("button", { name: "Check again" });
 });
 

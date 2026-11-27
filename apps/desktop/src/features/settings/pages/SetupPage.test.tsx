@@ -510,6 +510,14 @@ test("optional buttons are ghost while a required step waits, and each opens its
   ).toBeTruthy();
 });
 
+test("an optional step's mark is tied to its title's last word, so a wrapped title never strands it", async () => {
+  vi.mocked(cliClient.check).mockResolvedValue(noCommand);
+  render(<Settings />);
+  await settle();
+  const title = step(/^Get notified/).querySelector(".font-medium");
+  expect(title?.textContent).toMatch(/needs you\u00a0·\u00a0optional$/);
+});
+
 test("Set up sync opens Workspace sync", async () => {
   vi.mocked(workspaceClient.info).mockResolvedValue({
     path: "/w/workspace.sqlite3",

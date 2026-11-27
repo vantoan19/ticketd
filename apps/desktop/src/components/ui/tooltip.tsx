@@ -1,4 +1,5 @@
 import * as React from "react";
+import { flushSync } from "react-dom";
 import { cn } from "cn";
 import { Tooltip as TooltipPrimitive } from "radix-ui";
 import { Kbd } from "@/components/ui/kbd";
@@ -213,7 +214,26 @@ function Tooltip({
       >
         {children}
       </TooltipPrimitive.Trigger>
-      <TooltipContent side={side ?? regionSide ?? fallbackSide} align={align}>
+      <TooltipContent
+        side={side ?? regionSide ?? fallbackSide}
+        align={align}
+        onEscapeKeyDown={(event) => {
+          // A label is the top layer, so it would take the first Escape that
+          // should close the dialog around its trigger (after Tab to Close).
+          // Close the label, then let the same key reach the dialog.
+          const node = trigger.current;
+          if (!node?.closest('[role="dialog"], [role="alertdialog"]')) return;
+          event.preventDefault();
+          flushSync(() => setOpen(false));
+          node.dispatchEvent(
+            new KeyboardEvent("keydown", {
+              key: "Escape",
+              bubbles: true,
+              cancelable: true,
+            }),
+          );
+        }}
+      >
         {content}
         {keys.map((key) => (
           <Kbd key={key} tone="inverted">

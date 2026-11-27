@@ -5,8 +5,11 @@ import {
   fireEvent,
   render,
   screen,
+  waitFor,
 } from "@testing-library/react";
 import { afterEach, expect, test, vi } from "vitest";
+import { Dialog, DialogContent, DialogTitle } from "@/components/ui/dialog";
+import { IconButton } from "@/components/ui/icon-button";
 import { Tooltip, TooltipProvider } from "@/components/ui/tooltip";
 
 window.ResizeObserver = class {
@@ -165,4 +168,31 @@ test("a label held shut never opens the next one at once", () => {
   } finally {
     vi.useRealTimers();
   }
+});
+
+test("one Escape closes a dialog whose Close button shows its label", async () => {
+  const closed = vi.fn();
+  render(
+    <Dialog open onOpenChange={(open) => !open && closed()}>
+      <DialogContent showCloseButton={false}>
+        <DialogTitle>Restore</DialogTitle>
+        <IconButton label="Close">x</IconButton>
+      </DialogContent>
+    </Dialog>,
+  );
+  const close = screen.getByRole("button", { name: "Close" });
+  // The dialog focuses its first control on opening; Tab arrives from elsewhere.
+  act(() => close.blur());
+  tabTo(close);
+  // The dialog hides everything outside it from the accessibility tree.
+  await waitFor(() =>
+    expect(
+      document.querySelector('[data-slot="tooltip-content"]'),
+    ).not.toBeNull(),
+  );
+  fireEvent.keyDown(document.activeElement ?? document.body, {
+    key: "Escape",
+  });
+  expect(closed).toHaveBeenCalledTimes(1);
+  expect(document.querySelector('[data-slot="tooltip-content"]')).toBeNull();
 });

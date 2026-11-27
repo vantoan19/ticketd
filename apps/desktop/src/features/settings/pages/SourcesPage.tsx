@@ -112,7 +112,9 @@ export function SourcesPage({
                 <tr>
                   <th scope="col">Source</th>
                   <th scope="col">Status</th>
-                  <th scope="col">Signs in with</th>
+                  <th scope="col" className="sources-table-signs">
+                    Signs in with
+                  </th>
                   <th scope="col">Brings in</th>
                   <th scope="col">
                     <span className="sr-only">Open</span>
@@ -181,7 +183,7 @@ function SourceTableRow({
       <td>
         <StatusLabel tone={TONES[row.status]}>{row.status}</StatusLabel>
       </td>
-      <td>{row.signsInWith}</td>
+      <td className="sources-table-signs">{row.signsInWith}</td>
       <td>
         {row.bringsIn ? (
           <span className="sources-table-brings">

@@ -354,7 +354,7 @@ export function AgentSkillsCard({
                       <Button
                         type="button"
                         size="sm"
-                        disabled={busy}
+                        busy={busy}
                         onClick={() => void run(todo, false)}
                       >
                         {busy ? "Installing…" : `${verb} for ${names(todo)}`}
@@ -368,7 +368,7 @@ export function AgentSkillsCard({
                         type="button"
                         variant="ghost"
                         size="sm"
-                        disabled={busy || checking}
+                        busy={busy || checking}
                         onClick={checkAgain}
                       >
                         <RefreshCw aria-hidden="true" />
@@ -461,7 +461,7 @@ export function AgentSkillsCard({
                               variant="link"
                               size="xs"
                               aria-label={`Replace for ${agent.name}`}
-                              disabled={busy}
+                              busy={busy}
                               onClick={() => setReviewing(agent)}
                             >
                               Replace…

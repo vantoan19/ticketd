@@ -132,6 +132,12 @@
   display: flex;
   min-width: 0;
 }
+/* The board's skill folder is a plain 12px mono caption, not the 13px/500 path. */
+.agent-skill-path .ui-path-text {
+  font-size: var(--text-caption);
+  font-weight: 400;
+  line-height: var(--text-caption-line);
+}
 .agent-skill-folder {
   display: flex;
   flex-direction: column;

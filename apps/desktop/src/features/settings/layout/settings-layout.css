@@ -55,9 +55,11 @@
   flex: 1;
   min-height: 0;
   width: 100%;
-  overflow-y: auto;
   /* A classic scrollbar appearing on a longer page (an error, a list) must not
-     narrow the column and shift it sideways. */
+     narrow the column and shift it sideways. The track is always there (empty
+     and invisible when nothing scrolls) because WebKit ignores scrollbar-gutter
+     next to the app's styled scrollbar; Chromium keeps the gutter. */
+  overflow-y: scroll;
   scrollbar-gutter: stable;
   scroll-padding-top: 48px;
 }
