@@ -195,7 +195,7 @@
       "parent": null,
       "tool_id": "00000000-0000-4000-8000-000000000004:call_1",
       "background": false,
-      "payload": "{\"model\":\"gemini-3.1-pro\",\"description\":\"Session Auditor\",\"prompt\":\"Scan the session routes in src/auth for session fixation: is the session id regenerated after sign-in and after a privilege change? Change nothing.\"}",
+      "payload": "{\"model\":\"gemini-3.1-pro\",\"description\":\"Session Auditor\",\"prompt\":\"Scan the session routes in src/auth for session fixation: is the session id regenerated after sign-in and after a privilege change? Change nothing.\",\"model_name\":\"Gemini 3.1 Pro\"}",
       "created_at": "2026-11-27T10:00:00.000Z",
       "runs": [
         {
