@@ -681,3 +681,88 @@ mod background_stored {
         pinned(&h, "stopped");
     }
 }
+
+// --- A sub-agent's approval -------------------------------------------------------------
+
+mod approvals {
+    use super::*;
+    use crate::attention::Rank;
+    use ticketd_core::{ChatInteractionState, ChatOwner};
+
+    const PROMPT: &str = "Check that the limiter's tests cover its edge cases, in the background";
+
+    fn asked_by_task_b() -> ChatOwner {
+        ChatOwner::SubAgent {
+            native_id: "task_b".to_owned(),
+        }
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn a_background_sub_agent_s_approval_after_the_turn_ended_is_offered_and_answerable() {
+        let mut h = HostScript::claude()
+            .process([
+                fixture!("claude", "handshake"),
+                fixture!("claude", "sub_agent_approval"),
+            ])
+            .start();
+        h.send(PROMPT).await;
+        h.play_to("the SDK took the input").await;
+        h.play_to("the main agent's turn ended").await;
+        h.play_to("the sub-agent asks for approval after the turn ended")
+            .await;
+
+        // It is the sub-agent's, it opened no turn, and the Chat waits for the person.
+        assert_eq!(h.turns().len(), 1, "{:?}", h.transcript());
+        assert_eq!(h.turns()[0].state, ChatTurnState::Completed);
+        assert_eq!(
+            h.requests(),
+            [(asked_by_task_b(), ChatInteractionState::Pending)]
+        );
+        assert_eq!(h.live().await.interactions.len(), 1);
+        let status = h.attention().await;
+        assert_eq!(status.rank, Rank::Approval);
+        assert_eq!(status.line(), "Approval needed · Check limiter test coverage");
+        // Its Step is the sub-agent's own, and it waits with the request.
+        assert_eq!(h.sub_agent_transcript("task_b"), ["tool Bash running"]);
+        assert!(h.notices().is_empty(), "{:?}", h.notices());
+
+        // The answer goes back to Claude Code (the fixture holds the frame it must be).
+        h.approve().await;
+        h.play_to("the approval was answered").await;
+        assert_eq!(
+            h.requests(),
+            [(asked_by_task_b(), ChatInteractionState::Answered)]
+        );
+        h.play_all().await;
+        h.finish().await;
+        assert_eq!(h.turns().len(), 1);
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn an_approval_nobody_answered_goes_when_its_sub_agent_ends() {
+        let mut h = HostScript::claude()
+            .process([
+                fixture!("claude", "handshake"),
+                fixture!("claude", "sub_agent_approval_asker_ends"),
+            ])
+            .start();
+        h.send(PROMPT).await;
+        h.play_to("the SDK took the input").await;
+        h.play_to("the main agent's turn ended").await;
+        h.play_to("the sub-agent asks for approval after the turn ended")
+            .await;
+        assert_eq!(
+            h.requests(),
+            [(asked_by_task_b(), ChatInteractionState::Pending)]
+        );
+
+        h.play_all().await;
+        h.finish().await;
+        assert_eq!(
+            h.requests(),
+            [(asked_by_task_b(), ChatInteractionState::Expired)]
+        );
+        assert!(h.live().await.interactions.is_empty());
+        assert_eq!(h.attention().await.rank, Rank::Done);
+    }
+}

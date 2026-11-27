@@ -473,6 +473,7 @@ impl Session {
         events.push(EventKind::InteractionRequested(InteractionRequest {
             request: native,
             turn: Some(prompt.turn.clone()),
+            owner: None,
             item: Some(NativeItemId::new(tool.0.as_ref())),
             kind: InteractionKind::NativeApproval {
                 description: prompt.tools.get(&tool).map_or_else(

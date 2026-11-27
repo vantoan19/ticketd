@@ -4,8 +4,9 @@
 //! first line); the nested and multi-agent v1 cases are hand-built from the same shapes.
 
 use super::{HostScript, fixture};
+use crate::attention::Rank;
 use ticketd_core::{
-    ChatItem, ChatOwner, ChatSubAgent, ChatSubAgentRun, ChatSubAgentState, ChatSubAgentStopper,
+    ChatInteractionState, ChatItem, ChatOwner, ChatSubAgent, ChatSubAgentRun, ChatSubAgentState, ChatSubAgentStopper,
     ChatTurnState,
 };
 
@@ -404,8 +405,15 @@ async fn a_child_that_fails_says_why_and_the_parents_turn_carries_on() {
     assert_eq!(h.turns()[0].state, ChatTurnState::Completed);
 }
 
+fn asked_by_the_child() -> ChatOwner {
+    ChatOwner::SubAgent {
+        native_id: "thr_a".to_owned(),
+    }
+}
+
 #[tokio::test(start_paused = true)]
-async fn what_a_child_asks_never_opens_a_turn_and_is_not_answered_yet() {
+async fn a_child_s_approval_is_shown_while_the_main_agent_works_and_is_answered_on_its_own_request()
+ {
     let mut h = HostScript::codex()
         .process([
             fixture!("codex", "handshake"),
@@ -415,18 +423,83 @@ async fn what_a_child_asks_never_opens_a_turn_and_is_not_answered_yet() {
     h.send("Have a sub-agent change a file").await;
     h.play_to("the sub-agent asks for approval").await;
 
-    // Today's handling: nothing to answer, and a notice that says so.
-    assert!(h.live().await.interactions.is_empty());
+    // It is offered, it names the child that asked, and it opened no turn.
+    assert_eq!(h.live().await.interactions.len(), 1);
     assert_eq!(
-        h.notices(),
-        [
-            "A Codex sub-agent asked for approval. ticketd cannot offer it yet, so it was not answered."
-        ]
+        h.requests(),
+        [(asked_by_the_child(), ChatInteractionState::Pending)]
+    );
+    assert!(h.notices().is_empty(), "{:?}", h.notices());
+    assert_eq!(h.attention().await.rank, Rank::Approval);
+
+    // The answer goes back on the child's request: the fixture holds the frame it must be.
+    h.approve().await;
+    h.play_to("the sub-agent's approval was answered").await;
+    assert_eq!(
+        h.requests(),
+        [(asked_by_the_child(), ChatInteractionState::Answered)]
     );
     h.play_all().await;
     h.finish().await;
     assert_eq!(h.turns().len(), 1, "a child's request opens no turn");
     assert_eq!(h.turns()[0].state, ChatTurnState::Completed);
+}
+
+#[tokio::test(start_paused = true)]
+async fn a_child_s_approval_outlives_the_main_agent_s_turn_and_can_still_be_answered() {
+    let mut h = HostScript::codex()
+        .process([
+            fixture!("codex", "handshake"),
+            fixture!("codex", "sub_agent_approval_outlives_turn"),
+        ])
+        .start();
+    h.send("Have a sub-agent change a file").await;
+    h.play_to("the main agent's turn ended while the sub-agent waits")
+        .await;
+
+    // The turn is over; the request is not.
+    assert_eq!(h.turns()[0].state, ChatTurnState::Completed);
+    assert_eq!(
+        h.requests(),
+        [(asked_by_the_child(), ChatInteractionState::Pending)]
+    );
+    assert_eq!(h.live().await.interactions.len(), 1);
+    let status = h.attention().await;
+    assert_eq!(status.rank, Rank::Approval);
+
+    h.approve().await;
+    h.play_all().await;
+    h.finish().await;
+    assert_eq!(
+        h.requests(),
+        [(asked_by_the_child(), ChatInteractionState::Answered)]
+    );
+    assert_eq!(h.turns().len(), 1);
+}
+
+#[tokio::test(start_paused = true)]
+async fn a_child_s_approval_goes_when_the_child_ends_and_not_before() {
+    let mut h = HostScript::codex()
+        .process([
+            fixture!("codex", "handshake"),
+            fixture!("codex", "sub_agent_approval_asker_ends"),
+        ])
+        .start();
+    h.send("Have a sub-agent change a file").await;
+    h.play_to("the main agent's turn ended while the sub-agent waits")
+        .await;
+    assert_eq!(
+        h.requests(),
+        [(asked_by_the_child(), ChatInteractionState::Pending)]
+    );
+
+    h.play_all().await;
+    h.finish().await;
+    assert_eq!(
+        h.requests(),
+        [(asked_by_the_child(), ChatInteractionState::Expired)]
+    );
+    assert!(h.live().await.interactions.is_empty());
 }
 
 // --- The stored history, pinned for the desktop ----------------------------------------

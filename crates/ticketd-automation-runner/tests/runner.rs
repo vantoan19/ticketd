@@ -467,6 +467,7 @@ async fn a_harness_that_asks_for_approval_anyway_is_stopped_instead_of_waited_on
         .emit(EventKind::InteractionRequested(InteractionRequest {
             request: NativeRequestId::new("request-1"),
             turn: Some(NativeTurnId::new("turn-1")),
+            owner: None,
             item: None,
             kind: InteractionKind::Approval {
                 description: "rm -rf build".into(),

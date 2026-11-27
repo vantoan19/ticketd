@@ -891,7 +891,14 @@ pub enum ToolStatus {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct InteractionRequest {
     pub request: NativeRequestId,
+    /// The turn the request arrived in. `None` for a sub-agent's request: it is not the
+    /// turn's, and does not end with it.
     pub turn: Option<NativeTurnId>,
+    /// The sub-agent that asked; `None` when the main agent did. A request lives as long
+    /// as its asker: a sub-agent's is withdrawn when that sub-agent's run ends (the
+    /// adapter then reports [`EventKind::InteractionResolved`]), never because the
+    /// turn it arrived in did.
+    pub owner: Option<NativeSubAgentId>,
     /// The tool item an approval is about, when the harness names it: its decision is
     /// told on that step.
     pub item: Option<NativeItemId>,

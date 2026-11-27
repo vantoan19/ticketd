@@ -457,6 +457,7 @@ impl Provider for FakeProvider {
                 .emit(EventKind::InteractionRequested(crate::InteractionRequest {
                     request: request.clone(),
                     turn: None,
+                    owner: None,
                     item: None,
                     kind: crate::InteractionKind::Approval {
                         description: "Run cargo test".to_owned(),

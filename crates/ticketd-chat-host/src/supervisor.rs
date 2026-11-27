@@ -291,7 +291,10 @@ struct ObservedTurnEnd {
 struct LiveRequest {
     generation: RuntimeGeneration,
     request: NativeRequestId,
-    turn_id: String,
+    /// The turn it arrived in; `None` for a sub-agent's, which no turn ends.
+    turn_id: Option<String>,
+    /// The sub-agent that asked, as the Chat stores it.
+    owner: ChatOwner,
     kind: InteractionKind,
     /// The response being written, kept so a harness that confirms the answer before
     /// the write returns does not lose what the person chose.
@@ -1599,6 +1602,32 @@ impl Supervisor {
         }
     }
 
+    /// The requests a sub-agent asked that nobody answered end with it: the harness says
+    /// so when it can, and this covers the one that does not. `None` is every sub-agent's.
+    /// Returns what to record.
+    fn withdraw_asked_by(&mut self, native: Option<&str>) -> Vec<ChatObservation> {
+        let gone: Vec<String> = self
+            .interactions
+            .iter()
+            .filter(|(_, live)| match (&live.owner, native) {
+                (ChatOwner::Main, _) => false,
+                (ChatOwner::SubAgent { .. }, None) => true,
+                (ChatOwner::SubAgent { native_id }, Some(native)) => native_id == native,
+            })
+            .map(|(id, _)| id.clone())
+            .collect();
+        gone.into_iter()
+            .map(|interaction_id| {
+                self.interactions.remove(&interaction_id);
+                ChatObservation::InteractionResolved {
+                    interaction_id,
+                    state: ChatInteractionState::Expired,
+                    response: None,
+                }
+            })
+            .collect()
+    }
+
     /// Every sub-agent still running was stopped by the person. With `note`, the Chat says
     /// how many were stopped (when no turn is there to say it was stopped).
     fn end_sub_agents_stopped(
@@ -1609,6 +1638,7 @@ impl Supervisor {
         let mut running: Vec<String> = self.sub_agents.keys().cloned().collect();
         running.sort();
         self.sub_agents.clear();
+        observations.extend(self.withdraw_asked_by(None));
         observations.extend(
             running
                 .into_iter()
@@ -3384,14 +3414,16 @@ impl Supervisor {
                         }),
                     ),
                 };
-                self.record(vec![ChatObservation::SubAgentEnded {
+                let mut observations = self.withdraw_asked_by(Some(&sub_agent.0));
+                observations.push(ChatObservation::SubAgentEnded {
                     native_id: sub_agent.0,
                     native_run_id,
                     state,
                     stopped_by,
                     stop_reason: None,
                     detail,
-                }]);
+                });
+                self.record(observations);
             }
             EventKind::InteractionRequested(request) => {
                 self.on_interaction(&run, generation, request, observations);
@@ -3496,7 +3528,8 @@ impl Supervisor {
                     self.record(observations);
                 }
                 self.text.retain(|buffer| buffer.turn_id != turn_id);
-                self.interactions.retain(|_, live| live.turn_id != turn_id);
+                self.interactions
+                    .retain(|_, live| live.turn_id.as_ref() != Some(&turn_id));
                 if is_active {
                     // A sub-agent in the foreground ended with its turn. When the person
                     // stopped the turn, every sub-agent still running was stopped with it.
@@ -3715,15 +3748,25 @@ impl Supervisor {
         request: InteractionRequest,
         mut observations: Vec<ChatObservation>,
     ) {
-        let native_turn = request
-            .turn
-            .or_else(|| self.active.as_ref().map(|active| active.native.clone()));
-        let Some(turn_id) = native_turn.and_then(|turn| self.turn(&turn, &mut observations)) else {
-            // It cannot be recorded, so it cannot be offered; it stays unanswered.
-            self.notice(
-                "The harness asked something outside a turn; it was not answered.".to_owned(),
-            );
-            return;
+        // A sub-agent's request belongs to the sub-agent, not to the turn that happens to
+        // be running: it needs no turn, and no turn's end takes it away.
+        let (turn_id, owner) = match request.owner {
+            Some(owner) => (None, ChatOwner::SubAgent { native_id: owner.0 }),
+            None => {
+                let native_turn = request
+                    .turn
+                    .or_else(|| self.active.as_ref().map(|active| active.native.clone()));
+                let Some(turn_id) = native_turn.and_then(|turn| self.turn(&turn, &mut observations))
+                else {
+                    // It cannot be recorded, so it cannot be offered; it stays unanswered.
+                    self.notice(
+                        "The harness asked something outside a turn; it was not answered."
+                            .to_owned(),
+                    );
+                    return;
+                };
+                (Some(turn_id), ChatOwner::Main)
+            }
         };
         let interaction_id = format!("{run}:request:{}", request.request.0);
         let (kind, prompt, reason) = match &request.kind {
@@ -3753,8 +3796,8 @@ impl Supervisor {
         };
         observations.push(ChatObservation::InteractionRequested {
             interaction_id: interaction_id.clone(),
-            turn_id: Some(turn_id.clone()),
-            owner: ChatOwner::Main,
+            turn_id: turn_id.clone(),
+            owner: owner.clone(),
             kind,
             native_request_id: Some(request.request.0.clone()),
             prompt,
@@ -3771,6 +3814,7 @@ impl Supervisor {
                 generation,
                 request: request.request,
                 turn_id,
+                owner,
                 kind: request.kind,
                 answering: None,
             },

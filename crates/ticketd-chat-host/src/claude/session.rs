@@ -87,10 +87,16 @@ struct SubAgents {
 impl SubAgents {
     /// A turn ended. Frames still waiting for an announcement never get one, and what
     /// a foreground sub-agent ran in the turn is over with it.
-    fn turn_ended(&mut self) {
+    ///
+    /// Returns the foreground sub-agents that were over with it.
+    fn turn_ended(&mut self) -> Vec<String> {
         self.held.clear();
         self.finished_at_rest = None;
-        for agent in self.known.values_mut().filter(|agent| !agent.background) {
+        let mut over = Vec::new();
+        for (task, agent) in self.known.iter_mut().filter(|(_, agent)| !agent.background) {
+            if agent.running {
+                over.push(task.clone());
+            }
             agent.running = false;
         }
         // A sub-agent in the background goes on past the turn, and so do its tool calls.
@@ -101,6 +107,7 @@ impl SubAgents {
             .map(|(task, _)| task.as_str())
             .collect();
         self.owner.retain(|_, task| running.contains(task.as_str()));
+        over
     }
 }
 
@@ -661,6 +668,8 @@ impl Session {
             {
                 self.sub_agents.finished_at_rest = Some(task.to_owned());
             }
+            // What it asked and nobody answered goes with it.
+            events.extend(self.runtime.withdraw_owned(&NativeSubAgentId::new(task)));
             events.push(EventKind::SubAgentEnded {
                 sub_agent: NativeSubAgentId::new(task),
                 run: text(event, "run_id").map(str::to_owned),
@@ -695,6 +704,7 @@ impl Session {
                 agent.running = false;
             }
         }
+        events.extend(self.runtime.withdraw_owned(&NativeSubAgentId::new(task)));
         events.push(EventKind::SubAgentEnded {
             sub_agent: NativeSubAgentId::new(task),
             run,
@@ -722,6 +732,7 @@ impl Session {
             return;
         }
         agent.running = false;
+        events.extend(self.runtime.withdraw_owned(&NativeSubAgentId::new(task)));
         events.push(EventKind::SubAgentEnded {
             sub_agent: NativeSubAgentId::new(task),
             run: agent.run.clone(),
@@ -870,31 +881,46 @@ impl Session {
             "blocked_path": event.get("blocked_path"),
             "agent_id": event.get("agent_id"),
         });
-        let turn = self.turn(events);
-        // Claude Code can ask before emitting assistant content for the tool. A
-        // sub-agent's tool is left to its own frames: it is not the main agent's Step.
+        // A sub-agent's request is its own (`agent_id` is its task ID): no turn is opened
+        // for it, none owns it, and none's end withdraws it.
+        let owner = text(event, "agent_id").map(NativeSubAgentId::new);
+        let turn = owner.is_none().then(|| self.turn(events));
+        // Claude Code can ask before emitting assistant content for the tool.
         if let (Some(id), Some(name), Some(input)) = (
             text(event, "tool_use_id"),
             text(event, "tool_name"),
             event.get("input").filter(|input| input.is_object()),
         ) && !PLAN_TOOLS.contains(&name)
-            && event["agent_id"].is_null()
         {
-            self.observe_tool_input(Who::Main(&turn), id, name, input, events);
+            match (&turn, &owner) {
+                (Some(turn), _) => self.observe_tool_input(Who::Main(turn), id, name, input, events),
+                // A sub-agent's tool is its own Step, once the sub-agent is known.
+                (None, Some(agent)) if self.sub_agents.known.contains_key(&agent.0) => {
+                    self.sub_agents.owner.insert(id.to_owned(), agent.0.clone());
+                    self.observe_tool_input(Who::SubAgent(&agent.0), id, name, input, events);
+                }
+                (None, _) => {}
+            }
         }
-        if !self.runtime.register_request(
-            request.clone(),
-            Some(&turn),
-            Request {
-                questions: None,
-                tool_use: text(event, "tool_use_id").map(str::to_owned),
-            },
-        ) {
+        let payload = Request {
+            questions: None,
+            tool_use: text(event, "tool_use_id").map(str::to_owned),
+        };
+        let registered = match &owner {
+            Some(owner) => self
+                .runtime
+                .register_owned_request(request.clone(), owner.clone(), payload),
+            None => self
+                .runtime
+                .register_request(request.clone(), turn.as_ref(), payload),
+        };
+        if !registered {
             return;
         }
         events.push(EventKind::InteractionRequested(InteractionRequest {
             request,
-            turn: Some(turn),
+            turn,
+            owner,
             // The bridge names the tool use a permission is asked for.
             item: text(event, "tool_use_id").map(NativeItemId::new),
             kind: InteractionKind::approval(
@@ -951,6 +977,7 @@ impl Session {
                 "decision": {"kind": "deny", "message": "ticketd could not show this question"},
             }));
         }
+        // The bridge does not say which agent asks a question: it is the main agent's.
         let turn = self.turn(events);
         if !self.runtime.register_request(
             request.clone(),
@@ -970,6 +997,7 @@ impl Session {
         events.push(EventKind::InteractionRequested(InteractionRequest {
             request,
             turn: Some(turn),
+            owner: None,
             // The AskUserQuestion tool use it was asked from: its row waits with it.
             item: text(event, "tool_use_id").map(NativeItemId::new),
             kind: InteractionKind::Question { questions },
@@ -1061,7 +1089,10 @@ impl Session {
         let last_error = self.turn_error.take();
         self.declined.clear();
         self.streams.clear();
-        self.sub_agents.turn_ended();
+        for task in self.sub_agents.turn_ended() {
+            // A sub-agent in the foreground was over with the turn, and so was what it asked.
+            events.extend(self.runtime.withdraw_owned(&NativeSubAgentId::new(&task)));
+        }
         self.pending_inputs = strings(event, "pending_submission_ids")
             .into_iter()
             .collect();

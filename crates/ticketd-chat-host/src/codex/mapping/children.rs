@@ -109,7 +109,12 @@ impl Session {
 
     /// A child thread's frame arrived before the child was announced: it is a child all
     /// the same, started by the Chat's own thread as far as anyone can tell.
-    fn known(&mut self, thread: &str, turn: Option<&str>, native: Value) -> Vec<EventKind> {
+    pub(super) fn known(
+        &mut self,
+        thread: &str,
+        turn: Option<&str>,
+        native: Value,
+    ) -> Vec<EventKind> {
         if self.child(thread).is_some() {
             return Vec::new();
         }
@@ -144,6 +149,12 @@ impl Session {
             "item/started" => self.child_item(thread, params, false),
             "item/completed" => self.child_item(thread, params, true),
             "item/commandExecution/outputDelta" => self.child_tool_output(thread, params),
+            // What a child asked was answered, or taken back by Codex.
+            "serverRequest/resolved" => params
+                .get("requestId")
+                .and_then(|id| self.runtime.resolve_request(&super::request_key(id)))
+                .into_iter()
+                .collect(),
             // Everything else a child says (its plan, diff, tokens, errors, requests'
             // resolutions, status) is not shown, and is never the Chat's.
             _ => Vec::new(),
@@ -203,12 +214,16 @@ impl Session {
             child.stopping = None;
         }
         child.tools.clear();
-        vec![EventKind::SubAgentEnded {
-            sub_agent: NativeSubAgentId::new(thread),
+        // What it asked and nobody answered goes with it, and with nothing else.
+        let owner = NativeSubAgentId::new(thread);
+        let mut events = self.runtime.withdraw_owned(&owner);
+        events.push(EventKind::SubAgentEnded {
+            sub_agent: owner,
             run: Some(id.to_owned()),
             outcome,
             detail,
-        }]
+        });
+        events
     }
 
     fn child_item(&mut self, thread: &str, params: &Value, completed: bool) -> Vec<EventKind> {

@@ -55,6 +55,7 @@ fn facts<'a>(chat: &'a Chat, live: &'a ChatLive, last_turn: Option<&'a ChatTurn>
         files_changed: None,
         last_response: Some("All **done**. See `x`."),
         stopped_sub_agents: None,
+        asking: &[],
     }
 }
 
@@ -222,6 +223,58 @@ fn a_finished_turn_is_done_until_seen_then_idle_in_words() {
     assert!(!seen.unread());
 }
 
+fn approval(id: &str, command: &str) -> LiveInteraction {
+    LiveInteraction {
+        interaction_id: id.to_owned(),
+        kind: InteractionKind::Approval {
+            description: command.to_owned(),
+            reason: None,
+            decisions: Vec::new(),
+        },
+    }
+}
+
+#[test]
+fn a_sub_agents_approval_names_it_in_the_row_and_the_notification_says_the_card() {
+    let mut live = idle();
+    live.activity = crate::Activity::WaitingForYou;
+    live.sub_agents = 1;
+    live.interactions.push(approval("i", "npm test -- rate-limit"));
+    let asking = [Asking {
+        interaction_id: "i".to_owned(),
+        asker: "Check limiter test coverage".to_owned(),
+        card: "Check limiter test coverage wants to run npm test -- rate-limit".to_owned(),
+    }];
+    let status = status(&Facts {
+        activity: "waiting",
+        asking: &asking,
+        ..facts(&chat(0), &live, None)
+    });
+    // It outranks the work the sub-agent is part of, and the row says who asks.
+    assert_eq!(status.rank, Rank::Approval);
+    assert_eq!(status.line(), "Approval needed · Check limiter test coverage");
+    assert_eq!(
+        status.notification(),
+        "Check limiter test coverage wants to run npm test -- rate-limit"
+    );
+
+    // The main agent's approval, with another request listed as a sub-agent's, keeps what
+    // it would run, and a notification says the row.
+    let mut main = idle();
+    main.interactions.push(approval("i", "npm test"));
+    let other = [Asking {
+        interaction_id: "elsewhere".to_owned(),
+        ..asking[0].clone()
+    }];
+    let status = super::status(&Facts {
+        activity: "waiting",
+        asking: &other,
+        ..facts(&chat(0), &main, None)
+    });
+    assert_eq!(status.line(), "Approval needed · npm test");
+    assert_eq!(status.notification(), status.line());
+}
+
 #[test]
 fn a_request_outranks_work_and_a_failure_waits_only_until_seen() {
     let mut live = idle();
@@ -331,6 +384,7 @@ fn done(line: &str) -> Status {
         word: "Done".to_owned(),
         label: "Done".to_owned(),
         detail: Some(line.to_owned()),
+        announcement: None,
     }
 }
 
@@ -354,6 +408,7 @@ fn done_waits_out_the_quiet_window_and_a_new_turn_cancels_it() {
         word: "Working".to_owned(),
         label: "Working".to_owned(),
         detail: None,
+        announcement: None,
     };
     // What is there at startup is not announced again.
     assert!(
@@ -405,6 +460,7 @@ fn a_chat_in_view_muted_or_with_notifications_off_is_never_announced() {
         word: "Approval needed".to_owned(),
         label: "Approval needed".to_owned(),
         detail: None,
+        announcement: None,
     };
     let idle = Status {
         rank: Rank::Idle,
@@ -412,6 +468,7 @@ fn a_chat_in_view_muted_or_with_notifications_off_is_never_announced() {
         word: "Idle".to_owned(),
         label: "Idle".to_owned(),
         detail: None,
+        announcement: None,
     };
     let open = HashSet::from(["c".to_owned()]);
     let nobody = HashSet::new();

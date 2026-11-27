@@ -129,7 +129,7 @@ use crate::{
     SendMode, WorkspaceOpener,
 };
 use ticketd_core::{
-    Chat, ChatItem, ChatMessage, ChatOwner, ChatRole, ChatSubAgent, ChatTurn, NewChat, Workspace,
+    Chat, ChatInteractionState, ChatItem, ChatMessage, ChatOwner, ChatRole, ChatSubAgent, ChatTurn, NewChat, Workspace,
     WorkspaceSession,
 };
 
@@ -780,6 +780,17 @@ impl HostScript {
             .collect()
     }
 
+    /// Who asked each stored request, and where it stands, oldest first.
+    pub fn requests(&self) -> Vec<(ChatOwner, ChatInteractionState)> {
+        self.items()
+            .into_iter()
+            .filter_map(|item| match item {
+                ChatItem::Interaction(request) => Some((request.owner, request.state)),
+                _ => None,
+            })
+            .collect()
+    }
+
     /// The text of the Chat's stored notices.
     pub fn notices(&self) -> Vec<String> {
         self.items()
@@ -849,7 +860,35 @@ impl HostScript {
             Activity::Working => "working",
             Activity::WaitingForYou => "waiting",
         };
+        // The sub-agents that ask, named as the view names them (the desktop words the
+        // card; here it says the plain title and what is asked).
+        let asking: Vec<attention::Asking> = view
+            .snapshot
+            .items
+            .iter()
+            .filter_map(|item| match item {
+                ChatItem::Interaction(request) if request.state == ChatInteractionState::Pending => {
+                    let ChatOwner::SubAgent { native_id } = &request.owner else {
+                        return None;
+                    };
+                    let asker = view
+                        .snapshot
+                        .sub_agents
+                        .iter()
+                        .find(|record| &record.native_id == native_id)
+                        .and_then(|record| record.said("description"))
+                        .unwrap_or_else(|| "Sub-agent".to_owned());
+                    Some(attention::Asking {
+                        interaction_id: request.id.clone(),
+                        card: format!("{asker} wants approval for {}", request.prompt),
+                        asker,
+                    })
+                }
+                _ => None,
+            })
+            .collect();
         attention::status(&Facts {
+            asking: &asking,
             chat: &view.snapshot.chat,
             harness: self.harness_name,
             live: &view.live,
