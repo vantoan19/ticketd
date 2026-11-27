@@ -75,6 +75,8 @@ export function PdfStage({
           setLoaded({ key, failure: describeFailure(reason, "read the PDF") });
         return;
       }
+      // Closed while the read was pending: nothing to parse.
+      if (!active) return;
       try {
         const document = await openPdf(bytes);
         if (!active) document.destroy();

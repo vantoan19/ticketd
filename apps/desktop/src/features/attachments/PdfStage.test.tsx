@@ -272,6 +272,17 @@ test("leaving the PDF lets go of the parsed document", async () => {
   expect(pdf.destroy).toHaveBeenCalled();
 });
 
+test("a PDF closed while it is still being read is never parsed", async () => {
+  let finish: (bytes: Uint8Array) => void = () => {};
+  vi.mocked(invoke).mockImplementation(
+    () => new Promise<Uint8Array>((resolve) => (finish = resolve)),
+  );
+  const view = render(<Stage />);
+  view.unmount();
+  await act(async () => finish(new Uint8Array([37, 80])));
+  expect(openPdf).not.toHaveBeenCalled();
+});
+
 test("Next reaches a short last page that the scroll cannot bring to the top", async () => {
   serve(4);
   render(<Stage />);
