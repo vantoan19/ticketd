@@ -1,5 +1,6 @@
 // @vitest-environment jsdom
 import {
+  act,
   cleanup,
   fireEvent,
   render,
@@ -134,6 +135,27 @@ test("opening the Chat itself leaves a sub-agent's view", async () => {
   await screen.findByRole("heading", { name: "Check limiter test coverage" });
   fireEvent.click(
     screen.getByRole("button", { name: "Then ask to open the Chat" }),
+  );
+  expect(
+    await screen.findByRole("heading", { name: chat.chat.title }),
+  ).toBeTruthy();
+  expect(
+    screen.queryByRole("heading", { name: "Check limiter test coverage" }),
+  ).toBeNull();
+});
+
+test("a notification for the Chat leaves a sub-agent's view for the Chat", async () => {
+  const chat = subAgentFixtures().running;
+  const client = show(chat, {
+    kind: "open",
+    chatId: chat.chat.id,
+    retention: "active",
+    subAgent: "sa-tests",
+  });
+  await ask(chat.chat.title);
+  await screen.findByRole("heading", { name: "Check limiter test coverage" });
+  act(() =>
+    client.requestOpen({ chat_id: chat.chat.id, retention: "active" }),
   );
   expect(
     await screen.findByRole("heading", { name: chat.chat.title }),
