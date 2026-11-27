@@ -283,18 +283,21 @@ the harness process; Stop during a turn interrupts it and stops every sub-agent 
 
 Codex never resumes the main agent when a sub-agent finishes, so ticketd does (the
 descriptor's `sub_agents.wake`). When a direct sub-agent (not a nested one) finishes or fails
-while no turn runs, the supervisor remembers it and, half a second later (`WAKE_SETTLE`, so
-sub-agents finishing together are covered by one message), sends the main agent one message as
+while no turn runs, or during a turn other than the one it started (Codex files a sub-agent's
+completion under the turn that started it, so no other turn, whether the person's or an
+earlier wake's, ever sees it), the supervisor remembers it and, once no turn runs and half a
+second after the first finished (`WAKE_SETTLE`, so sub-agents finishing together are covered by
+one message), sends the main agent one message as
 a new turn that is not stored as a message of the person's: the Chat's own
 `wake-N` submission. The turn it starts is recorded with origin `ticketd` and the sub-agent
 whose finish it follows, so it reads "Started by ticketd: sub-agent finished", and a failure
 of it shows and notifies but does not pause the person's queue (the same rule as for a
 harness-started turn). One wake is outstanding at a time: sub-agents that finish while it is on
-its way wait for the next. The person's own input always goes first: a message they send
-before the wake went out starts the turn instead and carries what finished ahead of its text,
+its way, or while another turn runs, wait for the next and share one message. The person's own
+input always goes first: a message they send before the wake went out starts the turn instead and carries what finished ahead of its text,
 and nothing else is sent. No wake follows a Stop, a paused queue, a Chat with a problem, a
-nested sub-agent's finish, a sub-agent stopped by the person or the main agent, a finish that
-happens during a turn (the main agent is there to see it), or any Chat of an Automation run.
+nested sub-agent's finish, a sub-agent stopped by the person or the main agent, a finish
+inside the turn that started the sub-agent (that turn sees it), or any Chat of an Automation run.
 A wake that cannot be delivered leaves a Chat notice and is not retried. The words are
 ticketd's own and short. For one sub-agent they are
 

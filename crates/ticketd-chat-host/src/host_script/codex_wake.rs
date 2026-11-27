@@ -16,6 +16,9 @@ const PROMPT: &str = "Start one sub-agent on the slow check, do not wait for it,
 /// The child thread of the first fixture.
 const CHILD: &str = "00000000-0000-4000-8000-000000000003";
 
+/// The second child thread of the two-child fixtures.
+const SECOND_CHILD: &str = "00000000-0000-4000-8000-000000000013";
+
 /// Feeds the statuses the Chats list showed to the system's notifier, as the desktop
 /// does, and keeps what it announced.
 struct Watch {
@@ -204,8 +207,13 @@ async fn the_persons_message_goes_first_and_carries_what_finished() {
     assert_eq!(h.turns().len(), 2);
 }
 
+/// The person's message is written while the sub-agent runs, and the sub-agent finishes
+/// before Codex has answered it. Codex files the completion under the turn that spawned
+/// the sub-agent, not under the turn the message starts, so that turn never sees it:
+/// ticketd wakes the main agent once the person's turn is over.
 #[tokio::test(start_paused = true)]
-async fn a_sub_agent_that_finishes_while_the_persons_message_is_on_its_way_wakes_nothing() {
+async fn a_sub_agent_that_finishes_while_the_persons_message_is_on_its_way_wakes_the_main_agent_after_that_turn()
+ {
     let mut h = HostScript::codex()
         .process([
             fixture!("codex", "handshake"),
@@ -216,28 +224,32 @@ async fn a_sub_agent_that_finishes_while_the_persons_message_is_on_its_way_wakes
     h.play_to("the parent's turn ended while the sub-agent runs")
         .await;
     h.play_to("the sub-agent runs its command").await;
-    // The person's message is written while the sub-agent still runs, then the sub-agent
-    // finishes before Codex has answered it: no turn runs yet.
     h.send("What did it find?").await;
     h.play_to("the sub-agent finished").await;
     assert_eq!(h.live().await.sub_agents, 0);
     h.play_to("the person's turn ended").await;
-    // That message's turn is the one that covers the finish: ticketd sends nothing of its
-    // own afterwards, however long it stays quiet.
+    h.play_to("the woken turn ended").await;
     h.pass(Duration::from_secs(30)).await;
     h.finish().await;
     let turns = h.turns();
-    assert_eq!(turns.len(), 2, "{:?}", h.transcript());
+    assert_eq!(turns.len(), 3, "{:?}", h.transcript());
     assert_eq!(turns[1].origin, None, "the person started it");
+    let origin = turns[2].origin.clone().expect("the third turn is labelled");
+    assert_eq!(
+        (origin.by, origin.sub_agent),
+        (ChatTurnStarter::Ticketd, Some(CHILD.to_owned()))
+    );
 }
 
 /// The main agent is busy with a command of its own, the person queues a message, and the
-/// sub-agent finishes meanwhile. The turn that runs sees the finish itself, so ticketd
-/// sends no continuation for it: the person's message goes out alone when the turn ends,
-/// as the next turn, and nothing follows it.
+/// sub-agent finishes meanwhile, inside the turn that started it. Codex files a
+/// sub-agent's completion under the turn that started it, so that turn sees the finish
+/// itself and ticketd sends no continuation for it: the person's message goes out alone
+/// when the turn ends, as the next turn, and nothing follows it. (A finish in any other
+/// turn is not seen by it: the tests below.)
 #[tokio::test(start_paused = true)]
-async fn a_queued_message_goes_out_alone_when_the_sub_agent_finished_while_the_main_agent_was_busy()
-{
+async fn a_queued_message_goes_out_alone_when_the_sub_agent_finished_inside_the_turn_that_started_it()
+ {
     let mut h = HostScript::codex()
         .process([
             fixture!("codex", "handshake"),
@@ -255,7 +267,7 @@ async fn a_queued_message_goes_out_alone_when_the_sub_agent_finished_while_the_m
     h.play_to("the sub-agent finished while the parent is busy")
         .await;
     assert_eq!(h.live().await.sub_agents, 0);
-    // The turn is still the main agent's: nothing starts for the finish.
+    // The turn that started it is still running and sees the finish: nothing starts for it.
     assert_eq!(h.turns().len(), 1);
     h.pass(Duration::from_secs(30)).await;
     assert_eq!(h.turns().len(), 1);
@@ -394,4 +406,122 @@ async fn each_finish_wakes_the_main_agent_once_while_the_other_sub_agent_still_r
     );
     h.pass(Duration::from_secs(30)).await;
     h.finish().await;
+}
+
+/// The live run LX-06: two sub-agents finish seconds apart. The second finishes while the
+/// wake turn of the first runs, and Codex files its completion under the turn that started
+/// it, so the wake turn never sees it and the main agent said it was still running. It
+/// stays unreported until that turn ends, and then gets its own wake (one wake at a time).
+#[tokio::test(start_paused = true)]
+async fn a_sub_agent_that_finishes_during_another_ones_wake_turn_gets_its_own_wake_after_it() {
+    let mut h = HostScript::codex()
+        .process([
+            fixture!("codex", "handshake"),
+            fixture!("codex", "sub_agent_wake_during_wake"),
+        ])
+        .start();
+    h.send("Upgrade the payment client to v5. Split the refund calls and the webhook handler between two agents.")
+        .await;
+    h.play_to("the parent's turn ended while two sub-agents run")
+        .await;
+    h.play_to("the first sub-agent finished").await;
+    h.play_to("the second sub-agent finished during the wake turn")
+        .await;
+    // Both are done, the first's wake turn still runs, and nothing else is sent while it
+    // does (the fixture would fail on a write).
+    assert_eq!(h.live().await.sub_agents, 0);
+    h.pass(Duration::from_secs(30)).await;
+    let turns = h.turns();
+    assert_eq!(turns.len(), 2, "{:?}", h.transcript());
+    assert_eq!(turns[1].state, ChatTurnState::Active);
+    assert_eq!(h.attention().await.rank, Rank::Working);
+
+    h.play_to("the first woken turn ended").await;
+    h.play_to("the second woken turn ended").await;
+    let turns = h.turns();
+    assert_eq!(turns.len(), 3, "{:?}", h.transcript());
+    let whose = |turn: &ticketd_core::ChatTurn| {
+        turn.origin
+            .as_ref()
+            .map(|origin| (origin.by, origin.sub_agent.clone()))
+    };
+    assert_eq!(
+        whose(&turns[1]),
+        Some((ChatTurnStarter::Ticketd, Some(CHILD.to_owned())))
+    );
+    assert_eq!(
+        whose(&turns[2]),
+        Some((ChatTurnStarter::Ticketd, Some(SECOND_CHILD.to_owned())))
+    );
+    assert_eq!(h.attention().await.rank, Rank::Done);
+    h.pass(Duration::from_secs(30)).await;
+    h.finish().await;
+    assert_eq!(h.turns().len(), 3);
+}
+
+/// Several finishes during one turn that did not start them are covered by one message.
+#[tokio::test(start_paused = true)]
+async fn sub_agents_that_finish_during_a_wake_turn_are_covered_by_one_message_after_it() {
+    let mut h = HostScript::codex()
+        .process([
+            fixture!("codex", "handshake"),
+            fixture!("codex", "sub_agent_wake_piled_up"),
+        ])
+        .start();
+    h.send("Upgrade the payment client to v5. Split the refund calls, the webhook handler and the changelog between three agents.")
+        .await;
+    h.play_to("the parent's turn ended while three sub-agents run")
+        .await;
+    h.play_to("the first sub-agent finished").await;
+    h.play_to("the other two sub-agents finished during the wake turn")
+        .await;
+    assert_eq!(h.live().await.sub_agents, 0);
+    h.pass(Duration::from_secs(30)).await;
+    assert_eq!(h.turns().len(), 2, "{:?}", h.transcript());
+    // The fixture holds the one message that names both.
+    h.play_to("the first woken turn ended").await;
+    h.play_to("the second woken turn ended").await;
+    h.pass(Duration::from_secs(30)).await;
+    h.finish().await;
+    assert_eq!(h.turns().len(), 3, "{:?}", h.transcript());
+}
+
+/// The person sends a message while the sub-agent runs, and it finishes during that turn,
+/// which did not start it: the turn does not see the finish, so the main agent is woken
+/// when the person's turn ends.
+#[tokio::test(start_paused = true)]
+async fn a_sub_agent_that_finishes_during_a_later_turn_of_the_person_wakes_the_main_agent_after_it()
+{
+    let mut h = HostScript::codex()
+        .process([
+            fixture!("codex", "handshake"),
+            fixture!("codex", "sub_agent_wake_during_persons_turn"),
+        ])
+        .start();
+    h.send(PROMPT).await;
+    h.play_to("the parent's turn ended while the sub-agent runs")
+        .await;
+    h.send("Any news so far?").await;
+    h.play_to("the person's turn runs").await;
+    h.play_to("the sub-agent finished during the person's turn")
+        .await;
+    assert_eq!(h.live().await.sub_agents, 0);
+    // That turn runs on: nothing is sent for the finish yet, and the Chat stays working.
+    h.pass(Duration::from_secs(30)).await;
+    assert_eq!(h.turns().len(), 2, "{:?}", h.transcript());
+    assert_eq!(h.attention().await.rank, Rank::Working);
+
+    h.play_to("the person's turn ended").await;
+    h.play_to("the woken turn ended").await;
+    let turns = h.turns();
+    assert_eq!(turns.len(), 3, "{:?}", h.transcript());
+    assert_eq!(turns[1].origin, None, "the person started it");
+    let origin = turns[2].origin.clone().expect("the third turn is labelled");
+    assert_eq!(
+        (origin.by, origin.sub_agent),
+        (ChatTurnStarter::Ticketd, Some(CHILD.to_owned()))
+    );
+    h.pass(Duration::from_secs(30)).await;
+    h.finish().await;
+    assert_eq!(h.turns().len(), 3);
 }
