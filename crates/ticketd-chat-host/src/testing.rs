@@ -370,12 +370,27 @@ impl FakeAdapter {
                     live.runtime
                         .end_turn(turn.clone(), outcome.clone(), |_| Default::default());
                 }
-                EventKind::InteractionRequested(request) => {
-                    live.runtime.register_request(
-                        request.request.clone(),
-                        request.turn.as_ref(),
-                        (),
-                    );
+                EventKind::InteractionRequested(request) => match &request.owner {
+                    // A sub-agent's request lives as long as its asker, whatever turn
+                    // it arrived in.
+                    Some(owner) => {
+                        live.runtime.register_owned_request(
+                            request.request.clone(),
+                            owner.clone(),
+                            (),
+                        );
+                    }
+                    None => {
+                        live.runtime.register_request(
+                            request.request.clone(),
+                            request.turn.as_ref(),
+                            (),
+                        );
+                    }
+                },
+                EventKind::SubAgentEnded { sub_agent, .. } => {
+                    // The script provides the withdrawal events themselves.
+                    live.runtime.withdraw_owned(sub_agent);
                 }
                 EventKind::InteractionResolved { request, .. } => {
                     live.runtime.resolve_request(request);
