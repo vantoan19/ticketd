@@ -42,7 +42,8 @@ fn add_activity(h: &HostScript, call_key: Option<&str>, brief: &str) {
         .env("XDG_DATA_HOME", path.parent().expect("a folder"))
         .env(CHAT_ID_VARIABLE, h.chat_id())
         .env_remove("CODEX_TOOL_CALL_ID")
-        .env_remove("CODEX_THREAD_ID");
+        .env_remove("CODEX_THREAD_ID")
+        .env_remove("ANTIGRAVITY_SOURCE_METADATA");
     if let Some(key) = call_key {
         command.env("CODEX_TOOL_CALL_ID", key);
     }
