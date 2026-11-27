@@ -211,7 +211,11 @@ const OMITTED_TABLES: &[(&str, &str)] = &[
     ),
     (
         "chat_record_writes",
-        "bookkeeping for crediting CLI writes to Chat Turns",
+        "bookkeeping for crediting CLI writes to Chat Turns and sub-agents",
+    ),
+    (
+        "chat_step_windows",
+        "bookkeeping for crediting CLI writes to the sub-agent whose shell Step was running",
     ),
     ("device", "this installation's device code and counter"),
     ("document_fts", "a search index derived from Documents"),

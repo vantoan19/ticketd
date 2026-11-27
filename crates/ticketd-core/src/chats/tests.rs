@@ -230,3 +230,54 @@ fn capturing_a_short_turn_skips_unrelated_tickets_and_feed_rows() {
     let steps = ticks.load(Ordering::Relaxed) * 100;
     assert!(steps < 2_000, "used at least {steps} SQLite instructions");
 }
+
+#[test]
+fn deleting_a_chat_deletes_the_shell_windows_that_credit_its_writes() {
+    let dir = tempfile::tempdir().unwrap();
+    let mut workspace = Workspace::open(dir.path().join("workspace.sqlite3")).unwrap();
+    let chat = workspace
+        .create_chat(
+            None,
+            NewChat {
+                title: None,
+                harness: "claude-code".into(),
+                execution_folder: "/work/app".into(),
+                folder_managed: false,
+                links: Vec::new(),
+            },
+        )
+        .unwrap();
+    workspace
+        .record_chat_observations(
+            &chat.id,
+            vec![
+                ChatObservation::Tool {
+                    tool_id: "run-1:bash".into(),
+                    turn_id: None,
+                    owner: ChatOwner::Main,
+                    name: "Bash".into(),
+                    input: String::new(),
+                    state: ChatToolState::Running,
+                    output: None,
+                },
+                ChatObservation::ShellStep {
+                    tool_id: "run-1:bash".into(),
+                    writes: Vec::new(),
+                },
+            ],
+        )
+        .unwrap();
+    let windows = |workspace: &Workspace| -> i64 {
+        workspace
+            .connection
+            .query_row("SELECT COUNT(*) FROM chat_step_windows", [], |row| {
+                row.get(0)
+            })
+            .unwrap()
+    };
+    assert_eq!(windows(&workspace), 1);
+
+    delete_where(&workspace.connection, "1 = 1").unwrap();
+
+    assert_eq!(windows(&workspace), 0);
+}
