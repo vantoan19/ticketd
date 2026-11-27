@@ -494,9 +494,15 @@ fn a_restore_keeps_the_one_google_account_of_a_computer_that_only_keeps_files_in
     let (_kept, elsewhere) = backup_with_files_in(OTHER);
     Workspace::restore(&path, &elsewhere).unwrap();
     let mut a = Workspace::open(&path).unwrap();
-    assert_eq!(
+    // The computer's own Files folder stays, so its Google account is not forgotten.
+    assert!(matches!(
         a.attachment_upload_destination().unwrap(),
-        AttachmentUploadDestination::Local
+        AttachmentUploadDestination::GoogleDrive { destination, .. }
+            if destination.connection_id == CONNECTION && destination.folder_id == "team-files"
+    ));
+    assert_eq!(
+        a.google_sign_in().unwrap().unwrap().connection_id,
+        CONNECTION
     );
     // Sync can still sign in with this computer's account.
     a.sync_connect(CONNECTION, ACCOUNT).unwrap();
@@ -512,6 +518,37 @@ fn a_restore_keeps_the_one_google_account_of_a_computer_that_only_keeps_files_in
         a.attachment_upload_destination().unwrap(),
         AttachmentUploadDestination::GoogleDrive { destination, .. } if destination.connection_id == CONNECTION
     ));
+}
+
+/// The same, when the backup keeps Files on the computer it was made on: the computer's own
+/// Google account is not forgotten either.
+#[test]
+fn a_restore_of_a_backup_with_files_on_this_computer_keeps_the_files_only_google_account() {
+    let sim = DriveSim::default();
+    let directory = tempfile::tempdir().unwrap();
+    let path = directory.path().join("Desk");
+    let mut files_only = Workspace::open(&path).unwrap();
+    chosen_folder(&sim, &mut files_only);
+    drop(files_only);
+
+    let backups = tempfile::tempdir().unwrap();
+    let backup = backups.path().join("backup.sqlite3");
+    Workspace::open(backups.path().join("Elsewhere"))
+        .unwrap()
+        .backup(&backup)
+        .unwrap();
+    Workspace::restore(&path, &backup).unwrap();
+
+    let a = Workspace::open(&path).unwrap();
+    assert!(matches!(
+        a.attachment_upload_destination().unwrap(),
+        AttachmentUploadDestination::GoogleDrive { destination, .. }
+            if destination.connection_id == CONNECTION && destination.folder_id == "team-files"
+    ));
+    assert_eq!(
+        a.google_sign_in().unwrap().unwrap().connection_id,
+        CONNECTION
+    );
 }
 
 /// Another handle on the same Workspace file signing in to Google while a Files folder is
@@ -636,4 +673,51 @@ fn the_uploads_folder_is_not_saved_for_an_account_sync_left_while_it_was_looked_
         AttachmentUploadDestination::Local
     );
     assert_eq!(a.google_sign_in().unwrap().unwrap().connection_id, OTHER);
+}
+
+/// Another handle on the same Workspace file moving sync to another folder on the same
+/// Google connection while the Uploads folder is being found: the Uploads folder found is
+/// the old folder's.
+struct MovesSyncFolderDuringLookup {
+    workspace_file: std::path::PathBuf,
+}
+
+impl ticketd_core::drive::SyncUploadsFolder for MovesSyncFolderDuringLookup {
+    fn uploads_folder(
+        &self,
+        _: &str,
+    ) -> Result<ticketd_core::drive::DriveFolder, ticketd_core::sync::remote::RemoteError> {
+        rusqlite::Connection::open(&self.workspace_file)
+            .unwrap()
+            .execute(
+                "UPDATE sync_state SET folder = 'another-sync-folder', folder_name = 'ticketd Elsewhere'",
+                [],
+            )
+            .unwrap();
+        Ok(ticketd_core::drive::DriveFolder {
+            id: "uploads-folder".into(),
+            name: "Uploads".into(),
+            can_add_children: true,
+        })
+    }
+}
+
+#[test]
+fn the_uploads_folder_is_not_saved_for_a_sync_folder_sync_left_while_it_was_looked_up() {
+    let sim = DriveSim::default();
+    let (directory, mut a, _) = synced(&sim);
+    let provider = MovesSyncFolderDuringLookup {
+        workspace_file: directory.path().join("Desk A"),
+    };
+
+    let error = a.use_sync_uploads_folder(&provider).unwrap_err();
+
+    assert!(error.to_string().contains("another folder"), "{error}");
+    assert_eq!(
+        a.attachment_upload_destination().unwrap(),
+        AttachmentUploadDestination::Local
+    );
+    let now = a.sync_binding().unwrap().unwrap();
+    assert_eq!(now.folder_id, "another-sync-folder");
+    assert_eq!(now.connection_id.as_deref(), Some(CONNECTION));
 }

@@ -104,27 +104,40 @@ pub(crate) fn files_google_connection(connection: &Connection) -> Result<Option<
     })
 }
 
-/// A restore keeps this computer's Google sign-in (`kept`, the connection id) in the
-/// restored Workspace. A Files folder in another account than that one would leave Files
-/// and sync on two accounts, so it goes back to this computer, as when the account is
-/// switched. Without a sign-in kept (neither sync's nor a Files folder's), the restored
-/// folder is the only one there is.
+/// A restore keeps this computer's Google sign-in in the restored Workspace: sync's
+/// (`sync_sign_in`, the connection id), otherwise the one the replaced Workspace's Files
+/// folder uses. A restored Files folder in another account than that one would leave Files
+/// and sync on two accounts. When sync holds the sign-in, Files goes back to this
+/// computer, as when the account is switched. When only the replaced Files folder holds
+/// it, that folder is written into the restored Workspace unless the restored folder is in
+/// the same account (then the backup's folder stays), so the account is not forgotten even
+/// when the backup keeps Files on this computer. Without a sign-in kept, the restored
+/// destination is the only one there is.
 pub(crate) fn follow_kept_google_sign_in(
     restored: &Connection,
-    kept: Option<&str>,
+    replaced: &Connection,
+    sync_sign_in: Option<&str>,
 ) -> Result<(), Error> {
-    let Some(kept) = kept else {
-        return Ok(());
-    };
     // A backup of a format before Files had destinations has none to reset.
     if !crate::backup::table_exists(restored, "attachment_upload_destination")? {
         return Ok(());
     }
-    if let AttachmentUploadDestination::GoogleDrive { destination, .. } =
-        files_destination(restored)?
-        && destination.connection_id != kept
+    let restored_account = match files_destination(restored)? {
+        AttachmentUploadDestination::GoogleDrive { destination, .. } => {
+            Some(destination.connection_id)
+        }
+        AttachmentUploadDestination::Local => None,
+    };
+    if let Some(kept) = sync_sign_in {
+        if restored_account.is_some_and(|account| account != kept) {
+            write_destination(restored, &AttachmentUploadDestination::Local)?;
+        }
+        return Ok(());
+    }
+    // A replaced Workspace of a format before Files had destinations has none.
+    if files_google_connection(replaced)?.is_some_and(|own| restored_account.as_ref() != Some(&own))
     {
-        write_destination(restored, &AttachmentUploadDestination::Local)?;
+        write_destination(restored, &files_destination(replaced)?)?;
     }
     Ok(())
 }
@@ -346,6 +359,13 @@ impl Workspace {
                     ));
                 }
             };
+            // The Uploads folder belongs to the folder it was found in: sync could have
+            // moved to another folder on this account while Drive was asked.
+            if crate::sync::sync_folder_of(scope)?.as_deref() != Some(binding.folder_id.as_str()) {
+                return Err(Error::Attachment(
+                    "Workspace sync uses another folder now; try again".into(),
+                ));
+            }
             let chosen = AttachmentUploadDestination::GoogleDrive {
                 destination: DriveUploadDestination {
                     connection_id: connection_id.clone(),

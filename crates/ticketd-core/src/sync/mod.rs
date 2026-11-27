@@ -25,7 +25,7 @@ pub use setup::{
     SyncItem, SyncProvider, SyncRecovery, SyncRecoveryAction, SyncSettings, SyncState, SyncStatus,
     s3_service_changed,
 };
-pub(crate) use setup::{google_sign_in_of, other_google_account};
+pub(crate) use setup::{google_sign_in_of, other_google_account, sync_folder_of};
 
 pub(crate) fn migrate(connection: &rusqlite::Connection) -> Result<(), crate::Error> {
     capture::migrate(connection)?;

@@ -515,6 +515,13 @@ fn read_shared_hashes(path: &Path, verify: bool) -> Result<Vec<String>, Error> {
                 "the file inventory of a restore point is missing".into(),
             ));
         }
+        // The point's own attachment rows are the independent evidence: one that lists an
+        // attachment a backup keeps lost its inventory, and may need files nothing else names.
+        if verify && crate::backup_archive::keeps_attachment_files(&connection)? {
+            return Err(Error::Backup(
+                "a restore point lists attachments but has no file inventory".into(),
+            ));
+        }
         return Ok(Vec::new());
     }
     if verify && !crate::backup_archive::inventory_is_intact(&connection)? {

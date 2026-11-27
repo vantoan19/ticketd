@@ -305,6 +305,11 @@ pub(crate) fn google_sign_in_of(
     })
 }
 
+/// The folder Workspace sync uses now, if any.
+pub(crate) fn sync_folder_of(connection: &Connection) -> Result<Option<String>, Error> {
+    Ok(state(connection)?.folder)
+}
+
 /// Why a sign-in as another Google account is refused while Files or Workspace sync is
 /// already on one.
 pub(crate) fn other_google_account() -> Error {
@@ -752,13 +757,11 @@ pub(super) fn remember_replaced_folder(
     )?;
     // Files and sync share one Google sign-in on this computer: sync's, otherwise the one
     // the replaced Workspace's Files folder uses. A Files folder in another account goes.
-    let files_sign_in = crate::upload_destination::files_google_connection(replaced)?;
-    let kept = was
+    let sync_sign_in = was
         .connection
         .as_deref()
-        .filter(|_| was.provider == SyncProvider::GoogleDrive)
-        .or(files_sign_in.as_deref());
-    crate::upload_destination::follow_kept_google_sign_in(restored, kept)?;
+        .filter(|_| was.provider == SyncProvider::GoogleDrive);
+    crate::upload_destination::follow_kept_google_sign_in(restored, replaced, sync_sign_in)?;
     if !same_workspace {
         return Ok(());
     }
