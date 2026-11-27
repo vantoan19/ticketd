@@ -1,5 +1,5 @@
 {"note": "Hand-built from the codex-cli 0.162.1 JSON schema (codex app-server generate-json-schema) and the sub_agent_outlives_turn capture: the open of a Chat after ticketd restarted, then the person's next message carrying ticketd's note on the sub-agent that was lost (Codex cannot resume it, so the note does not say it can). Not captured from a live session."}
-{"client": {"id": 1, "method": "initialize", "params": {"clientInfo": {"name": "ticketd", "title": "ticketd", "version": "0.0.0-test"}}}}
+{"client": {"id": 1, "method": "initialize", "params": {"clientInfo": {"name": "ticketd", "title": "ticketd", "version": "0.0.0-test"}, "capabilities": {"experimentalApi": true}}}}
 {"server": {"id": 1, "result": {"userAgent": "ticketd/0.162.1 (Windows 10.0.26200; x86_64)", "codexHome": "/home/example/.codex", "platformFamily": "windows", "platformOs": "windows"}}}
 {"client": {"method": "initialized"}}
 {"client": {"id": 2, "method": "thread/resume", "params": {"threadId": "thr_1", "cwd": "/work/chat-1", "excludeTurns": true}}}
