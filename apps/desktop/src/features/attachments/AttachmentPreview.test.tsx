@@ -1120,6 +1120,117 @@ test("closing after stepping returns focus and scroll to what opened the viewer"
   expect(document.activeElement).toBe(opener);
 });
 
+test("closing returns the scroll to the top when the opener sat at the top", async () => {
+  serveWalk();
+  vi.mocked(openPdf).mockResolvedValue(fakePdf(2).document);
+  render(<Walk start={0} />);
+  const pane = screen.getByTestId("pane");
+  let top = 0;
+  Object.defineProperty(pane, "scrollTop", {
+    get: () => top,
+    set: (value: number) => {
+      top = value;
+    },
+  });
+  const opener = screen.getByRole("button", { name: "Open file" });
+  opener.focus();
+  fireEvent.click(opener);
+  await screen.findByRole("img", { name: "refund.png" });
+  top = 300; // the page moved while it was open
+  fireEvent.keyDown(screen.getByRole("dialog"), { key: "Escape" });
+  await waitFor(() => expect(screen.queryByRole("dialog")).toBeNull());
+  expect(top).toBe(0);
+});
+
+test("a neighbor read ahead is not kept when the read of that file itself fails", async () => {
+  serveWalk();
+  const served = vi.mocked(invoke).getMockImplementation()!;
+  let reads = 0;
+  vi.mocked(invoke).mockImplementation(async (command, args) => {
+    // Read ahead once, then the stored copy becomes unreadable.
+    if (
+      command === "attachment_preview" &&
+      (args as { id: string }).id === shot.id &&
+      ++reads > 1
+    )
+      throw new Error("cannot read");
+    return served(command, args);
+  });
+  vi.mocked(openPdf).mockResolvedValue(fakePdf(3).document);
+  render(<Walk start={1} />);
+  fireEvent.click(screen.getByRole("button", { name: "Open file" }));
+  await screen.findByLabelText("Report: E2E report");
+  await waitFor(() => expect(reads).toBe(1));
+  fireEvent.click(screen.getByRole("button", { name: "Previous file" }));
+  // The warm result shows the picture; the failed read replaces it with Retry.
+  expect(await screen.findByRole("button", { name: "Retry" })).toBeTruthy();
+  expect(screen.queryByRole("img", { name: "refund.png" })).toBeNull();
+});
+
+const held = { ...file, id: "held-1", quarantined: true };
+function serveQuarantined(restore: () => Promise<unknown>) {
+  vi.mocked(invoke).mockImplementation(async (command, args) => {
+    if (command === "attachment_workspace_id") return "workspace";
+    if (command === "restore_attachment") return restore();
+    if (command === "attachment_preview")
+      return (args as { id: string }).id === held.id
+        ? {
+            attachment: held,
+            status: "unsupported",
+            media_type: null,
+            message: "No media preview",
+            can_open: true,
+            usage: { total: 0, entries: [], legacy_drafts_pending: false },
+          }
+        : previews[(args as { id: string }).id];
+    return null;
+  });
+}
+
+test("a Restore that finishes after the viewer stepped to another file does not read that file again", async () => {
+  let finish: () => void = () => {};
+  const heldFirst: Attachment[] = [held, shot];
+  serveQuarantined(
+    () => new Promise((resolve) => (finish = () => resolve(held))),
+  );
+  function Pair() {
+    const [at, setAt] = useState(0);
+    return (
+      <AttachmentPreview
+        target={{ id: heldFirst[at]!.id, initial: heldFirst[at]! }}
+        browse={{
+          files: heldFirst,
+          onSelect: (next) => setAt(heldFirst.indexOf(next)),
+        }}
+        onClose={() => {}}
+      />
+    );
+  }
+  render(<Pair />);
+  fireEvent.click(await screen.findByRole("button", { name: "Restore file" }));
+  await waitFor(() =>
+    expect(invoke).toHaveBeenCalledWith(
+      "restore_attachment",
+      expect.anything(),
+    ),
+  );
+  fireEvent.click(screen.getByRole("button", { name: "Next file" }));
+  await screen.findByRole("img", { name: "refund.png" });
+  const reads = () =>
+    vi
+      .mocked(invoke)
+      .mock.calls.filter(
+        ([command, args]) =>
+          command === "attachment_preview" &&
+          (args as { id: string }).id === shot.id,
+      ).length;
+  await waitFor(() => expect(reads()).toBeGreaterThan(0));
+  const before = reads();
+  await act(async () => finish());
+  await act(async () => {});
+  expect(reads()).toBe(before);
+});
+
 const runLog: Attachment = {
   ...file,
   id: "run-1",

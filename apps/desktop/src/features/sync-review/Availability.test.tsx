@@ -1,3 +1,4 @@
+import { useState } from "react";
 import { revealFailureDetails } from "@/test/failure-details";
 // @vitest-environment jsdom
 
@@ -21,7 +22,12 @@ import { fakeChangeSignal } from "@/lib/workspace-reads/fake-signal";
 import { SyncStatusContext } from "@/features/sync/sync-status";
 import { syncStatus } from "@/features/sync/sync-fixtures";
 
-vi.mock("@tauri-apps/api/core", () => ({ invoke: vi.fn(), Channel: class {} }));
+vi.mock("@tauri-apps/api/core", () => ({
+  invoke: vi.fn(),
+  Channel: class {},
+  convertFileSrc: (path: string, protocol: string) =>
+    `${protocol}://localhost/${path}`,
+}));
 vi.mock("@tauri-apps/plugin-dialog", () => ({ open: vi.fn(), save: vi.fn() }));
 vi.mock("@/lib/sync-review-api", () => ({
   syncReview: { availability: vi.fn(), download: vi.fn() },
@@ -211,6 +217,101 @@ test("a download on open that fails says why and leaves Download", async () => {
   expect(screen.getByText("offline")).toBeTruthy();
   expect(screen.getByRole("button", { name: "Retry" })).toBeTruthy();
   expect(syncReview.download).toHaveBeenCalledTimes(1);
+});
+
+test("a download that finishes after the file's state was read again frees the viewer's controls", async () => {
+  let done: () => void = () => {};
+  vi.mocked(syncReview.download).mockImplementation(
+    () => new Promise<void>((resolve) => (done = resolve)),
+  );
+  const served = vi.mocked(invoke).getMockImplementation()!;
+  vi.mocked(invoke).mockImplementation(async (command, args) =>
+    command === "attachment_preview" && states[0]?.state === "downloaded"
+      ? {
+          attachment: files[0],
+          status: "available",
+          media_type: "video/mp4",
+          message: null,
+          can_open: true,
+          usage: { total: 0, entries: [], legacy_drafts_pending: false },
+        }
+      : served(command, args),
+  );
+  render(<AttachmentPreview target={{ id: "a" }} onClose={() => {}} />);
+  fireEvent.click(await screen.findByRole("button", { name: /^Download/ }));
+  await waitFor(() => expect(syncReview.download).toHaveBeenCalledWith("a"));
+  const reads = () =>
+    vi
+      .mocked(invoke)
+      .mock.calls.filter(([command]) => command === "attachment_preview")
+      .length;
+  const before = reads();
+  // The poll sees the file arrive before the download call answers.
+  states = [{ id: "a", state: "downloaded", progress: null }];
+  await waitFor(() => expect(reads()).toBeGreaterThan(before), {
+    timeout: 4000,
+  });
+  await act(async () => done());
+  await waitFor(
+    () =>
+      expect(
+        screen.getByRole<HTMLButtonElement>("button", { name: "Open file" })
+          .disabled,
+      ).toBe(false),
+    { timeout: 4000 },
+  );
+});
+
+test("a download on open is tried once per file, and its failure stays with the file that started it", async () => {
+  mode = "on_open";
+  states = [
+    { id: "a", state: "not_downloaded", progress: null },
+    { id: "b", state: "not_downloaded", progress: null },
+  ];
+  let failA: (reason: Error) => void = () => {};
+  vi.mocked(syncReview.download).mockImplementation((id) =>
+    id === "a"
+      ? new Promise<void>((_, reject) => (failA = reject))
+      : new Promise<void>(() => {}),
+  );
+  const served = vi.mocked(invoke).getMockImplementation()!;
+  vi.mocked(invoke).mockImplementation(async (command, args) =>
+    command === "attachment_preview"
+      ? {
+          attachment: files.find(
+            (item) => item.id === (args as { id: string }).id,
+          ),
+          status: "missing",
+          media_type: null,
+          message: null,
+          can_open: false,
+          usage: { total: 0, entries: [], legacy_drafts_pending: false },
+        }
+      : served(command, args),
+  );
+  function Switch() {
+    const [id, setId] = useState("a");
+    return (
+      <>
+        <button onClick={() => setId((now) => (now === "a" ? "b" : "a"))}>
+          Switch
+        </button>
+        <AttachmentPreview target={{ id }} onClose={() => {}} />
+      </>
+    );
+  }
+  render(<Switch />);
+  await waitFor(() => expect(syncReview.download).toHaveBeenCalledWith("a"));
+  fireEvent.click(screen.getByText("Switch"));
+  await waitFor(() => expect(syncReview.download).toHaveBeenCalledWith("b"));
+  // A's download fails after the viewer moved on: B shows nothing of it.
+  await act(async () => failA(new Error("offline")));
+  expect(screen.queryByText("Couldn’t download")).toBeNull();
+  expect(screen.queryByText("offline")).toBeNull();
+  // Back on A: it was tried, so it waits for the Download button.
+  fireEvent.click(screen.getByText("Switch"));
+  await screen.findByRole("button", { name: /^Download/ });
+  expect(syncReview.download).toHaveBeenCalledTimes(2);
 });
 
 test("availability that cannot be read again keeps what was last known", async () => {
