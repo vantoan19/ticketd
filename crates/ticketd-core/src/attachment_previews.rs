@@ -98,6 +98,10 @@ pub struct TextExcerpt {
     pub text: String,
     /// The file continues past the excerpt.
     pub truncated: bool,
+    /// Invalid bytes were replaced to read it as text: a log still shows, but it is not
+    /// the valid UTF-8 a report needs.
+    #[serde(skip)]
+    pub(crate) lossy: bool,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -209,7 +213,7 @@ impl Workspace {
                         .into(),
                 );
             } else {
-                html = text_excerpt.is_some();
+                html = text_excerpt.as_ref().is_some_and(|excerpt| !excerpt.lossy);
             }
         }
         let mut pdf = false;
@@ -342,7 +346,15 @@ impl Workspace {
             .read_to_end(&mut bytes)
             .ok()?;
         let truncated = length > bytes.len() as u64;
-        text_of(&bytes, truncated).map(|text| TextExcerpt { text, truncated })
+        let lossy = match std::str::from_utf8(&bytes) {
+            Ok(_) => false,
+            Err(error) => !(truncated && error.error_len().is_none()),
+        };
+        text_of(&bytes, truncated).map(|text| TextExcerpt {
+            text,
+            truncated,
+            lossy,
+        })
     }
 
     /// Whether a kept local file's stored copy is gone or cut short on this
