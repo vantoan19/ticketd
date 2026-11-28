@@ -99,6 +99,11 @@ export function enterTransition(): { duration: number; ease: Easing } {
   return { duration: seconds("--dur-enter"), ease: bezier("--ease-out") };
 }
 
+/** The 140 ms fade between ticket card states. */
+export function stateTransition(): { duration: number; ease: Easing } {
+  return { duration: seconds("--dur-2"), ease: bezier("--ease-in-out") };
+}
+
 /** An exit, faster than the entrance. */
 export function exitTransition(): { duration: number; ease: Easing } {
   return { duration: seconds("--dur-exit"), ease: bezier("--ease-in") };

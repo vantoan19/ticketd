@@ -166,6 +166,9 @@ The recorded state of a ticket: Todo, In progress, In review, Done, Canceled, or
 **In review**:
 A ticket status indicating that implementation is finished but review is pending. An In review ticket remains an unresolved blocker for its dependents.
 
+**Send back**:
+A review decision that returns a ticket from In review to In progress and posts the reviewer's reason as an update on the ticket.
+
 **Done**:
 A ticket status indicating that its work is complete and no further review is required.
 

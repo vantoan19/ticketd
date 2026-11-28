@@ -308,6 +308,14 @@ export const SHORTCUTS = [
     label: "Copy reference",
   },
   {
+    id: "ticket-agent-chat",
+    keys: [["O"]],
+    scope: "Ticket",
+    label: "Open the agent’s Chat",
+    note: "While the open ticket shows an agent.",
+    needs: "chat",
+  },
+  {
     id: "ticket-find-description",
     keys: [["Mod", "F"]],
     scope: "Ticket",
@@ -319,6 +327,20 @@ export const SHORTCUTS = [
     scope: "Ticket",
     label: "Move a ticket in review to Done",
     note: "On a Ready for review card, outside a text field.",
+  },
+  {
+    id: "ticket-review-send-back",
+    keys: [["B"]],
+    scope: "Ticket",
+    label: "Send work back",
+    note: "On a Ready for review card, outside a menu or text field.",
+  },
+  {
+    id: "ticket-review-send-back-submit",
+    keys: [["Mod", "Enter"]],
+    scope: "Ticket",
+    label: "Send back with the update",
+    note: "In the Send back field.",
   },
   {
     id: "ticket-edit",

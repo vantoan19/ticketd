@@ -1070,6 +1070,20 @@ export const client = {
       }),
     );
   },
+  async sendBack(reference: string, brief: string, requestId: string) {
+    return ticketSchema.parse(
+      await invoke("send_back", { reference, brief, requestId }),
+    );
+  },
+  async undoSendBack(
+    reference: string,
+    sendRequestId: string,
+    requestId: string,
+  ) {
+    return ticketSchema.parse(
+      await invoke("undo_send_back", { reference, sendRequestId, requestId }),
+    );
+  },
   async changeTicket(
     reference: string,
     patch: {

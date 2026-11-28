@@ -205,13 +205,9 @@
 .ticket-closing-line {
   margin-top: 8px;
 }
-.detail-document .ticket-agent-slot {
-  margin-top: 24px;
-}
 .detail-document .editor-body {
   margin-top: 24px;
 }
-.detail-document .ticket-agent-slot ~ .editor-body,
 .detail-document .ticket-decision-card ~ .editor-body {
   margin-top: 32px;
 }
