@@ -6,6 +6,7 @@ import { editingBlockedReason, useWorkspaceState } from "@/lib/workspace-state";
 import { EmptyState } from "@/components/ui/empty-state";
 import { Alert, AlertActions, AlertDescription } from "@/components/ui/alert";
 import "./description.css";
+import { TicketDescription } from "./TicketDescription";
 import { MarkdownDocument } from "@/features/markdown/MarkdownDocument";
 import { chatSource } from "@/features/chats/quotes";
 import { LazyMarkdownEditor } from "@/features/markdown/LazyMarkdownEditor";
@@ -819,7 +820,7 @@ function RecoveredTicketEditor({
                     return;
                   if (
                     event.target instanceof Element &&
-                    event.target.closest("a, button, input")
+                    event.target.closest("a, button, input, [role=search]")
                   )
                     return;
                   setBodyMode("editing");
@@ -833,7 +834,8 @@ function RecoveredTicketEditor({
                     id: ticket.id,
                   })}
                 >
-                  <MarkdownDocument
+                  <TicketDescription
+                    ticketId={ticket.id}
                     source={rendered}
                     {...(!blockedReason && {
                       onChange: (body: string) =>

@@ -71,3 +71,12 @@
   outline: 2px solid var(--ring);
   outline-offset: -2px;
 }
+
+.ticket-description-find-count {
+  font-size: var(--text-caption);
+  color: var(--muted-foreground);
+}
+
+.ticket-description ::highlight(ticket-description-find) {
+  background-color: var(--accent);
+}

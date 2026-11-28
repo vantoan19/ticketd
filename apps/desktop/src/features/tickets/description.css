@@ -119,3 +119,31 @@
   display: inline-flex;
   max-width: 100%;
 }
+
+.ticket-description-fold-button.ui-button {
+  width: 100%;
+  min-height: 28px;
+  height: auto;
+  justify-content: flex-start;
+  white-space: normal;
+  text-align: start;
+}
+
+.ticket-description-fold-content > * {
+  margin-block-start: 12px;
+}
+
+.ticket-description-find {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  margin-block-end: 12px;
+}
+
+.ticket-description-find .ticket-description-find-input {
+  height: 28px;
+}
+
+.ticket-description-find-count {
+  flex: none;
+}
