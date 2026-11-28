@@ -600,6 +600,14 @@ export const client = {
         ),
       );
   },
+  async ticketPeekCounts(reference: string) {
+    return z
+      .object({
+        linked: z.number().int().nonnegative(),
+        files: z.number().int().nonnegative(),
+      })
+      .parse(await invoke("ticket_peek_counts", { reference }));
+  },
   /** Every relationship of a ticket as the core reports it, one page of each kind. */
   async contextualRelationships(
     reference: string,

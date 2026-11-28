@@ -423,6 +423,124 @@ test("an open card peeks over the board, which keeps its width, and the list spl
   );
 });
 
+test("the board peek shows the review card and folds the description before opening the full ticket", async () => {
+  vi.spyOn(HTMLElement.prototype, "offsetWidth", "get").mockReturnValue(1000);
+  const overview = "The board can review a handoff.";
+  const detail = "Check the result in both themes.";
+  saved = [
+    {
+      ...ticket(2, "In review"),
+      body: `## Outcome\n\n${overview}\n\n## Acceptance criteria\n\n- [ ] ${detail}`,
+    },
+  ];
+  render(<App />);
+  await settle();
+  await showBoard();
+  fireEvent.click(
+    screen.getByRole("button", { name: /T-KQ2 In review.*Ticket 2/ }),
+  );
+  await settle();
+
+  const card = screen.getByRole("region", { name: "Ready for review" });
+  expect(
+    within(card).getByRole("button", { name: "Move to Done" }),
+  ).toBeTruthy();
+  expect(screen.getByRole("heading", { name: "Outcome" })).toBeTruthy();
+  expect(screen.getByText(overview)).toBeTruthy();
+  expect(
+    screen.queryByRole("heading", { name: "Acceptance criteria" }),
+  ).toBeNull();
+  const fold = screen.getByRole("button", {
+    name: "1 more section: Acceptance criteria",
+  });
+  expect(fold.getAttribute("aria-expanded")).toBe("false");
+  fireEvent.click(
+    within(card).getByRole("button", { name: "Acceptance 0 of 1" }),
+  );
+  expect(fold.getAttribute("aria-expanded")).toBe("true");
+  expect(
+    screen.getByRole("heading", { name: "Acceptance criteria" }),
+  ).toBeTruthy();
+
+  fireEvent.click(screen.getByRole("button", { name: "Open ticket" }));
+  await settle();
+  expect(screen.getByRole("textbox", { name: "Title" })).toHaveProperty(
+    "value",
+    "Ticket 2",
+  );
+  expect(
+    screen.getByRole("heading", { name: "Acceptance criteria" }),
+  ).toBeTruthy();
+});
+
+test("the board peek shows complete section counts even when their lists are paged", async () => {
+  vi.spyOn(HTMLElement.prototype, "offsetWidth", "get").mockReturnValue(1000);
+  const fallback = bridge.invoke.getMockImplementation()!;
+  bridge.invoke.mockImplementation(async (command: string, args?: object) => {
+    if (command === "ticket_peek_counts") return { linked: 112, files: 24 };
+    if (command === "ticket_evidence_page") return { items: [], total: 83 };
+    if (command === "activity_update_count") return 65;
+    return fallback(command, args);
+  });
+  render(<App />);
+  await settle();
+  await showBoard();
+  fireEvent.click(
+    screen.getByRole("button", { name: /T-KQ2 In review.*Ticket 2/ }),
+  );
+  await settle();
+
+  expect(
+    screen.getByText("Linked 112 · Evidence 83 · Files 24 · Updates 65"),
+  ).toBeTruthy();
+  expect(screen.queryByRole("heading", { name: "Evidence" })).toBeNull();
+  expect(screen.queryByRole("heading", { name: "Activity" })).toBeNull();
+});
+
+test("Send back from the board peek posts the reason and keeps the decision in view", async () => {
+  vi.spyOn(HTMLElement.prototype, "offsetWidth", "get").mockReturnValue(1000);
+  const review = ticket(2, "In review");
+  saved = [review];
+  const fallback = bridge.invoke.getMockImplementation()!;
+  bridge.invoke.mockImplementation(async (command: string, args?: object) => {
+    if (command === "send_back") {
+      const sent = { ...review, status: "In progress" };
+      saved = [sent];
+      return sent;
+    }
+    return fallback(command, args);
+  });
+  render(<App />);
+  await settle();
+  await showBoard();
+  fireEvent.click(
+    screen.getByRole("button", { name: /T-KQ2 In review.*Ticket 2/ }),
+  );
+  await settle();
+
+  const card = within(screen.getByRole("region", { name: "Ready for review" }));
+  fireEvent.click(card.getByRole("button", { name: "Send back" }));
+  const reason = "Please verify the shared shortcut.";
+  fireEvent.change(
+    card.getByRole("textbox", { name: "What needs to change?" }),
+    {
+      target: { value: reason },
+    },
+  );
+  fireEvent.click(card.getByRole("button", { name: "Send back" }));
+  await settle();
+
+  expect(bridge.invoke).toHaveBeenCalledWith("send_back", {
+    reference: "T-KQ2",
+    brief: reason,
+    requestId: expect.any(String),
+  });
+  const decision = within(screen.getByRole("region", { name: "Sent back" }));
+  expect(decision.getByText(reason)).toBeTruthy();
+  expect(screen.getByRole("button", { name: "Open ticket" })).toBeTruthy();
+  expect(screen.getByRole("button", { name: "Undo" })).toBeTruthy();
+});
+
 test("saved-status feedback is the pane's status line, can be dismissed and does not return", async () => {
   saved = [ticket(1), ticket(3)];
   render(<App />);
@@ -1261,12 +1379,12 @@ test("a card status action changes only that ticket and leaves the selected deta
   ];
   render(<App />);
   await settle();
-  await showBoard();
   fireEvent.click(screen.getByRole("button", { name: /T-KQ2.*Ticket 2/ }));
   await settle();
   fireEvent.change(screen.getByRole("textbox", { name: "Title" }), {
     target: { value: "Keep my draft" },
   });
+  await showBoard();
   const action = screen.getByRole("button", {
     name: /^Change status of T-KQ1, current status:/,
   });
@@ -1285,11 +1403,13 @@ test("a card status action changes only that ticket and leaves the selected deta
       { name: /T-KQ3.*Ticket 3/ },
     ),
   ).toBeTruthy();
+  expect(screen.getByText("Moved T-KQ1 to In progress")).toBeTruthy();
+  fireEvent.click(screen.getByRole("button", { name: "Open ticket" }));
+  await settle();
   expect(screen.getByRole("textbox", { name: "Title" })).toHaveProperty(
     "value",
     "Keep my draft",
   );
-  expect(screen.getByText("Moved T-KQ1 to In progress")).toBeTruthy();
   expect(bridge.invoke).toHaveBeenCalledWith("change_ticket", {
     reference: "T-KQ1",
     patch: { status: "In progress" },
@@ -1449,10 +1569,9 @@ test("workspace changes reconcile cards, counts and selected detail while a fail
   const todo = within(screen.getByRole("region", { name: "Todo column" }));
   expect(todo.getByRole("button", { name: /T-KQ1.*Ticket 1/ })).toBeTruthy();
   expect(todo.getByText(/Showing the saved tickets/)).toBeTruthy();
-  expect(screen.getByRole("textbox", { name: "Title" })).toHaveProperty(
-    "value",
-    "Updated elsewhere",
-  );
+  expect(
+    screen.getByRole("heading", { name: "Updated elsewhere", level: 1 }),
+  ).toBeTruthy();
   expect(
     within(screen.getByRole("region", { name: "Done column" })).getByRole(
       "button",
@@ -1487,17 +1606,22 @@ test("a card outside the List page opens existing detail, preserves its draft ac
   card.focus();
   fireEvent.click(card);
   await settle();
-  expect(screen.getByRole("textbox", { name: "Title" })).toHaveProperty(
-    "value",
-    "Ticket 56",
-  );
+  expect(
+    screen.getByRole("heading", { name: "Ticket 56", level: 1 }),
+  ).toBeTruthy();
   expect(screen.queryByText(/outside the current results/i)).toBeNull();
+  fireEvent.click(screen.getByRole("button", { name: "Open ticket" }));
+  await settle();
   fireEvent.change(screen.getByRole("textbox", { name: "Title" }), {
     target: { value: "Unpublished draft" },
   });
+  fireEvent.click(screen.getByRole("button", { name: "Show beside the list" }));
+  await settle();
   chooseLayout("List");
   await settle();
   await showBoard();
+  fireEvent.click(screen.getByRole("button", { name: "Open ticket" }));
+  await settle();
   expect(screen.getByRole("textbox", { name: "Title" })).toHaveProperty(
     "value",
     "Unpublished draft",
@@ -1521,10 +1645,9 @@ test("closing a ticket followed within Board details returns to its card", async
   await settle();
   fireEvent.click(screen.getByRole("button", { name: "T-KQ2" }));
   await settle();
-  expect(screen.getByRole("textbox", { name: "Title" })).toHaveProperty(
-    "value",
-    "Ticket 2",
-  );
+  expect(
+    screen.getByRole("heading", { name: "Ticket 2", level: 1 }),
+  ).toBeTruthy();
   fireEvent.click(screen.getByRole("button", { name: "Close ticket details" }));
   await settle();
   expect(document.activeElement).toBe(

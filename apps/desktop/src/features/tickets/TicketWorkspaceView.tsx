@@ -436,6 +436,7 @@ export function TicketWorkspaceView({
               workspace={workspace}
               hidden={inboxMode && !!triage?.chatId}
               leaving={detailLeaving}
+              peek={peek}
               {...(inboxMode && { context: "inbox" as const })}
               expanded={expanded}
               inboxTarget={inboxTarget}

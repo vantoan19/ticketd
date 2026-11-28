@@ -27,6 +27,8 @@ export function bridgeDefault(
     // Attachments settings reads it on open to gate the Google Drive tile.
     case "drive_configuration":
       return { configured: false, message: "" };
+    case "activity_update_count":
+      return 0;
     case "latest_update":
       return null;
     case "document_context_links":
@@ -39,6 +41,8 @@ export function bridgeDefault(
         tickets: [],
         tags: [],
       };
+    case "ticket_peek_counts":
+      return { linked: 0, files: 0 };
     case "ticket_backlinks":
     case "ticket_evidence_page":
       return { items: [], total: 0 };

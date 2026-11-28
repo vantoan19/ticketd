@@ -95,7 +95,7 @@ use serde::{Deserialize, Serialize};
 mod counts;
 mod history;
 mod readiness;
-pub use counts::{SidebarCounts, StatusCounts};
+pub use counts::{SidebarCounts, StatusCounts, TicketPeekCounts};
 mod inbox;
 pub use inbox::{AttentionEntry, InboxAttention, InboxEntry, ReminderState, ReviewState};
 mod activities;
