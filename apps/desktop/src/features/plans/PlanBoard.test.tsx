@@ -185,9 +185,10 @@ test("workspace changes refresh Plan membership, status, counts, and readiness w
   fireEvent.click(screen.getByRole("button", { name: /^T-KQ1\D/ }));
   // The next workspace poll arrives while this newly typed draft is still unsaved.
   await settle(1900);
-  fireEvent.change(screen.getByRole("textbox", { name: "Title" }), {
+  fireEvent.change(await openTitleEditor(), {
     target: { value: "My unsaved title" },
   });
+  await returnToBoard();
   saved = [
     { ...ticket(1, "Todo", "beta-plan"), title: "Changed elsewhere" },
     ticket(2, "In review"),
@@ -225,10 +226,7 @@ test("workspace changes refresh Plan membership, status, counts, and readiness w
   ).toBeTruthy();
   // Per-status counts live in the columns; the header keeps the progress.
   expect(screen.getByText("0 of 2 done")).toBeTruthy();
-  expect(screen.getByRole("textbox", { name: "Title" })).toHaveProperty(
-    "value",
-    "My unsaved title",
-  );
+  expect(await openTitleEditor()).toHaveProperty("value", "My unsaved title");
   expect(screen.getByLabelText(/not in the current results/i)).toBeTruthy();
 });
 
@@ -292,13 +290,12 @@ test("archiving a Plan on Board preserves ticket editing and restricts Plan memb
   ).toBeNull();
   fireEvent.click(screen.getByRole("button", { name: /^T-KQ1\D/ }));
   await settle();
-  expect(screen.getByRole("textbox", { name: "Title" })).toHaveProperty(
-    "disabled",
-    false,
-  );
-  fireEvent.change(screen.getByRole("textbox", { name: "Title" }), {
+  const title = await openTitleEditor();
+  expect(title).toHaveProperty("disabled", false);
+  fireEvent.change(title, {
     target: { value: "Allowed ticket draft" },
   });
+  await returnToBoard();
   chooseView("List");
   await settle();
   expect(
@@ -306,10 +303,11 @@ test("archiving a Plan on Board preserves ticket editing and restricts Plan memb
   ).toBeNull();
   chooseView("Board");
   await settle();
-  expect(screen.getByRole("textbox", { name: "Title" })).toHaveProperty(
+  expect(await openTitleEditor()).toHaveProperty(
     "value",
     "Allowed ticket draft",
   );
+  await returnToBoard();
   fireEvent.click(screen.getByRole("button", { name: "Reactivate" }));
   await settle();
   expect(
@@ -330,18 +328,19 @@ test("Plan ticket details retain their draft and return to the same Board positi
   card.focus();
   fireEvent.click(card);
   await settle();
-  fireEvent.change(screen.getByRole("textbox", { name: "Title" }), {
+  fireEvent.change(await openTitleEditor(), {
     target: { value: "Keep my Plan ticket draft" },
   });
+  await returnToBoard();
   chooseView("Flow");
   await settle();
   chooseView("Board");
   await settle();
-  expect(screen.getByRole("textbox", { name: "Title" })).toHaveProperty(
+  expect(card.getAttribute("aria-pressed")).toBe("true");
+  expect(await openTitleEditor()).toHaveProperty(
     "value",
     "Keep my Plan ticket draft",
   );
-  expect(card.getAttribute("aria-pressed")).toBe("true");
   fireEvent.click(screen.getByRole("button", { name: "Close ticket details" }));
   await settle();
   expect(board.scrollLeft).toBe(420);
@@ -358,6 +357,15 @@ async function settle(ms = 0) {
   await act(async () => {
     await vi.advanceTimersByTimeAsync(ms);
   });
+}
+async function openTitleEditor() {
+  fireEvent.click(screen.getByRole("button", { name: "Open ticket" }));
+  await settle();
+  return screen.getByRole("textbox", { name: "Title" });
+}
+async function returnToBoard() {
+  fireEvent.click(screen.getByRole("button", { name: "Show beside the list" }));
+  await settle();
 }
 async function openPlan(name = "Launch") {
   fireEvent.click(
