@@ -87,7 +87,7 @@ const longSpec = [
   "## User Stories",
   "Before acceptance contains the search phrase.",
   "## Testing Decisions",
-  "The tests refer to [the project][project].",
+  "The tests refer to [the project](https://example.com/project).",
   "## Migration",
   "Move the data.",
   "## Risks",
@@ -96,11 +96,15 @@ const longSpec = [
   "- [ ] Ready for review",
   "## More information",
   "After acceptance also contains the search phrase.",
-  "[project]: https://example.com/project",
 ].join("\n\n");
 
 test("a long description names the hidden sections, keeps acceptance visible and remembers folds per ticket", () => {
-  const original = detail(longSpec);
+  const referencedSpec =
+    longSpec.replace(
+      "[the project](https://example.com/project)",
+      "[the project][project]",
+    ) + "\n\n[project]: https://example.com/project";
+  const original = detail(referencedSpec);
   const before =
     "5 more sections: Solution, User Stories, Testing Decisions, +2";
   const after = "1 more section: More information";
