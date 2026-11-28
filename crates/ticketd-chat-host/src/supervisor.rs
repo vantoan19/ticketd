@@ -17,7 +17,7 @@ use ticketd_core::{
     ChatInteractionState, ChatMessage, ChatMessageNote, ChatMessageNoteKind, ChatObservation,
     ChatOwner, ChatRole, ChatSessionOrigin, ChatSubAgent, ChatSubAgentState, ChatSubAgentStopper,
     ChatSubmissionIntent, ChatToolState, ChatTurnOrigin, ChatTurnReceipt, ChatTurnStarter,
-    ChatTurnState, Error, Workspace,
+    ChatTurnState, Error, FailureKind, Workspace,
 };
 use tokio::sync::{mpsc, oneshot};
 use tokio::task::JoinHandle;
@@ -752,7 +752,14 @@ impl Supervisor {
     // ponytail: SQLite runs on the supervisor task; move to spawn_blocking if a slow
     // disk shows up as stalled Chats.
     fn core<T>(&self, call: impl FnOnce(&mut Workspace) -> Result<T, Error>) -> Result<T, Error> {
-        let mut workspace = (self.open_workspace)()?;
+        let mut workspace = (self.open_workspace)().or_else(|error| {
+            if error.kind() != FailureKind::WorkspaceLocked {
+                return Err(error);
+            }
+            // Retry opening once, before the caller can write anything.
+            std::thread::sleep(Duration::from_millis(25));
+            (self.open_workspace)()
+        })?;
         call(&mut workspace)
     }
 
@@ -767,6 +774,14 @@ impl Supervisor {
         if let Err(error) = &result
             && !is_refusal(error)
         {
+            if self.storage_failed.is_none() {
+                tracing::error!(
+                    chat_id = %self.chat_id,
+                    error_kind = error.kind().code(),
+                    error = storage_error_detail(error),
+                    "chat storage failed"
+                );
+            }
             self.storage_failed = Some(error.to_string());
         }
         result
@@ -4817,6 +4832,22 @@ fn native_session(chat: &Chat) -> (SessionStart, ChatSessionOrigin, Option<Strin
     }
 }
 
+/// Store typed diagnostics without forwarding error text that can contain Chat data or paths.
+fn storage_error_detail(error: &Error) -> Option<String> {
+    match error {
+        Error::WorkspaceUnavailable { source, .. }
+        | Error::Migration { source, .. }
+        | Error::Restore { source, .. }
+        | Error::SafetyCopy { source } => storage_error_detail(source),
+        Error::Database(source) => source.sqlite_error().map(ToString::to_string),
+        Error::Directory(source) | Error::RestoreLock { source } => Some(source.kind().to_string()),
+        Error::NoDataDirectory | Error::LegacyEffortWorkspace | Error::NewerSchema(_) => {
+            Some(error.to_string())
+        }
+        _ => None,
+    }
+}
+
 #[cfg(test)]
 mod tests {
     #![allow(clippy::unwrap_used)] // test setup and assertions
@@ -4854,6 +4885,52 @@ mod tests {
             Arc::new(HostLifecycle::default()),
         );
         (supervisor, chat)
+    }
+
+    #[test]
+    fn storage_failure_logs_the_sqlite_code_without_private_details() {
+        let dir = tempfile::tempdir().unwrap();
+        let (mut supervisor, chat) = supervisor(dir.path().join("workspace.sqlite3"));
+        let logs_dir = dir.path().join("logs");
+        let logs = ticketd_diagnostics::DesktopLogs::open(
+            &logs_dir,
+            ticketd_diagnostics::Config::default(),
+        );
+        let error = Error::WorkspaceUnavailable {
+            path: PathBuf::from("private-workspace-path"),
+            source: Box::new(
+                rusqlite::Error::SqliteFailure(
+                    rusqlite::ffi::Error::new(rusqlite::ffi::SQLITE_BUSY_SNAPSHOT),
+                    Some("private Chat data".into()),
+                )
+                .into(),
+            ),
+        };
+
+        logs.with_default(|| {
+            assert!(supervisor.write::<()>(|_| Err(error)).is_err());
+        });
+
+        let log_file = std::fs::read_dir(&logs_dir)
+            .unwrap()
+            .map(|entry| entry.unwrap().path())
+            .find(|path| path.extension().is_some_and(|extension| extension == "log"))
+            .unwrap();
+        let text = std::fs::read_to_string(log_file).unwrap();
+        let event = text
+            .lines()
+            .map(|line| serde_json::from_str::<serde_json::Value>(line).unwrap())
+            .find(|event| event["message"] == "chat storage failed")
+            .unwrap();
+        assert_eq!(event["chat_id"], chat.id);
+        assert_eq!(event["error_kind"], "workspace_locked");
+        assert!(
+            event["error"]
+                .as_str()
+                .is_some_and(|detail| detail.contains("Error code 517"))
+        );
+        assert!(!text.contains("private-workspace-path"));
+        assert!(!text.contains("private Chat data"));
     }
 
     fn start_child(

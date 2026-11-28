@@ -1443,6 +1443,44 @@ async fn a_storage_failure_stops_admission_and_the_runtime_until_storage_returns
 }
 
 #[tokio::test(start_paused = true)]
+async fn a_workspace_lock_while_opening_storage_does_not_interrupt_the_turn() {
+    let mut f = Fixture::new(FakeAdapter::codex());
+    let session = WorkspaceSession::for_file(&f.path).unwrap();
+    let locked = Arc::new(AtomicBool::new(false));
+    let report_lock = Arc::clone(&locked);
+    f.host = ChatHost::new(
+        Arc::new(move || {
+            if report_lock.swap(false, Ordering::SeqCst) {
+                return Err(rusqlite::Error::SqliteFailure(
+                    rusqlite::ffi::Error::new(rusqlite::ffi::SQLITE_BUSY),
+                    Some("database is locked".into()),
+                )
+                .into());
+            }
+            session.workspace()
+        }),
+        vec![Arc::new(f.fake.clone()) as Arc<dyn HarnessAdapter>],
+    )
+    .unwrap();
+    f.send("first").await;
+    f.emit(text_delta("response")).await;
+
+    locked.store(true, Ordering::SeqCst);
+    tokio::time::sleep(TEXT_CHECKPOINT_INTERVAL + Duration::from_millis(1)).await;
+    assert!(!locked.load(Ordering::SeqCst));
+    assert_eq!(f.live().await.problem, None);
+    assert_eq!(f.turns()[0].state, ChatTurnState::Active);
+    assert_eq!(f.fake.written().len(), 1);
+    assert!(f.items().iter().any(|item| matches!(
+        item,
+        ChatItem::Message(message) if message.role == ChatRole::Assistant && message.text == "response"
+    )));
+
+    f.emit(turn_ended(turn_1(), TurnOutcome::Completed)).await;
+    assert_eq!(f.turns()[0].state, ChatTurnState::Completed);
+}
+
+#[tokio::test(start_paused = true)]
 async fn a_turn_with_no_final_event_stays_active_until_contact_is_lost() {
     let f = Fixture::new(FakeAdapter::codex());
     f.send("first").await;

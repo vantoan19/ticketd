@@ -6,6 +6,65 @@ use std::sync::{
 use super::*;
 
 #[test]
+fn a_chat_write_retries_after_a_competing_writer_releases_its_lock() {
+    use rusqlite::hooks::{AuthAction, AuthContext, Authorization, TransactionOperation};
+
+    let dir = tempfile::tempdir().unwrap();
+    let path = dir.path().join("workspace.sqlite3");
+    let mut workspace = Workspace::open(&path).unwrap();
+    workspace
+        .connection
+        .pragma_update(None, "journal_mode", "WAL")
+        .unwrap();
+    let chat = workspace
+        .create_chat(
+            None,
+            NewChat {
+                title: None,
+                harness: "codex".into(),
+                execution_folder: "/work/app".into(),
+                folder_managed: false,
+                links: Vec::new(),
+            },
+        )
+        .unwrap();
+    let before = workspace.chat_change_sequence().unwrap();
+    let peer = Connection::open(&path).unwrap();
+    peer.execute_batch("BEGIN IMMEDIATE").unwrap();
+    workspace
+        .connection
+        .busy_timeout(std::time::Duration::ZERO)
+        .unwrap();
+    let mut starts = 0;
+    workspace
+        .connection
+        .authorizer(Some(move |context: AuthContext<'_>| {
+            if let AuthAction::Transaction {
+                operation: TransactionOperation::Begin,
+            } = context.action
+            {
+                starts += 1;
+                if starts == 2 {
+                    peer.execute_batch("COMMIT").unwrap();
+                }
+            }
+            Authorization::Allow
+        }));
+
+    let after = workspace
+        .record_chat_observations(
+            &chat.id,
+            vec![ChatObservation::Notice {
+                notice_id: "notice-1".into(),
+                text: "Working".into(),
+                from_harness: false,
+            }],
+        )
+        .unwrap();
+    assert_eq!(after, before + 1);
+}
+
+#[test]
 fn queue_hydration_sees_the_held_input_when_another_connection_replaces_it() {
     use rusqlite::hooks::{AuthAction, AuthContext, Authorization};
 
