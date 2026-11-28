@@ -277,10 +277,14 @@ test("J and K move between visible rows, Enter opens beside the Plan, and closin
     member(13, "Write release notes", "Done"),
   ]);
   const user = userEvent.setup();
-  const review = await within(overview).findByRole("button", {
+  const reviewSection = await within(overview).findByRole("region", {
+    name: "Needs you",
+  });
+  const readySection = within(overview).getByRole("region", { name: "Ready" });
+  const review = within(reviewSection).getByRole("button", {
     name: /T-11 Review copy/,
   });
-  const ready = within(overview).getByRole("button", {
+  const ready = within(readySection).getByRole("button", {
     name: /T-12 Build package/,
   });
   await user.click(
