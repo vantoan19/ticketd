@@ -473,6 +473,29 @@ test("the board peek shows the review card and folds the description before open
   ).toBeTruthy();
 });
 
+test("R opens the full ticket's update composer when the board peek has no Reply", async () => {
+  await import("@/features/markdown/MarkdownEditor");
+  vi.spyOn(HTMLElement.prototype, "offsetWidth", "get").mockReturnValue(1000);
+  render(<App />);
+  await settle();
+  await showBoard();
+  fireEvent.click(screen.getByRole("button", { name: "Display" }));
+  await settle();
+  fireEvent.click(screen.getByRole("button", { name: /T-KQ1 Todo.*Ticket 1/ }));
+  await settle();
+
+  expect(screen.queryByRole("heading", { name: "Activity" })).toBeNull();
+  const open = screen.getByRole("button", { name: "Open ticket" });
+  open.focus();
+  fireEvent.keyDown(open, { key: "r" });
+  await settle(50);
+
+  expect(screen.getByRole("heading", { name: "Activity" })).toBeTruthy();
+  const draft = screen.getByRole("textbox", { name: "New update rich text" });
+  await settle(50);
+  expect(document.activeElement).toBe(draft);
+});
+
 test("the board peek shows complete section counts even when their lists are paged", async () => {
   vi.spyOn(HTMLElement.prototype, "offsetWidth", "get").mockReturnValue(1000);
   const fallback = bridge.invoke.getMockImplementation()!;

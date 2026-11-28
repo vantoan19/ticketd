@@ -221,6 +221,7 @@ function quoteOf(brief: string): string {
 
 type ActivityProps = {
   foldEmpty?: boolean;
+  composeOnOpen?: boolean;
   sourceName?: string | undefined;
   latestNoteId?: string | undefined;
   representedUpdate?: LatestUpdate | null;
@@ -258,6 +259,7 @@ function RecoveredActivity({
   representedUpdate,
   seenTime = null,
   foldEmpty = false,
+  composeOnOpen = false,
 }: ActivityProps) {
   const editingHarness = useEditingHarness();
   const recovery = useDraftRecovery();
@@ -332,7 +334,9 @@ function RecoveredActivity({
         : loadDraft(ticketId)),
   );
   const savedRef = useRef(saved);
-  const [composing, setComposing] = useState(() => hasDraft(saved));
+  const [composing, setComposing] = useState(
+    () => composeOnOpen || hasDraft(saved),
+  );
   const requestKey = `ticketd:activity-request:${ticketId}`;
   /** Changes part of the draft and keeps the whole draft, as one object, on this device. */
   function updateDraft(patch: Partial<Draft>) {
@@ -431,7 +435,7 @@ function RecoveredActivity({
   const [editControlsHost, setEditControlsHost] =
     useState<HTMLSpanElement | null>(null);
   // Bumped to put the caret in the update editor / the new Details editor.
-  const [focusUpdate, setFocusUpdate] = useState(0);
+  const [focusUpdate, setFocusUpdate] = useState(composeOnOpen ? 1 : 0);
   const [focusDetails, setFocusDetails] = useState(false);
   const replied = useRef(false);
   const [confirmDelete, setConfirmDelete] = useState<string | null>(null);

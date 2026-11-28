@@ -1,6 +1,12 @@
 import { Alert, AlertActions, AlertDescription } from "@/components/ui/alert";
 import { Button } from "@/components/ui/button";
-import { useLayoutEffect, useRef, useState, type ReactNode } from "react";
+import {
+  useEffect,
+  useLayoutEffect,
+  useRef,
+  useState,
+  type ReactNode,
+} from "react";
 import { DropdownMenuItem } from "@/components/ui/dropdown-menu";
 import { Evidence } from "@/features/tickets/Evidence";
 import type { MentionTarget } from "@/features/tickets/Backlinks";
@@ -43,6 +49,7 @@ import { plural } from "@/lib/format";
 import { useWorkspaceChange } from "@/lib/workspace-change";
 import type { Plan } from "@/lib/api/plans";
 import type { LatestUpdate } from "@/lib/api/progress";
+import { onTicketUpdate } from "./activity-composer-request";
 
 type NoteTarget = { id: string; key: number };
 
@@ -92,6 +99,20 @@ export function TicketPage({
   const [representedUpdate, setRepresentedUpdate] =
     useState<LatestUpdate | null>(null);
   const [updateTarget, setUpdateTarget] = useState<NoteTarget | null>(null);
+  const peeking = Boolean(openFromPeek);
+  const [composer, setComposer] = useState({ peeking, requested: false });
+  if (composer.peeking !== peeking || (!active && composer.requested))
+    setComposer({
+      peeking,
+      requested: active && !peeking && composer.requested,
+    });
+  useEffect(() => {
+    if (!openFromPeek || !active || leaving || ticket.trashed) return;
+    return onTicketUpdate(ticket.reference, () => {
+      setComposer({ peeking: true, requested: true });
+      openFromPeek();
+    });
+  }, [active, leaving, openFromPeek, ticket.reference, ticket.trashed]);
   const work = useLinkedWork();
   const trash = useTicketTrash(changed);
   const [evidenceRequest, setEvidenceRequest] = useState(0);
@@ -395,6 +416,7 @@ export function TicketPage({
           trashed={ticket.trashed}
           select={select}
           foldEmpty
+          composeOnOpen={composer.requested}
           latestNoteId={ticket.latest_update?.activity_id}
           representedUpdate={representedUpdate}
           seenTime={seenTime}
