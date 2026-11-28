@@ -10,7 +10,8 @@ import { afterEach, expect, test, vi } from "vitest";
 import { SourcesPage } from "@/features/settings/pages/SourcesPage";
 import { SourceActivityContext } from "@/features/tickets/source-activity";
 import type { SourceEntry, SourceStatus } from "@/lib/api/sources";
-import { githubSource } from "@/test/source-fixtures";
+import type { GithubIntegration } from "@/lib/api/github";
+import { githubSource, githubIntegration } from "@/test/source-fixtures";
 
 vi.mock("@tauri-apps/api/core", () => ({ invoke: vi.fn() }));
 
@@ -137,6 +138,7 @@ function open(
   entries: SourceEntry[],
   sources: SourceStatus[] = [],
   onOpen: (id: string) => void = () => {},
+  github: GithubIntegration | null = null,
 ) {
   render(
     <SourceActivityContext.Provider
@@ -144,6 +146,7 @@ function open(
         refreshing: false,
         sources,
         entries,
+        github,
         intervalSecs: null,
         openSettings: () => {},
         refreshAll: async () => {},
@@ -159,18 +162,39 @@ function row(name: RegExp | string) {
   return within(button.closest("tr")!);
 }
 
+const connected = githubIntegration();
+const withRepositories = {
+  ...connected,
+  repositories: ["web", "api", "ios"].map((name) => ({
+    ...connected.repositories[0]!,
+    repository: `github.com/northwind/${name}`,
+    last_refreshed_at: minutesAgo(4),
+  })),
+};
+
 test("a table shows each source's status, sign-in and what it brings in", () => {
   open(
-    [connectedGithub, linear, jira],
+    [
+      connectedGithub,
+      {
+        ...connectedGithub,
+        saved: { ...connectedGithub.saved!, id: "github-2" },
+      },
+      linear,
+      jira,
+    ],
     [
       status("github", "github"),
       status("jira", "jira", { last_refreshed_at: minutesAgo(12) }),
     ],
+    undefined,
+    withRepositories,
   );
   expect(
     screen.getAllByRole("columnheader").map((header) => header.textContent),
   ).toEqual(["Source", "Status", "Signs in with", "Brings in", "Open"]);
 
+  expect(screen.getAllByRole("button", { name: /^GitHub/ })).toHaveLength(1);
   const gh = row(/^GitHub/);
   expect(gh.getByText("Built in")).toBeTruthy();
   expect(gh.getByText("Connected")).toBeTruthy();
@@ -222,6 +246,8 @@ test("a rejected sign-in reads Needs sign-in and a missing program reads Unavail
         error: { code: "unauthenticated", message: "Bad credentials" },
       }),
     ],
+    undefined,
+    githubIntegration("not_signed_in"),
   );
   expect(row(/^GitHub/).getByText("Needs sign-in")).toBeTruthy();
   expect(row(/^Jira/).getByText("Unavailable")).toBeTruthy();
@@ -236,6 +262,8 @@ test("a source that is only unreachable stays Connected", () => {
         error: { code: "rate_limited", message: "Try later" },
       }),
     ],
+    undefined,
+    connected,
   );
   expect(row(/^GitHub/).getByText("Connected")).toBeTruthy();
 });

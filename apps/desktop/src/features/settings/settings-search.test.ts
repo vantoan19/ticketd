@@ -28,16 +28,16 @@ test("every section has at least one entry and entries are complete", () => {
   }
 });
 
-test("an available source adds its row in Ticket sources, then Connection, Discovery and Sync in its own section", () => {
-  const entries = sourceEntries("github", "GitHub");
+test("a custom source adds its row in Ticket sources, then Connection, Discovery and Sync in its own section", () => {
+  const entries = sourceEntries("beacon", "Beacon");
   expect(entries.map((entry) => entry.title)).toEqual([
-    "GitHub",
+    "Beacon",
     "Connection",
     "Discovery",
     "Sync",
   ]);
   expect(entries[0]?.section).toBe("ticket-sources");
-  const { id } = sourceSection("github", "GitHub");
+  const { id } = sourceSection("beacon", "Beacon");
   expect(entries.slice(1).every((entry) => entry.section === id)).toBe(true);
 });
 

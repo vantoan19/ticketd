@@ -159,8 +159,12 @@ function ProjectSourceReview({
   }, [projectId, resumeAfterSetup, source]);
 
   const preview = state.status === "ready" ? state.preview : null;
-  const needsSetup = preview?.source === "not_connected";
-  const addsRepository = preview?.source === "add_repository";
+  const githubSetup =
+    preview?.provider === "github" &&
+    preview.connection_id === null &&
+    preview.source === "add_repository";
+  const needsSetup = githubSetup || preview?.source === "not_connected";
+  const addsRepository = !githubSetup && preview?.source === "add_repository";
   const fingerprint = addsRepository ? preview.fingerprint : null;
   const matchCount = count?.fingerprint === fingerprint ? count : null;
   useEffect(() => {
@@ -224,12 +228,15 @@ function ProjectSourceReview({
 
   async function confirm() {
     if (!preview || !source) return;
-    if (preview.source === "not_connected") {
+    if (needsSetup) {
       setExit({
         action: "setup",
         setup: {
           provider: preview.provider,
-          repository: preview.repository,
+          repository:
+            preview.provider === "github"
+              ? preview.project_remote
+              : preview.repository,
           projectId,
         },
       });
@@ -283,7 +290,9 @@ function ProjectSourceReview({
       primaryLabel={
         hasEffect
           ? needsSetup
-            ? `Set up ${sourceName ?? "source"}`
+            ? githubSetup
+              ? "Add repository…"
+              : `Set up ${sourceName ?? "source"}`
             : "Confirm"
           : null
       }
@@ -384,8 +393,9 @@ function ProjectSourceReview({
         <>
           {needsSetup && (
             <p>
-              Connect {sourceName} with {preview.repository} to import its
-              issues.
+              {githubSetup
+                ? `Choose which issues from ${preview.project_remote} to bring in.`
+                : `Connect ${sourceName} with ${preview.repository} to import its issues.`}
             </p>
           )}
           {addsRepository && (

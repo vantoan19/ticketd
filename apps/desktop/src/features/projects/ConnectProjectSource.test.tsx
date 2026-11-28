@@ -248,3 +248,40 @@ test("the selected connection supplies the reviewed count and confirmation", asy
     });
   }
 });
+
+test("a new GitHub repository opens its host-aware Settings editor before backfill", async () => {
+  const onSetup = vi.fn();
+  vi.mocked(invoke).mockImplementation(async (command) => {
+    if (command === "project_source_candidates")
+      return [{ ...candidate, connection_id: null }];
+    if (command === "preview_connect_source")
+      return {
+        ...preview,
+        connection_id: null,
+        project_remote: "enterprise.test/team/app",
+      };
+    throw new Error(`Unexpected command ${command}`);
+  });
+  render(
+    <ConnectProjectSource
+      projectId="p1"
+      onClose={() => {}}
+      onConnected={() => {}}
+      onSetup={onSetup}
+    />,
+  );
+  fireEvent.click(
+    await screen.findByRole("button", { name: "Add repository…" }),
+  );
+  await waitFor(() =>
+    expect(onSetup).toHaveBeenCalledWith({
+      provider: "github",
+      repository: "enterprise.test/team/app",
+      projectId: "p1",
+    }),
+  );
+  expect(vi.mocked(invoke).mock.calls.map(([command]) => command)).toEqual([
+    "project_source_candidates",
+    "preview_connect_source",
+  ]);
+});

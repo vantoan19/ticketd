@@ -1,4 +1,5 @@
 import { createContext, useContext } from "react";
+import type { GithubIntegration } from "@/lib/api/github";
 import type {
   SourceEntry,
   SourceHealthState,
@@ -20,6 +21,7 @@ export type SourceActivity = {
    * workspace. `null` where no workspace provides it (a view rendered alone).
    */
   entries: SourceEntry[] | null;
+  github?: GithubIntegration | null;
   /** Generation of the last successful catalog observation. */
   catalogObservation?: number;
   /** Starts a catalog read and returns its generation. */

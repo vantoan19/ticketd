@@ -822,11 +822,13 @@ test("opening a source focuses its page title, named for the source", async () =
 });
 
 test("switching settings sections retains the source draft and its preview", async () => {
-  vi.mocked(sourcesClient.list).mockResolvedValue([entry]);
+  vi.mocked(sourcesClient.list).mockResolvedValue([
+    { ...entry, connector: { ...entry.connector, provider: "example" } },
+  ]);
   vi.mocked(sourcesClient.preview).mockResolvedValue(preview);
   const props = { onRestore: async () => {} };
   const { rerender, unmount } = render(
-    <SettingsView {...props} selected="source-github" />,
+    <SettingsView {...props} selected="source-example" />,
   );
   await screen.findByRole("heading", { name: "Discovery" });
   await addRepository("o/r");
@@ -843,7 +845,7 @@ test("switching settings sections retains the source draft and its preview", asy
   rerender(<SettingsView {...props} selected="appearance" />);
   expect(screen.queryByRole("heading", { name: "Discovery" })).toBeNull();
   expect(screen.queryByRole("textbox", { name: /Assignee/ })).toBeNull();
-  rerender(<SettingsView {...props} selected="source-github" />);
+  rerender(<SettingsView {...props} selected="source-example" />);
   expect(screen.getByLabelText(/Assignee/)).toHaveProperty("value", "octo");
   expect(screen.getByRole("region", { name: "Preview" }).textContent).toContain(
     "First issue",
@@ -858,21 +860,25 @@ test("switching settings sections retains the source draft and its preview", asy
 
   // Drafts belong to this Settings visit, not a later workspace or visit.
   unmount();
-  render(<SettingsView {...props} selected="source-github" />);
+  render(<SettingsView {...props} selected="source-example" />);
   expect(await screen.findByLabelText(/Assignee/)).toHaveProperty("value", "");
 });
 
 test("opening a source for the first time uses its latest saved configuration", () => {
   const saved = (assignee: string): SourceEntry => ({
     ...entry,
+    connector: { ...entry.connector, provider: "example" },
     saved: {
-      provider: "github",
+      provider: "example",
       config: { repositories: ["o/r"], assignee },
       account: "octo",
       saved_at: "2026-02-01T00:00:00Z",
     },
   });
-  const view = (assignee: string, selected: "appearance" | "source-github") => (
+  const view = (
+    assignee: string,
+    selected: "appearance" | "source-example",
+  ) => (
     <SourceActivityContext.Provider
       value={{
         refreshing: false,
@@ -888,7 +894,7 @@ test("opening a source for the first time uses its latest saved configuration", 
   );
   const { rerender } = render(view("before", "appearance"));
   rerender(view("after", "appearance"));
-  rerender(view("after", "source-github"));
+  rerender(view("after", "source-example"));
   expect(screen.getByLabelText(/Assignee/)).toHaveProperty("value", "after");
 });
 

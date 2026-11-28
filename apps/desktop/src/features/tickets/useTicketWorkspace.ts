@@ -1,3 +1,4 @@
+import { getGithubIntegration, type GithubIntegration } from "@/lib/api/github";
 import {
   useCallback,
   useEffect,
@@ -127,12 +128,15 @@ export function useTicketWorkspace(
     { entries: sourceEntries, observation: sourceCatalogObservation },
     setSourceCatalog,
   ] = useState({ entries: [] as SourceEntry[], observation: 0 });
+  const [githubIntegration, setGithubIntegration] =
+    useState<GithubIntegration | null>(null);
   const sourceRead = useRef(0);
   const configuredSources = [
     ...new Set(
       sourceEntries
         .filter((entry) => entry.saved)
-        .map((entry) => entry.connector.provider),
+        .map((entry) => entry.connector.provider)
+        .concat(githubIntegration?.repositories.length ? ["github"] : []),
     ),
   ];
   const [sourceCounts, setSourceCounts] = useState<SourceCounts | null>(null);
@@ -357,13 +361,15 @@ export function useTicketWorkspace(
   const refreshCurrentScope = useCallback(() => currentRefresh.current(), []);
   const readSourceEntries = useCallback(() => {
     const request = ++sourceRead.current;
-    const complete = sourcesClient.list().then(
-      (entries) => {
+    const complete = Promise.allSettled([
+      sourcesClient.list().then((entries) => {
         if (request === sourceRead.current)
           setSourceCatalog({ entries, observation: request });
-      },
-      () => {},
-    );
+      }),
+      getGithubIntegration().then((integration) => {
+        if (request === sourceRead.current) setGithubIntegration(integration);
+      }),
+    ]).then(() => {});
     return { generation: request, complete };
   }, []);
   useEffect(() => {
@@ -372,6 +378,10 @@ export function useTicketWorkspace(
       sourceRead.current += 1;
     };
   }, [pollTick, readSourceEntries]);
+  useEffect(() => {
+    window.addEventListener("focus", readSourceEntries);
+    return () => window.removeEventListener("focus", readSourceEntries);
+  }, [readSourceEntries]);
   const readSourceHealth = useCallback(
     (verified?: { connection: string; account: string }) => {
       const request = ++healthRead.current;
@@ -646,6 +656,7 @@ export function useTicketWorkspace(
     sourceCounts,
     configuredSources,
     sourceEntries,
+    githubIntegration,
     sourceCatalogObservation,
     readSourceEntries,
     sourceConnectionsChanged,

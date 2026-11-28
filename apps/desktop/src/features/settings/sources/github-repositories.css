@@ -1,0 +1,51 @@
+/* The GitHub board centers short pages without an empty WebKit track. */
+.settings-page[data-github] {
+  overflow-y: auto;
+}
+
+.ui-icon-tile .github-mark {
+  width: 16px;
+}
+
+/* The name is the keyboard stop. Its hit area reaches the rest of the row,
+   with the trailing Remove button above it as a separate control. */
+.github-repositories .settings-list-row:has(.github-row-action) {
+  position: relative;
+}
+.github-repositories .settings-list-row:has(.github-row-action):hover {
+  background: var(--hover);
+}
+.github-repositories .settings-list-row-trailing {
+  position: relative;
+}
+.github-row-action {
+  padding: 0;
+  border: 0;
+  background: none;
+  color: inherit;
+  font: inherit;
+  text-align: start;
+  cursor: pointer;
+}
+.github-row-action::after {
+  position: absolute;
+  inset: 0;
+  content: "";
+}
+.github-repositories .settings-list-row[data-tight] {
+  gap: 12px;
+}
+.github-add-icon {
+  display: inline-flex;
+  width: 16px;
+  color: var(--muted-foreground);
+}
+.github-repository-editor {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  padding: 0 16px 16px;
+}
+.github-repository-editor + .settings-list-row {
+  box-shadow: inset 0 1px 0 var(--group-hairline);
+}

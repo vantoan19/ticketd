@@ -1,3 +1,4 @@
+import type { GithubHost, GithubIntegration } from "@/lib/api/github";
 import type { SourceEntry } from "@/lib/api/sources";
 
 export const githubSource: SourceEntry = {
@@ -80,3 +81,32 @@ export const beaconSource: SourceEntry = {
     saved_at: "2026-02-01T00:00:00Z",
   },
 };
+
+export function githubIntegration(
+  state: GithubHost["state"] = "connected",
+): GithubIntegration {
+  return {
+    id: "github",
+    hosts: [
+      {
+        host: "github.com",
+        state,
+        login: state === "connected" ? "octo" : null,
+        message: null,
+      },
+    ],
+    repositories: [
+      {
+        repository: "github.com/acme/web",
+        assignee: null,
+        labels: [],
+        project: null,
+        project_login: null,
+        tracked_tickets: 0,
+        last_refreshed_at: null,
+        error: null,
+      },
+    ],
+    migration_notices: [],
+  };
+}

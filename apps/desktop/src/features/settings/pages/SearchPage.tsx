@@ -54,7 +54,7 @@ function Highlighted({ text, query }: { text: string; query: string }) {
  */
 export function SearchPage() {
   const { query, openSetting } = useSettingsState();
-  const { entries: sources } = useSources();
+  const { entries: sources, github } = useSources();
   const chat = useChatFeature();
   const resultId = useId();
 
@@ -63,7 +63,16 @@ export function SearchPage() {
       SETTINGS_SECTIONS.map((section) => [section.id, section]),
     );
     const entries: SettingsEntry[] = [...SETTINGS_ENTRIES, ...supportEntries()];
+    if (
+      github ||
+      sources.some(({ connector }) => connector.provider === "github")
+    ) {
+      const section = sourceSection("github", "GitHub", undefined);
+      pages.set(section.id, section);
+      entries.push(...sourceEntries("github", "GitHub"));
+    }
     for (const { connector, saved } of sources) {
+      if (connector.provider === "github") continue;
       const id = saved?.id ?? connector.provider;
       const label = saved?.name ?? connector.name;
       const section = sourceSection(
@@ -82,7 +91,7 @@ export function SearchPage() {
       );
     }
     return { pages, entries };
-  }, [sources]);
+  }, [sources, github]);
 
   // Clearing the field sends the person back to their page, which takes a
   // moment to fade this one out: keep showing the last results until it has.

@@ -1,3 +1,4 @@
+import type { GithubIntegration } from "@/lib/api/github";
 import type { SourceEntry, SourceStatus } from "@/lib/api/sources";
 import type { SyncStatus } from "@/lib/sync-api";
 import type { UpdateSnapshot } from "@/features/updates/client";
@@ -36,7 +37,11 @@ export interface Need {
 /** What the needs are read from; each is "nothing to say" while unknown. */
 export interface NeedInputs {
   sync: SyncStatus | null;
-  sources: { entries: readonly SourceEntry[]; health: readonly SourceStatus[] };
+  sources: {
+    entries: readonly SourceEntry[];
+    health: readonly SourceStatus[];
+    github?: GithubIntegration | null;
+  };
   /** The Settings state's readings: true when the page would ask for a step. */
   needsSetup: Partial<
     Record<"command-line" | "agent-skills" | "agents", boolean>
@@ -78,8 +83,9 @@ export function updateNeedsYou(
 export function sourcesNeedYou(
   entries: readonly SourceEntry[],
   health: readonly SourceStatus[],
+  github: GithubIntegration | null = null,
 ) {
-  return sourceRows(entries, health).filter(
+  return sourceRows(entries, health, github).filter(
     (row) => row.status === "Needs sign-in" || row.status === "Unavailable",
   );
 }
@@ -115,7 +121,11 @@ export function deriveNeeds(input: NeedInputs): Need[] {
       mark: "Needs setup",
       opens: true,
     });
-  const sources = sourcesNeedYou(input.sources.entries, input.sources.health);
+  const sources = sourcesNeedYou(
+    input.sources.entries,
+    input.sources.health,
+    input.sources.github,
+  );
   if (sources.length > 0)
     needs.push({
       kind: "sources",

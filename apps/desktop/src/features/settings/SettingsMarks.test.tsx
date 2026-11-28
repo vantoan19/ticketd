@@ -18,7 +18,8 @@ import {
 import type { UpdateSnapshot } from "@/features/updates/client";
 import type { SourceEntry, SourceStatus } from "@/lib/api/sources";
 import type { SyncStatus } from "@/lib/sync-api";
-import { githubSource } from "@/test/source-fixtures";
+import type { GithubIntegration } from "@/lib/api/github";
+import { beaconSource, githubIntegration } from "@/test/source-fixtures";
 
 vi.mock("@tauri-apps/api/core", () => ({ invoke: vi.fn() }));
 window.ResizeObserver = class {
@@ -29,31 +30,6 @@ window.ResizeObserver = class {
 
 beforeEach(() => setDetailedLogging(null));
 afterEach(cleanup);
-
-const connection: SourceEntry = {
-  ...githubSource,
-  saved: {
-    id: "work-github",
-    name: "Work GitHub",
-    provider: "github",
-    config: { repositories: ["acme/api"] },
-    account: "sam",
-    saved_at: "2026-01-01T00:00:00Z",
-  },
-};
-
-const signedOut: SourceStatus = {
-  provider: "github",
-  connection_id: "work-github",
-  health: "unavailable",
-  last_attempt_at: null,
-  last_refreshed_at: null,
-  error: { code: "unauthenticated", message: "Bad credentials" },
-  failing_since: null,
-  retry_after: null,
-  unavailable_tickets: 0,
-  partial_message: null,
-};
 
 const ready: UpdateSnapshot = {
   ...initialUpdateState,
@@ -72,12 +48,14 @@ function nav({
   sync = syncStatus(),
   entries = [],
   health = [],
+  github = null,
   update = initialUpdateState,
 }: {
   needsSetup?: SettingsState["needsSetup"];
   sync?: SyncStatus;
   entries?: SourceEntry[];
   health?: SourceStatus[];
+  github?: GithubIntegration | null;
   update?: UpdateSnapshot;
 } = {}) {
   const wrap = (children: ReactNode) => (
@@ -104,6 +82,7 @@ function nav({
             refreshing: false,
             sources: health,
             entries,
+            github,
             intervalSecs: null,
             openSettings: () => {},
             refreshAll: async () => {},
@@ -161,7 +140,7 @@ test("sync that is offline or slowed down mends itself, so it asks for nothing",
 });
 
 test("a source that needs sign-in marks Ticket sources", () => {
-  nav({ entries: [connection], health: [signedOut] });
+  nav({ github: githubIntegration("not_signed_in") });
   expect(
     page("ticket-sources").getByRole("img", { name: "Needs sign-in" }),
   ).toBeTruthy();
@@ -169,7 +148,7 @@ test("a source that needs sign-in marks Ticket sources", () => {
 });
 
 test("a connection whose extension is missing marks Ticket sources as unavailable", () => {
-  nav({ entries: [{ ...connection, unavailable: true }] });
+  nav({ entries: [{ ...beaconSource, unavailable: true }] });
   expect(
     page("ticket-sources").getByRole("img", { name: "Unavailable" }),
   ).toBeTruthy();
@@ -203,8 +182,7 @@ test("several problems each mark only their own page", () => {
   nav({
     needsSetup: { "command-line": true },
     sync: syncStatus({ state: "needs_attention", recovery: "folder_missing" }),
-    entries: [connection],
-    health: [signedOut],
+    github: githubIntegration("not_signed_in"),
   });
   expect(marks().map((mark) => mark.getAttribute("aria-label"))).toEqual([
     "Folder missing",

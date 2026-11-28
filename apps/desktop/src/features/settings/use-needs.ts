@@ -17,19 +17,23 @@ export function useNeedsFrom(
   needsSetup: Partial<Record<IndicatorSection, boolean>>,
 ): Need[] {
   const { status: sync } = useSyncStatus();
-  const { entries, sources } = useSourceActivity();
+  const { entries, sources, github } = useSourceActivity();
   const update = useUpdates()?.snapshot ?? null;
   const loggingSince = useDetailedLogging();
   return useMemo(
     () =>
       deriveNeeds({
         sync,
-        sources: { entries: entries ?? [], health: sources },
+        sources: {
+          entries: entries ?? [],
+          health: sources,
+          github: github ?? null,
+        },
         needsSetup,
         update,
         loggingSince,
       }),
-    [sync, entries, sources, needsSetup, update, loggingSince],
+    [sync, entries, sources, github, needsSetup, update, loggingSince],
   );
 }
 

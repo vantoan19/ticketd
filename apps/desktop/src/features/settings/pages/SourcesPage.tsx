@@ -10,6 +10,7 @@ import { SettingsPage } from "@/features/settings/layout/SettingsPage";
 import { sectionMeta } from "@/features/settings/settings-sections";
 import { AddCustomSourceRow } from "@/features/settings/sources/custom-source";
 import { SourceCard } from "@/features/settings/sources/SourceCard";
+import { GithubMark } from "@/features/settings/sources/GithubMark";
 import { SourceIcon } from "@/features/settings/sources/SourceIcon";
 import {
   sourceRows,
@@ -47,7 +48,7 @@ export function SourcesPage({
     onCancel: () => void;
   };
 }) {
-  const { entries, loading, readCatalog } = useSources();
+  const { entries, github, loading, readCatalog } = useSources();
   // A source just added opens once the catalog lists it.
   const [opening, setOpening] = useState<string | null>(null);
   useEffect(() => {
@@ -86,7 +87,7 @@ export function SourcesPage({
     );
   }
 
-  const rows = sourceRows(entries, health, now);
+  const rows = sourceRows(entries, health, github, now);
   return (
     <SettingsPage {...sectionMeta("ticket-sources")}>
       {loading ? (
@@ -167,7 +168,11 @@ function SourceTableRow({
           }}
         >
           <IconTile>
-            <SourceIcon svg={row.entry.connector.presentation?.icon_svg} />
+            {row.entry ? (
+              <SourceIcon svg={row.entry.connector.presentation?.icon_svg} />
+            ) : (
+              <GithubMark />
+            )}
           </IconTile>
           <span className="sources-table-name">
             <span className="sources-table-name-line">
