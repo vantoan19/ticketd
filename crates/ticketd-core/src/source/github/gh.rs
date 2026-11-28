@@ -11,7 +11,7 @@ use std::{
 use sha2::{Digest, Sha256};
 
 use tokio::{
-    io::{AsyncReadExt, AsyncWriteExt},
+    io::{AsyncBufReadExt, AsyncReadExt, AsyncWriteExt, BufReader},
     process::Command,
 };
 
@@ -421,6 +421,8 @@ impl GhApi {
     }
 }
 
+pub(in crate::source) const NOT_INSTALLED: &str =
+    "the GitHub CLI (gh) was not found. Install it to use GitHub";
 const OFFLINE: &str = "Could not reach GitHub. Check your network connection and try again.";
 const TIMED_OUT: &str = "the GitHub CLI request timed out";
 
@@ -543,6 +545,95 @@ fn run(
     })
 }
 
+fn command(program: &str) -> Command {
+    let mut command = Command::new(program);
+    command
+        .env("GH_PROMPT_DISABLED", "1")
+        .env("GH_PAGER", "")
+        .env("GH_TELEMETRY", "false")
+        .env("GH_NO_UPDATE_NOTIFIER", "1")
+        .env("GH_NO_EXTENSION_UPDATE_NOTIFIER", "1")
+        .env("NO_COLOR", "1")
+        .env_remove("CLICOLOR_FORCE")
+        .env_remove("GH_DEBUG")
+        .env_remove("GH_FORCE_TTY");
+    #[cfg(windows)]
+    command.creation_flags(windows::Win32::System::Threading::CREATE_NO_WINDOW.0);
+    command
+}
+
+pub(in crate::source) async fn sign_in(
+    host: &str,
+    mut canceled: tokio::sync::watch::Receiver<bool>,
+    mut code: impl FnMut(String) -> Result<(), SourceError>,
+    mut browser: impl FnMut(String) -> Result<(), SourceError>,
+) -> Result<(), SourceError> {
+    let expected = url::Url::parse(&format!("https://{host}/login/device"))
+        .map_err(|_| SourceError::Unavailable("the GitHub sign-in host is invalid".into()))?;
+    let mut child = None;
+    for program in PROGRAMS {
+        match command(program)
+            .args(["auth", "login", "--web", "--hostname", host])
+            .stdin(Stdio::null())
+            .stdout(Stdio::null())
+            .stderr(Stdio::piped())
+            .kill_on_drop(true)
+            .spawn()
+        {
+            Ok(process) => {
+                child = Some(process);
+                break;
+            }
+            Err(error) if error.kind() == io::ErrorKind::NotFound => continue,
+            Err(error) => return Err(process_error(error)),
+        }
+    }
+    let mut child = child.ok_or_else(|| SourceError::Unavailable(NOT_INSTALLED.into()))?;
+    let stderr = child
+        .stderr
+        .take()
+        .ok_or_else(|| missing_output("stderr"))?;
+    let mut lines = BufReader::new(stderr.take(STDERR_LIMIT)).lines();
+    let finished = tokio::time::timeout(Duration::from_secs(900), async {
+        let mut sent_code = false;
+        let mut opened = false;
+        while let Some(line) = lines.next_line().await.map_err(process_error)? {
+            if !sent_code
+                && let Some((_, value)) = line.split_once("First copy your one-time code:")
+                && let Some((first, last)) = value.trim().split_once('-')
+                && [first, last].into_iter().all(|part| {
+                    part.len() == 4
+                        && part
+                            .bytes()
+                            .all(|b| b.is_ascii_uppercase() || b.is_ascii_digit())
+                })
+            {
+                code(value.trim().to_owned())?;
+                sent_code = true;
+            }
+            if !opened
+                && let Some((_, value)) =
+                    line.split_once("Open this URL to continue in your web browser:")
+                && url::Url::parse(value.trim()).is_ok_and(|url| url == expected)
+            {
+                browser(expected.to_string())?;
+                opened = true;
+            }
+        }
+        if child.wait().await.map_err(process_error)?.success() {
+            Ok(())
+        } else {
+            Err(SourceError::Unauthenticated(
+                "GitHub sign-in did not finish. Try again.".into(),
+            ))
+        }
+    });
+    tokio::select! {
+        result = finished => result.map_err(|_| SourceError::Unavailable("GitHub sign-in timed out. Try again.".into()))?,
+        _ = canceled.wait_for(|value| *value) => Err(SourceError::RefreshCanceled),
+    }
+}
+
 async fn run_with_timeout(
     programs: &[&str],
     args: &[&str],
@@ -551,18 +642,9 @@ async fn run_with_timeout(
     timeout: Duration,
 ) -> Result<Output, SourceError> {
     for program in programs {
-        let mut command = Command::new(program);
+        let mut command = command(program);
         command
             .args(args)
-            .env("GH_PROMPT_DISABLED", "1")
-            .env("GH_PAGER", "")
-            .env("GH_TELEMETRY", "false")
-            .env("GH_NO_UPDATE_NOTIFIER", "1")
-            .env("GH_NO_EXTENSION_UPDATE_NOTIFIER", "1")
-            .env("NO_COLOR", "1")
-            .env_remove("CLICOLOR_FORCE")
-            .env_remove("GH_DEBUG")
-            .env_remove("GH_FORCE_TTY")
             .stdin(if input.is_some() {
                 Stdio::piped()
             } else {
@@ -590,8 +672,6 @@ async fn run_with_timeout(
             };
             command.env(key, token);
         }
-        #[cfg(windows)]
-        command.creation_flags(windows::Win32::System::Threading::CREATE_NO_WINDOW.0);
         let mut child = match command.spawn() {
             Ok(child) => child,
             Err(error) if error.kind() == io::ErrorKind::NotFound => continue,
@@ -637,9 +717,7 @@ async fn run_with_timeout(
         let _ = child.kill().await;
         return Err(error);
     }
-    Err(SourceError::Unavailable(
-        "the GitHub CLI (gh) was not found. Install it to use GitHub".into(),
-    ))
+    Err(SourceError::Unavailable(NOT_INSTALLED.into()))
 }
 
 async fn read_output(

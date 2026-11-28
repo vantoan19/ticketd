@@ -28,7 +28,7 @@ use crate::{
 
 /// The workspace format version this application reads and writes. The next
 /// format change bumps this and adds one step to [`LADDER`]; nothing else holds the number.
-pub const FORMAT_VERSION: i64 = 105;
+pub const FORMAT_VERSION: i64 = 106;
 
 /// One change to what a Workspace stores. The second argument is the format version
 /// the run started from, `0` for a new Workspace.
@@ -187,6 +187,7 @@ const LADDER: [(i64, Step); FORMAT_VERSION as usize] = [
         chats::sub_agents::migrate(tx)?;
         chats::migrate_credit(tx)
     }),
+    (106, |tx, _| source::migrate_github_integration(tx)),
 ];
 
 /// Takes a Workspace at format version `from` to the current one, or creates it when

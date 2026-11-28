@@ -38,6 +38,8 @@ use super::{
 pub(crate) const PROVIDER: &str = "github";
 /// What people call this provider.
 pub(crate) const DISPLAY_NAME: &str = "GitHub";
+pub(super) const SITE_CONFIG: &str = "github_site";
+pub(super) use gh::{NOT_INSTALLED as GH_NOT_INSTALLED, sign_in};
 const DEFAULT_API_URL: &str = "https://api.github.com";
 /// Overrides the API address, for GitHub Enterprise or a test server.
 pub(crate) const API_URL_VARIABLE: &str = "TICKETD_GITHUB_API_URL";
@@ -253,7 +255,7 @@ impl GithubConnector {
                     required: false,
                     placeholder: Some("e.g. octocat".into()),
                     pattern: Some(FieldPattern {
-                        regex: "^[A-Za-z0-9](?:[A-Za-z0-9-]{0,37}[A-Za-z0-9])?$".into(),
+                        regex: "^(?:@me|[A-Za-z0-9](?:[A-Za-z0-9-]{0,37}[A-Za-z0-9])?)$".into(),
                         message: "must be a username of letters, digits and hyphens".into(),
                     }),
                     advanced: false,
@@ -515,7 +517,11 @@ impl GithubConnector {
 impl Connector for GithubConnector {
     fn for_connection(&self, _id: &str, config: &ConfigValues) -> Option<Box<dyn Connector>> {
         let gh = self.gh.as_ref()?.for_account(configured_account(config));
-        Some(Box::new(Self::using_gh(self.api_url.clone(), gh)))
+        let api_url = config
+            .get(SITE_CONFIG)
+            .and_then(Value::as_str)
+            .map_or_else(|| self.api_url.clone(), api_url_for_host);
+        Some(Box::new(Self::using_gh(api_url, gh)))
     }
 
     fn with_workflow_credentials(
@@ -648,6 +654,7 @@ impl Connector for GithubConnector {
     fn validate(&self, config: &ConfigValues) -> Result<Vec<FieldIssue>, SourceError> {
         let mut issues = Vec::new();
         if let Some(assignee) = config.get("assignee").and_then(Value::as_str)
+            && assignee != "@me"
             && !ValueFormat::Handle.is_valid(assignee)
         {
             issues.push(FieldIssue::for_field(

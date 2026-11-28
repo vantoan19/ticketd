@@ -221,7 +221,7 @@ export type ProjectSourceCandidate = z.infer<
   typeof projectSourceCandidateSchema
 >;
 
-const previewSchema = lazySchema(() =>
+export const previewSchema = lazySchema(() =>
   z.object({
     provider: z.string(),
     account: z.string(),

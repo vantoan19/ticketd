@@ -340,7 +340,7 @@ impl RefreshCoordinator {
                     .map(|source| source.id)
                     .collect()
             };
-            if let Some(id) = connection {
+            if let Some(id) = connection.filter(|id| *id != super::GITHUB_INTEGRATION) {
                 workspace.source_connection(id)?;
             }
             let result = workspace.refresh_selected_with_clock(

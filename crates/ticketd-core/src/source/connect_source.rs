@@ -10,6 +10,8 @@ use super::{
 };
 use crate::{Error, Workspace, projects, read_scope, ticket_change, write_scope};
 
+use super::github_integration::{self, GITHUB_INTEGRATION, GithubRepositoryRule};
+
 // Connection IDs are environment-safe, so this form cannot select a saved ID.
 const UNCONFIGURED_PROVIDER: &str = "provider:";
 
@@ -89,7 +91,10 @@ impl Effect {
             &self.project_id,
             &self.project_remote,
             &self.provider,
-            self.saved.as_ref().map(|source| &source.saved.id),
+            self.saved
+                .as_ref()
+                .filter(|source| !github_integration::is_integration_target(source))
+                .map(|source| &source.saved.id),
             self.action,
             configuration,
             &self.tickets,
@@ -145,6 +150,18 @@ impl Workspace {
                     });
                 }
             }
+            if engine.descriptor(GITHUB_INTEGRATION).is_ok()
+                && !candidates
+                    .iter()
+                    .any(|candidate| candidate.provider == GITHUB_INTEGRATION)
+            {
+                candidates.push(ProjectSourceCandidate {
+                    source: GITHUB_INTEGRATION.into(),
+                    provider: GITHUB_INTEGRATION.into(),
+                    connection_id: None,
+                    name: "GitHub".into(),
+                });
+            }
             if candidates.is_empty() {
                 for description in engine.descriptions() {
                     let descriptor = description.descriptor;
@@ -178,7 +195,10 @@ impl Workspace {
             project_id: effect.project_id,
             project_remote: effect.project_remote,
             provider: effect.provider,
-            connection_id: effect.saved.map(|source| source.saved.id),
+            connection_id: effect
+                .saved
+                .filter(|source| !github_integration::is_integration_target(source))
+                .map(|source| source.saved.id),
             repository: effect.repository,
             source: effect.action,
             tickets: effect
@@ -206,6 +226,20 @@ impl Workspace {
             return Ok(None);
         }
         let saved = effect.saved.ok_or(Error::ConnectSourceChanged)?;
+        if github_integration::is_integration_target(&saved) {
+            let preview = self.preview_github_repository(
+                engine,
+                GithubRepositoryRule {
+                    repository: effect.project_remote,
+                    assignee: None,
+                    labels: Vec::new(),
+                },
+            )?;
+            return Ok(Some(ConnectSourceMatchCount {
+                matched: preview.matched,
+                complete: preview.complete,
+            }));
+        }
         let scoped = saved.bind(engine);
         saved.verify_effective_site(&scoped)?;
         let scoped = scoped.with_workflow_credentials(&effect.provider, &saved.saved.config)?;
@@ -235,6 +269,19 @@ impl Workspace {
     ) -> Result<ConnectSourceOutcome, Error> {
         let initial = self.connect_source_effect(engine, source, project_id)?;
         initial.check(expected_fingerprint)?;
+        let github_rule = (initial.action == ConnectSourceAction::AddRepository
+            && initial
+                .saved
+                .as_ref()
+                .is_some_and(github_integration::is_integration_target))
+        .then(|| GithubRepositoryRule {
+            repository: initial.project_remote.to_ascii_lowercase(),
+            assignee: None,
+            labels: Vec::new(),
+        });
+        if let Some(rule) = &github_rule {
+            self.preview_github_repository(engine, rule.clone())?;
+        }
         let validated = match initial.action {
             ConnectSourceAction::NotConnected => {
                 return Err(Error::ProjectSourceNotConnected {
@@ -242,6 +289,7 @@ impl Workspace {
                     repository: initial.repository,
                 });
             }
+            ConnectSourceAction::AddRepository if github_rule.is_some() => None,
             ConnectSourceAction::AddRepository => {
                 let saved = initial.saved.ok_or(Error::ConnectSourceChanged)?;
                 let scoped = saved.bind(engine);
@@ -310,11 +358,20 @@ impl Workspace {
                 )?;
                 clear_source_auth_error(transaction, &saved.saved.id)?;
             }
+            if let Some(rule) = &github_rule {
+                if transaction.query_row("SELECT EXISTS(SELECT 1 FROM github_legacy_repository_rules WHERE repository = ?1 AND resolved = 0)",
+                    [&rule.repository], |row| row.get::<_, bool>(0))? {
+                    return Err(SourceError::InvalidConfiguration(vec![super::FieldIssue::for_field(
+                        "repository", "review and save the repository's previous GitHub filters before backfilling",
+                    )]).into());
+                }
+                github_integration::save_rule(transaction, rule)?;
+            }
             for ticket in &current.tickets {
                 ticket_change::set_project(transaction, &ticket.id, None, Some(project_id), None)?;
             }
             Ok(ConnectSourceOutcome {
-                repository_added: validated.is_some(),
+                repository_added: validated.is_some() || github_rule.is_some(),
                 linked_tickets: current
                     .tickets
                     .into_iter()
@@ -378,12 +435,29 @@ fn read_effect(
 ) -> Result<Effect, Error> {
     let (project_id, remote) = project_remote(connection, project_id)?;
     let repository = remote_repository(&remote)?;
-    let (saved, provider) = if let Some(provider) = source.strip_prefix(UNCONFIGURED_PROVIDER) {
+    let (mut saved, provider) = if let Some(provider) = source.strip_prefix(UNCONFIGURED_PROVIDER) {
         (None, provider)
     } else {
         let saved = configured_source(connection, source)?;
         (saved, source)
     };
+    if provider == GITHUB_INTEGRATION && saved.is_none() {
+        let (host, _) = remote.split_once('/').ok_or(Error::InvalidProjectRemote)?;
+        let listed = connection.query_row(
+            "SELECT EXISTS(SELECT 1 FROM github_repository_rules WHERE repository = ?1)",
+            [&remote],
+            |row| row.get::<_, bool>(0),
+        )?;
+        let repositories = listed
+            .then(|| vec![repository.to_owned()])
+            .unwrap_or_default();
+        saved = Some(github_integration::workflow_target(
+            connection,
+            host,
+            Some(&project_id),
+            &repositories,
+        )?);
+    }
     let provider = saved
         .as_ref()
         .map_or(provider, |source| &source.saved.provider);

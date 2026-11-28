@@ -1424,12 +1424,19 @@ impl Workspace {
         let Some(ticket) = tracked.first() else {
             return Ok(None);
         };
-        super::selected_connection(
+        Ok(super::selected_connection(
             &self.connection,
             &ticket.ticket_id,
             &ticket.provider,
             &ticket.partition,
-        )
+        )?
+        .map(|id| {
+            if super::github_integration::repository_job(&id).is_some() {
+                super::GITHUB_INTEGRATION.into()
+            } else {
+                id
+            }
+        }))
     }
 
     /// Refreshes a single connection and the tickets routed to it.
@@ -1439,6 +1446,19 @@ impl Workspace {
         id: &str,
         options: &RefreshOptions,
     ) -> Result<RefreshReport, Error> {
+        if id == super::GITHUB_INTEGRATION
+            && super::configured_source(&self.connection, id)?.is_none()
+        {
+            let mut statement = self
+                .connection
+                .prepare("SELECT repository FROM github_repository_rules")?;
+            let jobs = statement
+                .query_map([], |row| row.get::<_, String>(0))?
+                .map(|repository| repository.map(|name| super::github_integration::job_id(&name)))
+                .collect::<Result<Vec<_>, _>>()?;
+            drop(statement);
+            return self.refresh_selected(engine, options, Some(&jobs));
+        }
         self.source_connection(id)?;
         self.refresh_selected(engine, options, Some(&[id.to_owned()]))
     }
@@ -1463,7 +1483,15 @@ impl Workspace {
         engine.check_refresh_canceled()?;
         let started = super::clock(&self.connection, options.now.as_deref())?;
         let tracked = tracked(&self.connection, options.ticket.as_deref())?;
-        let sources = super::configured_sources(&self.connection)?;
+        if selected.is_none_or(|ids| {
+            ids.iter().any(|id| {
+                id == super::GITHUB_INTEGRATION
+                    || super::github_integration::repository_job(id).is_some()
+            })
+        }) {
+            self.reconcile_github_with_engine(engine)?;
+        }
+        let sources = super::refresh_sources_configuration(&self.connection)?;
         let routed = |ticket: &Tracked| {
             ticket
                 .connection(&sources)
@@ -1471,7 +1499,8 @@ impl Workspace {
         };
         if let (Some(selected), Some(ticket)) = (selected, tracked.first())
             && options.ticket.is_some()
-            && !routed(ticket).is_some_and(|id| selected.iter().any(|selection| selection == id))
+            && !routed(ticket)
+                .is_some_and(|id| selected.iter().any(|selection| job_selected(selection, id)))
         {
             return Err(
                 SourceError::InvalidConfiguration(vec![super::FieldIssue::for_field(
@@ -1507,7 +1536,7 @@ impl Workspace {
         let jobs: Vec<_> = sources
             .iter()
             .filter(|source| {
-                selected.is_none_or(|ids| ids.contains(&source.saved.id))
+                selected.is_none_or(|ids| ids.iter().any(|id| job_selected(id, &source.saved.id)))
                     && (options.ticket.is_none()
                         || tracked
                             .iter()
@@ -1668,6 +1697,12 @@ impl Workspace {
     }
 }
 
+fn job_selected(selection: &str, id: &str) -> bool {
+    selection == id
+        || (selection == super::GITHUB_INTEGRATION
+            && super::github_integration::repository_job(id).is_some())
+}
+
 fn github_identities(connection: &Connection) -> Result<HashSet<String>, Error> {
     Ok(connection
         .prepare_cached("SELECT external_id FROM external_identities WHERE provider = ?1")?
@@ -1770,14 +1805,16 @@ fn gather_discovery(
     ) {
         // A part read under narrower rules is new to a broader discovery.
         let scope = &derived.discovery_scope;
-        let scoped = |part: &str| {
-            let mut part = part.replace('%', "%25").replace('?', "%3F");
-            if !scope.is_empty() {
-                part.push('?');
-                part.push_str(scope);
-            }
-            part
-        };
+        let scoped = |part: &str| freshness::scoped_partition(part, scope);
+        let discovery_config = super::github_integration::resolve_assignee(
+            &provider,
+            config,
+            checked
+                .as_ref()
+                .and_then(|checked| checked.verified.as_ref())
+                .map(|checked| checked.connection.account.as_str())
+                .unwrap_or_default(),
+        );
         gathered.imported_partitions.insert(
             provider.clone(),
             tracked
@@ -1786,7 +1823,7 @@ fn gather_discovery(
                 .map(|ticket| scoped(&ticket.partition))
                 .collect(),
         );
-        let result = engine.discover(&provider, config, |issue| {
+        let result = engine.discover(&provider, &discovery_config, |issue| {
             if tracked
                 .get(&(provider.as_str(), issue.reference.identity.id.as_str()))
                 .is_some_and(|ticket| {
@@ -2593,6 +2630,9 @@ impl Workspace {
                             }],
                             refreshed_at: now.to_owned(),
                         });
+                    }
+                    if super::github_integration::repository_job(&current.saved.id).is_some() {
+                        continue;
                     }
                     let derived = &verified.derived;
                     let changed = transaction.execute(

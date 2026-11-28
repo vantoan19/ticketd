@@ -425,7 +425,9 @@ impl Engine {
         let mut issues = Vec::new();
         let mut matched = 0;
         let mut already_here = 0;
-        let summary = self.discover(provider, config, |issue| {
+        let discovery_config =
+            super::github_integration::resolve_assignee(provider, config, &connection.account);
+        let summary = self.discover(provider, &discovery_config, |issue| {
             matched += 1;
             let ticket = existing(&issue.reference.identity);
             already_here += usize::from(ticket.is_some());

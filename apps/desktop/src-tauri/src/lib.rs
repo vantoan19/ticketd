@@ -15,6 +15,7 @@ mod cli_status;
 mod diagnostics_commands;
 mod drive_commands;
 mod folder_probe;
+mod github_commands;
 mod notification_permission;
 mod restore_points;
 #[cfg(test)]
@@ -2352,6 +2353,7 @@ pub fn run() -> Result<(), tauri::Error> {
             ActiveRefreshes::default(),
         ))
         .manage(sources.clone())
+        .manage(github_commands::GithubSignIns::default())
         .manage(sync_commands::SyncHost {
             scheduler: std::sync::Arc::clone(&sync),
             started,
@@ -2587,6 +2589,13 @@ pub fn run() -> Result<(), tauri::Error> {
             link_source_repository_project,
             create_source_repository_project,
             refresh_sources,
+            github_commands::get_github_integration,
+            github_commands::preview_github_repository,
+            github_commands::save_github_repository,
+            github_commands::remove_github_repository,
+            github_commands::set_github_project_login,
+            github_commands::start_github_sign_in,
+            github_commands::cancel_github_sign_in,
             cancel_source_refresh,
             take_ownership,
             source_health,

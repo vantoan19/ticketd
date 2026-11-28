@@ -746,6 +746,11 @@ struct SourceSettings {
 
 #[derive(Subcommand)]
 enum SourceCommand {
+    /// Manage the built-in GitHub integration on this device
+    Github {
+        #[command(subcommand)]
+        command: GithubCommand,
+    },
     /// Manage ticket source extensions on this device
     Extension {
         #[command(subcommand)]
@@ -806,9 +811,12 @@ enum SourceCommand {
     Publish {
         /// The local ticket to publish, for example T-KQ12
         ticket: String,
-        /// The source connection. Optional when only one can publish or a successful attempt is replayed
-        #[arg(long)]
+        /// An extension connection ID. Optional when only one source can publish
+        #[arg(long, conflicts_with = "provider")]
         connection: Option<String>,
+        /// Choose the built-in GitHub integration when more than one source can publish
+        #[arg(long, value_parser = ["github"])]
+        provider: Option<String>,
         /// Where to create the issue, for example owner/name. Defaults to the
         /// ticket's Project remote when listed by the source, or to the only
         /// listed repository. A configured list limits where issues can be sent
@@ -849,7 +857,7 @@ enum SourceCommand {
         confirm_host: Option<String>,
         /// The saved GitHub connection to use with --issue when the original binding is
         /// missing. The connection must use the verified original host
-        #[arg(long, requires = "issue", conflicts_with_all = ["not_created", "no_search"])]
+        #[arg(long, hide = true, requires = "issue", conflicts_with_all = ["not_created", "no_search"])]
         using_connection: Option<String>,
         /// Attach an issue whose title or description differs from what was sent. Its text
         /// then replaces the ticket's, and the ticket's own text is kept as a note
@@ -861,6 +869,47 @@ enum SourceCommand {
     /// Operate on a saved connection by its ID
     #[command(external_subcommand)]
     Connection(Vec<OsString>),
+}
+
+#[derive(Subcommand)]
+enum GithubCommand {
+    /// Show GitHub login readiness and repository rules
+    Show,
+    /// Verify the active login on a GitHub host
+    Test {
+        #[arg(long, default_value = "github.com")]
+        host: String,
+    },
+    /// Show repository refresh status and migration notices
+    Status,
+    /// Preview or save issue import filters for a repository
+    Repository {
+        /// The full repository name, such as github.com/owner/name
+        repository: String,
+        #[arg(long)]
+        assignee: Option<String>,
+        #[arg(long = "label")]
+        labels: Vec<String>,
+        #[arg(long)]
+        preview: bool,
+    },
+    /// Remove a repository from issue import and refresh
+    Remove { repository: String },
+    /// Import matching GitHub issues and refresh tracked tickets
+    Refresh {
+        #[arg(long)]
+        ticket: Option<String>,
+    },
+    /// Pin a Project to a login for a host, or clear the pin to use the active login
+    ProjectLogin {
+        project: String,
+        #[arg(long, default_value = "github.com")]
+        host: String,
+        #[arg(long, required_unless_present = "clear", conflicts_with = "clear")]
+        login: Option<String>,
+        #[arg(long)]
+        clear: bool,
+    },
 }
 
 #[derive(Subcommand)]
@@ -1614,6 +1663,31 @@ fn run(output: &mut impl Write, origin: &Origin) -> Result<(), Box<dyn std::erro
     if origin.automation_run_id.is_some() {
         workspace.act_for_automation()?;
     }
+    if let Command::Source {
+        command:
+            SourceCommand::Github {
+                command: GithubCommand::Refresh { ticket },
+            },
+    } = &command
+    {
+        let integration = ticketd_core::source::GITHUB_INTEGRATION;
+        let engine = ticketd_core::source::Engine::builtin();
+        let report = source_refresh::controlled(integration, |control| {
+            workspace.refresh_connection(
+                &engine.clone().with_refresh_control(control),
+                integration,
+                &ticketd_core::source::RefreshOptions {
+                    ticket: ticket.clone(),
+                    now: None,
+                },
+            )
+        })??;
+        writeln!(output, "{}", serde_json::to_string(&report)?)?;
+        if let Some(failure) = report.failures.first() {
+            return Err(failure.message.clone().into());
+        }
+        return Ok(());
+    }
     if let Some((id, operation)) = connection_command {
         return run_source_connection(&mut workspace, &id, operation, output);
     }
@@ -1953,6 +2027,9 @@ fn run(output: &mut impl Write, origin: &Origin) -> Result<(), Box<dyn std::erro
             } => {
                 let engine = ticketd_core::source::ExtensionRegistry::device()?.engine()?;
                 let source = match connection {
+                    Some(connection) if connection == "github" => {
+                        return Err("Run project connect-source without --connection for GitHub.".into());
+                    }
                     Some(connection) => workspace.source_connection(&connection)?.id,
                     None => {
                         let candidates = workspace.project_source_candidates(&engine, &project)?;
@@ -2417,6 +2494,7 @@ fn run(output: &mut impl Write, origin: &Origin) -> Result<(), Box<dyn std::erro
                 SourceCommand::Publish {
                     ticket,
                     connection,
+                    provider,
                     destination,
                     preview,
                     expect,
@@ -2425,6 +2503,10 @@ fn run(output: &mut impl Write, origin: &Origin) -> Result<(), Box<dyn std::erro
         } => {
             let registry = ExtensionRegistry::device()?;
             let engine = registry.engine()?;
+            if connection.as_deref() == Some("github") {
+                return Err("Use --provider github to choose the built-in integration.".into());
+            }
+            let connection = provider.or(connection);
             if preview {
                 let connection = match connection {
                     Some(id) => id,
@@ -2619,6 +2701,7 @@ fn source_command(
 ) -> Result<String, Box<dyn std::error::Error>> {
     use ticketd_core::source::ConfigValues;
     Ok(match command {
+        SourceCommand::Github { command } => return github_command(workspace, command),
         SourceCommand::List => {
             let registry = ExtensionRegistry::device()?;
             let engine = registry.engine()?;
@@ -2665,6 +2748,9 @@ fn source_command(
         } => {
             let registry = ExtensionRegistry::device()?;
             let engine = registry.engine()?;
+            if provider == "github" {
+                return Err("Use ticketd source github repository HOST/OWNER/NAME to configure GitHub import.".into());
+            }
             let values = source_settings(&engine, &provider, ConfigValues::new(), settings)?;
             if preview {
                 serde_json::to_string(
@@ -2695,6 +2781,55 @@ fn source_command(
             return Err(
                 "this source operation must be handled before opening source settings".into(),
             );
+        }
+    })
+}
+
+fn github_command(
+    workspace: &mut Workspace,
+    command: GithubCommand,
+) -> Result<String, Box<dyn std::error::Error>> {
+    use ticketd_core::source::GithubRepositoryRule;
+    let engine = ticketd_core::source::Engine::builtin();
+    Ok(match command {
+        GithubCommand::Show | GithubCommand::Status => {
+            serde_json::to_string(&workspace.github_integration(&engine)?)?
+        }
+        GithubCommand::Test { host } => {
+            serde_json::to_string(&workspace.github_host_readiness(&engine, &host)?)?
+        }
+        GithubCommand::Repository {
+            repository,
+            assignee,
+            labels,
+            preview,
+        } => {
+            let rule = GithubRepositoryRule {
+                repository,
+                assignee,
+                labels,
+            };
+            if preview {
+                serde_json::to_string(&workspace.preview_github_repository(&engine, rule)?)?
+            } else {
+                serde_json::to_string(&workspace.save_github_repository(&engine, rule)?)?
+            }
+        }
+        GithubCommand::Remove { repository } => {
+            workspace.remove_github_repository(&repository)?;
+            serde_json::json!({ "ok": true }).to_string()
+        }
+        GithubCommand::Refresh { .. } => {
+            return Err("GitHub refresh must report its outcome directly".into());
+        }
+        GithubCommand::ProjectLogin {
+            project,
+            host,
+            login,
+            clear: _,
+        } => {
+            workspace.set_github_project_login(&engine, &project, &host, login.as_deref())?;
+            serde_json::json!({ "ok": true }).to_string()
         }
     })
 }
