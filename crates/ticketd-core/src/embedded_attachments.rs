@@ -91,14 +91,21 @@ fn index_content(
             crate::attachments::validate_attachment_reference(tx, &file)?;
         }
     }
-    tx.execute(
-        "DELETE FROM embedded_attachments WHERE source_id=?1",
-        [source_id],
-    )?;
+    // Retain the order in which unchanged links were added. A removed link gets a
+    // new row when it is added again.
+    for uri in previous.difference(&next) {
+        tx.execute(
+            "DELETE FROM embedded_attachments WHERE source_id=?1 AND uri=?2",
+            params![source_id, uri],
+        )?;
+    }
     for uri in next {
         let id = uri.strip_prefix(&prefix);
         tx.execute(
-            "INSERT INTO embedded_attachments(source_id, uri, attachment_id) VALUES (?1, ?2, (SELECT id FROM attachments WHERE id=?3))",
+            "INSERT INTO embedded_attachments(source_id, uri, attachment_id)
+             VALUES (?1, ?2, (SELECT id FROM attachments WHERE id=?3))
+             ON CONFLICT(source_id, uri) DO UPDATE SET attachment_id=excluded.attachment_id
+             WHERE embedded_attachments.attachment_id IS NOT excluded.attachment_id",
             params![source_id, uri, id],
         )?;
     }
