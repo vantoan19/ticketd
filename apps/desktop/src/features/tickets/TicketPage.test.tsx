@@ -97,6 +97,31 @@ test("a change made by the CLI appears in a section of the open page", async () 
   ).toBeTruthy();
 });
 
+test("a checklist in Trash shows its state without editing the ticket", async () => {
+  render(
+    <TestOpenTicket
+      ticket={{ ...ticket, body: "- [ ] Confirm", trashed: true }}
+    >
+      <TicketPage
+        active
+        projects={[]}
+        plans={[]}
+        select={vi.fn()}
+        noteTarget={null}
+        mention={null}
+        onMention={vi.fn()}
+      />
+    </TestOpenTicket>,
+  );
+  fireEvent.click(await screen.findByText("Confirm"));
+  expect(screen.getByRole("img", { name: "Not done" })).toBeTruthy();
+  expect(screen.queryByRole("checkbox")).toBeNull();
+  expect(bridge.invoke).not.toHaveBeenCalledWith(
+    "change_ticket",
+    expect.anything(),
+  );
+});
+
 test("Evidence previews the newest three and names the records behind the fold", async () => {
   const items = [
     "Deploy check",

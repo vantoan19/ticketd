@@ -275,7 +275,7 @@ test.each(["reader", "rich"])(
 test("ticket descriptions autosave inserted links and retain the failed draft", async () => {
   bridge();
   render(<TicketEditor ticket={ticket} onSaved={vi.fn()} />);
-  fireEvent.click(screen.getByRole("button", { name: "Add a description…" }));
+  fireEvent.click(screen.getByRole("button", { name: "Add a description" }));
   await insertInto("Description");
   await waitFor(() =>
     expect(invoke).toHaveBeenCalledWith(
