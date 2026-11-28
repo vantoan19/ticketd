@@ -100,6 +100,32 @@ it("lets an empty Capture close without creating a Document", async () => {
   await waitFor(() => expect(close).toHaveBeenCalledOnce());
   expect(documents.save).not.toHaveBeenCalled();
 });
+
+it("saves a checklist toggle while reading a Document", async () => {
+  vi.useFakeTimers();
+  const document = {
+    id: "d1",
+    title: null,
+    body: "# Release\n\n- [ ] Verify the build",
+    created_at: "now",
+    updated_at: "now",
+    trashed: false,
+  };
+  const body = "# Release\n\n- [x] Verify the build";
+  vi.mocked(documents.version).mockResolvedValue([document.updated_at, false]);
+  vi.mocked(documents.save).mockResolvedValue({ ...document, body });
+  renderEditor(<DocumentEditor initial={document} onClose={vi.fn()} />);
+
+  fireEvent.click(screen.getByRole("checkbox", { name: "Verify the build" }));
+  expect(
+    screen.getByRole("checkbox", { name: "Verify the build", checked: true }),
+  ).toBeTruthy();
+  await act(async () => {
+    await vi.advanceTimersByTimeAsync(2000);
+  });
+  expect(vi.mocked(documents.save).mock.calls[0]?.[2]).toBe(body);
+});
+
 it("tells a capture it is saved to Documents once it has text", async () => {
   vi.mocked(documents.save).mockResolvedValue({
     id: "d1",

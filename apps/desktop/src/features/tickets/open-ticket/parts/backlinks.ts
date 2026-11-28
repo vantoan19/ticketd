@@ -1,85 +1,89 @@
-import { useMemo, useState } from "react";
-import { documents, type DocumentLink } from "@/features/documents/api";
 import { client, type Ticket } from "@/lib/api/client";
-import type { FailureDescription } from "@/lib/api/describe-failure";
-import { read, skip, useRead } from "@/lib/workspace-reads";
-import { documentLinksRead } from "./files";
+import { pagedRead, skip, usePagedRead } from "@/lib/workspace-reads";
 
 // What mentions a Ticket: other tickets and updates (a window at a time), and
 // Documents.
 
-type Backlink = Awaited<ReturnType<typeof client.backlinks>>[number];
+type MentionPage = Awaited<ReturnType<typeof client.backlinks>>;
 
-export type TicketBacklinks = {
-  /** The shown window; the previous one stays while the next is read. Each
-   * mentioning update carries its `reported_at`. */
-  links: Backlink[] | undefined;
-  failure: FailureDescription | null;
-  retry(): void;
-};
-
-const backlinksRead = read({
+const backlinksRead = pagedRead({
   key: "backlinks",
-  call: (args: { reference: string; offset: number }) =>
-    client.backlinks(args.reference, args.offset),
-  failure: "load mentions",
-});
-
-const PAGE = 100;
-
-// Incoming links mix tickets, Plans and Documents; past the first 100 (the
-// shared read) page through them, so Document mentions are not lost.
-const laterDocumentBacklinksRead = read({
-  key: "documentBacklinksAfterFirstPage",
-  call: async (id: string) => {
-    const found: DocumentLink[] = [];
-    for (let page = 1; page < 5; page += 1) {
-      const [, incoming] = await documents.links(id, page * PAGE);
-      found.push(...incoming.filter((link) => link.source_kind === "document"));
-      if (incoming.length < PAGE) break;
-    }
-    return found;
+  call: (reference: string, offset) => client.backlinks(reference, offset),
+  next: (page: MentionPage, pages) => {
+    const loaded = pages.reduce(
+      (count, entry) => count + entry.items.length,
+      0,
+    );
+    return page.items.length > 0 && loaded < page.total ? loaded : null;
   },
-  failure: "load mentions",
+  join: (pages: readonly MentionPage[]) => {
+    const tickets = new Map<string, MentionPage["items"][number]>();
+    for (const page of pages) {
+      for (const ticket of page.items) {
+        if (!tickets.has(ticket.reference))
+          tickets.set(ticket.reference, ticket);
+      }
+    }
+    return { items: [...tickets.values()], total: pages.at(-1)?.total ?? 0 };
+  },
+  failure: "load ticket mentions",
+  more: "load more ticket mentions",
 });
 
-/** One window of 20 backlinks, from `offset`. */
-export function useBacklinks(
-  record: Ticket | undefined,
-  offset: number,
-): TicketBacklinks {
-  const state = useRead(
-    backlinksRead,
-    record ? { reference: record.reference, offset } : skip,
-  );
-  // Show the previous window until the next one is read, so nothing jumps.
-  const [shown, setShown] = useState(state.value);
-  if (state.value && state.value !== shown) setShown(state.value);
-  return {
-    links: state.value ?? shown,
-    failure: state.failure,
-    retry: state.retry,
-  };
+const documentBacklinksRead = pagedRead({
+  key: "documentBacklinks",
+  call: (reference: string, offset) =>
+    client.documentMentions(reference, offset),
+  next: (page, pages) => {
+    const loaded = pages.reduce(
+      (count, entry) => count + entry.items.length,
+      0,
+    );
+    return page.items.length > 0 && loaded < page.total ? loaded : null;
+  },
+  join: (pages) => ({
+    items: pages.flatMap((page) => page.items),
+    total: pages.at(-1)?.total ?? 0,
+  }),
+  failure: "load Document mentions",
+  more: "load more Document mentions",
+});
+
+const passagesRead = pagedRead({
+  key: "mentionPassages",
+  call: (
+    {
+      reference,
+      source,
+      start,
+    }: { reference: string; source: string; start: number },
+    offset,
+  ) => client.mentionPassages(reference, source, offset || start),
+  next: (page) => page.next_offset,
+  join: (pages) => pages.flatMap((page) => page.items),
+  failure: "load passages",
+  more: "load more passages",
+});
+
+export function useBacklinks(record: Ticket | undefined) {
+  return usePagedRead(backlinksRead, record?.reference ?? skip);
 }
 
-/** The Documents that mention the Ticket (incoming links of kind document). */
-export function useDocumentBacklinks(
+export type TicketBacklinks = ReturnType<typeof useBacklinks>;
+
+export function useDocumentBacklinks(record: Ticket | undefined) {
+  return usePagedRead(documentBacklinksRead, record?.reference ?? skip);
+}
+
+export function useMentionPassages(
   record: Ticket | undefined,
-): DocumentLink[] {
-  const first = useRead(
-    documentLinksRead,
-    record ? { id: record.id, offset: 0 } : skip,
-  );
-  const incoming = first.value?.[1];
-  const later = useRead(
-    laterDocumentBacklinksRead,
-    record && incoming && incoming.length >= PAGE ? record.id : skip,
-  );
-  return useMemo(
-    () => [
-      ...(incoming?.filter((link) => link.source_kind === "document") ?? []),
-      ...(later.value ?? []),
-    ],
-    [incoming, later.value],
+  source: string,
+  start: number | null,
+) {
+  return usePagedRead(
+    passagesRead,
+    record && start !== null
+      ? { reference: record.reference, source, start }
+      : skip,
   );
 }

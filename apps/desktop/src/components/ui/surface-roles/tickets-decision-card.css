@@ -1,0 +1,27 @@
+.ticket-decision-card.ui-card-well {
+  border: 1px solid var(--group-hairline);
+}
+
+.ticket-decision-title {
+  color: var(--foreground);
+  font-size: var(--text-ui);
+  line-height: var(--text-ui-line);
+  font-weight: 600;
+}
+
+.ticket-decision-byline {
+  color: var(--muted-foreground);
+  font-size: var(--text-caption);
+  line-height: var(--text-caption-line);
+}
+
+.ticket-decision-report {
+  font-size: var(--text-ui);
+  line-height: var(--text-ui-line);
+}
+
+.ticket-decision-card :is(a, time, [tabindex="-1"]):focus-visible,
+.ticket-decision-card .ticket-review-focus:focus {
+  outline: 2px solid var(--ring);
+  outline-offset: 2px;
+}

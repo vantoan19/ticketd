@@ -1,80 +1,102 @@
 @import "../../components/ui/surface-roles/tickets-evidence.css";
 
 .evidence-section {
-  margin-top: 40px;
+  margin-top: 48px;
 }
 .evidence-section [data-slot="section-header"] {
   margin-bottom: 8px;
 }
 .evidence-list {
-  display: flex;
-  flex-direction: column;
-  gap: 4px;
+  display: grid;
+  gap: 2px;
   margin: 0;
   padding: 0;
 }
-/* A record row (P12): the same three lines at any width. Line 1 the name and
-   its actions, line 2 the caption, line 3 the value (detB DB-24). */
 .evidence-item {
-  display: flex;
-  flex-direction: column;
-  gap: 2px;
-  margin: 0 -8px;
-  padding: 6px 8px;
-}
-.evidence-item-heading {
-  display: flex;
+  display: grid;
+  grid-template-columns: 20px minmax(0, 1fr) minmax(0, 1.2fr) auto auto;
   align-items: center;
-  gap: 8px;
-  min-height: 24px;
+  gap: 2px 8px;
+  min-height: 32px;
+  margin-inline: -8px;
+  padding-inline: 8px;
+}
+.evidence-kind-icon {
+  grid-column: 1;
+  grid-row: 1;
+}
+.evidence-kind-icon > svg {
+  width: 16px;
+  height: 16px;
 }
 .evidence-item-name {
-  flex: 1 1 auto;
+  grid-column: 2;
+  grid-row: 1;
   min-width: 0;
   overflow: hidden;
   text-overflow: ellipsis;
 }
+.evidence-item-value {
+  grid-column: 3;
+  grid-row: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.evidence-item-value > button {
+  max-width: 100%;
+}
+.evidence-item-meta {
+  grid-column: 4;
+  grid-row: 1;
+}
 .evidence-item-actions {
   display: flex;
-  flex: none;
+  grid-column: 5;
+  grid-row: 1;
   align-items: center;
   gap: 2px;
-  margin: -4px -4px -4px 0;
 }
-/* Copy and "…" wait in their slot until the row is hovered or focused. */
+/* The actions stay keyboard reachable while visually waiting for the row. */
 .evidence-reveal {
   display: inline-flex;
-  visibility: hidden;
+  opacity: 0;
 }
 .evidence-item:hover .evidence-reveal,
 .evidence-item:focus-within .evidence-reveal,
-.evidence-item[data-open] .evidence-reveal,
 .evidence-reveal:has([data-state="open"], [data-copied]) {
-  visibility: visible;
+  opacity: 1;
 }
 @media (hover: none) {
   .evidence-item .evidence-reveal {
-    visibility: visible;
+    opacity: 1;
   }
 }
-.evidence-item > [data-slot="button"],
-.evidence-item > button {
+.evidence-section .ui-disclosure-trigger {
   max-width: 100%;
-  justify-content: flex-start;
 }
-.evidence-item-value {
-  max-height: 96px;
-  overflow: auto;
-  overflow-wrap: anywhere;
+.evidence-section .ui-disclosure-trigger > span {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
-.evidence-confirm-text {
-  margin-top: 4px;
+
+:where(:is(.ticket-detail, .chat-pane)[data-width~="max-460"]) .evidence-item {
+  grid-template-columns: 20px minmax(0, 1fr) auto auto;
+  padding-bottom: 4px;
 }
-.evidence-confirm-actions {
-  display: flex;
-  justify-content: flex-end;
-  gap: 8px;
-  margin-top: 16px;
+:where(:is(.ticket-detail, .chat-pane)[data-width~="max-460"])
+  .evidence-item-value {
+  grid-column: 2 / -1;
+  grid-row: 2;
+}
+:where(:is(.ticket-detail, .chat-pane)[data-width~="max-460"])
+  .evidence-item-meta {
+  grid-column: 3;
+}
+:where(:is(.ticket-detail, .chat-pane)[data-width~="max-460"])
+  .evidence-item-actions {
+  grid-column: 4;
 }
 
 /* The calm empty ticket: one quiet row of adds under the description
@@ -87,37 +109,6 @@
   margin: 24px -8px 0;
 }
 
-.evidence-item {
-  display: grid;
-  grid-template-columns: 20px minmax(0, 1fr) minmax(0, 40%);
-  gap: 2px 8px;
-  padding-block: 8px;
-}
-.evidence-kind-icon {
-  grid-column: 1;
-  grid-row: 1 / 3;
-  align-self: center;
-}
-.evidence-item-heading {
-  grid-column: 2;
-  grid-row: 1;
-}
-.evidence-item-meta {
-  grid-column: 2;
-  grid-row: 2;
-}
-.evidence-item > :last-child {
-  grid-column: 3;
-  grid-row: 1 / 3;
-  align-self: center;
-  justify-self: end;
-}
 .ticket-add-row:not(:has(button)) {
   display: none;
-}
-:where(:is(.ticket-detail, .chat-pane)[data-width~="max-460"])
-  .evidence-item
-  > :last-child {
-  grid-column: 2 / -1;
-  grid-row: 3;
 }

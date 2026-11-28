@@ -1,4 +1,10 @@
-import { useId, useState, type ReactNode, type Ref } from "react";
+import {
+  useId,
+  useState,
+  type MouseEventHandler,
+  type ReactNode,
+  type Ref,
+} from "react";
 import { Check, ChevronRight, Copy, TriangleAlert } from "lucide-react";
 import { cn } from "cn";
 import {
@@ -113,7 +119,7 @@ function RetryButton({
 }: {
   failure: FailureDescription;
   label?: string;
-  onRetry: (() => void) | undefined;
+  onRetry: MouseEventHandler<HTMLButtonElement> | undefined;
   variant?: "ghost" | "outline" | "link";
 }) {
   if (!onRetry || failure.action !== "retry") return null;
@@ -204,7 +210,7 @@ export function FailureState({
   className,
 }: {
   failure: FailureDescription;
-  onRetry?: () => void;
+  onRetry?: MouseEventHandler<HTMLButtonElement>;
   actions?: ReactNode;
   size?: "block" | "inline";
   /** Short visible wording when the full title is available in Details. */

@@ -4,8 +4,15 @@ import { TITLE_MAX_LENGTH } from "@/lib/limits";
 import { Tooltip } from "@/components/ui/tooltip";
 import { editingBlockedReason, useWorkspaceState } from "@/lib/workspace-state";
 import { EmptyState } from "@/components/ui/empty-state";
+import { Kbd } from "@/components/ui/kbd";
 import { Alert, AlertActions, AlertDescription } from "@/components/ui/alert";
 import "./description.css";
+import { TicketDescription } from "./TicketDescription";
+import {
+  TICKET_DESCRIPTION_REVEAL,
+  revealTicketDescription,
+  type TicketDescriptionReveal,
+} from "./description-navigation";
 import { MarkdownDocument } from "@/features/markdown/MarkdownDocument";
 import { chatSource } from "@/features/chats/quotes";
 import { LazyMarkdownEditor } from "@/features/markdown/LazyMarkdownEditor";
@@ -123,11 +130,7 @@ type TicketEditorProps = {
   /** Keep the saved copy's geometry while a fresh read is pending. */
   readOnly?: boolean;
   onSaved: (ticket: Ticket) => void;
-  /**
-   * The ticket's stable state line. Editor controls float outside the prose.
-   */
-  stateLine?: ReactNode;
-  /** Under the state row: the folded property strip. */
+  /** The ticket context and card between the title and description. */
   children?: ReactNode;
   select?: (reference: string) => void;
   revision?: number;
@@ -148,7 +151,6 @@ function RecoveredTicketEditor({
   ticket,
   readOnly = false,
   onSaved,
-  stateLine,
   children,
   select,
   revision,
@@ -296,6 +298,32 @@ function RecoveredTicketEditor({
   const [savedField, setSavedField] = useState("Changes");
   const bodyRef = useRef<HTMLDivElement>(null);
   const documentRef = useRef<HTMLDivElement>(null);
+  const readingTarget = useRef<TicketDescriptionReveal["target"] | null>(null);
+  useEffect(() => {
+    if (!editingBody) {
+      const target = readingTarget.current;
+      if (target !== null) {
+        readingTarget.current = null;
+        revealTicketDescription(ticketId, target);
+      }
+      return;
+    }
+    function reveal(event: Event) {
+      const { detail } = event as CustomEvent<TicketDescriptionReveal>;
+      if (
+        detail?.ticketId !== ticketId ||
+        !bodyRef.current ||
+        bodyRef.current.closest("[hidden], [inert], [data-graph]")
+      )
+        return;
+      // The draft stays in the editor state. The reader can reveal the saved
+      // or edited Markdown as soon as it mounts.
+      readingTarget.current = detail.target;
+      setBodyMode("reading");
+    }
+    window.addEventListener(TICKET_DESCRIPTION_REVEAL, reveal);
+    return () => window.removeEventListener(TICKET_DESCRIPTION_REVEAL, reveal);
+  }, [editingBody, ticketId]);
   const noteRef = useRef<HTMLParagraphElement>(null);
   // A mention is revealed once. It is dropped when the person starts editing, when
   // the saved text changes under it, or when the next navigation clears it, so
@@ -327,7 +355,11 @@ function RecoveredTicketEditor({
     : null;
   const mark =
     shown && span && mentionStillAt(rendered, shown.mention.passage, span)
-      ? { ...span, describedBy: `mention-note-${ticket.id}` }
+      ? {
+          ...span,
+          key: shown.mention.key,
+          describedBy: `mention-note-${ticket.id}`,
+        }
       : undefined;
   // Scroll to the marked passage and focus it, once per mention. React renders the
   // mark; this only reads the DOM and writes the status text it points to. When no
@@ -640,7 +672,7 @@ function RecoveredTicketEditor({
             : (adopted ?? "");
   return (
     <div className="ticket-editor">
-      <label className="editor-title">
+      <h1 className="editor-title" aria-label={draft.title}>
         <span className="sr-only">Title</span>
         <textarea
           ref={titleRef}
@@ -666,7 +698,7 @@ function RecoveredTicketEditor({
               event.preventDefault();
           }}
         />
-      </label>
+      </h1>
       {titleInvalid && (
         <div className="editor-title-error">
           <FieldError id={`title-error-${ticket.id}`}>
@@ -676,8 +708,7 @@ function RecoveredTicketEditor({
       )}
       {titleConflict && !bodyConflict && notice}
       {children}
-      <div className="ticket-state-row" data-floating={!stateLine || undefined}>
-        <span className="ticket-state-text">{stateLine}</span>
+      <div className="ticket-title-feedback">
         {!editingBody && state !== "failed" && (
           <span role="status" className="editor-save-state">
             {saveState}
@@ -789,7 +820,7 @@ function RecoveredTicketEditor({
           </div>
         )}
         {!editingBody &&
-          (draft.body ? (
+          (rendered.trim() ? (
             <Tooltip content={blockedReason ?? "Edit description"} shortcut="E">
               <div
                 className="description-reading"
@@ -819,7 +850,7 @@ function RecoveredTicketEditor({
                     return;
                   if (
                     event.target instanceof Element &&
-                    event.target.closest("a, button, input")
+                    event.target.closest("a, button, input, [role=search]")
                   )
                     return;
                   setBodyMode("editing");
@@ -833,7 +864,8 @@ function RecoveredTicketEditor({
                     id: ticket.id,
                   })}
                 >
-                  <MarkdownDocument
+                  <TicketDescription
+                    ticketId={ticket.id}
                     source={rendered}
                     {...(!blockedReason && {
                       onChange: (body: string) =>
@@ -853,7 +885,10 @@ function RecoveredTicketEditor({
             </Tooltip>
           ) : (
             // One quiet line that becomes the editor in place (detA DS-06).
-            <Tooltip content={blockedReason ?? "Edit description (E)"}>
+            <Tooltip
+              content={blockedReason ?? "Edit description"}
+              {...(!blockedReason && { shortcut: "E" })}
+            >
               <span
                 className="description-edit-control"
                 tabIndex={blockedReason ? 0 : undefined}
@@ -866,10 +901,11 @@ function RecoveredTicketEditor({
                     editButton.current = element;
                   }}
                   className="description-add"
-                  aria-keyshortcuts="E"
+                  aria-keyshortcuts={blockedReason ? undefined : "E"}
                   onClick={() => setBodyMode("editing")}
                 >
-                  Add a description…
+                  Add a description
+                  {!blockedReason && <Kbd aria-hidden="true">E</Kbd>}
                 </button>
               </span>
             </Tooltip>

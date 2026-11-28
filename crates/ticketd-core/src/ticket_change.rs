@@ -219,7 +219,17 @@ pub(crate) fn edit(
     // An editor that sends the values it loaded is refused when someone else has since
     // changed them (ADR 0015). A caller that omits them overwrites.
     if stale(&patch.title, &patch.expected_title, &ticket.title)
+        || (patch.status.is_some()
+            && patch
+                .expected_status
+                .is_some_and(|expected| expected != ticket.status))
         || stale(&patch.body, &patch.expected_body, &ticket.body)
+    {
+        return Err(Error::TicketChanged(reference.to_owned()));
+    }
+    if let Some(expected) = patch.expected_status_history_number
+        && patch.status.is_some()
+        && last_status_change(scope, &ticket.id)?.unwrap_or(0) != expected
     {
         return Err(Error::TicketChanged(reference.to_owned()));
     }
@@ -355,6 +365,81 @@ pub(crate) fn post_update(
     let activity = activities::add(scope, &ticket_id, content, agent)?;
     inbox::record(scope, &ticket_id, "activity", &activity.id, content, agent)?;
     Ok(activity)
+}
+
+/// The review decision and the exact status change and update it can undo.
+#[derive(Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct SendBackOutcome {
+    pub ticket: Ticket,
+    pub activity: Activity,
+    status_history_number: Option<i64>,
+}
+
+fn last_status_change(scope: &WriteScope<'_>, id: &str) -> Result<Option<i64>, Error> {
+    Ok(scope.query_row(
+        "SELECT MAX(number) FROM ticket_history WHERE ticket_id = ?1 AND kind = 'status'",
+        [id],
+        |row| row.get(0),
+    )?)
+}
+
+pub(crate) fn send_back(
+    connection: &Connection,
+    reference: &str,
+    brief: &str,
+    expected_status_history_number: i64,
+) -> Result<SendBackOutcome, Error> {
+    write_scope::run(connection, |scope| {
+        edit(
+            scope,
+            reference,
+            &TicketPatch {
+                expected_status: Some(Status::InReview),
+                expected_status_history_number: Some(expected_status_history_number),
+                status: Some(Status::InProgress),
+                ..Default::default()
+            },
+            Mode::Single,
+        )?;
+        let activity = post_update(scope, reference, brief, None)?;
+        let status_history_number = last_status_change(scope, &activity.ticket_id)?;
+        Ok(SendBackOutcome {
+            ticket: read_ticket(scope, reference)?,
+            activity,
+            status_history_number,
+        })
+    })
+}
+
+pub(crate) fn undo_send_back(
+    connection: &Connection,
+    reference: &str,
+    sent: SendBackOutcome,
+) -> Result<Ticket, Error> {
+    write_scope::run(connection, |scope| {
+        let id = scope.editable(reference)?;
+        // The status may have returned to In progress since this decision. The same
+        // status change and update must still be present before undoing either one.
+        if sent.ticket.id != id
+            || last_status_change(scope, &id)? != sent.status_history_number
+            || activities::get(scope, &id, &sent.activity.id)? != sent.activity
+        {
+            return Err(Error::TicketChanged(reference.into()));
+        }
+        edit(
+            scope,
+            reference,
+            &TicketPatch {
+                expected_status: Some(Status::InProgress),
+                status: Some(Status::InReview),
+                ..Default::default()
+            },
+            Mode::Single,
+        )?;
+        activities::delete(scope, &id, &sent.activity.id)?;
+        inbox::remove_activity_entries(scope, &id, &sent.activity.id)?;
+        read_ticket(scope, reference)
+    })
 }
 
 /// Make every edit of a combined change to `reference`, in this order: the patch, updates,

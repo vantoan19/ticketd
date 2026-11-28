@@ -2,146 +2,198 @@
 import { cleanup, fireEvent, render, screen } from "@testing-library/react";
 import { afterEach, expect, test, vi } from "vitest";
 import type { Ticket } from "@/lib/api/client";
-import { Backlinks } from "./Backlinks";
+import { Backlinks, type MentionTarget } from "./Backlinks";
+import { useOpenTicket } from "./open-ticket";
 import { TestOpenTicket } from "./open-ticket/testing";
 
 const bridge = vi.hoisted(() => ({ invoke: vi.fn() }));
 vi.mock("@tauri-apps/api/core", () => bridge);
 const ticket = { id: "ticket", reference: "T-KQ1", trashed: false } as Ticket;
+function BacklinksPanel({
+  select,
+}: {
+  select: (target: MentionTarget) => void;
+}) {
+  const mentions = useOpenTicket("backlinks");
+  const documentLinks = useOpenTicket("documentBacklinks");
+  return (
+    <Backlinks
+      select={select}
+      mentions={mentions}
+      documentLinks={documentLinks}
+    />
+  );
+}
+
 function backlinks(select = vi.fn()) {
   return (
     <TestOpenTicket ticket={ticket}>
-      <Backlinks select={select} />
+      <BacklinksPanel select={select} />
     </TestOpenTicket>
   );
 }
 afterEach(() => {
   cleanup();
   bridge.invoke.mockReset();
+  localStorage.clear();
 });
 
-test("lists each mention with its location and opens the source passage", async () => {
-  bridge.invoke.mockImplementation(async (command: string) => {
-    if (command === "ticket_backlinks")
-      return [
-        {
-          source_reference: "T-KQ2",
-          source_title: "Cache layer",
-          activity_id: null,
-          reported_at: null,
-          passage: "Blocked on T-KQ1 and T-KQ12.",
-          mention_start: 11,
-          mention_end: 14,
-        },
-        {
-          source_reference: "T-KQ3",
-          source_title: "Docs",
-          activity_id: "n1",
-          reported_at: "2026-10-31T10:00:00Z",
-          passage: "See T-KQ1 for context.",
-          mention_start: 4,
-          mention_end: 7,
-        },
-      ];
-    throw new Error(`Unexpected ${command}`);
-  });
+const passage = (text: string, activityId: string | null = null) => ({
+  activity_id: activityId,
+  reported_at: activityId ? "2026-10-31T10:00:00Z" : null,
+  passage: text,
+  mention_start: 4,
+  mention_end: 9,
+});
+const mention = (
+  index: number,
+  passages = [passage("See T-KQ1 for context.")],
+) => ({
+  reference: `T-REF${index}`,
+  title: `Source ${index}`,
+  status: "In review",
+  mentioned_at: "2026-10-31T10:00:00Z",
+  passages,
+});
+
+test("mentions start closed, reveal three tickets and keep them when showing more", async () => {
+  bridge.invoke.mockImplementation(
+    async (command: string, args?: { offset?: number }) => {
+      if (command === "ticket_backlinks")
+        return {
+          items: args?.offset
+            ? [mention(1)]
+            : [
+                mention(4, [
+                  passage("See T-KQ1 and T-KQ12.", "n1"),
+                  passage("See T-KQ1 for other context."),
+                ]),
+                mention(3),
+                mention(2),
+              ],
+          total: 4,
+        };
+      if (command === "ticket_document_mentions")
+        return { items: [], total: 0 };
+      throw new Error(`Unexpected ${command}`);
+    },
+  );
   const select = vi.fn();
   render(backlinks(select));
-  await screen.findByText("Cache layer");
-  expect(screen.getByRole("heading", { name: /Mentioned in/ })).toBeTruthy();
-  expect(screen.getByText("Description")).toBeTruthy();
-  expect(await screen.findByText(/^Update · /)).toBeTruthy();
-  // The date comes with the mention: one backlinks read, no per-update reads.
-  const commands = bridge.invoke.mock.calls.map(([command]) => command);
-  expect(commands.filter((c) => c === "ticket_backlinks")).toHaveLength(1);
-  expect(commands).not.toContain("get_activity");
-  // Only the whole reference is emphasized, not the prefix of T-KQ12.
+  const group = await screen.findByRole("button", {
+    name: /Mentioned in 4 tickets/,
+    expanded: false,
+  });
+  expect(screen.queryByRole("button", { name: /Source 4/ })).toBeNull();
+  fireEvent.click(group);
   expect(
-    screen
-      .getAllByText("T-KQ1", { selector: "mark" })
-      .map((mark) => mark.tagName),
-  ).toHaveLength(2);
-  fireEvent.click(screen.getByRole("button", { name: /T-KQ3/ }));
+    screen.getByText("Tickets whose text names T-KQ1, newest first"),
+  ).toBeTruthy();
+  expect(screen.getAllByRole("img", { name: "In review" })).toHaveLength(3);
+  const highlights = screen.getAllByText("T-KQ1", { selector: "mark" });
+  expect(highlights).toHaveLength(4);
+  fireEvent.click(screen.getByRole("button", { name: /See T-KQ1 and T-KQ12/ }));
   expect(select).toHaveBeenCalledWith({
-    reference: "T-KQ3",
+    reference: "T-REF4",
     mentioned: "T-KQ1",
     noteId: "n1",
-    passage: "See T-KQ1 for context.",
+    passage: "See T-KQ1 and T-KQ12.",
     start: 4,
-    end: 7,
+    end: 9,
   });
+  fireEvent.click(screen.getByRole("button", { name: "Show 1 more" }));
+  await screen.findByRole("button", { name: /Source 1/ });
+  expect(screen.getByRole("button", { name: /Source 4/ })).toBeTruthy();
+  expect(bridge.invoke).toHaveBeenCalledWith("ticket_backlinks", {
+    reference: "T-KQ1",
+    limit: 3,
+    offset: 3,
+  });
+  expect(bridge.invoke).not.toHaveBeenCalledWith(
+    "get_activity",
+    expect.anything(),
+  );
 });
 
-test("finds Document mentions beyond the first hundred incoming links", async () => {
-  const link = (index: number, kind: string) => ({
-    source_id: `${kind}-${index}`,
-    target_id: "ticket",
-    source_kind: kind,
-    target_kind: "ticket",
+test("a failed later Document mention page keeps the first page and retries that read", async () => {
+  const link = (index: number) => ({
+    source_id: `document-${index}`,
     passage: `Mentions T-KQ1 ${index}`,
-    source_label: `${kind} ${index}`,
-    target_label: "T-KQ1",
+    source_label: `Document ${index}`,
     source_trashed: false,
-    target_trashed: false,
-    activity_id: null,
   });
+  let unavailable = true;
   bridge.invoke.mockImplementation(
     async (command: string, args?: { offset?: number }) => {
-      if (command === "ticket_backlinks") return [];
-      if (command === "document_context_links")
-        return [
-          [],
-          args?.offset
-            ? [link(1, "document")]
-            : Array.from({ length: 100 }, (_, index) => link(index, "ticket")),
-        ];
+      if (command === "ticket_backlinks") return { items: [], total: 0 };
+      if (command === "ticket_document_mentions") {
+        if (args?.offset && unavailable)
+          throw { code: "failed", message: "Document page unavailable" };
+        return {
+          items: args?.offset ? [link(4)] : [link(1), link(2), link(3)],
+          total: 4,
+        };
+      }
       throw new Error(`Unexpected ${command}`);
     },
   );
   render(backlinks());
-  expect(await screen.findByText("document 1")).toBeTruthy();
-  // Page 0 is the read Files shares; only the pages after it are read here.
-  expect(
-    bridge.invoke.mock.calls.filter(
-      ([command, args]) =>
-        command === "document_context_links" && args.offset === 0,
-    ),
-  ).toHaveLength(1);
+  fireEvent.click(await screen.findByRole("button", { name: /Mentioned in/ }));
+  expect(await screen.findByText("Document 1")).toBeTruthy();
+  fireEvent.click(
+    screen.getByRole("button", { name: "Show 1 more Document mentions" }),
+  );
+  const retry = await screen.findByRole("button", { name: "Retry" });
+  expect(screen.getByText("Document 1")).toBeTruthy();
+  unavailable = false;
+  fireEvent.click(retry);
+  expect(await screen.findByText("Document 4")).toBeTruthy();
+  expect(screen.getByText("Document 1")).toBeTruthy();
+  expect(bridge.invoke).toHaveBeenLastCalledWith("ticket_document_mentions", {
+    reference: "T-KQ1",
+    limit: 3,
+    offset: 3,
+  });
 });
 
-test("pages through backlinks by window, keeping the shown window while the next one loads", async () => {
-  const link = (index: number) => ({
-    source_reference: `T-S${index}`,
-    source_title: `Source ${index}`,
-    activity_id: null,
-    reported_at: null,
-    passage: "Mentions T-KQ1",
-    mention_start: 9,
-    mention_end: 14,
+test("one mentioning ticket can reveal passages beyond the first three", async () => {
+  bridge.invoke.mockImplementation(async (command: string) => {
+    if (command === "ticket_backlinks")
+      return {
+        items: [
+          {
+            ...mention(2, [
+              passage("First T-KQ1", "n1"),
+              passage("Second T-KQ1", "n2"),
+              passage("Third T-KQ1", "n3"),
+            ]),
+            next_offset: 3,
+          },
+        ],
+        total: 1,
+      };
+    if (command === "ticket_document_mentions") return { items: [], total: 0 };
+    if (command === "ticket_mention_passages")
+      return {
+        items: [passage("Fourth T-KQ1", "n4")],
+        next_offset: null,
+      };
+    throw new Error(`Unexpected ${command}`);
   });
-  let release: () => void = () => {};
-  bridge.invoke.mockImplementation(
-    async (command: string, args?: { offset?: number }) => {
-      if (command === "ticket_backlinks") {
-        if (args?.offset) {
-          await new Promise<void>((resolve) => (release = resolve));
-          return [link(99)];
-        }
-        return Array.from({ length: 20 }, (_, index) => link(index));
-      }
-      if (command === "document_context_links") return [[], []];
-      throw new Error(`Unexpected ${command}`);
-    },
-  );
   render(backlinks());
   fireEvent.click(
-    await screen.findByRole("button", { name: "More backlinks" }),
+    await screen.findByRole("button", { name: /Mentioned in 1 ticket/ }),
   );
-  // The first window stays until the next arrives, so nothing jumps.
-  expect(screen.getByText("Source 0")).toBeTruthy();
-  release();
-  expect(await screen.findByText("Source 99")).toBeTruthy();
-  expect(screen.queryByText("Source 0")).toBeNull();
-  fireEvent.click(screen.getByRole("button", { name: "Previous backlinks" }));
-  expect(await screen.findByText("Source 0")).toBeTruthy();
+  expect(screen.queryByRole("button", { name: /Fourth T-KQ1/ })).toBeNull();
+  fireEvent.click(screen.getByRole("button", { name: /Show more passages/ }));
+  expect(
+    await screen.findByRole("button", { name: /Fourth T-KQ1/ }),
+  ).toBeTruthy();
+  expect(screen.getByRole("button", { name: /Third T-KQ1/ })).toBeTruthy();
+  expect(bridge.invoke).toHaveBeenCalledWith("ticket_mention_passages", {
+    reference: "T-KQ1",
+    sourceReference: "T-REF2",
+    limit: 3,
+    offset: 3,
+  });
 });

@@ -1222,3 +1222,14 @@ TICKETD_UPDATE_FORMAT_LEDGER=1 cargo test -p ticketd-core --lib format::
 + column chat_turns.origin_by
 + column chat_turns.origin_sub_agent
 + column chats.restart_notice
+
+## 106
++ table backlink_passages
++ column backlink_passages.activity
++ column backlink_passages.mention_end
++ column backlink_passages.mention_start
++ column backlink_passages.passage
++ column backlink_passages.reference
++ column backlink_passages.source_id
++ column backlink_passages.ticket_id
++ trigger backlink_passages_activity_delete

@@ -17,5 +17,10 @@ export type TicketCommandScope = (typeof ticketCommandActions)[number]["scope"];
 
 /** Opens the same scoped choices from a ticket chip and its direct key. */
 export const TicketCommandContext = createContext<
-  ((scope: TicketCommandScope, reference: string) => void) | null
+  | ((
+      scope: TicketCommandScope,
+      reference: string,
+      origin?: HTMLElement,
+    ) => void)
+  | null
 >(null);

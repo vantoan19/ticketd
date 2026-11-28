@@ -24,6 +24,8 @@ import type { ChatRequest } from "@/features/chats/ticket-chat";
 export type ChatFeature = {
   /** The Experimental switch; false until the host has answered. */
   enabled: boolean;
+  /** The saved Chat preference is still being read. */
+  checking?: boolean;
   setEnabled: (enabled: boolean) => Promise<void>;
   overview: ChatOverview;
   /** Rises whenever any Chat's summary may have changed. */
@@ -142,34 +144,43 @@ export function useChat(id: string) {
   // Bumped to open the Chat again after a resync.
   const [attempt, setAttempt] = useState(0);
   useEffect(() => {
-    let current = true;
-    let unsubscribe = () => {};
-    client.openChat(id).then(
+    const view = new AbortController();
+    const { signal } = view;
+    let unsubscribe: (() => void) | undefined;
+    const stop = () => {
+      view.abort();
+      unsubscribe?.();
+      unsubscribe = undefined;
+    };
+    client.openChat(id, signal).then(
       (opened) => {
-        if (!current) return;
+        if (signal.aborted) return;
         let latest = opened;
         setSnapshot(opened);
         setError(null);
-        unsubscribe = client.subscribe(id, opened.cursor, (change) => {
-          if (!current) return;
-          const next = applyChange(latest, change);
-          if (next === "resync") {
-            current = false;
-            unsubscribe();
-            setAttempt((count) => count + 1);
-            return;
-          }
-          latest = next;
-          setSnapshot(next);
-        });
+        unsubscribe = client.subscribe(
+          id,
+          opened.cursor,
+          (change) => {
+            if (signal.aborted) return;
+            const next = applyChange(latest, change);
+            if (next === "resync") {
+              stop();
+              setAttempt((count) => count + 1);
+              return;
+            }
+            latest = next;
+            setSnapshot(next);
+          },
+          signal,
+        );
+        // Subscribe can replay a resync before returning its cleanup.
+        if (signal.aborted) stop();
       },
       (reason: unknown) =>
-        current && setError(describeFailure(reason, "open this Chat")),
+        !signal.aborted && setError(describeFailure(reason, "open this Chat")),
     );
-    return () => {
-      current = false;
-      unsubscribe();
-    };
+    return stop;
   }, [client, id, attempt]);
   return {
     snapshot: snapshot?.chat.id === id ? snapshot : null,

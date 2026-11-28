@@ -25,6 +25,7 @@ beforeAll(async () => {
 });
 afterEach(() => {
   cleanup();
+  localStorage.removeItem("ticketd:activity-view");
   bridge.invoke.mockReset();
 });
 
@@ -104,6 +105,7 @@ test("an update credited to a sub-agent keeps its author and opens the sub-agent
 
 test("a status change credited to a sub-agent shows it after the author", async () => {
   show([status(creditedTests)]);
+  fireEvent.click(screen.getByRole("radio", { name: "All" }));
   fireEvent.click(await screen.findByRole("button", { name: /^1 change:/ }));
   const credit = await screen.findByRole("button", {
     name: "Check limiter test coverage",

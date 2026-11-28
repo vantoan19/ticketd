@@ -704,9 +704,34 @@ fn ticket_backlinks(
     reference: String,
     limit: u32,
     offset: u32,
-) -> Result<Vec<ticketd_core::Backlink>, BridgeFailure> {
+) -> Result<ticketd_core::TicketMentions, BridgeFailure> {
     open_workspace()
-        .and_then(|workspace| workspace.backlinks(&reference, limit, offset))
+        .and_then(|workspace| workspace.ticket_mentions(&reference, limit, offset))
+        .map_err(BridgeFailure::from)
+}
+
+#[tauri::command(async)]
+fn ticket_mention_passages(
+    reference: String,
+    source_reference: String,
+    limit: u32,
+    offset: u32,
+) -> Result<ticketd_core::MentionPassagePage, BridgeFailure> {
+    open_workspace()
+        .and_then(|workspace| {
+            workspace.ticket_mention_passages(&reference, &source_reference, limit, offset)
+        })
+        .map_err(BridgeFailure::from)
+}
+
+#[tauri::command(async)]
+fn ticket_document_mentions(
+    reference: String,
+    limit: u32,
+    offset: u32,
+) -> Result<ticketd_core::TicketDocumentMentions, BridgeFailure> {
+    open_workspace()
+        .and_then(|workspace| workspace.ticket_document_mentions(&reference, limit, offset))
         .map_err(BridgeFailure::from)
 }
 
@@ -939,6 +964,54 @@ fn change_ticket(
 }
 
 #[tauri::command(async)]
+fn send_back(
+    reference: String,
+    brief: String,
+    request_id: String,
+    expected_status_history_number: i64,
+) -> Result<Ticket, BridgeFailure> {
+    match open_workspace()
+        .and_then(|mut workspace| {
+            workspace.write(
+                Some(&request_id),
+                WriteRequest::SendBack {
+                    reference,
+                    brief,
+                    expected_status_history_number,
+                },
+            )
+        })
+        .map_err(BridgeFailure::from)?
+    {
+        WriteResult::SendBack(sent) => Ok(sent.ticket),
+        _ => Err("Unexpected Send back result".into()),
+    }
+}
+
+#[tauri::command(async)]
+fn undo_send_back(
+    reference: String,
+    send_request_id: String,
+    request_id: String,
+) -> Result<Ticket, BridgeFailure> {
+    match open_workspace()
+        .and_then(|mut workspace| {
+            workspace.write(
+                Some(&request_id),
+                WriteRequest::UndoSendBack {
+                    reference,
+                    send_request_id,
+                },
+            )
+        })
+        .map_err(BridgeFailure::from)?
+    {
+        WriteResult::Ticket(ticket) => Ok(ticket),
+        _ => Err("Unexpected Undo result".into()),
+    }
+}
+
+#[tauri::command(async)]
 fn ticket_history(reference: String) -> Result<Vec<serde_json::Value>, BridgeFailure> {
     open_workspace()
         .and_then(|workspace| ticket_credit::credited_history(&workspace, &reference))
@@ -951,6 +1024,17 @@ fn list_evidence(reference: String, offset: u32) -> Result<Vec<Evidence>, Bridge
         .and_then(|w| w.evidence(&reference, 50, offset))
         .map_err(BridgeFailure::from)
 }
+
+#[tauri::command(async)]
+fn ticket_evidence_page(
+    reference: String,
+    offset: u32,
+) -> Result<ticketd_core::EvidencePage, BridgeFailure> {
+    open_workspace()
+        .and_then(|w| w.evidence_page(&reference, 50, offset))
+        .map_err(BridgeFailure::from)
+}
+
 #[tauri::command(async)]
 fn add_evidence(
     reference: String,
@@ -1025,14 +1109,26 @@ fn activity_feed(
     reference: String,
     limit: u32,
     offset: u32,
+    updates_only: Option<bool>,
 ) -> Result<Vec<serde_json::Value>, BridgeFailure> {
     open_workspace()
         .and_then(|workspace| {
-            let feed = workspace.activity_feed(&reference, limit, offset)?;
+            let feed = if updates_only.unwrap_or(false) {
+                workspace.activity_updates(&reference, limit, offset)?
+            } else {
+                workspace.activity_feed(&reference, limit, offset)?
+            };
             ticket_credit::credited_feed(&workspace, &reference, feed)
         })
         .map_err(BridgeFailure::from)
 }
+#[tauri::command(async)]
+fn activity_update_count(reference: String) -> Result<u32, BridgeFailure> {
+    open_workspace()
+        .and_then(|workspace| workspace.activity_update_count(&reference))
+        .map_err(BridgeFailure::from)
+}
+
 #[tauri::command(async)]
 fn get_activity(reference: String, id: String) -> Result<Option<Activity>, BridgeFailure> {
     open_workspace()
@@ -1251,6 +1347,13 @@ fn take_ownership(reference: String, request_id: String) -> Result<Ticket, Bridg
         WriteResult::Ticket(ticket) => Ok(ticket),
         _ => Err("Unexpected write result".into()),
     }
+}
+
+#[tauri::command(async)]
+fn ticket_peek_counts(reference: String) -> Result<ticketd_core::TicketPeekCounts, BridgeFailure> {
+    open_workspace()
+        .and_then(|workspace| workspace.ticket_peek_counts(&reference))
+        .map_err(BridgeFailure::from)
 }
 
 #[tauri::command(async)]
@@ -2541,6 +2644,7 @@ pub fn run() -> Result<(), tauri::Error> {
             attachment_commands::replace_ticket_attachment,
             attachment_commands::export_attachment,
             attachment_commands::export_markdown_with_files,
+            attachment_commands::ticket_export_markdown,
             attachment_commands::open_attachment,
             attachment_commands::attachment_uri,
             attachment_commands::resolve_attachment_uri,
@@ -2652,6 +2756,8 @@ pub fn run() -> Result<(), tauri::Error> {
             set_trashed,
             create_ticket,
             change_ticket,
+            send_back,
+            undo_send_back,
             bulk_status,
             bulk_change,
             ticket_history,
@@ -2664,13 +2770,17 @@ pub fn run() -> Result<(), tauri::Error> {
             sidebar_counts,
             workspace_change_token,
             list_evidence,
+            ticket_evidence_page,
             add_evidence,
             edit_evidence,
             delete_evidence,
             ticket_backlinks,
+            ticket_mention_passages,
+            ticket_document_mentions,
             source_conversation,
             latest_update,
             activity_feed,
+            activity_update_count,
             first_agent_update,
             get_activity,
             add_activity,
@@ -2685,6 +2795,7 @@ pub fn run() -> Result<(), tauri::Error> {
             mark_duplicate_reviewed,
             edit_dependencies_reviewed,
             remove_duplicate,
+            ticket_peek_counts,
             contextual_relationships,
             change_contextual_relationship,
             add_dependency,

@@ -1,8 +1,5 @@
 /* Shared visual roles. Loaded with the owning layout to preserve lazy CSS order. */
 
-.ticket-state-row .ticket-state-line {
-  white-space: nowrap;
-}
 .editor-save-state {
   color: var(--muted-foreground);
   font-size: var(--text-caption);
@@ -70,4 +67,18 @@
 .description-add:focus-visible {
   outline: 2px solid var(--ring);
   outline-offset: -2px;
+}
+
+.ticket-description-find {
+  background-color: var(--background);
+}
+
+.ticket-description-find-count {
+  font-size: var(--text-caption);
+  color: var(--muted-foreground);
+}
+
+.ticket-description ::highlight(ticket-description-find) {
+  background-color: var(--foreground);
+  color: var(--background);
 }

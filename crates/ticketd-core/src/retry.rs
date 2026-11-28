@@ -129,6 +129,15 @@ pub enum WriteRequest {
         reference: String,
         change: TicketChange,
     },
+    SendBack {
+        reference: String,
+        brief: String,
+        expected_status_history_number: i64,
+    },
+    UndoSendBack {
+        reference: String,
+        send_request_id: String,
+    },
     Batch {
         operations: Vec<BatchOperation>,
     },
@@ -295,6 +304,7 @@ pub enum WriteResult {
     Document(Document),
     Ticket(Ticket),
     Tickets(Vec<Ticket>),
+    SendBack(crate::SendBackOutcome),
     Activity(Activity),
     Evidence(Evidence),
     Project(Project),
@@ -371,7 +381,13 @@ impl Workspace {
         request: WriteRequest,
     ) -> Result<WriteResult, Error> {
         // A blank ID would key unrelated writes to one stored outcome (ADR 0002).
-        if request_id.is_some_and(|id| id.trim().is_empty()) {
+        if request_id.is_some_and(|id| id.trim().is_empty())
+            || (request_id.is_none()
+                && matches!(
+                    request,
+                    WriteRequest::SendBack { .. } | WriteRequest::UndoSendBack { .. }
+                ))
+        {
             return Err(Error::EmptyRequestId);
         }
         if let WriteRequest::ImportAttachment {
@@ -602,6 +618,39 @@ impl Workspace {
             }
             WriteRequest::TicketChange { reference, change } => {
                 WriteResult::Ticket(self.apply_ticket_change(&reference, change)?)
+            }
+            WriteRequest::SendBack {
+                reference,
+                brief,
+                expected_status_history_number,
+            } => WriteResult::SendBack(crate::ticket_change::send_back(
+                &self.connection,
+                &reference,
+                &brief,
+                expected_status_history_number,
+            )?),
+            WriteRequest::UndoSendBack {
+                reference,
+                send_request_id,
+            } => {
+                let outcome: Option<String> = self
+                    .connection
+                    .query_row(
+                        "SELECT outcome FROM request_outcomes WHERE id = ?1",
+                        [&send_request_id],
+                        |row| row.get(0),
+                    )
+                    .optional()?;
+                let Some(WriteResult::SendBack(sent)) =
+                    outcome.as_deref().map(serde_json::from_str).transpose()?
+                else {
+                    return Err(Error::TicketChanged(reference));
+                };
+                WriteResult::Ticket(crate::ticket_change::undo_send_back(
+                    &self.connection,
+                    &reference,
+                    sent,
+                )?)
             }
             WriteRequest::Batch { operations } => {
                 WriteResult::Tickets(self.apply_batch(operations)?)

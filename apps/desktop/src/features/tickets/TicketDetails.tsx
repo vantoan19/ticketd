@@ -2,7 +2,7 @@ import { useInboxTriage } from "./inbox-triage-context";
 import { InboxTriageCard } from "./InboxTriageCard";
 import { TicketAgentSession } from "./TicketAgent";
 import { OverlayBoundary } from "@/components/ui/overlay-boundary";
-import { memo, useRef, useState } from "react";
+import { memo, useCallback, useRef, useState } from "react";
 import { EmptyState } from "@/components/ui/empty-state";
 import { Kbd } from "@/components/ui/kbd";
 import { TicketHeader } from "@/features/tickets/TicketHeader";
@@ -14,15 +14,22 @@ import { hasTicketDraft } from "./ticket-draft";
 import { useDraftRecovery } from "@/lib/draft-recovery-context";
 import { useMentionReadiness } from "./use-mention-readiness";
 import type { MentionTarget } from "@/features/tickets/Backlinks";
-import type { FollowedMention } from "@/features/tickets/useTicketWorkspace";
+import type {
+  FollowedMention,
+  TicketListPosition,
+} from "@/features/tickets/useTicketWorkspace";
 import type { Plan } from "@/lib/api/plans";
 import { TicketPage } from "@/features/tickets/TicketPage";
+import type { ReadReviewQueue } from "./use-ticket-review-decision";
 import { usePageSwap } from "./use-page-swap";
+import { useNarrowPane } from "./useNarrowPane";
 type NoteTarget = { id: string; key: number };
 type InboxTarget = { reference: string; id: string; key: number };
 
 /** Hidden pages kept besides the selected one; any page holding a draft is kept too. */
 const RECENT_PAGES = 3;
+// The 680px column, 32px gap, 248px rail, and two 32px gutters.
+const TICKET_RAIL_MIN_WIDTH = 1024;
 
 /** Two ways to arrive at a note (the Inbox, a backlink); the later one wins. */
 function newest(
@@ -52,14 +59,18 @@ export function TicketDetails({
   onAdjacent,
   returnLabel,
   outsideResults = false,
+  readReviewQueue,
   leaving = false,
+  peek = false,
 }: {
   outsideResults?: boolean;
+  readReviewQueue?: ReadReviewQueue | undefined;
   /** The pane is fading out after the ticket closed: it takes no input. */
   leaving?: boolean;
+  peek?: boolean;
   hidden?: boolean;
   /** The selected ticket's place in the visible list, across pages. */
-  position?: { index: number; total: number } | null;
+  position?: TicketListPosition | null;
   /** The list's name, for the expanded view's return crumb. */
   returnLabel?: string;
   /** Open the ticket before (-1) or after (1) the selected one in the list. */
@@ -100,6 +111,14 @@ export function TicketDetails({
     }
   }, [selected]);
   const [boundary, setBoundary] = useState<HTMLElement | null>(null);
+  const pane = useRef<HTMLElement>(null);
+  const setPane = useCallback((node: HTMLElement | null) => {
+    pane.current = node;
+    setBoundary(node);
+  }, []);
+  const narrowHeader = useNarrowPane(pane, 560);
+  const scroller = useRef<HTMLDivElement>(null);
+  const narrow = useNarrowPane(scroller, TICKET_RAIL_MIN_WIDTH, true);
   const [scrolledReference, setScrolledReference] = useState<string | null>(
     null,
   );
@@ -112,7 +131,8 @@ export function TicketDetails({
   const open = (reference: string | null) => setSelected(reference);
   // The selected ticket's record, shared with its page; the header, the agent
   // session and the triage card sit above the pages and read it from here.
-  const ticket = useTicket(selected).value ?? undefined;
+  const record = useTicket(selected);
+  const ticket = record.value ?? undefined;
   useMentionReadiness({
     selected,
     mention,
@@ -135,18 +155,18 @@ export function TicketDetails({
   const pages =
     selected && !kept.includes(selected) ? [...kept, selected] : kept;
   // Pages are memoized, so what they call is the same object on every render.
-  const latest = useRef({ open, showGraph, setSelected });
+  const latest = useRef({ open, setSelected, onExpand });
   useEffect(() => {
-    latest.current = { open, showGraph, setSelected };
+    latest.current = { open, setSelected, onExpand };
   });
   const [pageActions] = useState<PageActions>(() => ({
     select: (reference) => latest.current.open(reference),
-    openGraph: (reference) => latest.current.showGraph(reference),
     mention: (target) => latest.current.setSelected(target.reference, target),
+    expand: () => latest.current.onExpand(),
   }));
   return (
     <section
-      ref={setBoundary}
+      ref={setPane}
       className="ticket-detail"
       hidden={hidden}
       inert={leaving}
@@ -155,24 +175,31 @@ export function TicketDetails({
       aria-labelledby="detail-heading"
     >
       <OverlayBoundary element={boundary}>
-        <TicketAgentSession ticket={ticket ?? preview}>
+        <TicketAgentSession
+          selected={selected}
+          record={record}
+          preview={preview}
+        >
           {(agentLoading) => (
             <>
               <TicketHeader
                 selected={selected}
                 ticket={ticket}
                 scrolled={selected !== null && scrolledReference === selected}
+                narrow={narrowHeader}
                 expanded={expanded}
                 onExpand={onExpand}
                 onReturn={onReturn}
                 onClose={() => open(null)}
                 {...(openGraph && { onOpenGraph: () => showGraph(selected) })}
                 position={position}
+                outsideResults={outsideResults}
                 projects={projects}
                 {...(returnLabel && { returnLabel })}
                 {...(onAdjacent && { onAdjacent })}
               />
               <div
+                ref={scroller}
                 className="detail-scroll"
                 onScroll={(event) => {
                   const scroller = event.currentTarget;
@@ -216,11 +243,17 @@ export function TicketDetails({
                     key={reference}
                     reference={reference}
                     active={reference === selected}
+                    reading={reference === selected && !hidden && !leaving}
+                    expanded={expanded}
+                    openFromPeek={peek ? pageActions.expand : undefined}
+                    rail={expanded && !narrow}
                     hidden={hidden || reference !== selected}
                     swap={swap.swapped && reference === selected}
                     leaving={reference === swap.leaving}
                     seed={reference === selected ? preview : undefined}
-                    outsideResults={outsideResults && reference === selected}
+                    readReviewQueue={
+                      reference === selected ? readReviewQueue : undefined
+                    }
                     projects={projects}
                     plans={plans}
                     inboxTarget={
@@ -241,8 +274,8 @@ export function TicketDetails({
 
 type PageActions = {
   select: (reference: string | null) => void;
-  openGraph: (reference: string) => void;
   mention: (target: MentionTarget) => void;
+  expand: () => void;
 };
 
 /**
@@ -252,26 +285,34 @@ type PageActions = {
 const OpenedPage = memo(function OpenedPage({
   reference,
   active,
+  reading,
+  expanded,
+  openFromPeek,
+  rail,
   hidden,
   swap,
   leaving,
   seed,
-  outsideResults,
   projects,
   plans,
+  readReviewQueue,
   inboxTarget,
   mention,
   actions,
 }: {
   reference: string;
   active: boolean;
+  reading: boolean;
+  expanded: boolean;
+  openFromPeek: (() => void) | undefined;
+  rail: boolean;
   hidden: boolean;
   swap: boolean;
   leaving: boolean;
   seed: Ticket | undefined;
-  outsideResults: boolean;
   projects: Project[];
   plans: Plan[];
+  readReviewQueue: ReadReviewQueue | undefined;
   /** The Inbox note to show, when it is on this page. */
   inboxTarget: InboxTarget | null;
   /** The mention being followed, when it is on this page. */
@@ -282,13 +323,16 @@ const OpenedPage = memo(function OpenedPage({
     <OpenTicket reference={reference} seed={seed} hidden={hidden}>
       <TicketPage
         active={active}
+        reading={reading}
+        expanded={expanded}
+        openFromPeek={openFromPeek}
+        rail={rail}
         swap={swap}
         leaving={leaving}
-        outsideResults={outsideResults}
         projects={projects}
         plans={plans}
+        readReviewQueue={readReviewQueue}
         select={actions.select}
-        onOpenGraph={() => actions.openGraph(reference)}
         noteTarget={newest(
           inboxTarget,
           mention?.noteId ? { id: mention.noteId, key: mention.key } : null,

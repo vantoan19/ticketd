@@ -10,6 +10,7 @@ import {
   useRef,
   useLayoutEffect,
   useId,
+  type ReactNode,
 } from "react";
 import ReactMarkdown, {
   defaultUrlTransform,
@@ -17,6 +18,9 @@ import ReactMarkdown, {
   type ExtraProps,
 } from "react-markdown";
 import remarkGfm from "remark-gfm";
+import type { Position } from "unist";
+import type { Pluggable } from "unified";
+import { blockRanges, type MarkdownBlockRange } from "./block-ranges";
 import {
   DocumentNavigation,
   PlanNavigation,
@@ -54,12 +58,23 @@ import {
 } from "@/features/tickets/mention-passage";
 
 const MarkdownSource = createContext("");
+const ChangeTaskMarker = createContext<
+  ((start: number, end: number, checked: boolean) => Promise<void>) | null
+>(null);
+const TaskControl = createContext<{ name: string; toggle: () => void } | null>(
+  null,
+);
 /** Saved updates show an attachment link alone on its line as a card. */
 const AttachmentCards = createContext(false);
 const AttachmentReplacement = createContext<
   (node: ExtraProps["node"], uri: string) => ReferenceReplacement | undefined
 >(() => undefined);
-type MdNode = { type: string; value?: string; children?: MdNode[] };
+type MdNode = {
+  type: string;
+  value?: string;
+  children?: MdNode[];
+  position?: Position;
+};
 /**
  * Raw HTML is never rendered, but it is not dropped either: `<tag>` written in a brief
  * or Document reads as the literal text the person typed.
@@ -77,7 +92,11 @@ function htmlAsText() {
         parent.type === "heading" ||
         parent.type === "tableCell"
         ? text
-        : { type: "paragraph", children: [text] };
+        : {
+            type: "paragraph",
+            children: [text],
+            ...(child.position && { position: child.position }),
+          };
     });
   };
   return (tree: MdNode) => walk(tree);
@@ -101,6 +120,16 @@ export type SectionFolding = {
   toggle: (id: string) => void;
 };
 const Folding = createContext<SectionFolding | null>(null);
+type RenderBlockRange = (start: number, children: ReactNode) => ReactNode;
+const BlockRangeRenderer = createContext<RenderBlockRange | null>(null);
+
+function BlockRange({ node, children }: ExtraProps & { children?: ReactNode }) {
+  const render = useContext(BlockRangeRenderer);
+  const start = node?.properties.dataRangeStart;
+  return render && typeof start === "number"
+    ? render(start, children)
+    : children;
+}
 const TicketNavigation = createContext<{
   select: ((reference: string) => void) | undefined;
   revision: number | undefined;
@@ -297,6 +326,97 @@ function CodeBlock({ node }: ExtraProps) {
   );
 }
 
+function taskName(
+  node: NonNullable<ExtraProps["node"]>["children"][number],
+): string {
+  if (node.type === "text") return node.value;
+  if (node.type !== "element") return "";
+  switch (node.tagName) {
+    case "input":
+    case "ol":
+    case "ul":
+      return "";
+    case "br":
+      return " ";
+    case "img":
+      return String(node.properties.alt ?? "");
+    case "p":
+      return node.children.map(taskName).join("") + " ";
+    default:
+      return node.children.map(taskName).join("");
+  }
+}
+
+function TaskListItem({
+  node,
+  attributes,
+  children,
+}: ExtraProps & { attributes: Record<string, unknown>; children: ReactNode }) {
+  const source = useContext(MarkdownSource);
+  const changeMarker = useContext(ChangeTaskMarker);
+  const start = node?.position?.start.offset;
+  const end = node?.position?.end.offset;
+  // GFM identifies task items before this renders. The item's first brackets
+  // hold the marker, including when whitespace in it spans a source line.
+  const open = start === undefined ? -1 : source.indexOf("[", start);
+  const close = open < 0 ? -1 : source.indexOf("]", open);
+  const toggle =
+    changeMarker && close > open && end !== undefined && close < end
+      ? () =>
+          void changeMarker(
+            open + 1,
+            close,
+            !/^[xX]$/.test(source.slice(open + 1, close)),
+          )
+      : undefined;
+  const control = toggle
+    ? {
+        name: node?.children.map(taskName).join("").trim() || "Checklist item",
+        toggle,
+      }
+    : null;
+
+  return (
+    <li
+      {...attributes}
+      data-task-editable={toggle ? "" : undefined}
+      onClick={
+        toggle &&
+        ((event) => {
+          const { target, currentTarget } = event;
+          if (
+            !(target instanceof Element) ||
+            target.closest(
+              "li, ul, ol, a, button, input, [role=button], [role=link]",
+            ) !== currentTarget ||
+            window.getSelection()?.toString()
+          )
+            return;
+          event.stopPropagation();
+          toggle();
+        })
+      }
+    >
+      <TaskControl.Provider value={control}>
+        {Children.map(children, (child) => {
+          const name = isValidElement<{ node?: ExtraProps["node"] }>(child)
+            ? typeof child.type === "string"
+              ? child.type
+              : child.props.node?.tagName
+            : undefined;
+          // A child list has its own checked state. Loose paragraphs can
+          // provide a block to decorate without striking the child list.
+          return name && ["ul", "ol", "p", "input"].includes(name) ? (
+            child
+          ) : (
+            <span className="markdown-task-text">{child}</span>
+          );
+        })}
+      </TaskControl.Provider>
+    </li>
+  );
+}
+
 // The block holding the mention gets its mark as props, so React owns it and
 // every other attribute (a code block's tab stop included) stays untouched.
 function mentionBlock(tag: string) {
@@ -316,8 +436,14 @@ function mentionBlock(tag: string) {
       anchors && offset !== undefined && /^h[1-4]$/.test(tag)
         ? anchors.get(offset)
         : undefined;
-    const attributes =
-      outlined === undefined ? props : { ...props, id: outlined.id };
+    const attributes = {
+      ...props,
+      ...(outlined && { id: outlined.id }),
+      ...(offset !== undefined &&
+        /^h[1-6]$/.test(tag) && {
+          "data-heading-offset": offset,
+        }),
+    };
     const marked =
       mark !== null && isMentionBlock(node as PositionedNode, mark);
     if (outlined?.foldable && folding) {
@@ -363,20 +489,32 @@ function mentionBlock(tag: string) {
     }
     const alone =
       cards && (tag === "p" || tag === "li") ? cardLinks(node) : null;
+    const blockAttributes = {
+      ...attributes,
+      ...(marked && {
+        "data-mention-target": "",
+        tabIndex: -1,
+        "aria-describedby": mark.describedBy,
+      }),
+      ...(alone && { "data-cards": "" }),
+    };
+    if (
+      !alone &&
+      tag === "li" &&
+      String(props.className ?? "")
+        .split(" ")
+        .includes("task-list-item")
+    )
+      return (
+        <TaskListItem node={node} attributes={blockAttributes}>
+          {children as ReactNode}
+        </TaskListItem>
+      );
+
     // A card is a block: it cannot sit inside a paragraph, so its row is a div.
     return createElement(
       alone && tag === "p" ? "div" : tag,
-      {
-        ...(marked
-          ? {
-              ...attributes,
-              "data-mention-target": "",
-              tabIndex: -1,
-              "aria-describedby": mark.describedBy,
-            }
-          : attributes),
-        ...(alone && { "data-cards": "" }),
-      },
+      blockAttributes,
       alone
         ? alone.map((link, index) => (
             <AttachmentCardLink
@@ -386,23 +524,7 @@ function mentionBlock(tag: string) {
               onReplace={replacement(link.node as ExtraProps["node"], link.uri)}
             />
           ))
-        : tag === "li" &&
-            String(props.className ?? "").includes("task-list-item")
-          ? Children.map(children as React.ReactNode, (child) => {
-              const name = isValidElement<{ node?: ExtraProps["node"] }>(child)
-                ? typeof child.type === "string"
-                  ? child.type
-                  : child.props.node?.tagName
-                : undefined;
-              // A child list has its own checked state; loose paragraphs already
-              // provide a block to decorate without striking the child list.
-              return name && ["ul", "ol", "p", "input"].includes(name) ? (
-                child
-              ) : (
-                <span className="markdown-task-text">{child}</span>
-              );
-            })
-          : (children as React.ReactNode),
+        : (children as React.ReactNode),
     );
   };
 }
@@ -424,6 +546,7 @@ const components: Components = {
     </div>
   ),
   pre: CodeBlock,
+  ...{ "markdown-block-range": BlockRange },
   ...Object.fromEntries(
     [...MENTION_BLOCKS].map((tag) => [tag, mentionBlock(tag)]),
   ),
@@ -446,19 +569,35 @@ function AttachmentImage({
   );
 }
 
-/**
- * A read-only checklist box: a drawn glyph, a tick on the recessed fill when
- * done and a ring when not, never a disabled-looking control (detA DS-08).
- */
 function CheckGlyph({
   type,
   checked,
 }: { type?: string | undefined; checked?: boolean | undefined } & ExtraProps) {
+  const control = useContext(TaskControl);
   if (type !== "checkbox") return null;
+  const checkedMark = checked ? "" : undefined;
+  if (control)
+    return (
+      <button
+        type="button"
+        className="markdown-check"
+        data-checked={checkedMark}
+        role="checkbox"
+        aria-checked={Boolean(checked)}
+        aria-label={control.name}
+        onClick={(event) => {
+          event.stopPropagation();
+          control.toggle();
+        }}
+      >
+        <Check aria-hidden="true" />
+      </button>
+    );
+
   return (
     <span
       className="markdown-check"
-      data-checked={checked ? "" : undefined}
+      data-checked={checkedMark}
       role="img"
       aria-label={checked ? "Done" : "Not done"}
     >
@@ -569,6 +708,8 @@ export function MarkdownDocument({
   attachmentCards = false,
   headings,
   folding,
+  ranges,
+  renderRange,
 }: {
   source: string;
   select?: ((reference: string) => void) | undefined;
@@ -585,9 +726,13 @@ export function MarkdownDocument({
   headings?: readonly OutlineHeading[] | undefined;
   /** Folds hide the sections named here and give each foldable heading its chevron. */
   folding?: SectionFolding | undefined;
+  /** Group top-level blocks at these source offsets. */
+  ranges?: readonly MarkdownBlockRange[] | undefined;
+  renderRange?: RenderBlockRange | undefined;
 }) {
   const currentSource = useRef(source);
   const recovery = useDraftRecovery();
+  const statusLine = useStatusLine();
   const replacementHistory = useRef<string | null>(null);
   useEffect(
     () => () => {
@@ -599,6 +744,23 @@ export function MarkdownDocument({
   useLayoutEffect(() => {
     currentSource.current = source;
   }, [source]);
+  async function changeTaskMarker(
+    start: number,
+    end: number,
+    checked: boolean,
+  ) {
+    if (!onChange || currentSource.current !== source) return;
+    const next =
+      source.slice(0, start) + (checked ? "x" : " ") + source.slice(end);
+    try {
+      await onChange(next, new AbortController().signal);
+    } catch {
+      statusLine.show({
+        tone: "error",
+        message: "Couldn't change checklist item",
+      });
+    }
+  }
   function replacement(node: ExtraProps["node"], uri: string) {
     const start = node?.position?.start.offset;
     const end = node?.position?.end.offset;
@@ -647,18 +809,18 @@ export function MarkdownDocument({
             ? [...remarkPlugins, [chunkFade, chunkStarts]]
             : remarkPlugins
         }
-        rehypePlugins={
-          attachmentCards
-            ? [[attachmentOrder, mentions], cardGaps]
-            : [[attachmentOrder, mentions]]
-        }
+        rehypePlugins={[
+          [attachmentOrder, mentions],
+          ...(attachmentCards ? [cardGaps] : []),
+          ...(ranges ? [[blockRanges, ranges] satisfies Pluggable] : []),
+        ]}
         urlTransform={urlTransform}
         components={components}
       >
         {source}
       </ReactMarkdown>
     ),
-    [source, chunkStarts, mentions, attachmentCards],
+    [source, chunkStarts, mentions, attachmentCards, ranges],
   );
   const anchors = useMemo(
     () => headings && new Map(headings.map((h) => [h.offset, h])),
@@ -679,7 +841,13 @@ export function MarkdownDocument({
                 <AttachmentReplacement.Provider value={replacement}>
                   <AttachmentCards.Provider value={attachmentCards}>
                     <AttachmentPlace.Provider value={place}>
-                      {rendered}
+                      <BlockRangeRenderer.Provider value={renderRange ?? null}>
+                        <ChangeTaskMarker.Provider
+                          value={onChange ? changeTaskMarker : null}
+                        >
+                          {rendered}
+                        </ChangeTaskMarker.Provider>
+                      </BlockRangeRenderer.Provider>
                     </AttachmentPlace.Provider>
                   </AttachmentCards.Provider>
                 </AttachmentReplacement.Provider>

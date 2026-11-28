@@ -13,7 +13,7 @@ use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
 use crate::harnesses::{HARNESS_DESCRIPTORS, UnattendedSupport, descriptor};
-use crate::{Error, Status, Workspace, document_links, inbox::LOCAL_PERSON, source};
+use crate::{Error, Status, Workspace, document_links, history, inbox::LOCAL_PERSON, source};
 
 /// The record kinds that each have their own sync file, in an order that applies a
 /// relationship's target before its owner where the kinds allow it.
@@ -2052,8 +2052,21 @@ impl Apply<'_> {
         }
         let (schema, _) = shape(Block::Record(record.kind), LATEST_FILE_FORMAT);
         for name in schema.map(|field| field.0).chain(["body"]) {
-            if present(&current.fields, name) != present(&record.fields, name) {
+            let before = present(&current.fields, name);
+            let after = present(&record.fields, name);
+            if before != after {
                 self.write(name)?;
+                if let (
+                    SyncKind::Ticket,
+                    "status",
+                    false,
+                    Some(SyncValue::Text(from)),
+                    Some(SyncValue::Text(to)),
+                ) = (record.kind, name, created, before, after)
+                {
+                    // A review decision on this device is tied to one status history row.
+                    history::insert(c, &record.id, "status", from, to, None)?;
+                }
             }
         }
         if record.kind == SyncKind::Ticket
@@ -2193,9 +2206,10 @@ impl Workspace {
     /// that cannot be applied changes nothing.
     ///
     /// A relationship to a record that is not here yet is skipped and returned; apply
-    /// the same record again once that record has arrived. No history or inbox entry
-    /// is recorded, and the rules for edits made on this device (Trash, archived Plans and Projects,
-    /// external ownership, dependency loops) do not apply: the record is taken as it is.
+    /// the same record again once that record has arrived. A status change on an existing
+    /// ticket advances its device-local status history for review decisions. Sync takes
+    /// the record as it is, bypassing Inbox delivery and the rules for edits made on this
+    /// device (Trash, archived Plans and Projects, external ownership, dependency loops).
     pub fn apply_sync_record(&mut self, record: &SyncRecord) -> Result<Vec<MissingTarget>, Error> {
         record.validate()?;
         record.validate_agent_command_policy()?;

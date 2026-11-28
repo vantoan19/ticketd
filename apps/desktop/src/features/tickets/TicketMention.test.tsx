@@ -49,6 +49,7 @@ afterEach(() => {
   vi.unstubAllGlobals();
   bridge.invoke.mockReset();
   listStamp = 0;
+  localStorage.clear();
 });
 
 const ticket = (reference: string, body: string, trashed = false): Ticket => ({
@@ -114,17 +115,25 @@ function setUp(showTicket: (reference: string) => Promise<Ticket>) {
           return show(args?.reference ?? "");
         case "ticket_backlinks":
           return args?.reference === "T-KQ1"
-            ? [
-                {
-                  source_reference: "T-KQ2",
-                  source_title: "Source",
-                  activity_id: null,
-                  reported_at: null,
-                  passage: "Blocked on T-KQ1 today.",
-                  ...span,
-                },
-              ]
-            : [];
+            ? {
+                total: 1,
+                items: [
+                  {
+                    reference: "T-KQ2",
+                    title: "Source",
+                    status: "Todo",
+                    mentioned_at: "2026-10-31T10:00:00Z",
+                    passages: [
+                      {
+                        activity_id: null,
+                        passage: "Blocked on T-KQ1 today.",
+                        ...span,
+                      },
+                    ],
+                  },
+                ],
+              }
+            : { items: [], total: 0 };
         case "find_tickets_with_updates":
           // Something else changed in the workspace, as a real edit would show.
           return listStamp > 0
@@ -166,7 +175,12 @@ async function followBacklink() {
   act(() => api.select("T-KQ2"));
   await screen.findByText(passage);
   act(() => api.select("T-KQ1"));
-  fireEvent.click(await screen.findByRole("button", { name: /Source/ }));
+  fireEvent.click(
+    await screen.findByRole("button", { name: /Mentioned in 1 ticket/ }),
+  );
+  fireEvent.click(
+    await screen.findByRole("button", { name: /Blocked on T-KQ1 today/ }),
+  );
 }
 
 test("a mention waits for the fresh body, so a stale cache neither misses nor loses the highlight", async () => {
@@ -191,7 +205,12 @@ test("a mention waits for the fresh body, so a stale cache neither misses nor lo
   // A CLI edit changes the body while T-KQ2 is hidden, and the poll has not
   // noticed yet: following the mention still judges it against a fresh read.
   fresh = true;
-  fireEvent.click(await screen.findByRole("button", { name: /Source/ }));
+  fireEvent.click(
+    await screen.findByRole("button", { name: /Mentioned in 1 ticket/ }),
+  );
+  fireEvent.click(
+    await screen.findByRole("button", { name: /Blocked on T-KQ1 today/ }),
+  );
   // The cached body is on screen, but nothing is revealed or reported yet.
   expect(marked()).toBeNull();
   expect(document.querySelector("[id^=mention-note]")?.textContent).toBe("");
@@ -228,7 +247,12 @@ test("a mention waits for the fresh body when a reported change has made the cac
   // its cached copy is stale, and not read again until it is shown.
   fresh = true;
   await act(async () => signal.change());
-  fireEvent.click(await screen.findByRole("button", { name: /Source/ }));
+  fireEvent.click(
+    await screen.findByRole("button", { name: /Mentioned in 1 ticket/ }),
+  );
+  fireEvent.click(
+    await screen.findByRole("button", { name: /Blocked on T-KQ1 today/ }),
+  );
   expect(marked()).toBeNull();
   await act(async () => release());
   await waitFor(() =>

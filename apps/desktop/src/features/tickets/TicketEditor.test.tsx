@@ -152,6 +152,29 @@ test("reading, selection, focus and editor mode changes preserve source without 
   expect(bridge.invoke).not.toHaveBeenCalled();
 });
 
+test("clicking checklist text saves only that marker without opening the editor", async () => {
+  vi.useFakeTimers();
+  const body =
+    "\uFEFFIntro 😀\r\n\r\n3) [ ] Ship **the change**\r\n   - [X] Keep this checked\r\n";
+  const next =
+    "\uFEFFIntro 😀\r\n\r\n3) [x] Ship **the change**\r\n   - [X] Keep this checked\r\n";
+  const ticket = { ...initial, body };
+  bridge.invoke.mockResolvedValue({ ...ticket, body: next });
+  render(<TicketEditor ticket={ticket} onSaved={vi.fn()} />);
+
+  fireEvent.click(screen.getByText("the change"));
+
+  expect(screen.queryByRole("button", { name: "Done editing" })).toBeNull();
+  expect(
+    screen.getByRole("checkbox", { name: "Ship the change", checked: true }),
+  ).toBeTruthy();
+  await autosave();
+  expect(bridge.invoke).toHaveBeenCalledExactlyOnceWith("change_ticket", {
+    reference: "T-KQ1",
+    patch: { body: next, expected_body: body },
+  });
+});
+
 test("keeps a failed Unicode rich draft visible and retries only the description patch", async () => {
   vi.useFakeTimers();
   const ticket = { ...initial, body: "# Xin chào\n\n- [ ] Second line 🌿" };
@@ -168,7 +191,9 @@ test("keeps a failed Unicode rich draft visible and retries only the description
   expect(screen.getByRole("alert").textContent).toContain(
     "The result couldn't be confirmed",
   );
-  expect(screen.getByRole("img", { name: "Done" })).toBeTruthy();
+  expect(
+    screen.getByRole("checkbox", { name: "Second line 🌿", checked: true }),
+  ).toBeTruthy();
   rerender(
     <TicketEditor
       ticket={{ ...ticket, title: "External title" }}
@@ -374,6 +399,37 @@ test("a description mention is scrolled to, highlighted and focused in place, th
   ).toBe(false);
 });
 
+test("a mention opens its fold again only on a fresh follow after manual collapse", () => {
+  const line = "Blocked on T-KQ1 until Friday.";
+  const body = [
+    "Introduction. ".repeat(88),
+    "## Blockers",
+    line,
+    "Details. ".repeat(190),
+  ].join("\n\n");
+  const { ticket, view } = renderMention(body, line);
+  const fold = screen.getByRole("button", {
+    name: "1 more section: Blockers",
+  });
+  expect(fold.getAttribute("aria-expanded")).toBe("true");
+
+  fireEvent.click(fold);
+  expect(fold.getAttribute("aria-expanded")).toBe("false");
+
+  view.rerender(
+    <TicketEditor ticket={ticket} onSaved={vi.fn()} mention={at(body, line)} />,
+  );
+  expect(fold.getAttribute("aria-expanded")).toBe("false");
+  view.rerender(
+    <TicketEditor
+      ticket={ticket}
+      onSaved={vi.fn()}
+      mention={at(body, line, 0, 2)}
+    />,
+  );
+  expect(fold.getAttribute("aria-expanded")).toBe("true");
+});
+
 test("a line with a link marks its own paragraph, not an earlier mention", () => {
   renderMention(
     "Intro: T-KQ1 is the parent.\n\nBlocked on T-KQ1 with [the spec](https://example.com/spec).",
@@ -494,22 +550,22 @@ test("a passage that is gone says so and lands on the description without guessi
   expect(marked()).toBeNull();
 });
 
-test("an empty description has one add affordance and keeps focus when editing ends", async () => {
+test("an empty description shows Add a description with E and returns focus there", async () => {
   render(
     <TicketEditor
-      ticket={{ ...initial, id: "empty-description", body: "" }}
+      ticket={{ ...initial, id: "empty-description", body: " \n " }}
       onSaved={vi.fn()}
     />,
   );
-  expect(
-    screen.getByRole("button", { name: "Add a description…" }),
-  ).toBeTruthy();
+  const add = screen.getByRole("button", { name: "Add a description" });
+  expect(add.textContent).toMatch(/Add a description\s*E/);
+  expect(add.getAttribute("aria-keyshortcuts")).toBe("E");
   expect(screen.queryByRole("group", { name: "Read description" })).toBeNull();
-  fireEvent.click(screen.getByRole("button", { name: "Add a description…" }));
+  fireEvent.keyDown(add, { key: "e" });
   fireEvent.click(screen.getByRole("button", { name: "Done editing" }));
   await waitFor(() =>
     expect(document.activeElement).toBe(
-      screen.getByRole("button", { name: "Add a description…" }),
+      screen.getByRole("button", { name: "Add a description" }),
     ),
   );
 });

@@ -1,22 +1,16 @@
 @import "../../components/ui/surface-roles/tickets-description.css";
 
-/* The state line keeps its place while controls float outside the prose. */
-.ticket-state-row {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  height: 32px;
-  margin-top: 4px;
-  min-width: 0;
-}
-/* A normal local Ticket has no duplicate timestamp row. Save feedback uses
-   the existing description gap, so a save never pushes the prose down. */
-.ticket-state-row[data-floating] {
+/* Title save feedback sits in the description gap without changing its position. */
+.ticket-title-feedback {
   position: relative;
   height: 0;
-  margin-top: 0;
 }
-.ticket-state-row[data-floating] .editor-save-state {
+.ticket-title-feedback .editor-save-state {
+  position: absolute;
+  top: 4px;
+  inset-inline-end: 0;
+}
+.editor-save-state {
   position: absolute;
   top: 4px;
   inset-inline-end: 0;
@@ -54,10 +48,6 @@
    outside the text, and reads at the same size, so no line moves (DS-01). */
 .editor-body .markdown-editor[data-chrome="floating"] {
   margin: -4px -12px -12px;
-}
-.ticket-detail[data-expanded] .editor-body {
-  --text-editor: var(--text-reading);
-  --text-editor-line: var(--text-reading-line);
 }
 .ticket-detail[data-expanded]
   .editor-body
@@ -109,6 +99,7 @@
 .description-add {
   display: flex;
   align-items: center;
+  gap: 8px;
   width: calc(100% + 24px);
   height: 40px;
   margin: -4px -12px 0;
@@ -118,4 +109,31 @@
 .description-edit-control {
   display: inline-flex;
   max-width: 100%;
+}
+
+.ticket-description-fold > .ui-button {
+  width: 100%;
+  min-height: 28px;
+  height: auto;
+  justify-content: flex-start;
+  white-space: normal;
+  text-align: start;
+}
+
+.ticket-description-fold-content > * {
+  margin-block-start: 12px;
+}
+
+.ticket-description-find {
+  position: sticky;
+  inset-block-start: 0;
+  z-index: 1;
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  margin-block-end: 12px;
+}
+
+.ticket-description-find-count {
+  flex: none;
 }

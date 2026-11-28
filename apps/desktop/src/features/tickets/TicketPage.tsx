@@ -1,33 +1,36 @@
-import { TicketCommandPicker } from "./TicketCommandPicker";
-import { useContext } from "react";
-import { IconButton } from "@/components/ui/icon-button";
-import {
-  DropdownMenu,
-  DropdownMenuTrigger,
-  DropdownMenuContent,
-  DropdownMenuItem,
-} from "@/components/ui/dropdown-menu";
-import { TicketCommandContext } from "@/lib/ticket-command-actions";
-import { Tooltip } from "@/components/ui/tooltip";
 import { Alert, AlertActions, AlertDescription } from "@/components/ui/alert";
 import { Button } from "@/components/ui/button";
-import { useLayoutEffect, useRef, useState } from "react";
-import { Plus } from "lucide-react";
+import {
+  useCallback,
+  useEffect,
+  useLayoutEffect,
+  useRef,
+  useState,
+  type ReactNode,
+} from "react";
+import { DropdownMenuItem } from "@/components/ui/dropdown-menu";
 import { Evidence } from "@/features/tickets/Evidence";
-import { Backlinks, type MentionTarget } from "@/features/tickets/Backlinks";
-import { Reminder } from "@/features/tickets/Reminder";
+import type { MentionTarget } from "@/features/tickets/Backlinks";
 import { RailPlacement } from "@/features/tickets/rail-placement";
-import { TicketProperties } from "@/features/tickets/TicketProperties";
-import { LinkedWork, LinkedWorkDialogs } from "@/features/tickets/LinkedWork";
-import { TicketFiles } from "@/features/tickets/TicketFiles";
-import { useLinkedWork } from "@/features/tickets/useLinkedWork";
+import { TicketClosingLine, TicketParentLine } from "./TicketPageLines";
+import { TicketContextLine, TicketBlockersPopover } from "./TicketContextLine";
+import {
+  LinkedWork,
+  LinkedWorkDialogs,
+  type LinkedWorkHandle,
+  type LinkedWorkRowFocus,
+} from "@/features/tickets/LinkedWork";
+import {
+  TicketFiles,
+  type FileAddRequest,
+} from "@/features/tickets/TicketFiles";
+import { useLinkedWork, orderBlockers } from "@/features/tickets/useLinkedWork";
 import { Activity } from "@/features/tickets/Activity";
 import { SourceConversation } from "@/features/tickets/SourceConversation";
-import { MarkdownDocument } from "@/features/markdown/MarkdownDocument";
-import { StatusDot } from "@/components/ui/status-dot";
+import { TicketDescription } from "./TicketDescription";
+import { TicketOutline } from "./TicketOutline";
+import { TicketPeek } from "./TicketPeek";
 import { ReadOnlyTitle, SourceDescription } from "./ReadOnlySource";
-import { formatDateTime, relativeDateTime } from "@/lib/format";
-import { useNow } from "@/lib/use-now";
 import { SourceUnavailableNotice } from "@/features/tickets/SourceUnavailableNotice";
 import { NeedsReviewNotice } from "@/features/sync-review/NeedsReviewNotice";
 import {
@@ -36,47 +39,57 @@ import {
 } from "@/features/automations/TicketRuns";
 import { useTicketRuns } from "@/features/automations/use-ticket-runs";
 import { PublicationNotice } from "@/features/tickets/PublishToSource";
-import {
-  externalSource,
-  sourceReference,
-  sourceState,
-} from "@/features/tickets/ticket-source";
+import { externalSource } from "@/features/tickets/ticket-source";
 import { TicketEditor } from "@/features/tickets/TicketEditor";
-import { useSourcesConfigured } from "@/features/tickets/use-publication-preview";
 import { useTicketTrash } from "@/features/tickets/use-ticket-trash";
 import type { Project } from "@/lib/api/client";
 import { useOpenTicket } from "./open-ticket";
+import { TicketDecisionCard, type DecisionFocus } from "./TicketDecisionCard";
+import {
+  useTicketReviewDecision,
+  type ReadReviewQueue,
+} from "./use-ticket-review-decision";
+import { useTicketSeenTime } from "./ticket-seen-time";
+import { revealTicketDescription } from "./description-navigation";
+import { plural } from "@/lib/format";
 import { useWorkspaceChange } from "@/lib/workspace-change";
 import type { Plan } from "@/lib/api/plans";
+import type { LatestUpdate } from "@/lib/api/progress";
+import { onTicketUpdate } from "./activity-composer-request";
 
 type NoteTarget = { id: string; key: number };
 
-/** The ticket document with its wrapping properties and linked context. */
+/** The ticket document with its properties and linked work. */
 export function TicketPage({
   active,
+  expanded = false,
+  openFromPeek,
+  rail = false,
   swap = false,
   leaving = false,
-  outsideResults = false,
+  reading = active && !leaving,
+  readReviewQueue,
   projects,
   plans,
   select,
-  onOpenGraph,
   noteTarget,
   mention,
   onMention,
 }: {
   /** Only the selected ticket reads its links, evidence, and backlinks. */
   active: boolean;
+  expanded?: boolean;
+  openFromPeek?: (() => void) | undefined;
+  rail?: boolean;
   /** Shown after another open ticket: its document fades up once that one has left. */
   swap?: boolean;
   /** Not the open ticket any more, kept on screen for one exit while it fades out. */
   leaving?: boolean;
-  /** The ticket is not among the list's current results. */
-  outsideResults?: boolean;
+  reading?: boolean;
+  readReviewQueue?: ReadReviewQueue | undefined;
   projects: Project[];
   plans: Plan[];
   select: (reference: string | null) => void;
-  onOpenGraph: () => void;
   noteTarget: NoteTarget | null;
   /** The description mention being followed, once the ticket has been fetched. */
   mention: (MentionTarget & { key: number }) | null;
@@ -88,66 +101,43 @@ export function TicketPage({
   // Readers not yet on the Open Ticket (the source's conversation, rendered
   // Markdown, the editor's conflict check) follow the Workspace's change.
   const revision = useWorkspaceChange();
-  const now = useNow();
-  const openCommand = useContext(TicketCommandContext);
+  const seenTime = useTicketSeenTime(ticket.id, reading);
+  const [representedUpdate, setRepresentedUpdate] =
+    useState<LatestUpdate | null>(null);
   const [updateTarget, setUpdateTarget] = useState<NoteTarget | null>(null);
+  const peeking = Boolean(openFromPeek);
+  const [composer, setComposer] = useState({ peeking, requested: false });
+  if (composer.peeking !== peeking || (!active && composer.requested))
+    setComposer({
+      peeking,
+      requested: active && !peeking && composer.requested,
+    });
+  useEffect(() => {
+    if (!openFromPeek || !active || leaving || ticket.trashed) return;
+    return onTicketUpdate(ticket.reference, () => {
+      setComposer({ peeking: true, requested: true });
+      openFromPeek();
+    });
+  }, [active, leaving, openFromPeek, ticket.reference, ticket.trashed]);
   const work = useLinkedWork();
-  const sourcesConfigured = useSourcesConfigured();
   const trash = useTicketTrash(changed);
-  // A new ticket is calm: empty Subtickets and Evidence fold into one quiet
-  // row of adds under the description, and appear once they have content.
-  const [evidenceCount, setEvidenceCount] = useState<number | null>(null);
   const [evidenceRequest, setEvidenceRequest] = useState(0);
-  const [fileAddTarget, setFileAddTarget] = useState<HTMLSpanElement | null>(
+  const [showEvidenceRequest, setShowEvidenceRequest] = useState(0);
+  const showEvidenceOnExpand = useRef(false);
+  useLayoutEffect(() => {
+    if (openFromPeek || !showEvidenceOnExpand.current) return;
+    showEvidenceOnExpand.current = false;
+    setShowEvidenceRequest((count) => count + 1);
+  }, [openFromPeek]);
+  const [fileAddRequest, setFileAddRequest] = useState<FileAddRequest | null>(
     null,
   );
-  const noSubtickets = work.current?.links?.children_progress.total === 0;
-  const noRelationships =
-    Boolean(work.current?.links) && work.rows.length === 0;
-  const addRow = active && !ticket.trashed && (
-    <div
-      className="ticket-add-row"
-      role="group"
-      aria-label="Add to this ticket"
-    >
-      {noSubtickets && (
-        <Button
-          variant="ghost"
-          size="sm"
-          onClick={() => work.openLink("subticket")}
-        >
-          <Plus aria-hidden="true" />
-          Subticket
-        </Button>
-      )}
-      {noRelationships && (
-        <Button
-          variant="ghost"
-          size="sm"
-          aria-label="Link a ticket"
-          onClick={() => work.openLink("related")}
-        >
-          <Plus aria-hidden="true" />
-          Link
-        </Button>
-      )}
-      {evidenceCount === 0 && (
-        <Button
-          variant="ghost"
-          size="sm"
-          onClick={() => setEvidenceRequest((count) => count + 1)}
-        >
-          <Plus aria-hidden="true" />
-          Evidence
-        </Button>
-      )}
-      <span ref={setFileAddTarget} />
-    </div>
-  );
+  const [addTrigger, setAddTrigger] = useState<HTMLButtonElement | null>(null);
   const ticketRuns = useTicketRuns(ticket.reference, active);
   // Pages stay mounted while hidden and the shared scrollers keep their
   // offset, so showing a ticket starts its document at the top.
   const page = useRef<HTMLDivElement>(null);
+  const readingColumn = useRef<HTMLDivElement>(null);
   useLayoutEffect(() => {
     const content = page.current;
     if (!active || !content) return;
@@ -159,192 +149,187 @@ export function TicketPage({
       if (node) node.scrollTop = 0;
     }
   }, [active]);
-  // The reading column: title, state, description, subtickets, evidence,
-  // backlinks, then notes and history.
   const source = externalSource(ticket);
-  const issueReference = source ? sourceReference(source) : null;
-  const state = source ? sourceState(source) : null;
-  const original =
-    source?.state.category === "duplicate" &&
-    !source.unavailable &&
-    source.duplicate_target?.kind === "external"
-      ? source.duplicate_target
-      : null;
-  const originalLabel =
-    (issueReference?.place ? source?.duplicate_number : undefined) ??
-    original?.display;
-  // The header owns the normal updated time. Only source or exceptional
-  // context needs a line between the property strip and the description.
-  const stateLine =
-    source || sourcesConfigured || ticket.source || outsideResults ? (
-      <p className="ticket-state-line">
-        {source && state ? (
-          <>
-            <span className="ticket-source-state">
-              {state.tone && <StatusDot tone={state.tone} size={10} />}
-              <span>{state.text}</span>
-            </span>
-            {source.unavailable ? (
-              <span>
-                Last synced copy from{" "}
-                {source.last_refreshed_at
-                  ? formatDateTime(source.last_refreshed_at)
-                  : "an earlier sync"}
-              </span>
-            ) : (
-              <>
-                {source.state.category === "open" && (
-                  <span>{issueReference?.label}</span>
-                )}
-                {original && (
-                  <span>
-                    Duplicate of{" "}
-                    <Tooltip content={original.display} side="bottom">
-                      <span className="source-number" tabIndex={0}>
-                        {originalLabel}
-                      </span>
-                    </Tooltip>
-                    {original.last_known && " (last known)"}
-                  </span>
-                )}
-                {source.closed_at && (
-                  <Tooltip
-                    content={formatDateTime(source.closed_at)}
-                    side="bottom"
-                  >
-                    <time dateTime={source.closed_at} tabIndex={0}>
-                      {relativeDateTime(source.closed_at, now)}
-                    </time>
-                  </Tooltip>
-                )}
-              </>
-            )}
-            {/* Part of the last synced copy, so shown while the source is unavailable too. */}
-            {source.author && <span>{source.author}</span>}
-            {source.created_at && (
-              <Tooltip
-                content={formatDateTime(source.created_at)}
-                side="bottom"
-              >
-                <time dateTime={source.created_at} tabIndex={0}>
-                  opened {relativeDateTime(source.created_at, now)}
-                </time>
-              </Tooltip>
-            )}
-          </>
-        ) : sourcesConfigured || ticket.source ? (
-          <span>Local ticket</span>
-        ) : null}
-        {outsideResults && <span>Not in the current results</span>}
-      </p>
-    ) : null;
   // The source owns the title and description, so they are read, never edited.
   const contentLocked = Boolean(source?.content_locked);
-  const attentionFor = (variant: "rail" | "strip") =>
-    active &&
-    !ticket.trashed && (
-      <>
-        <Reminder
-          key={`reminder-${ticket.reference}`}
-          variant={variant}
-          projects={projects}
-          plans={plans}
-        />
-      </>
-    );
+  const linked = useRef<HTMLDivElement>(null);
+  const linkedWork = useRef<LinkedWorkHandle>(null);
+  const linkedFocus = useRef<LinkedWorkRowFocus | null>(null);
+  const watchLinkedLayout = useCallback((node: HTMLElement | null) => {
+    if (!node) return;
+    return () => {
+      const focused = document.activeElement;
+      const row = focused?.closest<HTMLElement>(".reference-row");
+      const { kind, reference } = row?.dataset ?? {};
+      if (node.contains(focused) && kind && reference) {
+        linkedFocus.current = {
+          kind,
+          reference,
+          action: Boolean(focused?.closest(".reference-row-action")),
+        };
+      }
+    };
+  }, []);
+  const watchLinkedColumn = useCallback(
+    (node: HTMLDivElement | null) => {
+      linked.current = node;
+      const capture = watchLinkedLayout(node);
+      return () => {
+        capture?.();
+        linked.current = null;
+      };
+    },
+    [watchLinkedLayout],
+  );
+  useLayoutEffect(() => {
+    const focus = linkedFocus.current;
+    linkedFocus.current = null;
+    if (focus && active && !leaving && page.current)
+      linkedWork.current?.restoreRowFocus(focus, page.current);
+  }, [active, leaving, rail]);
+  const parentRow = work.rows.find((row) => row.kind === "parent");
+  const parent = work.current?.links ? parentRow : ticket.parent;
   const files = active && (
     <TicketFiles
       key={ticket.reference}
       onOpenUpdate={(id) => setUpdateTarget({ id, key: Date.now() })}
-      emptyTarget={fileAddTarget}
+      expanded={expanded}
+      addRequest={fileAddRequest}
+      hideEmpty
+      addTrigger={addTrigger}
     />
   );
-  const relationships = active && (
-    <LinkedWork work={work} select={select} onOpenGraph={onOpenGraph} document>
-      <Backlinks select={onMention} />
-    </LinkedWork>
-  );
   const runs = active && <TicketRunsSection runs={ticketRuns.runs} />;
-  // One property strip for every document width.
-  const [reminderOpen, setReminderOpen] = useState(false);
-  const blockedReferences = work.current?.links
-    ? work.rows
-        .filter((row) => row.kind === "blocked_by" && row.unresolved)
-        .map((row) => row.reference)
-    : ticket.prerequisites
-        .filter((item) => item.unresolved && !item.trashed)
-        .map((item) => item.reference);
-  const strip = (
-    <TicketProperties
-      layout="strip"
-      attention={attentionFor("strip")}
-      ticket={ticket}
-      active={active && !opening}
+  const blockerCount = orderBlockers(work).filter(
+    (row) => row.unresolved,
+  ).length;
+  const properties = (subtickets?: ReactNode) => (
+    <TicketContextLine
+      rail={rail}
+      subtickets={subtickets}
       projects={projects}
       plans={plans}
-      onSaved={changed}
-      refresh={changed}
-      onOpenTicket={select}
-      onOpenNote={(id) => setUpdateTarget({ id, key: Date.now() })}
-    >
-      {active && !ticket.trashed && (
+      work={work}
+      select={select}
+      addTriggerRef={setAddTrigger}
+      additionalActions={
         <>
-          {blockedReferences.length > 0 && (
-            <Button
-              variant="ghost"
-              size="sm"
-              onClick={() => work.openLink("blocked_by")}
-            >
-              <Plus aria-hidden="true" />
-              Blocked by {blockedReferences.join(", ")}
-            </Button>
-          )}
-          <TicketCommandPicker
-            ticket={ticket}
-            projects={projects}
-            plans={plans}
-            refresh={changed}
-            scope="Reminder"
-            open={reminderOpen}
-            onOpenChange={setReminderOpen}
-            anchorOnly
+          <DropdownMenuItem
+            onSelect={() => setEvidenceRequest((count) => count + 1)}
+          >
+            Evidence…
+          </DropdownMenuItem>
+          <DropdownMenuItem
+            onSelect={() =>
+              setFileAddRequest({ kind: "file", key: Date.now() })
+            }
+          >
+            File…
+          </DropdownMenuItem>
+          <DropdownMenuItem
+            onSelect={() =>
+              setFileAddRequest({ kind: "document", key: Date.now() })
+            }
+          >
+            Document…
+          </DropdownMenuItem>
+        </>
+      }
+      onOpenSubtickets={() => {
+        linkedWork.current?.openSubtickets();
+        linked.current?.scrollIntoView({ block: "start" });
+      }}
+    />
+  );
+  const reviewDecision = useTicketReviewDecision(
+    active && !leaving,
+    readReviewQueue,
+  );
+  // Expanding the peek remounts the card even when its decision is pending.
+  const decisionFocusRef = useRef<DecisionFocus | null>(null);
+  useLayoutEffect(() => {
+    if (!active || leaving) return;
+    const follow = (event: FocusEvent) => {
+      const origin = decisionFocusRef.current;
+      if (!origin || origin.moved || event.target === origin.element) return;
+      // Expanding the peek focuses this pane's non-tabbable reference heading
+      // while the outgoing board can still be mounted during its transition.
+      const heading = page.current
+        ?.closest(".ticket-detail")
+        ?.querySelector("#detail-heading");
+      if (heading && event.target === heading) {
+        origin.element = heading;
+      } else {
+        origin.moved = true;
+      }
+    };
+    document.addEventListener("focusin", follow);
+    return () => {
+      document.removeEventListener("focusin", follow);
+      decisionFocusRef.current = null;
+    };
+  }, [active, leaving]);
+  const decisionCard = (
+    <TicketDecisionCard
+      active={active && !leaving}
+      seenTime={seenTime}
+      onRepresentedUpdate={setRepresentedUpdate}
+      reviewDecision={reviewDecision}
+      decisionFocusRef={decisionFocusRef}
+      blockerCount={blockerCount}
+      blockers={
+        blockerCount > 0 ? (
+          <TicketBlockersPopover
+            work={work}
+            select={select}
             trigger={
-              <DropdownMenu>
-                <DropdownMenuTrigger asChild>
-                  <IconButton label="Add ticket property" size="icon-compact">
-                    <Plus />
-                  </IconButton>
-                </DropdownMenuTrigger>
-                <DropdownMenuContent
-                  align="end"
-                  onCloseAutoFocus={(event) => {
-                    if (reminderOpen) event.preventDefault();
-                  }}
-                >
-                  {openCommand && (
-                    <DropdownMenuItem onSelect={() => setReminderOpen(true)}>
-                      Reminder
-                    </DropdownMenuItem>
-                  )}
-                  <DropdownMenuItem
-                    onSelect={() => work.openLink("blocked_by")}
-                  >
-                    Blocked by
-                  </DropdownMenuItem>
-                  <DropdownMenuItem onSelect={() => work.openLink("parent")}>
-                    Parent
-                  </DropdownMenuItem>
-                  <DropdownMenuItem onSelect={() => work.openLink("related")}>
-                    Link
-                  </DropdownMenuItem>
-                </DropdownMenuContent>
-              </DropdownMenu>
+              <Button variant="attention" size="compact">
+                {plural(blockerCount, "blocker")} still open
+              </Button>
             }
           />
-        </>
-      )}
-    </TicketProperties>
+        ) : null
+      }
+      doneFallback={<TicketClosingLine />}
+      onOpenUpdate={(id) => {
+        setUpdateTarget({ id, key: Date.now() });
+        openFromPeek?.();
+      }}
+      onEvidence={() => {
+        if (openFromPeek) {
+          showEvidenceOnExpand.current = true;
+          openFromPeek();
+        } else setShowEvidenceRequest((count) => count + 1);
+      }}
+      select={select}
+      onAcceptance={() => revealTicketDescription(ticket.id, "acceptance")}
+    />
   );
+  const context = (
+    <>
+      {!rail && properties()}
+      {decisionCard}
+    </>
+  );
+  if (openFromPeek) {
+    return (
+      <div
+        ref={page}
+        className="detail-content"
+        hidden={!active && !leaving}
+        inert={opening || leaving}
+        aria-busy={opening}
+        data-swap={swap || undefined}
+        data-fresh={fresh || undefined}
+        data-leaving={leaving || undefined}
+      >
+        {active && !ticket.trashed && <LinkedWorkDialogs work={work} />}
+        <TicketPeek select={select} revision={revision} onOpen={openFromPeek}>
+          {decisionCard}
+        </TicketPeek>
+      </div>
+    );
+  }
   return (
     <div
       ref={page}
@@ -356,11 +341,12 @@ export function TicketPage({
       data-fresh={fresh || undefined}
       data-leaving={leaving || undefined}
       data-trashed={ticket.trashed || undefined}
+      data-rail={rail || undefined}
     >
       {/* Mounted here, not inside the rail or the narrow layout, so crossing
           the breakpoint never remounts an open review and drops its state. */}
       {active && !ticket.trashed && <LinkedWorkDialogs work={work} />}
-      <div className="detail-document">
+      <div className="detail-document" ref={readingColumn}>
         {/* One notice for the whole state; the header and rail keep their shape. */}
         {ticket.trashed && (
           <Alert size="compact" role="status" className="mb-6">
@@ -387,15 +373,24 @@ export function TicketPage({
         )}
         {active && <PublicationNotice ticket={ticket} refresh={changed} />}
         {active && <RunNotices {...ticketRuns} />}
+        {parent && (
+          <TicketParentLine
+            parent={parent}
+            select={select}
+            {...(!rail &&
+              parentRow &&
+              !ticket.trashed &&
+              !work.pending && { onRemove: () => void work.remove(parentRow) })}
+          />
+        )}
         {ticket.trashed || contentLocked ? (
           <>
             {source && contentLocked ? (
               <ReadOnlyTitle title={ticket.title} source={source} />
             ) : (
-              <h3 className="detail-title">{ticket.title}</h3>
+              <h1 className="detail-title">{ticket.title}</h1>
             )}
-            {strip}
-            {stateLine}
+            {context}
             <div className="editor-body">
               {source && contentLocked ? (
                 <SourceDescription
@@ -403,13 +398,15 @@ export function TicketPage({
                   source={source}
                   select={select}
                   revision={revision}
+                  refresh={changed}
                 />
               ) : (
                 <>
                   <p className="sr-only">Description</p>
                   <div className="markdown-preview description-document">
                     {ticket.body.trim() ? (
-                      <MarkdownDocument
+                      <TicketDescription
+                        ticketId={ticket.id}
                         source={ticket.body}
                         select={select}
                         revision={revision}
@@ -430,21 +427,31 @@ export function TicketPage({
             select={select}
             revision={revision}
             mention={mention}
-            stateLine={stateLine}
           >
-            {strip}
+            {context}
           </TicketEditor>
         )}
-        {addRow}
-        <RailPlacement value="column">
-          <div className="detail-connected">{relationships}</div>
-        </RailPlacement>
+        {!rail && (
+          <RailPlacement value="column">
+            <div ref={watchLinkedColumn} className="detail-connected">
+              {active && (
+                <LinkedWork
+                  ref={linkedWork}
+                  work={work}
+                  select={select}
+                  onMention={onMention}
+                />
+              )}
+            </div>
+          </RailPlacement>
+        )}
         {active && (
           <Evidence
             trashed={ticket.trashed}
             folded
             addRequest={evidenceRequest}
-            onCount={setEvidenceCount}
+            showRequest={showEvidenceRequest}
+            addTrigger={addTrigger}
           />
         )}
         {
@@ -477,10 +484,37 @@ export function TicketPage({
           trashed={ticket.trashed}
           select={select}
           foldEmpty
+          composeOnOpen={composer.requested}
           latestNoteId={ticket.latest_update?.activity_id}
+          representedUpdate={representedUpdate}
+          seenTime={seenTime}
           sourceName={source?.provider_name}
         />
       </div>
+      {rail && (
+        <aside
+          ref={watchLinkedLayout}
+          className="ticket-detail-rail"
+          aria-label="Ticket details"
+        >
+          {active ? (
+            <LinkedWork
+              ref={linkedWork}
+              work={work}
+              select={select}
+              onMention={onMention}
+              railLead={(subtickets) => (
+                <>
+                  {properties(subtickets)}
+                  <TicketOutline column={readingColumn} ticketId={ticket.id} />
+                </>
+              )}
+            />
+          ) : (
+            properties()
+          )}
+        </aside>
+      )}
     </div>
   );
 }

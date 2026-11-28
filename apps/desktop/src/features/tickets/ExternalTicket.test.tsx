@@ -10,7 +10,11 @@ import {
   within,
 } from "@testing-library/react";
 import { afterEach, expect, test, vi } from "vitest";
-import { client, type Ticket, type TicketSource } from "@/lib/api/client";
+import {
+  type ConversationEntry,
+  type Ticket,
+  type TicketSource,
+} from "@/lib/api/client";
 import { SourceFilter } from "./SourceFilter";
 import { SourceDescription } from "./ReadOnlySource";
 import { TicketDetails } from "./TicketDetails";
@@ -394,16 +398,13 @@ test("an externally owned description is a read-only source card without editing
   ).toBeTruthy();
   expect(screen.queryByRole("textbox", { name: /title/i })).toBeNull();
   expect(screen.queryByRole("button", { name: "Edit description" })).toBeNull();
-  expect(
-    screen.getByText("GitHub: Open").closest(".ticket-state-line")?.textContent,
-  ).toContain("#98");
-  // The document's source state line replaces the old duplicate rail link.
+  expect(screen.getAllByText("GitHub issue")).toHaveLength(1);
+  expect(within(card).getByText("Open")).toBeTruthy();
+  expect(screen.getAllByText("Open")).toHaveLength(1);
+  expect(screen.queryByText("GitHub: Open")).toBeNull();
   expect(
     screen.getByRole("link", { name: /acme.*api.*#98/ }).getAttribute("href"),
   ).toBe("https://github.com/acme/api/issues/98");
-  expect(
-    screen.getByText(/Only in ticketd · never sent to GitHub/),
-  ).toBeTruthy();
   fireEvent.click(screen.getByRole("button", { name: ticket().title }));
   expect(screen.getByText("GitHub owns this title.")).toBeTruthy();
   fireEvent.keyDown(document, { key: "Escape" });
@@ -411,9 +412,121 @@ test("an externally owned description is a read-only source card without editing
   expect(screen.getByText("GitHub owns this description.")).toBeTruthy();
 });
 
-test("an open state line names who opened the issue and when", () => {
+test.each([3, 4])(
+  "a GitHub conversation with %i comments keeps its source order when read",
+  async (count) => {
+    const comments: ConversationEntry[] = Array.from(
+      { length: count },
+      (_, index) => ({
+        type: "comment",
+        id: String(index + 1),
+        author: "alice",
+        body: `Comment ${index + 1} body`,
+        url: `https://github.com/acme/api/issues/98#issuecomment-${index + 1}`,
+        created_at: `2026-01-0${index + 1}T00:00:00Z`,
+        edited_at: null,
+      }),
+    );
+    const assigned: ConversationEntry = {
+      type: "event",
+      id: "assigned",
+      event: "assigned",
+      actor: "bob",
+      subject: "carol",
+      created_at: "2026-01-02T12:00:00Z",
+    };
+    bridge.invoke.mockImplementation(async (command: string) =>
+      command === "source_conversation"
+        ? [...comments.slice(0, 2), assigned, ...comments.slice(2)]
+        : [],
+    );
+    render(<DetailsFixture value={ticket()} />);
+    const conversation = within(
+      await screen.findByRole("region", { name: "Conversation on GitHub" }),
+    );
+    await conversation.findByRole("heading", {
+      name: `GitHub conversation ${count}`,
+    });
+    expect(conversation.getByText("Comment 1 body")).toBeTruthy();
+    expect(conversation.getByText(`Comment ${count} body`)).toBeTruthy();
+    expect(conversation.getByText(/assigned carol on GitHub/)).toBeTruthy();
+
+    if (count === 4) {
+      expect(conversation.queryByText("Comment 2 body")).toBeNull();
+      expect(conversation.queryByText("Comment 3 body")).toBeNull();
+      const fold = conversation.getByRole("button", {
+        name: "2 more comments",
+        expanded: false,
+      });
+      fireEvent.click(fold);
+      expect(
+        conversation.getByRole("button", {
+          name: "2 more comments",
+          expanded: true,
+        }),
+      ).toBe(fold);
+    } else {
+      expect(
+        conversation.queryByRole("button", { name: /more comments/ }),
+      ).toBeNull();
+    }
+
+    const second = conversation.getByText("Comment 2 body");
+    const third = conversation.getByText("Comment 3 body");
+    const assignedText = conversation.getByText(/assigned carol on GitHub/);
+    expect(
+      second.compareDocumentPosition(assignedText) &
+        Node.DOCUMENT_POSITION_FOLLOWING,
+    ).toBeTruthy();
+    expect(
+      assignedText.compareDocumentPosition(third) &
+        Node.DOCUMENT_POSITION_FOLLOWING,
+    ).toBeTruthy();
+  },
+);
+
+test.each([
+  {
+    owner: "GitHub",
+    ticketSource: source(),
+    prompt: "Write an update · not posted to GitHub",
+  },
+  { owner: "Local", ticketSource: null, prompt: "Write an update…" },
+])(
+  "$owner ticket shows where an Activity update goes in the composer",
+  async ({ ticketSource, prompt }) => {
+    bridge.invoke.mockImplementation(async (command: string) =>
+      command === "activity_feed"
+        ? [
+            {
+              type: "authored",
+              activity: {
+                id: "existing",
+                ticket_id: "1",
+                brief: "An existing update",
+                reported_at: "2026-01-04T00:00:00Z",
+                updated_at: "2026-01-04T00:00:00Z",
+                editing_agent: null,
+                supporting_document_id: null,
+              },
+            },
+          ]
+        : [],
+    );
+    render(<DetailsFixture value={ticket({ source: ticketSource })} />);
+    await screen.findByText("An existing update");
+    const activity = within(screen.getByRole("region", { name: "Activity" }));
+    fireEvent.click(activity.getByRole("button", { name: prompt }));
+    const editor = await activity.findByRole("textbox", {
+      name: "New update rich text",
+    });
+    expect(editor.getAttribute("aria-placeholder")).toBe(prompt);
+  },
+);
+
+test("the source description names who opened the issue and when", () => {
   bridge.invoke.mockResolvedValue([]);
-  const openedAt = new Date(Date.now() - 2 * 1440 * 60_000).toISOString();
+  const openedAt = "2026-02-01T15:00:00Z";
   render(
     <DetailsFixture
       value={ticket({
@@ -421,27 +534,36 @@ test("an open state line names who opened the issue and when", () => {
       })}
     />,
   );
-  const line = screen.getByText("GitHub: Open").closest(".ticket-state-line");
-  expect(line?.textContent).toContain("#98");
-  expect(within(line as HTMLElement).getByText("alice")).toBeTruthy();
+  const card = screen.getByRole("region", {
+    name: "Description from GitHub, read-only",
+  });
+  expect(card.textContent).toContain("opened ");
+  expect(card.textContent).toContain(" by alice");
   expect(
-    within(line as HTMLElement)
-      .getByText("opened 2 d ago")
+    within(card)
+      .getByText(
+        new Date(openedAt).toLocaleDateString(undefined, {
+          dateStyle: "medium",
+        }),
+      )
       .getAttribute("datetime"),
   ).toBe(openedAt);
 });
 
-test("a ticket imported before the author was stored shows neither until a refresh", () => {
+test("a description without original author data still shows the source state", () => {
   bridge.invoke.mockResolvedValue([]);
   render(<DetailsFixture value={ticket()} />);
-  const line = screen.getByText("GitHub: Open").closest(".ticket-state-line");
-  expect(line?.textContent).not.toContain("opened");
+  const card = screen.getByRole("region", {
+    name: "Description from GitHub, read-only",
+  });
+  expect(within(card).getByText("Open")).toBeTruthy();
+  expect(card.textContent).not.toContain("opened");
 });
 
-test("an unavailable source still names who opened the issue and when", () => {
+test("an unavailable issue shows its last synced author and opening date", () => {
   bridge.invoke.mockResolvedValue([]);
-  const openedAt = new Date(Date.now() - 2 * 1440 * 60_000).toISOString();
-  const { container } = render(
+  const openedAt = "2026-02-01T15:00:00Z";
+  render(
     <DetailsFixture
       value={ticket({
         source: source({
@@ -456,71 +578,46 @@ test("an unavailable source still names who opened the issue and when", () => {
       })}
     />,
   );
-  const line = container.querySelector(".ticket-state-line") as HTMLElement;
-  expect(line.textContent).toContain("Source unavailable");
-  expect(line.textContent).toContain("Last synced copy from");
-  expect(within(line).getByText("alice")).toBeTruthy();
+  const card = screen.getByRole("region", {
+    name: "Description from GitHub, read-only",
+  });
+  expect(within(card).getByText("Source unavailable")).toBeTruthy();
+  expect(card.textContent).toContain(" by alice");
   expect(
-    within(line).getByText("opened 2 d ago").getAttribute("datetime"),
+    within(card)
+      .getByText(
+        new Date(openedAt).toLocaleDateString(undefined, {
+          dateStyle: "medium",
+        }),
+      )
+      .getAttribute("datetime"),
   ).toBe(openedAt);
 });
 
-test("a closed state line uses the core's closure time and names its canonical issue", async () => {
+test("an externally completed issue shows its closure time above its description", () => {
   bridge.invoke.mockResolvedValue([]);
   const closedAt = new Date(Date.now() - 210 * 60_000).toISOString();
-  const value = ticket({
-    status: "Duplicate",
-    source: source({
-      state: { category: "duplicate", name: "Closed" },
-      status_locked: true,
-      closed_at: closedAt,
-      duplicate_number: "#99",
-      duplicate_target: {
-        kind: "external",
-        identity: { provider: "github", id: "99" },
-        locator: "acme/api#99",
-        display: "acme/api#99",
-      },
-    }),
-  });
-  bridge.invoke.mockResolvedValueOnce(value);
-  const shown = await client.showTicket(value.reference);
-  const { container, rerender } = render(<DetailsFixture value={shown} />);
-  const line = container.querySelector(".ticket-state-line")!;
-  expect(line.textContent).toContain("GitHub: Closed (duplicate)");
-  expect(line.textContent).toContain("Duplicate of #99");
-  const time = line.querySelector("time")!;
-  expect(time.dateTime).toBe(closedAt);
-  expect(time.textContent).toBe("3 h ago");
-  rerender(
+  render(
     <DetailsFixture
       value={ticket({
         status: "Done",
         source: source({
           state: { category: "completed", name: "Closed" },
+          closed_at: closedAt,
           status_locked: true,
-          closed_at: null,
         }),
       })}
     />,
   );
-  // The last refresh time is never used as a substitute for an unknown closure.
-  expect(container.querySelector(".ticket-state-line time")).toBeNull();
-  rerender(
-    <DetailsFixture
-      value={{
-        ...value,
-        source: {
-          ...value.source!,
-          unavailable: { code: "not_found", message: "gone", since: closedAt },
-        },
-      }}
-    />,
-  );
+  const card = screen.getByRole("region", {
+    name: "Description from GitHub, read-only",
+  });
+  expect(within(card).getByText("Closed (completed)")).toBeTruthy();
+  const time = screen.getByText("3 h ago");
+  expect(time.getAttribute("datetime")).toBe(closedAt);
   expect(
-    container.querySelector(".ticket-state-line")?.textContent,
-  ).not.toContain("of #99");
-  expect(container.querySelector(".ticket-state-line time")).toBeNull();
+    time.compareDocumentPosition(card) & Node.DOCUMENT_POSITION_FOLLOWING,
+  ).toBeTruthy();
 });
 
 test("a row shows the owner's pill and a local row shows none", () => {
@@ -555,7 +652,7 @@ test("a row shows the owner's pill and a local row shows none", () => {
   expect(pills[0]?.querySelector("span[aria-hidden]")?.textContent).toBe("#98");
 });
 
-test("a tracker identifier with a team prefix stays readable in the header, state and list", () => {
+test("a tracker identifier with a team prefix stays readable in the header and list", () => {
   const issue = ticket({
     source: source({
       provider: "linear",
@@ -569,7 +666,7 @@ test("a tracker identifier with a team prefix stays readable in the header, stat
       state: { category: "open", name: "In Progress" },
     }),
   });
-  const { container } = render(
+  render(
     <>
       <DetailsFixture value={issue} />
       <SourcePill ticket={issue} />
@@ -578,9 +675,10 @@ test("a tracker identifier with a team prefix stays readable in the header, stat
   expect(
     screen.getByRole("link", { name: "Open on Linear: ENG-42" }),
   ).toBeTruthy();
-  expect(container.querySelector(".ticket-state-line")?.textContent).toContain(
-    "ENG-42",
-  );
+  const description = screen.getByRole("region", {
+    name: "Description from Linear, read-only",
+  });
+  expect(within(description).getByText("In Progress")).toBeTruthy();
   expect(screen.getByText("Owned by Linear, ENG-42")).toBeTruthy();
 });
 
@@ -622,11 +720,11 @@ test("the source filter offers All, GitHub and Local with counts and reports the
 
 test("source wording: location, state and freshness", () => {
   expect(sourceLocation(source())).toBe("acme / api #98");
-  expect(sourceState(source()).text).toBe("GitHub: Open");
+  expect(sourceState(source()).text).toBe("Open");
   expect(
     sourceState(source({ state: { category: "not_planned", name: "Closed" } }))
       .text,
-  ).toBe("GitHub: Closed (not planned)");
+  ).toBe("Closed (not planned)");
   expect(
     sourceState(
       source({
@@ -634,7 +732,7 @@ test("source wording: location, state and freshness", () => {
         state: { category: "open", name: "In development" },
       }),
     ),
-  ).toEqual({ text: "Tracker: In development", tone: "positive" });
+  ).toEqual({ text: "In development", tone: "positive" });
   const now = new Date("2026-02-01T00:04:30Z").getTime();
   expect(freshness(source(), now)).toBe("Synced 4 min ago");
   expect(freshness(source({ last_refreshed_at: null }), now)).toBe(
@@ -689,32 +787,38 @@ test("a local child explains its independent ownership when its parent belongs t
   ).toBeTruthy();
 });
 
-test("a long source description can expand without making the field editable", () => {
-  const height = vi
-    .spyOn(HTMLElement.prototype, "scrollHeight", "get")
-    .mockReturnValue(400);
-  try {
-    render(
-      <SourceDescription
-        ticket={ticket({ body: "## Scope\n\nA long source document." })}
-        source={source()}
-        revision={0}
-        select={vi.fn()}
-      />,
-    );
-    const expand = screen.getByRole("button", {
-      name: "Show full description",
-    });
-    expect(expand.getAttribute("aria-expanded")).toBe("false");
-    fireEvent.click(expand);
-    expect(
-      screen
-        .getByRole("button", { name: "Show less" })
-        .getAttribute("aria-expanded"),
-    ).toBe("true");
-    expect(screen.getByRole("heading", { name: "Scope" })).toBeTruthy();
-    expect(screen.queryByRole("textbox")).toBeNull();
-  } finally {
-    height.mockRestore();
-  }
+test("a long source description opens its named fold without making the field editable", () => {
+  render(
+    <SourceDescription
+      ticket={ticket({
+        body: [
+          "Starting context. ".repeat(56),
+          "## Scope",
+          "Hidden source detail. ".repeat(100),
+          "## Acceptance criteria",
+          "- [ ] Verify",
+        ].join("\n\n"),
+      })}
+      source={source()}
+      revision={0}
+      select={vi.fn()}
+    />,
+  );
+  const fold = screen.getByRole("button", { name: "1 more section: Scope" });
+  expect(fold.getAttribute("aria-expanded")).toBe("false");
+  expect(
+    screen.getByRole("heading", { name: "Acceptance criteria" }),
+  ).toBeTruthy();
+  fireEvent.click(fold);
+  expect(fold.getAttribute("aria-expanded")).toBe("true");
+  expect(screen.getByRole("heading", { name: "Scope" })).toBeTruthy();
+  expect(screen.queryByRole("textbox")).toBeNull();
+  fireEvent.click(screen.getByText("Verify"));
+  expect(screen.getByRole("img", { name: "Not done" })).toBeTruthy();
+  expect(screen.queryByRole("checkbox")).toBeNull();
+  expect(bridge.invoke).not.toHaveBeenCalledWith(
+    "change_ticket",
+    expect.anything(),
+  );
+  fireEvent.click(fold);
 });

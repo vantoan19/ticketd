@@ -751,6 +751,18 @@ async fn a_view_follows_numbered_changes_in_ticketd_terms_and_answers_only_live_
     assert_eq!(again.unwrap_err().code, "stale");
 }
 
+#[test]
+fn a_lost_answer_has_a_distinct_bridge_failure_code() {
+    let failure = ChatFailure::from(HostError::ContactLost);
+    assert_eq!(
+        serde_json::to_value(failure).unwrap(),
+        json!({
+            "code": "contact_lost",
+            "message": HostError::ContactLost.to_string(),
+        }),
+    );
+}
+
 fn command_tool(item: &str, command: &str, status: ToolStatus) -> EventKind {
     EventKind::ToolUpdated {
         turn: turn(),

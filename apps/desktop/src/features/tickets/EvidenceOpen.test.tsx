@@ -23,11 +23,14 @@ vi.mock("@tauri-apps/api/core", () => {
   });
   return {
     invoke: vi.fn(async (command: string) =>
-      command === "list_evidence"
-        ? [
-            item("1", "pull_request", "PR", "https://example.com/pr/1"),
-            item("2", "branch", "Branch", "feature/x"),
-          ]
+      command === "ticket_evidence_page"
+        ? {
+            total: 2,
+            items: [
+              item("1", "pull_request", "PR", "https://example.com/pr/1"),
+              item("2", "branch", "Branch", "feature/x"),
+            ],
+          }
         : undefined,
     ),
   };

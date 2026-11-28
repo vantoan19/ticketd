@@ -6,6 +6,7 @@ import {
   render,
   screen,
   waitFor,
+  within,
 } from "@testing-library/react";
 import { afterEach, beforeEach, expect, test, vi } from "vitest";
 import type { Ticket } from "@/lib/api/client";
@@ -50,7 +51,8 @@ beforeEach(() => {
     if (command === "show_ticket") return ticket;
     if (command === "is_following") return false;
     if (command === "reminder") return null;
-    if (command === "list_evidence") return evidence;
+    if (command === "ticket_evidence_page")
+      return { items: evidence, total: evidence.length };
     return bridgeDefault(command, args as { reference?: string });
   });
 });
@@ -69,7 +71,6 @@ test("a change made by the CLI appears in a section of the open page", async () 
           projects={[]}
           plans={[]}
           select={vi.fn()}
-          onOpenGraph={vi.fn()}
           noteTarget={null}
           mention={null}
           onMention={vi.fn()}
@@ -96,6 +97,88 @@ test("a change made by the CLI appears in a section of the open page", async () 
   ).toBeTruthy();
 });
 
+test("a checklist in Trash shows its state without editing the ticket", async () => {
+  render(
+    <TestOpenTicket
+      ticket={{ ...ticket, body: "- [ ] Confirm", trashed: true }}
+    >
+      <TicketPage
+        active
+        projects={[]}
+        plans={[]}
+        select={vi.fn()}
+        noteTarget={null}
+        mention={null}
+        onMention={vi.fn()}
+      />
+    </TestOpenTicket>,
+  );
+  fireEvent.click(await screen.findByText("Confirm"));
+  expect(screen.getByRole("img", { name: "Not done" })).toBeTruthy();
+  expect(screen.queryByRole("checkbox")).toBeNull();
+  expect(bridge.invoke).not.toHaveBeenCalledWith(
+    "change_ticket",
+    expect.anything(),
+  );
+});
+
+test("Evidence previews the newest three and names the records behind the fold", async () => {
+  const items = [
+    "Deploy check",
+    "Main build",
+    "Unit tests",
+    "Smoke run",
+    "First check",
+  ].map((name, index) => ({
+    id: String(index),
+    name,
+    kind: "verification",
+    value: `Outcome ${index}`,
+    editing_agent: null,
+    created_at: `2026-11-2${5 - index}T15:00:00Z`,
+    updated_at: `2026-11-2${5 - index}T15:00:00Z`,
+  }));
+  bridge.invoke.mockImplementation(async (command: string, args?: object) => {
+    if (command === "ticket_evidence_page") return { items, total: 5 };
+    return bridgeDefault(command, args as { reference?: string });
+  });
+  render(
+    <TestOpenTicket ticket={ticket}>
+      <TicketPage
+        active
+        projects={[]}
+        plans={[]}
+        select={vi.fn()}
+        noteTarget={null}
+        mention={null}
+        onMention={vi.fn()}
+      />
+    </TestOpenTicket>,
+  );
+  const section = within(
+    await screen.findByRole("region", { name: "Evidence" }),
+  );
+  const fold = await section.findByRole("button", {
+    name: "2 more: Smoke run, First check",
+  });
+  const rows = () =>
+    section
+      .getAllByRole("listitem")
+      .map((row) => within(row).getByText(/Outcome \d/).textContent);
+  expect(rows()).toEqual(["Outcome 0", "Outcome 1", "Outcome 2"]);
+  expect(fold.getAttribute("aria-expanded")).toBe("false");
+  expect(section.queryByRole("button", { name: "Add evidence" })).toBeNull();
+  fireEvent.click(fold);
+  expect(fold.getAttribute("aria-expanded")).toBe("true");
+  expect(rows()).toEqual([
+    "Outcome 0",
+    "Outcome 1",
+    "Outcome 2",
+    "Outcome 3",
+    "Outcome 4",
+  ]);
+});
+
 test("saving a property reports the write once", async () => {
   bridge.invoke.mockImplementation(async (command: string, args?: object) => {
     if (command === "show_ticket" || command === "change_ticket")
@@ -112,7 +195,6 @@ test("saving a property reports the write once", async () => {
         projects={[{ id: "p", name: "Project", path: "/p", paths: [] }]}
         plans={[]}
         select={vi.fn()}
-        onOpenGraph={vi.fn()}
         noteTarget={null}
         mention={null}
         onMention={vi.fn()}
@@ -121,10 +203,12 @@ test("saving a property reports the write once", async () => {
   );
   await screen.findByDisplayValue("Ship the rail");
   for (let turn = 0; turn < 4; turn += 1) await act(async () => {});
-  fireEvent.click(screen.getByRole("button", { name: /Project: No project/ }));
-  const search = await screen.findByLabelText("Search projects");
-  fireEvent.change(search, { target: { value: "Project" } });
-  fireEvent.keyDown(search, { key: "Enter" });
+  fireEvent.keyDown(
+    screen.getByRole("button", { name: "Add ticket property" }),
+    { key: "Enter" },
+  );
+  fireEvent.click(await screen.findByRole("menuitem", { name: "Project" }));
+  fireEvent.click(await screen.findByRole("option", { name: "Project" }));
   await waitFor(() =>
     expect(bridge.invoke).toHaveBeenCalledWith(
       "change_ticket",

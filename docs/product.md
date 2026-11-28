@@ -146,6 +146,12 @@ tickets. Marking a ticket Duplicate follows [Duplicates](#duplicates).
   dependents keep their status. Trashing a Done prerequisite leaves it satisfied;
   trashing an unfinished one leaves it unresolved.
 
+### Reviewing from a ticket
+
+The Ready for review card shows the latest report, acceptance and blocker counts, and implementation evidence. Choose **Move to Done** to finish a locally owned ticket, or **Send back** to write what needs to change. Send back saves the reason as your update and moves the ticket to In progress together. On a GitHub-owned ticket, the card offers **Open on GitHub** for closure, and the Send back update stays in ticketd.
+
+The card confirms your decision and offers **Next to review** in the current list's order. The ticket stays open until you choose to move on. The pane offers **Undo** for Move to Done and Send back. Undo applies to the status change from that decision. Undoing Send back restores In review and removes the update from that decision.
+
 ### Trash
 
 - Tickets can be trashed and restored; permanent deletion is not supported. Identity

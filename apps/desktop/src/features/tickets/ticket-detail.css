@@ -16,10 +16,99 @@
      restyles a container's whole subtree each time it resizes. */
   contain: inline-size layout style;
 }
-/* The same document stays in place when it opens full width. */
-.ticket-detail[data-expanded] .detail-document {
-  max-width: 760px;
+.detail-content[data-rail] {
+  grid-template-columns: 680px 248px;
+  justify-content: center;
+  gap: 32px;
+  padding-inline: 32px;
+}
+.detail-content[data-rail] .detail-document {
   padding-top: 40px;
+  padding-inline: 0;
+}
+.ticket-detail-rail {
+  position: sticky;
+  top: 48px;
+  align-self: start;
+  display: grid;
+  gap: 24px;
+  min-width: 0;
+  max-height: calc(100dvh - 128px);
+  margin-top: 48px;
+  padding: 2px;
+  overflow: auto;
+  scrollbar-width: thin;
+}
+.ticket-rail-properties {
+  display: grid;
+  gap: 2px;
+}
+.ticket-rail-property {
+  display: grid;
+  grid-template-columns: 80px minmax(0, 1fr);
+  align-items: start;
+  min-width: 0;
+}
+.ticket-rail-label {
+  display: flex;
+  align-items: center;
+  min-height: 28px;
+}
+.ticket-rail-property .rail-row {
+  min-height: 28px;
+  width: 100%;
+  margin: 0;
+  padding-inline: 4px;
+  text-align: start;
+  white-space: nowrap;
+}
+.ticket-rail-properties > [data-slot="button"] {
+  justify-self: start;
+  padding-inline: 4px;
+}
+.ticket-rail-property:has(> .linked-work-disclosure) > * {
+  grid-row: 1;
+}
+.ticket-rail-property > .ticket-rail-label {
+  grid-column: 1;
+}
+.ticket-rail-property > .linked-work-disclosure {
+  grid-column: 1 / -1;
+}
+.ticket-rail-property > .linked-work-disclosure .ui-disclosure-trigger {
+  width: calc(100% - 80px);
+  margin-inline-start: 80px;
+}
+.ticket-detail-rail .reference-row[data-density="rail"] {
+  margin-inline: 0;
+  padding-inline-start: 0;
+}
+.ticket-outline ul {
+  display: grid;
+  margin: 6px 0 0;
+  padding-inline-start: 0;
+  list-style-type: none;
+}
+.ticket-outline li[data-subsection] .ui-button {
+  padding-inline-start: 24px;
+}
+.ticket-outline .ui-button {
+  display: flex;
+  width: 100%;
+  justify-content: start;
+  height: auto;
+  min-height: 28px;
+  padding: 4px 12px;
+  text-align: start;
+  white-space: normal;
+  overflow-wrap: anywhere;
+}
+.ticket-blocker-row {
+  display: flex;
+  align-items: center;
+}
+.ticket-blocker-row .rail-row {
+  min-width: 0;
 }
 .ticket-follow-slot {
   display: inline-flex;
@@ -31,24 +120,102 @@
   top: 100%;
   inset-inline-end: 0;
 }
-/* One 32px row under the title: "Updated 5 h ago", the source state, or
-   save state. Its height is fixed so nothing moves when its words change. */
-.ticket-state-line {
+.ticket-parent-line {
+  min-width: 0;
+  margin-bottom: 8px;
+}
+.ticket-parent-line > button {
+  display: block;
+  max-width: 100%;
+  line-height: 20px;
+  text-align: start;
+}
+.ticket-context-line {
+  --context-gap: 4px;
+  --context-add-width: calc(var(--spacing) * 7);
   display: flex;
   flex-wrap: wrap;
   align-items: center;
-  gap: 4px 12px;
-  min-height: 32px;
-  margin: 4px 0 0;
+  gap: var(--context-gap);
+  margin: 12px 0 0 -8px;
 }
-.ticket-source-state {
+.ticket-context-property {
   display: inline-flex;
-  align-items: center;
-  gap: 8px;
+  min-width: 0;
   max-width: 100%;
 }
-.editor-title {
-  margin-bottom: 8px;
+/* Count Add's width on the preceding chip so both wrap together. */
+.ticket-context-property:has(+ .ticket-context-add) {
+  padding-inline-end: calc(var(--context-add-width) + var(--context-gap));
+}
+.ticket-context-add {
+  display: inline-flex;
+  flex: none;
+  inline-size: var(--context-add-width);
+  margin-inline-start: calc(
+    -1 * (var(--context-add-width) + var(--context-gap))
+  );
+}
+.ticket-context-line .rail-row {
+  width: auto;
+  max-width: 100%;
+  height: 28px;
+  min-height: 28px;
+  margin: 0;
+  padding-inline: 8px;
+  gap: 6px;
+  white-space: nowrap;
+}
+.ticket-context-tags {
+  display: inline-flex;
+  max-width: 100%;
+  align-items: center;
+  gap: 4px;
+}
+.ticket-context-tags > * {
+  min-width: 0;
+}
+.ticket-context-tags > :last-child {
+  flex-shrink: 0;
+}
+.ticket-subtickets-ring {
+  fill: none;
+  stroke-width: 2;
+}
+.ticket-blockers-popover {
+  max-height: calc(var(--radix-popover-content-available-height) - 32px);
+  overflow: auto;
+}
+.ticket-blockers-popover .rail-row {
+  margin: 0;
+  width: 100%;
+  max-width: 100%;
+  padding-inline: 4px;
+  text-align: start;
+  overflow-wrap: anywhere;
+}
+.ticket-blockers-footer,
+.ticket-closing-line,
+.ticket-source-state,
+.source-card-summary {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+}
+.ticket-blockers-footer,
+.ticket-closing-line,
+.source-card-summary {
+  flex-wrap: wrap;
+}
+.ticket-closing-line {
+  margin-top: 8px;
+}
+.detail-document .editor-body {
+  margin-top: 24px;
+}
+.detail-document .ticket-decision-card ~ .editor-body {
+  margin-top: 32px;
 }
 .list-position {
   display: flex;
@@ -63,6 +230,7 @@
 /* Clamped at 240px: the place gives way with an ellipsis, the number stays. */
 .header-source-link {
   min-width: 0;
+  min-height: 28px;
   overflow: hidden;
 }
 .header-source-place {
@@ -111,13 +279,6 @@
 .source-readonly-explanation .source-caption {
   margin: 0;
 }
-.source-description-clip[data-collapsed] {
-  max-height: 260px;
-  overflow: hidden;
-}
-.source-description-toggle {
-  margin: 0 4px 8px;
-}
 .source-card-actions {
   margin-left: auto;
 }
@@ -151,6 +312,7 @@
 .ticket-header-title {
   min-width: 0;
   overflow: hidden;
+  white-space: nowrap;
   text-overflow: ellipsis;
 }
 

@@ -1,4 +1,4 @@
-use ticketd_core::{DocumentPatch, Workspace};
+use ticketd_core::{DocumentPatch, TicketPatch, Workspace};
 
 #[test]
 fn document_fields_survive_restart_and_edits_do_not_change_recent_order() {
@@ -218,6 +218,59 @@ fn document_ticket_mentions_create_backlinks_without_creating_dependencies() {
             .unwrap()
             .prerequisites
             .is_empty()
+    );
+}
+
+#[test]
+fn incoming_document_mentions_page_before_mixing_with_tickets() {
+    let dir = tempfile::tempdir().unwrap();
+    let mut workspace = Workspace::open(dir.path().join("workspace.sqlite3")).unwrap();
+    let target = workspace.create_ticket("Target").unwrap();
+    let source = workspace.create_ticket("Ticket source").unwrap();
+    workspace
+        .change_ticket(
+            &source.reference,
+            TicketPatch {
+                body: Some(format!("See {}", target.reference)),
+                ..Default::default()
+            },
+        )
+        .unwrap();
+    let first = workspace
+        .create_document(
+            Some("Explicit and plain"),
+            &format!("[{0}](ticketd://ticket/{0})", target.reference),
+        )
+        .unwrap();
+    let second = workspace
+        .create_document(
+            Some("Plain reference"),
+            &format!("Related to {}", target.reference),
+        )
+        .unwrap();
+
+    let start = workspace
+        .ticket_document_mentions(&target.reference, 1, 0)
+        .unwrap();
+    let rest = workspace
+        .ticket_document_mentions(&target.reference, 1, 1)
+        .unwrap();
+    assert_eq!(start.total, 2);
+    assert_eq!(rest.total, 2);
+    let mut actual = [
+        start.items[0].source_id.clone(),
+        rest.items[0].source_id.clone(),
+    ];
+    let mut expected = [first.id, second.id];
+    actual.sort();
+    expected.sort();
+    assert_eq!(actual, expected);
+    assert_eq!(
+        workspace
+            .ticket_peek_counts(&target.reference)
+            .unwrap()
+            .linked,
+        3
     );
 }
 

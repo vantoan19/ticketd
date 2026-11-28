@@ -19,6 +19,7 @@ export function TicketDetailPane({
   onSelect,
   context = "list",
   leaving = false,
+  peek = false,
 }: {
   workspace: TicketWorkspace;
   hidden?: boolean;
@@ -27,6 +28,7 @@ export function TicketDetailPane({
    * that ticket, as it was, instead of the empty state it would become.
    */
   leaving?: boolean;
+  peek?: boolean;
   /** Opened from the Inbox: no list position, no "outside the results". */
   context?: "list" | "inbox";
   expanded: boolean;
@@ -90,11 +92,13 @@ export function TicketDetailPane({
         opened={opened}
         onMentionReady={workspace.markMentionReady}
         onClearMention={workspace.clearMention}
+        readReviewQueue={workspace.readReviewQueue}
         preview={resultTickets.find((ticket) => ticket.reference === selected)}
         projects={projects}
         plans={plans}
         position={position}
         leaving={leaving}
+        peek={peek}
         onAdjacent={
           context === "inbox"
             ? (triage?.adjacent ?? openAdjacent)

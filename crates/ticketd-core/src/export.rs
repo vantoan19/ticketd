@@ -162,6 +162,10 @@ const EXPORTED: &[(&str, &str)] = &[
 #[cfg_attr(not(test), allow(dead_code))]
 const OMITTED_TABLES: &[(&str, &str)] = &[
     (
+        "backlink_passages",
+        "an index derived from ticket descriptions and Activity briefs",
+    ),
+    (
         "activity_graph_numbers",
         "an index derived from Activity text, rebuilt from it",
     ),

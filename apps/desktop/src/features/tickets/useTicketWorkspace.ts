@@ -22,6 +22,7 @@ import {
   type SourceEntry,
   type SourceHealth,
 } from "@/lib/api/sources";
+import { statusCountKey, ticketStatuses } from "@/lib/statuses";
 import { loadPreferences, usePreferences } from "@/lib/preferences";
 import {
   describeFailure,
@@ -63,6 +64,11 @@ type View = "tickets" | "projects" | "plans" | "settings" | "inbox";
  */
 export type FollowedMention = MentionTarget & { key: number; ready: boolean };
 export type TicketWorkspace = ReturnType<typeof useTicketWorkspace>;
+export type TicketListPosition = {
+  index: number;
+  total: number;
+  statusGroup?: { index: number; total: number; status: string };
+};
 function markReady(
   mention: FollowedMention | null,
   reference: string | null,
@@ -558,8 +564,27 @@ export function useTicketWorkspace(
     (item) => item.reference === selected,
   );
   /** The selected ticket's place in the whole result. */
-  const position =
-    selectedIndex >= 0 ? { index: selectedIndex + 1, total } : null;
+  const selectedStatus = tickets[selectedIndex]?.status;
+  let position: TicketListPosition | null = null;
+  if (selectedStatus) {
+    const group = tickets.filter(({ status }) => status === selectedStatus);
+    const knownStatus = ticketStatuses.find(
+      (status) => status === selectedStatus,
+    );
+    const groupCount =
+      counts && knownStatus ? counts[statusCountKey[knownStatus]] : 0;
+    position = {
+      index: selectedIndex + 1,
+      total,
+      statusGroup: {
+        status: selectedStatus,
+        index: group.findIndex(({ reference }) => reference === selected) + 1,
+        // Counts include later pages. A just-saved status can move the row
+        // before those counts refresh, so the loaded group is the minimum.
+        total: Math.max(group.length, groupCount),
+      },
+    };
+  }
   function openAdjacent(direction: 1 | -1) {
     if (selectedIndex < 0) return;
     const next = tickets[selectedIndex + direction];
@@ -570,6 +595,25 @@ export function useTicketWorkspace(
       setPendingNext(selectedIndex + 1);
       setPages((value) => value + 1);
     }
+  }
+  // A decision needs the queue before the write can remove its row from the
+  // results. Read beyond the loaded page only when the review count requires it.
+  async function readReviewQueue(fresh = false) {
+    if (trash || (filterArgs.status && filterArgs.status !== "In review"))
+      return [];
+    const reviewFilter = { ...filterArgs, status: "In review" };
+    if (fresh) {
+      const { total } = await client.countTickets(reviewFilter);
+      return readPages(reviewFilter, Math.ceil(total / PAGE_SIZE));
+    }
+    const column = board.columns.find(({ status }) => status === "In review");
+    const loaded =
+      layout === "board"
+        ? (column?.tickets ?? [])
+        : tickets.filter(({ status }) => status === "In review");
+    const reviewCount = layout === "board" ? column?.total : counts?.in_review;
+    if (reviewCount == null || loaded.length >= reviewCount) return loaded;
+    return readPages(reviewFilter, Math.ceil(reviewCount / PAGE_SIZE));
   }
   /** Every reference the current search and filters match, across pages. */
   async function matchingReferences(): Promise<string[]> {
@@ -689,6 +733,7 @@ export function useTicketWorkspace(
     grouped: !trash && !query,
     position,
     openAdjacent,
+    readReviewQueue,
     selected,
     mention,
     clearMention,

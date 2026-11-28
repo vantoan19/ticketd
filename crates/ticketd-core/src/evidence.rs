@@ -32,6 +32,14 @@ pub struct Evidence {
     pub updated_at: String,
     pub editing_agent: Option<String>,
 }
+
+#[derive(Debug, Serialize)]
+pub struct EvidencePage {
+    pub items: Vec<Evidence>,
+    pub total: u32,
+    pub proof: Vec<Evidence>,
+}
+
 fn validate(input: &EvidenceInput) -> Result<(), Error> {
     if input.name.trim().is_empty() || input.value.trim().is_empty() {
         return Err(Error::InvalidEvidence(
@@ -156,6 +164,54 @@ impl Workspace {
         Ok(stmt
             .query_map(params![ticket, limit.clamp(1, 100), offset], row)?
             .collect::<Result<Vec<_>, _>>()?)
+        })
+    }
+
+    /// The newest evidence first, with a total from the same read snapshot.
+    pub fn evidence_page(
+        &self,
+        reference: &str,
+        limit: u32,
+        offset: u32,
+    ) -> Result<EvidencePage, Error> {
+        self.read(|_| {
+            let ticket = relationships::id(&self.connection, reference)?;
+            let total = self.connection.query_row(
+                "SELECT COUNT(*) FROM evidence WHERE ticket_id=?1",
+                [&ticket],
+                |row| row.get(0),
+            )?;
+            let mut stmt = self.connection.prepare(
+                "SELECT id, kind, name, value, created_at, updated_at, editing_agent
+                 FROM evidence WHERE ticket_id=?1
+                 ORDER BY created_at DESC, number DESC LIMIT ?2 OFFSET ?3",
+            )?;
+            let items = stmt
+                .query_map(params![ticket, limit.clamp(1, 100), offset], row)?
+                .collect::<Result<Vec<_>, _>>()?;
+            // The review card shares the evidence read. Rank over every record
+            // on the first page, since the newest PR may be behind older-page controls.
+            let proof = if offset == 0 && total > 0 {
+                let mut stmt = self.connection.prepare(
+                    "SELECT id, kind, name, value, created_at, updated_at, editing_agent
+                     FROM evidence WHERE ticket_id=?1
+                       AND kind IN ('pull_request', 'verification', 'branch')
+                     ORDER BY CASE kind
+                       WHEN 'pull_request' THEN 0
+                       WHEN 'verification' THEN 1
+                       ELSE 2
+                     END, created_at DESC, number DESC LIMIT 2",
+                )?;
+                stmt.query_map([&ticket], row)?
+                    .collect::<Result<Vec<_>, _>>()?
+            } else {
+                Vec::new()
+            };
+            Ok(EvidencePage {
+                items,
+                total,
+                proof,
+            })
         })
     }
 }

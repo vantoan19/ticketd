@@ -174,6 +174,13 @@ pub fn export_markdown_with_files(
         .map_err(BridgeFailure::from)
 }
 
+#[tauri::command(async)]
+pub fn ticket_export_markdown(reference: String) -> Result<String, BridgeFailure> {
+    open_workspace()
+        .and_then(|w| w.ticket_export_markdown(&reference))
+        .map_err(BridgeFailure::from)
+}
+
 static UPLOADS: OnceLock<Uploads> = OnceLock::new();
 
 struct UploadGuard(String);

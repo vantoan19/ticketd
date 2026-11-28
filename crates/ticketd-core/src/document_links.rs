@@ -29,6 +29,38 @@ pub struct DocumentBacklink {
     pub source_trashed: bool,
 }
 
+#[derive(Debug, Serialize)]
+pub struct TicketDocumentMentions {
+    pub items: Vec<TicketDocumentMention>,
+    pub total: usize,
+}
+
+#[derive(Debug, Serialize)]
+pub struct TicketDocumentMention {
+    pub source_id: String,
+    pub source_label: String,
+    pub source_trashed: bool,
+    pub passage: String,
+}
+
+// Filter the two incoming indexes before they are combined. An explicit link
+// and a visible reference in the same Document passage are one result.
+const TICKET_DOCUMENT_MENTIONS: &str =
+    "SELECT m.source_id, m.passage FROM context_mentions m JOIN documents d ON d.id = m.source_id WHERE m.target_id = ?1
+     UNION SELECT m.source_id, m.passage FROM numeric_mentions m JOIN documents d ON d.id = m.source_id WHERE m.reference = ?2 AND m.activity = 0";
+
+pub(crate) fn ticket_document_mention_count(
+    tx: &Connection,
+    id: &str,
+    reference: &str,
+) -> Result<usize, Error> {
+    Ok(tx
+        .prepare_cached(&format!(
+            "SELECT COUNT(*) FROM ({TICKET_DOCUMENT_MENTIONS})"
+        ))?
+        .query_row(params![id, reference], |row| row.get(0))?)
+}
+
 pub(crate) fn migrate(tx: &Connection) -> Result<(), Error> {
     tx.execute_batch("INSERT OR IGNORE INTO entities(id, kind) SELECT id, 'ticket' FROM tickets; INSERT OR IGNORE INTO entities(id, kind) SELECT id, 'plan' FROM plans;
         CREATE TRIGGER IF NOT EXISTS ticket_entity_insert AFTER INSERT ON tickets BEGIN INSERT INTO entities(id,kind) VALUES (NEW.id,'ticket'); END;
@@ -217,7 +249,9 @@ fn index_numbers(tx: &Connection, id: &str, body: &str, activity: bool) -> Resul
         "DELETE FROM numeric_mentions WHERE source_id = ?1 AND activity = ?2",
         params![id, activity],
     )?;
-    for (text, range) in crate::backlinks::text_runs(body) {
+    let runs = crate::backlinks::text_runs(body);
+    crate::backlinks::index(tx, id, body, activity, &runs)?;
+    for (text, range) in runs {
         for (at, len) in ticket_references(&text) {
             let reference = &text[at..at + len];
             let offset = body[range.clone()]
@@ -531,6 +565,36 @@ impl Workspace {
         Ok(links)
         })
     }
+    /// A page of incoming passages from Documents, including Documents in Trash.
+    pub fn ticket_document_mentions(
+        &self,
+        reference: &str,
+        limit: u32,
+        offset: u32,
+    ) -> Result<TicketDocumentMentions, Error> {
+        crate::read_scope::run(&self.connection, |tx| {
+            let id = crate::relationships::id(tx, reference)?;
+            let total = ticket_document_mention_count(tx, &id, reference)?;
+            let mut statement = tx.prepare_cached(&format!(
+                "SELECT d.id, {heading}, d.trashed, m.passage
+                 FROM ({TICKET_DOCUMENT_MENTIONS}) m JOIN documents d ON d.id = m.source_id
+                 ORDER BY m.source_id, m.passage LIMIT ?3 OFFSET ?4",
+                heading = crate::documents::HEADING,
+            ))?;
+            let items = statement
+                .query_map(params![id, reference, limit.clamp(1, 100), offset], |row| {
+                    Ok(TicketDocumentMention {
+                        source_id: row.get(0)?,
+                        source_label: row.get(1)?,
+                        source_trashed: row.get(2)?,
+                        passage: row.get(3)?,
+                    })
+                })?
+                .collect::<Result<Vec<_>, _>>()?;
+            Ok(TicketDocumentMentions { items, total })
+        })
+    }
+
     pub fn context_links(
         &self,
         id: &str,

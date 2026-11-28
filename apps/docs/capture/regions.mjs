@@ -37,10 +37,9 @@ export async function measureRegions(screen, page, size) {
     done: { completed: [ticket, ".board-card-title"] },
     ticket: {
       update: [
-        page.getByRole("button", {
-          name: "Go to update: " + report,
-          exact: true,
-        }),
+        page
+          .getByRole("region", { name: /^(Ready for review|Latest update)$/ })
+          .getByText(report, { exact: true }),
       ],
     },
     evidence: {

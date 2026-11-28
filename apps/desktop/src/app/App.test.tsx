@@ -533,7 +533,7 @@ test("opens a related ticket outside the filtered list and preserves drafts when
     "value",
     "Unfinished title",
   );
-  expect(screen.getByText("Not in the current results")).toBeTruthy();
+  expect(screen.getByLabelText("Not in the current results")).toBeTruthy();
   listVisible = true;
   await act(async () => {
     await vi.advanceTimersByTimeAsync(2000);
@@ -737,7 +737,7 @@ test("changing the scope drops an open ticket that is outside it", async () => {
     await vi.advanceTimersByTimeAsync(0);
   });
   expect(screen.queryByRole("textbox", { name: "Title" })).toBeNull();
-  expect(screen.queryByText("Not in the current results")).toBeNull();
+  expect(screen.queryByLabelText("Not in the current results")).toBeNull();
 });
 
 test("new ticket dialog focuses title and restores focus on Escape", async () => {
@@ -2659,7 +2659,7 @@ test("the sidebar footer follows persisted source health and keeps the list", as
   expect(within(footer).getByText(/GitHub synced/)).toBeTruthy();
 });
 
-test("Previous and Next follow the visible list across groups and keep the selection", async () => {
+test("the header counts within a status while J and K walk the whole list", async () => {
   const tickets = [
     bulkTicket(2, { status: "In progress", availability: null }),
     bulkTicket(1),
@@ -2673,18 +2673,24 @@ test("Previous and Next follow the visible list across groups and keep the selec
   });
   fireEvent.click(screen.getByRole("button", { name: /First/ }));
   await act(async () => {});
-  expect(screen.getByText("2 of 3")).toBeTruthy();
-  fireEvent.click(screen.getByRole("button", { name: "Next ticket" }));
+  expect(screen.getByText("1 of 2 todo")).toBeTruthy();
+  fireEvent.keyDown(screen.getByRole("heading", { name: "T-KQ1" }), {
+    key: "j",
+  });
   await act(async () => {});
-  expect(screen.getByText("3 of 3")).toBeTruthy();
+  expect(screen.getByText("2 of 2 todo")).toBeTruthy();
   expect(
     (screen.getByRole("button", { name: "Next ticket" }) as HTMLButtonElement)
       .disabled,
   ).toBe(true);
-  fireEvent.click(screen.getByRole("button", { name: "Previous ticket" }));
-  fireEvent.click(screen.getByRole("button", { name: "Previous ticket" }));
+  fireEvent.keyDown(screen.getByRole("heading", { name: "T-KQ3" }), {
+    key: "k",
+  });
+  fireEvent.keyDown(screen.getByRole("heading", { name: "T-KQ1" }), {
+    key: "k",
+  });
   await act(async () => {});
-  expect(screen.getByText("1 of 3")).toBeTruthy();
+  expect(screen.getByText("1 of 1 in progress")).toBeTruthy();
   expect(
     screen.getByRole("button", { name: /Second/ }).getAttribute("aria-pressed"),
   ).toBe("true");
@@ -2826,8 +2832,6 @@ test("Next at the end of a page opens the first ticket of the next page", async 
       title: `Ticket ${offset + index + 1}`,
     }));
   const rows = (offset: number) => page(offset, offset === 0 ? 50 : 10);
-  const position = () =>
-    document.querySelector(".list-position-text")?.textContent;
   let offset = 0;
   await renderBulk({
     find_tickets: (args: { filter: { offset: number } }) => {
@@ -2844,7 +2848,7 @@ test("Next at the end of a page opens the first ticket of the next page", async 
   });
   fireEvent.click(screen.getByRole("button", { name: /Ticket 50/ }));
   await act(async () => {});
-  expect(position()).toBe("50 of 60");
+  expect(screen.getByText("50 of 60 todo")).toBeTruthy();
   const nextTicket = screen.getByRole("button", { name: "Next ticket" });
   nextTicket.focus();
   fireEvent.click(nextTicket);
@@ -2852,7 +2856,7 @@ test("Next at the end of a page opens the first ticket of the next page", async 
     await vi.advanceTimersByTimeAsync(10);
   });
   expect(offset).toBe(50);
-  expect(position()).toBe("51 of 60");
+  expect(screen.getByText("51 of 60 todo")).toBeTruthy();
   // Keyboard focus stays on the control across the page edge.
   expect(document.activeElement).toBe(
     screen.getByRole("button", { name: "Next ticket" }),
@@ -3414,15 +3418,18 @@ test("the ticket detail bounds one document scroller and keeps properties in the
   const bounded = detail.querySelectorAll(".detail-scroll");
   expect(bounded).toHaveLength(1);
   expect(bounded[0]!.parentElement).toBe(detail);
-  // The property bar and connected context share one document scroller.
+  // The context line shares the document's scroller.
   await act(async () => {
     await vi.advanceTimersByTimeAsync(0);
   });
   const content = bounded[0]!.querySelector<HTMLElement>(".detail-content")!;
-  expect(content.querySelector(":scope > .detail-document")).toBeTruthy();
+  const reading = content.querySelector<HTMLElement>(
+    ":scope > .detail-document",
+  )!;
+  expect(reading).toBeTruthy();
   expect(content.querySelector(":scope > .ticket-properties")).toBeNull();
   expect(
-    content.querySelector(".detail-document .property-strip"),
+    within(reading).getByRole("group", { name: "Ticket properties" }),
   ).toBeTruthy();
 });
 
@@ -4622,7 +4629,9 @@ test("palette offers the focused Ticket's linked Chat and opens that Chat", asyn
       name: /Open its Chat, “Polish focused Ticket”/,
     }),
   );
-  await vi.waitFor(() => expect(open).toHaveBeenCalledWith("linked-chat"));
+  await vi.waitFor(() =>
+    expect(open.mock.calls.map(([id]) => id)).toContain("linked-chat"),
+  );
 });
 
 test("sidebar jump opens the palette and footer icons navigate", async () => {
@@ -4873,17 +4882,17 @@ test.each([
     { patch: { status: "Done" } },
   ],
   [
-    "Project: No project",
+    "Project",
     "Project",
     "Next project",
     "change_ticket",
     { patch: { project_id: "project-next" } },
   ],
-  ["Plan: No Plan", "Plan", "Next Plan", "set_plan", { plan: "plan-next" }],
-  ["Tags: No tags", "Tags", "polish", "add_tag", { tag: "polish" }],
-  ["Remind me", "Reminder", "Tomorrow", "set_reminder", {}],
+  ["Plan", "Plan", "Next Plan", "set_plan", { plan: "plan-next" }],
+  ["Tags", "Tags", "polish", "add_tag", { tag: "polish" }],
+  ["Reminder", "Reminder", "Tomorrow", "set_reminder", {}],
 ])(
-  "the %s chip opens the shared %s drill-in and mutation",
+  "the context line’s %s action opens the shared %s drill-in and mutation",
   async (chip, scope, label, command, expected) => {
     const current = bulkTicket(1, {
       reference: "T-FV1",
@@ -4916,16 +4925,15 @@ test.each([
     fireEvent.click(
       await screen.findByRole("button", { name: /Document target/ }),
     );
-    if (scope === "Reminder") {
-      expect(screen.queryByRole("button", { name: "Remind me" })).toBeNull();
+    if (scope === "Status") {
+      fireEvent.click(await screen.findByRole("button", { name: chip }));
+    } else {
       fireEvent.keyDown(
         await screen.findByRole("button", { name: "Add ticket property" }),
         { key: "ArrowDown" },
       );
-      fireEvent.click(
-        await screen.findByRole("menuitem", { name: "Reminder" }),
-      );
-    } else fireEvent.click(await screen.findByRole("button", { name: chip }));
+      fireEvent.click(await screen.findByRole("menuitem", { name: chip }));
+    }
     const choices = await screen.findByText(`${scope} of T-FV1`);
     expect(choices.closest('[data-slot="popover-content"]')).toBeTruthy();
     expect(screen.queryByRole("dialog", { name: "Go anywhere" })).toBeNull();
@@ -4951,7 +4959,7 @@ test("a read-only workspace disables description editing from the button and E",
   render(<App />);
   fireEvent.click(await screen.findByRole("button", { name: /Open Ticket/ }));
   const edit = await screen.findByRole("button", {
-    name: "Add a description…",
+    name: "Add a description",
   });
   act(() => reportWorkspaceFailure("workspace_read_only", "Read only"));
   expect(edit.hasAttribute("disabled")).toBe(true);
@@ -5056,9 +5064,11 @@ test("a property drill-in highlights its current clearing value instead of the f
   fireEvent.click(
     await screen.findByRole("button", { name: /Current project/ }),
   );
-  fireEvent.click(
-    await screen.findByRole("button", { name: "Project: No project" }),
+  fireEvent.keyDown(
+    await screen.findByRole("button", { name: "Add ticket property" }),
+    { key: "ArrowDown" },
   );
+  fireEvent.click(await screen.findByRole("menuitem", { name: "Project" }));
   const clear = await screen.findByRole("option", { name: "No project" });
   await vi.waitFor(() =>
     expect(clear.getAttribute("aria-selected")).toBe("true"),
@@ -6890,7 +6900,7 @@ test.each([
   [false, "2"],
   [true, "3"],
 ] as const)(
-  "ticket agent strip and Inbox follow approval answer (focused: %s, choice: %s)",
+  "ticket agent card and Inbox follow approval answer (focused: %s, choice: %s)",
   async (focused, choice) => {
     const user = userEvent.setup();
     const { notificationClient } = await import("@/lib/api/notifications");
@@ -6907,6 +6917,7 @@ test.each([
         enabled: true,
         chats: [
           {
+            updated_at: new Date().toISOString(),
             chat: chatState({
               id: "strip-chat",
               title: "Strip Chat",
@@ -6939,13 +6950,13 @@ test.each([
       fireEvent.click(
         await screen.findByRole("button", { name: /Focused Ticket/ }),
       );
-      const strip = await screen.findByRole("status", { name: "Ticket agent" });
-      expect(within(strip).getByText(/is working on this/)).toBeTruthy();
+      const card = await screen.findByRole("region", {
+        name: "Agents on this ticket",
+      });
+      expect(within(card).getByText(/is working on this/)).toBeTruthy();
       expect(
         await screen.findByRole("button", { name: "Chats, 1 working" }),
       ).toBeTruthy();
-      expect(strip.closest(".ticket-agent-slot")).toBeTruthy();
-      const slot = strip.closest(".ticket-agent-slot");
       act(() =>
         client.push("strip-chat", {
           kind: "steps",
@@ -6962,17 +6973,17 @@ test.each([
         }),
       );
       expect(
-        await within(strip).findByText(/Running npm test -- board/),
+        await within(card).findByText(/Running npm test -- board/),
       ).toBeTruthy();
-      expect(
-        strip.querySelector('[aria-hidden="true"].text-muted-foreground'),
-      ).toBeTruthy();
-      expect(strip.getAttribute("aria-live")).toBe("polite");
-      expect(strip.getAttribute("aria-atomic")).toBe("true");
+      expect(within(card).getByRole("status").getAttribute("aria-live")).toBe(
+        "polite",
+      );
       act(() => client.patch("strip-chat", { activity: "idle" }));
-      await within(strip).findByRole("button", { name: "Open Chat" });
-      expect(within(strip).queryByText(/is working on this/)).toBeNull();
-      expect(strip.closest(".ticket-agent-slot")).toBe(slot);
+      await vi.waitFor(() =>
+        expect(
+          screen.queryByRole("region", { name: "Agents on this ticket" }),
+        ).toBeNull(),
+      );
       act(() =>
         client.push("strip-chat", {
           kind: "request",
@@ -6990,13 +7001,12 @@ test.each([
           free_text: false,
         }),
       );
-      await within(strip).findByRole("button", {
-        name: "Review request",
+      const approval = await screen.findByRole("region", {
+        name: "Request from an agent",
       });
       expect(
-        await within(strip).findByText(/wants to run npm test -- board/),
+        await within(approval).findByText("npm test -- board"),
       ).toBeTruthy();
-      expect(strip.closest(".ticket-agent-slot")).toBe(slot);
       expect(
         await screen.findByRole("button", { name: "Chats, 1 waiting" }),
       ).toBeTruthy();
@@ -7015,7 +7025,9 @@ test.each([
         await screen.findByRole("button", { name: /Focused Ticket/ }),
       );
       fireEvent.click(
-        await screen.findByRole("button", { name: "Review request" }),
+        within(
+          await screen.findByRole("region", { name: "Request from an agent" }),
+        ).getByRole("button", { name: "Open Chat" }),
       );
       expect(
         await screen.findByRole("heading", { name: "Strip Chat" }),
@@ -7068,8 +7080,8 @@ test.each([
       fireEvent.click(
         await screen.findByRole("button", { name: /Focused Ticket/ }),
       );
-      const resumed = await screen.findByRole("status", {
-        name: "Ticket agent",
+      const resumed = await screen.findByRole("region", {
+        name: "Agents on this ticket",
       });
       expect(within(resumed).getByText(/is working on this/)).toBeTruthy();
       expect(
@@ -7092,7 +7104,12 @@ test.each([false, true])(
     const tickets = paletteTickets();
     const client = createMockChatClient({
       enabled: true,
-      chats: [{ chat: chatState({ id: "late", title: "Late Chat" }) }],
+      chats: [
+        {
+          updated_at: new Date().toISOString(),
+          chat: chatState({ id: "late", title: "Late Chat" }),
+        },
+      ],
     });
     bridge.invoke.mockImplementation((command: string, args: unknown) =>
       command === "find_tickets"
@@ -7112,10 +7129,12 @@ test.each([false, true])(
     await screen.findByRole("group", { name: "Ticket properties" });
     await vi.waitFor(() =>
       expect(
-        document.querySelector(".detail-scroll[data-agent-loading]"),
+        screen.queryByRole("status", { name: "Loading ticket agent context" }),
       ).toBeNull(),
     );
-    expect(screen.queryByRole("status", { name: "Ticket agent" })).toBeNull();
+    expect(
+      screen.queryByRole("region", { name: "Agents on this ticket" }),
+    ).toBeNull();
     const copy = screen.getByRole("button", { name: "Copy reference" });
     act(() => copy.focus());
     act(() =>
@@ -7138,7 +7157,9 @@ test.each([false, true])(
     await vi.waitFor(() =>
       expect(within(header as HTMLElement).getByText("Working")).toBeTruthy(),
     );
-    expect(screen.queryByRole("status", { name: "Ticket agent" })).toBeNull();
+    expect(
+      screen.queryByRole("region", { name: "Agents on this ticket" }),
+    ).toBeNull();
     expect(document.activeElement).toBe(copy);
     act(() =>
       client.push("late", {
@@ -7162,7 +7183,9 @@ test.each([false, true])(
     expect(
       within(header as HTMLElement).getByText("Approval needed"),
     ).toBeTruthy();
-    expect(screen.queryByRole("status", { name: "Ticket agent" })).toBeNull();
+    expect(
+      screen.queryByRole("region", { name: "Agents on this ticket" }),
+    ).toBeNull();
     expect(document.activeElement).toBe(copy);
     await act(async () => {
       await client.answer("late", "late-approval", { option_id: "allow" });
@@ -7215,16 +7238,17 @@ test.each([false, true])(
     fireEvent.click(screen.getByRole("button", { name: /Close ticket/ }));
     fireEvent.click(screen.getByRole("button", { name: /Focused Ticket/ }));
     expect(
-      await screen.findByRole("status", { name: "Ticket agent" }),
+      await screen.findByRole("region", { name: "Agents on this ticket" }),
     ).toBeTruthy();
   },
 );
 
-test("ticket agent idle update preserves unseen Chat and opens its Activity", async () => {
+test("reading a ticket’s latest update preserves the unseen state of its idle Chat", async () => {
   const { ChatClientContext } = await import("@/features/chats/client");
   const { createMockChatClient, chatState } =
     await import("@/features/chats/mock-client");
   const tickets = paletteTickets();
+  tickets[1] = { ...tickets[1]!, status: "In progress" };
   const client = createMockChatClient({
     enabled: true,
     chats: [
@@ -7272,19 +7296,16 @@ test("ticket agent idle update preserves unseen Chat and opens its Activity", as
   fireEvent.click(
     await screen.findByRole("button", { name: /Focused Ticket/ }),
   );
-  const strip = await screen.findByRole("status", { name: "Ticket agent" });
-  expect(within(strip).getByText(/Kept the placeholder stable/)).toBeTruthy();
+  const card = await screen.findByRole("region", { name: "Latest update" });
+  expect(
+    await within(card).findByText("Kept the placeholder stable"),
+  ).toBeTruthy();
   expect(open).not.toHaveBeenCalled();
   expect((await client.listChats("active"))[0]?.status.unseen).toBe(true);
-  expect(strip.querySelector(".harness-mark")).toBeTruthy();
-  fireEvent.click(within(strip).getByRole("button", { name: "Open Chat" }));
-  expect(
-    await screen.findByRole("heading", { name: "Finished Chat" }),
-  ).toBeTruthy();
 });
 
 test.each([null, "codex"])(
-  "ticket agent reserves an update slot only for agent attribution (%s)",
+  "a Todo ticket does not show an idle update card (attribution: %s)",
   async (editing_agent) => {
     const tickets = paletteTickets();
     bridge.invoke.mockImplementation((command: string, args: unknown) =>
@@ -7313,12 +7334,10 @@ test.each([null, "codex"])(
     await screen.findByRole("group", { name: "Ticket properties" });
     await vi.waitFor(() =>
       expect(
-        document.querySelector(".detail-scroll[data-agent-loading]"),
+        screen.queryByRole("status", { name: "Loading ticket agent context" }),
       ).toBeNull(),
     );
-    expect(
-      Boolean(screen.queryByRole("status", { name: "Ticket agent" })),
-    ).toBe(Boolean(editing_agent));
+    expect(screen.queryByRole("region", { name: "Latest update" })).toBeNull();
   },
 );
 
@@ -8458,12 +8477,12 @@ test("a blocker removed and re-added through Linked is visible and can be remove
   await vi.waitFor(() =>
     expect(screen.queryByRole("button", { name: removeLabel })).toBeNull(),
   );
-  fireEvent.click(await screen.findByRole("button", { name: "Link a ticket" }));
-  const dialog = await screen.findByRole("dialog", { name: "Link a ticket" });
-  fireEvent.click(
-    within(dialog).getByRole("combobox", { name: /Relationship/ }),
+  fireEvent.keyDown(
+    await screen.findByRole("button", { name: "Add ticket property" }),
+    { key: "ArrowDown" },
   );
-  fireEvent.click(await screen.findByRole("option", { name: "is blocked by" }));
+  fireEvent.click(await screen.findByRole("menuitem", { name: "Blocked by…" }));
+  const dialog = await screen.findByRole("dialog", { name: "Link a ticket" });
   fireEvent.change(
     within(dialog).getByRole("combobox", {
       name: "Ticket",
@@ -8497,7 +8516,8 @@ test("empty Ticket evidence adds, removes, and restores through Undo", async () 
     ) => {
       if (command === "find_tickets") return [current];
       if (command === "show_ticket") return current;
-      if (command === "list_evidence") return items;
+      if (command === "ticket_evidence_page")
+        return { items, total: items.length };
       if (command === "add_evidence") {
         const key = args?.requestId ?? "";
         const known = writes.get(key);
@@ -8538,7 +8558,11 @@ test("empty Ticket evidence adds, removes, and restores through Undo", async () 
   fireEvent.click(
     await screen.findByRole("button", { name: /Evidence outcome/ }),
   );
-  fireEvent.click(await screen.findByRole("button", { name: "Evidence" }));
+  fireEvent.keyDown(
+    await screen.findByRole("button", { name: "Add ticket property" }),
+    { key: "Enter" },
+  );
+  fireEvent.click(await screen.findByRole("menuitem", { name: "Evidence…" }));
   const dialog = await screen.findByRole("dialog", { name: "Add evidence" });
   fireEvent.change(within(dialog).getByLabelText("Name"), {
     target: { value: "Review" },
@@ -8633,9 +8657,12 @@ test("empty Ticket Files adds an existing file and detaches with Undo", async ()
   );
   render(<App />);
   fireEvent.click(await screen.findByRole("button", { name: /File outcome/ }));
-  fireEvent.keyDown(await screen.findByRole("button", { name: "File" }), {
-    key: "Enter",
-  });
+  fireEvent.keyDown(
+    await screen.findByRole("button", { name: "Add ticket property" }),
+    {
+      key: "Enter",
+    },
+  );
   fireEvent.click(await screen.findByRole("menuitem", { name: "File…" }));
   fireEvent.click(await screen.findByRole("radio", { name: "Existing files" }));
   fireEvent.click(
@@ -8690,7 +8717,7 @@ test("Linked shows a blocking subticket once and the scrolled title reuses its h
   fireEvent.click(
     await screen.findByRole("button", { name: /A long outcome/ }),
   );
-  expect(await screen.findByRole("heading", { name: "Linked 1" })).toBeTruthy();
+  expect(await screen.findByRole("heading", { name: "Linked" })).toBeTruthy();
   expect(
     screen.getAllByRole("button", { name: "The shared prerequisite" }),
   ).toHaveLength(1);
@@ -8740,19 +8767,21 @@ test("an empty Ticket folds Activity and R opens its existing composer without l
   });
   render(<App />);
   fireEvent.click(await screen.findByRole("button", { name: /Quiet outcome/ }));
-  await screen.findByRole("button", { name: "File" });
+  await screen.findByRole("button", { name: "Add ticket property" });
   await vi.waitFor(() =>
     expect(screen.queryByRole("heading", { name: "Activity" })).toBeNull(),
   );
   expect(
-    screen.getAllByRole("group", { name: "Add to this ticket" }),
+    screen.getAllByRole("group", { name: "Ticket properties" }),
   ).toHaveLength(1);
   fireEvent.keyDown(document.body, { key: "r" });
   expect(await screen.findByRole("heading", { name: "Activity" })).toBeTruthy();
   fireEvent.click(
     await screen.findByRole("button", { name: "Edit Markdown source" }),
   );
-  const brief = screen.getByRole("textbox", { name: "New update source" });
+  const brief = await screen.findByRole("textbox", {
+    name: "New update source",
+  });
   fireEvent.change(brief, { target: { value: "A retained update draft" } });
   fireEvent.keyDown(brief, { key: "Escape" });
   expect(
@@ -9056,7 +9085,11 @@ test.each([
       expect(document.activeElement).toBe(requestTitle);
       const failure = screen.getByRole("alert");
       expect(within(failure).getByText("Answer not sent")).toBeTruthy();
-      expect(screen.getByText("npm test -- board")).toBeTruthy();
+      expect(
+        within(screen.getByRole("region", { name: "Triage Chat" })).getByText(
+          "npm test -- board",
+        ),
+      ).toBeTruthy();
       const details = within(failure).getByRole("button", { name: "Details" });
       await user.click(details);
       const popup = await screen.findByRole("dialog", {
@@ -10029,7 +10062,24 @@ test.each(["ready", "trashed"] as const)(
     expect(screen.queryByRole("button", { name: "Set up ticketd" })).toBeNull();
   },
 );
-test("header Follow keeps failures in the pane status line, retries and respects read-only state", async () => {
+test("the ticket actions Reminder and H open the same choices", async () => {
+  paletteTickets();
+  render(<App />);
+  fireEvent.click(await screen.findByRole("button", { name: /Open Ticket/ }));
+  const actions = await screen.findByRole("button", { name: "Ticket actions" });
+  fireEvent.keyDown(actions, { key: "Enter" });
+  fireEvent.click(await screen.findByRole("menuitem", { name: "Remind me…" }));
+  expect(await screen.findByText("Reminder of T-KQ1")).toBeTruthy();
+  const palette = screen.getByRole("combobox", {
+    name: "Search tickets and destinations",
+  });
+  fireEvent.keyDown(palette, { key: "Escape" });
+  await vi.waitFor(() => expect(document.activeElement).toBe(actions));
+  fireEvent.keyDown(actions, { key: "h" });
+  expect(await screen.findByText("Reminder of T-KQ1")).toBeTruthy();
+});
+
+test("menu Follow keeps failures in the pane status line, retries and respects read-only state", async () => {
   const current = bulkTicket(1, { title: "Follow outcome" });
   let following = false;
   let failed = true;
@@ -10050,31 +10100,33 @@ test("header Follow keeps failures in the pane status line, retries and respects
   fireEvent.click(
     await screen.findByRole("button", { name: /Follow outcome/ }),
   );
-  const follow = await screen.findByRole("button", { name: "Follow" });
-  const header = follow.closest("header");
-  expect(header).toBeTruthy();
-  expect(
-    within(
-      screen.getByRole("group", { name: "Ticket properties" }),
-    ).queryByRole("button", { name: "Follow" }),
-  ).toBeNull();
-  fireEvent.click(follow);
+  async function openFollow(checked: boolean) {
+    const actions = await screen.findByRole("button", {
+      name: "Ticket actions",
+    });
+    fireEvent.keyDown(actions, { key: "Enter" });
+    return screen.findByRole("menuitemcheckbox", { name: "Follow", checked });
+  }
+  fireEvent.click(await openFollow(false));
   const retry = await screen.findByRole("button", { name: "Retry" });
-  expect(follow.closest("header")).toBe(header);
-  expect(header?.querySelector('[role="alert"]')).toBeNull();
-  expect(follow.getAttribute("aria-pressed")).toBe("false");
+  expect(
+    within(screen.getByRole("region", { name: "T-KQ1" })).queryByRole(
+      "button",
+      { name: "Follow" },
+    ),
+  ).toBeNull();
   failed = false;
   fireEvent.click(retry);
-  await vi.waitFor(() =>
-    expect(follow.getAttribute("aria-pressed")).toBe("true"),
-  );
+  const followed = await openFollow(true);
+  expect(followed.getAttribute("aria-checked")).toBe("true");
   following = false;
-  await vi.waitFor(
-    () => expect(follow.getAttribute("aria-pressed")).toBe("false"),
+  const unfollowed = await screen.findByRole(
+    "menuitemcheckbox",
+    { name: "Follow", checked: false },
     { timeout: 3000 },
   );
   act(() => reportWorkspaceFailure("workspace_read_only", "Read only"));
-  expect(follow.hasAttribute("disabled")).toBe(true);
+  expect(unfollowed.getAttribute("aria-disabled")).toBe("true");
 });
 
 test("New ticket expands without replacing the rich draft and creates once from a focused property", async () => {
@@ -11009,7 +11061,8 @@ test("pointer Delete removes existing evidence directly and Undo restores its fi
     (command: string, args?: { input?: typeof original }) => {
       if (command === "find_tickets") return [current];
       if (command === "show_ticket") return current;
-      if (command === "list_evidence") return items;
+      if (command === "ticket_evidence_page")
+        return { items, total: items.length };
       if (command === "delete_evidence") {
         items = [];
         return;
@@ -11099,6 +11152,7 @@ test("Activity folds recorded changes between authored updates and expands every
   await user.click(
     await screen.findByRole("button", { name: /Folded history outcome/ }),
   );
+  await user.click(await screen.findByRole("radio", { name: "All" }));
   const timeline = await screen.findByRole("list", {
     name: "Activity timeline",
   });
@@ -11162,7 +11216,10 @@ test("Evidence announces a pending initial read without claiming empty and retai
   bridge.invoke.mockImplementation((command: string) => {
     if (command === "find_tickets") return [current];
     if (command === "show_ticket") return current;
-    if (command === "list_evidence") return initial ? firstRead : [record];
+    if (command === "ticket_evidence_page")
+      return initial
+        ? firstRead.then((items) => ({ items, total: items.length }))
+        : { items: [record], total: 1 };
     return bridgeDefault(command);
   });
   render(<App />);
@@ -11196,7 +11253,7 @@ test("Evidence announces a pending initial read without claiming empty and retai
   bridge.invoke.mockImplementation((command: string) => {
     if (command === "find_tickets") return [current];
     if (command === "show_ticket") return current;
-    if (command === "list_evidence")
+    if (command === "ticket_evidence_page")
       throw new Error("SYNTHETIC_REFRESH_FAILURE");
     return bridgeDefault(command);
   });
@@ -12058,7 +12115,7 @@ test("Activity R focuses the single composer and failed posting retains its requ
   });
   render(<App />);
   fireEvent.click(await screen.findByRole("button", { name: /First/ }));
-  await screen.findByRole("button", { name: "File" });
+  await screen.findByRole("button", { name: "Add ticket property" });
   fireEvent.keyDown(document.body, { key: "r" });
   const editor = await screen.findByRole("textbox", {
     name: "New update rich text",
@@ -12194,7 +12251,7 @@ test("Ticket description and update draft share one visible floating bar and fol
   });
   render(<App />);
   fireEvent.click(await screen.findByRole("button", { name: /First/ }));
-  await screen.findByRole("button", { name: "File" });
+  await screen.findByRole("button", { name: "Add ticket property" });
   fireEvent.keyDown(document.body, { key: "r" });
   const update = await screen.findByRole("textbox", {
     name: "New update rich text",
@@ -13995,8 +14052,11 @@ test("Source refresh and its persisted failure keep raw diagnostics behind Detai
     },
   });
   fireEvent.click(screen.getByRole("button", { name: /T-KQ1.*First/ }));
-  await screen.findByRole("button", { name: "Source: acme/api#98" });
-  fireEvent.click(screen.getByRole("button", { name: "Source: acme/api#98" }));
+  fireEvent.click(
+    await screen.findByRole("button", {
+      name: "Explain read-only description",
+    }),
+  );
   expect(screen.queryByText(raw)).toBeNull();
   fireEvent.click(screen.getByRole("button", { name: "Details" }));
   expect(screen.getByText(raw)).toBeTruthy();

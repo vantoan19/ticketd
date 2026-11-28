@@ -10,7 +10,6 @@ import {
 import { afterEach, expect, test, vi } from "vitest";
 import { invoke } from "@tauri-apps/api/core";
 import { AttachmentCard } from "./AttachmentCard";
-import { FileGrid } from "./FileCard";
 import { fitName } from "./file-name";
 import { openPdf } from "./pdf-document";
 import { fakePdf } from "@/test/fake-pdf";
@@ -219,32 +218,6 @@ test("a report that can't show, a failed read, a large report or a missing file 
     expect.objectContaining({ id: "away" }),
   );
   expect(screen.getAllByRole("button")).toHaveLength(4);
-});
-
-test("more than six cards fold into a +N card that opens the rest in place", () => {
-  render(
-    <FileGrid label="Files">
-      {Array.from({ length: 13 }, (_, index) => (
-        <li key={index} className="file-card-item">
-          <AttachmentCard
-            file={stored(`f${index}`, `file-${index}.zip`)}
-            onOpen={() => {}}
-          />
-        </li>
-      ))}
-    </FileGrid>,
-  );
-  expect(screen.getAllByRole("listitem")).toHaveLength(7);
-  expect(screen.queryByRole("button", { name: "file-6.zip" })).toBeNull();
-  const more = screen.getByRole("button", { name: /Show all 13 files/ });
-  expect(more.textContent).toContain("+7");
-  fireEvent.click(more);
-  expect(screen.getAllByRole("listitem")).toHaveLength(13);
-  expect(screen.queryByRole("button", { name: /Show all/ })).toBeNull();
-  // Focus lands on the first card the +N card revealed.
-  expect(document.activeElement).toBe(
-    screen.getByRole("button", { name: "file-6.zip" }),
-  );
 });
 
 test("measured, a cut name keeps the end of its second line and its first line stays whole", () => {

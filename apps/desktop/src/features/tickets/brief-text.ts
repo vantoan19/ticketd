@@ -13,7 +13,7 @@ export function hasVisibleText(markdown: string): boolean {
         : /^#\d/.test(name)
           ? Number.parseInt(name.slice(1), 10)
           : NaN;
-      return Number.isNaN(code) ? entity : String.fromCodePoint(code);
+      return code <= 0x10ffff ? String.fromCodePoint(code) : entity;
     })
     .replace(new RegExp("[\u200b-\u200d\u2060\ufeff]", "g"), "");
   return text.trim().length > 0;

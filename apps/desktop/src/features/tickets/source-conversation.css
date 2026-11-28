@@ -1,11 +1,12 @@
 .source-conversation {
-  margin-top: 40px;
+  margin-top: 48px;
 }
 .source-card-actions {
   display: flex;
   flex-wrap: nowrap;
   align-items: center;
   gap: 8px;
+  flex: none;
 }
 
 .source-conversation [data-slot="section-header"] {
@@ -15,34 +16,16 @@
   margin: 0;
 }
 .source-conversation [data-slot="section-header"] .source-link {
+  min-height: 28px;
   font-size: var(--text-caption);
-}
-.source-card-actions {
-  flex: none;
-}
-.source-readonly-label {
-  display: inline-flex;
-  align-items: center;
-  gap: 4px;
-  white-space: nowrap;
-}
-.source-readonly-label svg {
-  width: 12px;
-  height: 12px;
 }
 .source-conversation .description-document {
   padding: 0;
   margin-top: 0;
   min-height: 0;
 }
-:where(:is(.ticket-detail, .chat-pane)[data-width~="max-760"])
-  .source-conversation
-  .source-card-actions
-  .source-link {
-  width: 32px;
-  height: 32px;
-  justify-content: center;
-  font-size: 0;
+.source-conversation-fold {
+  margin-inline-start: 40px;
 }
 .take-ownership-actions {
   position: sticky;

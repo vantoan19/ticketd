@@ -1,9 +1,9 @@
-import { FollowToggle } from "./Attention";
+import { useFollow } from "./use-follow";
 import { TicketAgentHeader } from "./TicketAgent";
 import { formatDateTime, relativeDateTime } from "@/lib/format";
 import { useNow } from "@/lib/use-now";
 import { Tooltip } from "@/components/ui/tooltip";
-import { useEffect, useRef, useState } from "react";
+import { useContext, useEffect, useEffectEvent, useRef, useState } from "react";
 import {
   ArrowLeft,
   ChevronDown,
@@ -24,14 +24,24 @@ import { useStatusLine } from "@/components/ui/use-status-line";
 import { useCopy } from "@/components/ui/use-copy";
 import {
   DropdownMenu,
+  DropdownMenuCheckboxItem,
   DropdownMenuContent,
   DropdownMenuGroup,
   DropdownMenuItem,
+  DropdownMenuLabel,
   DropdownMenuSeparator,
+  DropdownMenuShortcut,
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
 import { PublishDialog } from "./PublishToSource";
 import { useMarkdownExport } from "@/features/attachments/use-markdown-export";
+import { ticketExportMarkdown } from "@/lib/api/portable-export";
+import { TicketCommandContext } from "@/lib/ticket-command-actions";
+import {
+  ariaKeyShortcuts,
+  matchesShortcut,
+  shortcutLabel,
+} from "@/lib/shortcuts";
 import {
   publicationReason,
   usePublishTarget,
@@ -47,6 +57,7 @@ import {
 } from "@/features/tickets/ticket-source";
 import { useChatAboutTicket } from "@/features/chats/use-ticket-chats";
 import { type Project, type Ticket } from "@/lib/api/client";
+import type { TicketListPosition } from "./useTicketWorkspace";
 import { useTicketTrash } from "./use-ticket-trash";
 import { useTicketChanged } from "./open-ticket";
 import "./ticket-detail.css";
@@ -71,18 +82,22 @@ export function TicketHeader({
   onClose,
   onOpenGraph,
   position = null,
+  outsideResults = false,
   onAdjacent,
   projects = [],
   returnLabel = "All tickets",
   scrolled = false,
+  narrow = false,
 }: {
   /** The name of the list the ticket was opened from, for the return crumb. */
   returnLabel?: string;
   scrolled?: boolean;
+  narrow?: boolean;
   /** For the Project folder a Chat about the ticket is offered. */
   projects?: Project[];
   /** The selected ticket's place in the visible list, across pages. */
-  position?: { index: number; total: number } | null;
+  position?: TicketListPosition | null;
+  outsideResults?: boolean;
   /** Opens the ticket before (-1) or after (1) this one in the list. */
   onAdjacent?: (direction: 1 | -1) => void;
   selected: string | null;
@@ -108,6 +123,53 @@ export function TicketHeader({
   const [duplicateOpen, setDuplicateOpen] = useState(false);
   const [historyOpen, setHistoryOpen] = useState(false);
   const actionsTrigger = useRef<HTMLButtonElement>(null);
+  const openCommand = useContext(TicketCommandContext);
+  const followReference = ticket && !ticket.trashed ? ticket.reference : null;
+  const follow = useFollow(followReference, true);
+  const openReminder = () => {
+    if (followReference)
+      openCommand?.(
+        "Reminder",
+        followReference,
+        actionsTrigger.current ?? undefined,
+      );
+  };
+  const runHeaderShortcut = useEffectEvent((event: KeyboardEvent) => {
+    const target = event.target;
+    const pane = actionsTrigger.current?.closest(".ticket-detail");
+    if (
+      event.defaultPrevented ||
+      event.isComposing ||
+      event.repeat ||
+      !(target instanceof Element) ||
+      !pane?.contains(target) ||
+      pane.closest("[hidden], [inert]") ||
+      target.closest(
+        "input, textarea, select, [contenteditable]:not([contenteditable=false]), [role=textbox]",
+      ) ||
+      document.querySelector(
+        "[role=dialog], [role=alertdialog], [role=menu], [role=listbox], [data-slot=popover-content]",
+      )
+    )
+      return;
+    if (matchesShortcut(event, "ticket-follow") && !follow.blocked) {
+      event.preventDefault();
+      void follow.toggle();
+    } else if (
+      returnLabel === "Inbox" &&
+      matchesShortcut(event, "ticket-reminder") &&
+      openCommand
+    ) {
+      event.preventDefault();
+      openReminder();
+    }
+  });
+  useEffect(() => {
+    if (!followReference) return;
+    const onKey = (event: KeyboardEvent) => runHeaderShortcut(event);
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [followReference]);
   /** A dialog opened from the menu hands focus back to the menu's trigger. */
   const returnToActions = () =>
     window.requestAnimationFrame(() => {
@@ -119,13 +181,16 @@ export function TicketHeader({
     { kind: "ticket", reference: ticket?.reference ?? "" },
     actionsTrigger,
   );
+  const previousLabel =
+    returnLabel === "Inbox" ? "Previous entry" : "Previous ticket";
+  const nextLabel = returnLabel === "Inbox" ? "Next entry" : "Next ticket";
   // Previous/Next replace the ticket (and, at a page edge, the page), which
   // remounts this group. Remember which one the keyboard used and give it focus
   // back; at the end of the list that button is disabled, so focus moves to its
   // twin, or to the reference, never nowhere.
   const listPosition = useRef<HTMLDivElement>(null);
   const adjacentFocus = useRef<{
-    label: "Previous ticket" | "Next ticket";
+    direction: -1 | 1;
     from: string | null;
   } | null>(null);
   useEffect(() => {
@@ -137,12 +202,13 @@ export function TicketHeader({
       listPosition.current?.querySelector<HTMLButtonElement>(
         `button[aria-label="${label}"]:not(:disabled)`,
       );
-    const twin =
-      wanted.label === "Previous ticket" ? "Next ticket" : "Previous ticket";
-    const next = button(wanted.label) ?? button(twin);
+    const next =
+      wanted.direction === -1
+        ? (button(previousLabel) ?? button(nextLabel))
+        : (button(nextLabel) ?? button(previousLabel));
     if (next) next.focus();
     else document.getElementById("detail-heading")?.focus();
-  }, [selected, ticket, position]);
+  }, [selected, ticket, position, previousLabel, nextLabel]);
   const statusLine = useStatusLine();
   const changed = useTicketChanged();
   const trash = useTicketTrash(changed);
@@ -156,7 +222,7 @@ export function TicketHeader({
     });
   }, [exportError, statusLine]);
   /** A menu copy: the menu closes, so the status line says what happened. */
-  async function copyFromMenu(label: string, text: string) {
+  async function copyFromMenu(label: string, text: string | Promise<string>) {
     const done = await copy(label, text);
     statusLine.show(
       done
@@ -167,6 +233,21 @@ export function TicketHeader({
           },
     );
   }
+  const group = position?.statusGroup ?? position;
+  const groupStatus =
+    returnLabel === "Inbox"
+      ? null
+      : (position?.statusGroup?.status ?? ticket?.status);
+  const positionText = group
+    ? `${group.index} of ${group.total}${groupStatus ? ` ${groupStatus.toLowerCase()}` : ""}`
+    : "–";
+  const positionReason = position
+    ? undefined
+    : outsideResults
+      ? "Not in the current results"
+      : "No position in the current list";
+  const sourceURL = ticket?.source?.url;
+  const agentCommand = contextCommand(ticket?.reference ?? "");
   const owner = ticket ? externalSource(ticket) : null;
   const issueReference = owner ? sourceReference(owner) : null;
   return (
@@ -194,14 +275,14 @@ export function TicketHeader({
                 </IconButton>
               </span>
             )}
-            <h1
+            <h2
               id="detail-heading"
               tabIndex={-1}
               className={selected ? "detail-reference" : "sr-only"}
             >
               {selected ?? "Ticket details"}
-            </h1>
-            {selected && (
+            </h2>
+            {selected && !narrow && (
               <CopyButton
                 label="Copy reference"
                 text={selected}
@@ -209,22 +290,12 @@ export function TicketHeader({
               />
             )}
             {scrolled && ticket && (
-              <Tooltip content={ticket.title}>
+              <Tooltip content={ticket.title} overflowOnly>
                 <span className="ticket-header-title">
                   <span aria-hidden="true">· </span>
                   {ticket.title}
                 </span>
               </Tooltip>
-            )}
-            {!scrolled && ticket?.updated_at && (
-              <span className="ticket-header-updated">
-                <span aria-hidden="true">·</span>
-                <Tooltip content={formatDateTime(ticket.updated_at)}>
-                  <time dateTime={ticket.updated_at}>
-                    Updated {relativeDateTime(ticket.updated_at, now)}
-                  </time>
-                </Tooltip>
-              </span>
             )}
             {selected && <TicketAgentHeader reference={selected} />}
             {owner && issueReference && (
@@ -232,6 +303,7 @@ export function TicketHeader({
                 url={owner.url}
                 className="header-source-link"
                 label={`Open on ${owner.provider_name}: ${sourceLocation(owner)}`}
+                title={sourceLocation(owner)}
               >
                 {issueReference.place && (
                   <>
@@ -264,25 +336,25 @@ export function TicketHeader({
                     role="group"
                     aria-label="Position in the list"
                   >
-                    {/* The slot is kept when the ticket has no place in the list, so
-                  the icons never move between tickets. */}
-                    <span className="list-position-text">
-                      {position
-                        ? `${position.index} of ${position.total}`
-                        : "–"}
-                    </span>
+                    {!narrow && (
+                      <Tooltip content={positionReason}>
+                        <span
+                          className="list-position-text"
+                          tabIndex={positionReason ? 0 : undefined}
+                          aria-label={positionReason}
+                        >
+                          {positionText}
+                        </span>
+                      </Tooltip>
+                    )}
                     <IconButton
-                      label={
-                        returnLabel === "Inbox"
-                          ? "Previous entry"
-                          : "Previous ticket"
-                      }
+                      label={previousLabel}
                       shortcut="K"
                       aria-keyshortcuts="K"
                       disabled={!position || position.index <= 1}
                       onClick={() => {
                         adjacentFocus.current = {
-                          label: "Previous ticket",
+                          direction: -1,
                           from: selected,
                         };
                         onAdjacent(-1);
@@ -291,15 +363,13 @@ export function TicketHeader({
                       <ChevronUp />
                     </IconButton>
                     <IconButton
-                      label={
-                        returnLabel === "Inbox" ? "Next entry" : "Next ticket"
-                      }
+                      label={nextLabel}
                       shortcut="J"
                       aria-keyshortcuts="J"
                       disabled={!position || position.index >= position.total}
                       onClick={() => {
                         adjacentFocus.current = {
-                          label: "Next ticket",
+                          direction: 1,
                           from: selected,
                         };
                         onAdjacent(1);
@@ -308,9 +378,6 @@ export function TicketHeader({
                       <ChevronDown />
                     </IconButton>
                   </div>
-                )}
-                {!ticket.trashed && (
-                  <FollowToggle reference={ticket.reference} variant="strip" />
                 )}
                 <DropdownMenu>
                   <DropdownMenuTrigger asChild>
@@ -322,7 +389,25 @@ export function TicketHeader({
                       <MoreHorizontal />
                     </IconButton>
                   </DropdownMenuTrigger>
-                  <DropdownMenuContent align="end">
+                  <DropdownMenuContent
+                    align="end"
+                    className="w-64 max-w-(--radix-dropdown-menu-content-available-width)"
+                  >
+                    {ticket.updated_at && (
+                      <DropdownMenuLabel>
+                        <Tooltip content={formatDateTime(ticket.updated_at)}>
+                          <time dateTime={ticket.updated_at}>
+                            Updated {relativeDateTime(ticket.updated_at, now)}
+                          </time>
+                        </Tooltip>
+                      </DropdownMenuLabel>
+                    )}
+                    {narrow && onAdjacent && (
+                      <DropdownMenuLabel aria-label={positionReason}>
+                        {positionText}
+                        {positionReason && <> · {positionReason}</>}
+                      </DropdownMenuLabel>
+                    )}
                     <DropdownMenuGroup>
                       <DropdownMenuItem
                         onSelect={() =>
@@ -331,21 +416,90 @@ export function TicketHeader({
                       >
                         Copy reference
                       </DropdownMenuItem>
+                      {sourceURL && (
+                        <DropdownMenuItem
+                          onSelect={() => void copyFromMenu("Link", sourceURL)}
+                        >
+                          Copy link
+                        </DropdownMenuItem>
+                      )}
                       <DropdownMenuItem
                         onSelect={() =>
                           void copyFromMenu(
-                            "Context command",
-                            contextCommand(ticket.reference),
+                            "Markdown",
+                            ticketExportMarkdown(ticket.reference),
                           )
                         }
                       >
-                        Copy context command
+                        Copy as Markdown
                       </DropdownMenuItem>
+                      <DropdownMenuItem
+                        aria-label="Copy for an agent"
+                        aria-description={agentCommand}
+                        onSelect={() =>
+                          void copyFromMenu("Context command", agentCommand)
+                        }
+                      >
+                        <span className="flex min-w-0 flex-col">
+                          Copy for an agent
+                          <span className="wrap-anywhere font-mono text-xs/4 text-muted-foreground">
+                            {agentCommand}
+                          </span>
+                        </span>
+                      </DropdownMenuItem>
+                    </DropdownMenuGroup>
+                    <DropdownMenuSeparator />
+                    <DropdownMenuGroup>
+                      {!ticket.trashed && (
+                        <>
+                          <DropdownMenuCheckboxItem
+                            aria-label="Follow"
+                            aria-keyshortcuts={ariaKeyShortcuts(
+                              "ticket-follow",
+                            )}
+                            aria-description="Updates and approvals reach your Inbox"
+                            checked={follow.following}
+                            disabled={follow.blocked}
+                            keepOpen={false}
+                            onCheckedChange={() => void follow.toggle()}
+                          >
+                            <span className="flex min-w-0 flex-col">
+                              Follow
+                              <span className="text-xs/4 text-muted-foreground">
+                                Updates and approvals reach your Inbox
+                              </span>
+                            </span>
+                            <DropdownMenuShortcut aria-hidden="true">
+                              {shortcutLabel("ticket-follow")}
+                            </DropdownMenuShortcut>
+                          </DropdownMenuCheckboxItem>
+                          <DropdownMenuItem
+                            aria-label="Remind me…"
+                            aria-keyshortcuts={ariaKeyShortcuts(
+                              "ticket-reminder",
+                            )}
+                            onSelect={openReminder}
+                          >
+                            Remind me…
+                            <DropdownMenuShortcut aria-hidden="true">
+                              {shortcutLabel("ticket-reminder")}
+                            </DropdownMenuShortcut>
+                          </DropdownMenuItem>
+                        </>
+                      )}
                       {chatAbout && (
                         <DropdownMenuItem onSelect={chatAbout}>
                           Chat about this ticket
                         </DropdownMenuItem>
                       )}
+                      {!ticket.trashed && onOpenGraph && (
+                        <DropdownMenuItem onSelect={onOpenGraph}>
+                          Open in graph
+                        </DropdownMenuItem>
+                      )}
+                      <DropdownMenuItem onSelect={() => setHistoryOpen(true)}>
+                        History…
+                      </DropdownMenuItem>
                       <DropdownMenuItem
                         disabled={exporter.busy}
                         onSelect={() => void exporter.run()}
@@ -374,22 +528,12 @@ export function TicketHeader({
                         </DropdownMenuItem>
                       )}
                       {!ticket.trashed && (
-                        <>
-                          <DropdownMenuItem
-                            onSelect={() => setDuplicateOpen(true)}
-                          >
-                            Mark as duplicate…
-                          </DropdownMenuItem>
-                          {onOpenGraph && (
-                            <DropdownMenuItem onSelect={onOpenGraph}>
-                              Open graph
-                            </DropdownMenuItem>
-                          )}
-                        </>
+                        <DropdownMenuItem
+                          onSelect={() => setDuplicateOpen(true)}
+                        >
+                          Mark as duplicate…
+                        </DropdownMenuItem>
                       )}
-                      <DropdownMenuItem onSelect={() => setHistoryOpen(true)}>
-                        History…
-                      </DropdownMenuItem>
                     </DropdownMenuGroup>
                     <DropdownMenuSeparator />
                     <DropdownMenuGroup>

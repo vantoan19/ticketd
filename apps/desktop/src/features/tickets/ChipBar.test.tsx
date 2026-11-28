@@ -13,6 +13,7 @@ import { TicketDetails } from "./TicketDetails";
 import { TestReads } from "@/lib/workspace-reads/testing";
 import type { Ticket } from "@/lib/api/client";
 import { bridgeDefault, unknownCommands } from "@/test/bridge-defaults";
+import { fakeChangeSignal } from "@/lib/workspace-reads/fake-signal";
 
 const bridge = vi.hoisted(() => ({ invoke: vi.fn() }));
 vi.mock("@tauri-apps/api/core", () => bridge);
@@ -41,14 +42,16 @@ Element.prototype.scrollIntoView = () => {};
 
 const changes: object[] = [];
 let following = false;
+let reminder: string | null = null;
 beforeEach(() => {
   callbacks = [];
   following = false;
+  reminder = null;
   changes.length = 0;
   bridge.invoke.mockImplementation(async (command: string, args?: object) => {
     if (command === "show_ticket") return ticket;
     if (command === "is_following") return following;
-    if (command === "reminder") return null;
+    if (command === "reminder") return reminder;
     if (command === "set_following") {
       following = (args as { following: boolean }).following;
       return null;
@@ -81,17 +84,20 @@ const ticket: Ticket = {
   children: [],
   prerequisites: [],
 };
-function renderDetails() {
+function renderDetails(
+  record = ticket,
+  signal?: ReturnType<typeof fakeChangeSignal>,
+) {
   render(
-    <TestReads primed={{ ticket: ticket }}>
+    <TestReads primed={{ ticket: record }} {...(signal && { signal })}>
       <TicketDetails
         mention={null}
-        selected={ticket.reference}
+        selected={record.reference}
         expanded={false}
         onExpand={vi.fn()}
         onReturn={vi.fn()}
         setSelected={vi.fn()}
-        opened={[ticket.reference]}
+        opened={[record.reference]}
         onMentionReady={vi.fn()}
         onClearMention={vi.fn()}
         projects={[{ id: "p1", name: "Web portal" } as never]}
@@ -114,57 +120,77 @@ test("a wide pane keeps the same wrapping property bar", async () => {
   ).toBeNull();
 });
 
-test("a narrow pane folds the rail into chips that open the same editors", async () => {
+test("below a 560px pane the menu carries Copy and the position, and navigation stays in the header", async () => {
+  renderDetails();
+  resizePane(560);
+  const header = screen.getByRole("banner");
+  expect(
+    within(header).getByRole("button", { name: "Copy reference" }),
+  ).toBeTruthy();
+  expect(within(header).getByText("2 of 11 in progress")).toBeTruthy();
+  resizePane(559);
+  expect(
+    within(header).queryByRole("button", { name: "Copy reference" }),
+  ).toBeNull();
+  expect(within(header).queryByText("2 of 11 in progress")).toBeNull();
+  for (const name of [
+    "Return to ticket list",
+    "Previous ticket",
+    "Next ticket",
+    "Close ticket details",
+  ])
+    expect(within(header).getByRole("button", { name })).toBeTruthy();
+  fireEvent.keyDown(
+    within(header).getByRole("button", { name: "Ticket actions" }),
+    {
+      key: "Enter",
+    },
+  );
+  const menu = await screen.findByRole("menu");
+  expect(within(menu).getByText("2 of 11 in progress")).toBeTruthy();
+  expect(
+    within(menu).getByRole("menuitem", { name: "Copy reference" }),
+  ).toBeTruthy();
+});
+
+test("a narrow pane shows only present properties and adds a project through the plus menu", async () => {
   renderDetails();
   resizePane(500);
   const bar = await screen.findByRole("group", { name: "Ticket properties" });
   expect(screen.queryByRole("complementary")).toBeNull();
-  // Rail order, each chip named by its property and value. No source is set
-  // up, so there is no Source chip and nothing says "Local".
-  await screen.findByRole("button", { name: "Follow" });
   expect(
-    [...bar.querySelectorAll("button, [role=combobox]")].map(
-      (chip) => chip.getAttribute("aria-label") ?? chip.textContent,
-    ),
-  ).toEqual([
-    "Status: In progress",
-    "Project: No project",
-    "Plan: No Plan",
-    "Tags: release",
-    "Manage reminder",
-    "Add ticket property",
-  ]);
+    within(bar)
+      .getAllByRole("button")
+      .map((chip) => chip.getAttribute("aria-label")),
+  ).toEqual(["Status: In progress", "Tags: release", "Add ticket property"]);
   expect(bar.textContent).not.toContain("Local");
-  // Follow is an icon toggle: its name stays "Follow" and aria-pressed says
-  // whether it is on.
-  const follow = screen.getByRole("button", { name: "Follow" });
-  expect(follow.getAttribute("aria-pressed")).toBe("false");
-  fireEvent.click(follow);
-  await waitFor(() => expect(follow.getAttribute("aria-pressed")).toBe("true"));
-
-  // The Project chip opens the rail's picker, and choosing saves.
-  fireEvent.click(
-    within(bar).getByRole("button", { name: "Project: No project" }),
+  fireEvent.keyDown(
+    within(bar).getByRole("button", { name: "Add ticket property" }),
+    { key: "Enter" },
   );
+  const menu = await screen.findByRole("menu");
+  expect(within(menu).queryByRole("menuitem", { name: "Tags" })).toBeNull();
+  expect(
+    within(menu)
+      .getAllByRole("menuitem")
+      .map((item) => item.textContent),
+  ).toEqual([
+    "Project",
+    "PlanL",
+    "ReminderH",
+    "Blocked by…B",
+    "Parent…",
+    "Subticket…",
+    "Link a ticket…",
+    "Evidence…",
+    "File…",
+    "Document…",
+  ]);
+  fireEvent.click(within(menu).getByRole("menuitem", { name: "Project" }));
   fireEvent.click(await screen.findByRole("option", { name: "Web portal" }));
   await waitFor(() =>
     expect(changes).toEqual([expect.objectContaining({ reference: "T-KQ1" })]),
   );
-});
-
-test("narrow, empty linked context offers one add row after the description", async () => {
-  renderDetails();
-  resizePane(500);
-  const bar = await screen.findByRole("group", { name: "Ticket properties" });
-  const connected = await screen.findByRole("group", {
-    name: "Add to this ticket",
-  });
-  expect(bar.contains(connected)).toBe(false);
-  expect(
-    screen
-      .getByText("A description to read.")
-      .compareDocumentPosition(connected) & Node.DOCUMENT_POSITION_FOLLOWING,
-  ).toBeTruthy();
 });
 
 test("widening the pane keeps the same bar", async () => {
@@ -175,6 +201,28 @@ test("widening the pane keeps the same bar", async () => {
   expect(
     await screen.findByRole("group", { name: "Ticket properties" }),
   ).toBeTruthy();
+});
+
+test("a reminder arriving while Tags is open preserves the picker and its trigger", async () => {
+  const signal = fakeChangeSignal();
+  renderDetails(ticket, signal);
+  resizePane(500);
+  const tags = await screen.findByRole("button", { name: "Tags: release" });
+  fireEvent.click(tags);
+  const search = await screen.findByRole("combobox");
+  fireEvent.change(search, { target: { value: "front" } });
+  search.focus();
+
+  reminder = "2099-12-31T00:00:00Z";
+  await act(async () => signal.change());
+  expect(
+    await screen.findByRole("button", { name: /^Manage reminder, scheduled/ }),
+  ).toBeTruthy();
+  expect(screen.getByRole("combobox")).toBe(search);
+  expect(document.activeElement).toBe(search);
+  expect(search).toHaveProperty("value", "front");
+  fireEvent.keyDown(search, { key: "Escape" });
+  await waitFor(() => expect(document.activeElement).toBe(tags));
 });
 
 test("a hidden pane reports no width and keeps its layout", async () => {
@@ -188,7 +236,7 @@ test("a hidden pane reports no width and keeps its layout", async () => {
   ).toBeNull();
 });
 
-test("narrow, an agent update keeps its reserved strip after the property controls", async () => {
+test("narrow, the update card follows the property controls", async () => {
   bridge.invoke.mockImplementation(async (command: string, args?: object) => {
     if (command === "latest_update")
       return {
@@ -203,16 +251,13 @@ test("narrow, an agent update keeps its reserved strip after the property contro
     if (command === "reminder") return null;
     return bridgeDefault(command, args as { reference?: string });
   });
-  renderDetails();
+  renderDetails({ ...ticket, status: "In progress" });
   resizePane(500);
   const bar = await screen.findByRole("group", { name: "Ticket properties" });
-  // One line: who and when, then the excerpt.
-  const latest = (await screen.findByText(/Drafted a fix/)).closest(
-    ".ticket-agent-strip",
-  )!;
-  expect(latest.textContent).toMatch(/^codex · .*Drafted a fix/);
+  const latest = await screen.findByRole("region", { name: "Latest update" });
+  expect(await within(latest).findByText("Drafted a fix")).toBeTruthy();
   // On its own line after the last chip, not between Status and the others.
-  const last = within(bar).getByRole("button", { name: "Manage reminder" });
+  const last = within(bar).getByRole("button", { name: "Add ticket property" });
   expect(
     last.compareDocumentPosition(latest) & Node.DOCUMENT_POSITION_FOLLOWING,
   ).toBeTruthy();

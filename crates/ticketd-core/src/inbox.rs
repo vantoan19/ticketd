@@ -108,6 +108,18 @@ pub(crate) fn record(
     Ok(())
 }
 
+pub(crate) fn remove_activity_entries(
+    connection: &Connection,
+    ticket_id: &str,
+    activity_id: &str,
+) -> Result<(), Error> {
+    connection.execute(
+        "DELETE FROM inbox_entries WHERE ticket_id = ?1 AND kind = 'activity' AND from_value = ?2",
+        params![ticket_id, activity_id],
+    )?;
+    Ok(())
+}
+
 /// Makes the local person follow a ticket; following twice changes nothing.
 pub(crate) fn follow(connection: &rusqlite::Connection, ticket_id: &str) -> Result<(), Error> {
     connection.execute(

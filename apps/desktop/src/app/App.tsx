@@ -1,3 +1,4 @@
+import { windowQuittingEvent } from "@/lib/api/window";
 import { ticketUnavailable } from "@/features/tickets/inboxModel";
 import type { ProjectSourceSetup } from "@/features/projects/ConnectProjectSource";
 import { ProjectRemoteNote } from "@/features/projects/ProjectRemoteNote";
@@ -247,6 +248,7 @@ function UpdateShell() {
       beforeInstall={async () => {
         window.dispatchEvent(new Event("ticketd:window-closing"));
         await recovery.flush();
+        window.dispatchEvent(new Event(windowQuittingEvent));
       }}
     >
       <AppContent />
@@ -739,7 +741,7 @@ function AppContent() {
         view === "tickets" &&
         workspace.selected === reference
       ) {
-        openTicketUpdate();
+        requestTicketUpdate(reference, undefined, true);
         return true;
       }
       return false;
@@ -1721,12 +1723,13 @@ function AppContent() {
                                       </div>
                                     )}
                                     <TicketCommandContext.Provider
-                                      value={(scope, reference) => {
+                                      value={(scope, reference, origin) => {
                                         paletteReturn.current =
-                                          document.activeElement instanceof
+                                          origin ??
+                                          (document.activeElement instanceof
                                           HTMLElement
                                             ? document.activeElement
-                                            : null;
+                                            : null);
                                         setPaletteReference(reference);
                                         setPaletteScope(scope);
                                         setPaletteOpen(true);

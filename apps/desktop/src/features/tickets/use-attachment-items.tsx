@@ -4,12 +4,12 @@ import type { Attachment } from "@/lib/api/attachments";
 import { useAvailability } from "@/features/sync-review/availability";
 
 /**
- * The attached files as card items, one `<li>` each so the grid can count them
- * and fold after six; each opens its preview.
+ * The attached files as card items. Each opens its preview.
  */
 export function useAttachmentItems(
   files: Attachment[],
   onOpen: (file: Attachment) => void,
+  cardWidth: number,
 ): ReactElement[] {
   const availability = useAvailability(
     files
@@ -23,6 +23,7 @@ export function useAttachmentItems(
         storage={availability.of(file.id)}
         storageKnown={availability.known}
         onOpen={() => onOpen(file)}
+        width={cardWidth}
       />
     </li>
   ));

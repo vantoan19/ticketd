@@ -5,6 +5,9 @@
   font-size: var(--text-caption);
   line-height: 16px;
 }
+.activity-new-divider::after {
+  background: var(--group-hairline);
+}
 .activity-author {
   white-space: nowrap;
 }
@@ -59,6 +62,9 @@
 .activity-row-actions {
   opacity: 0;
 }
+.activity-latest-stub:hover .activity-row-actions,
+.activity-latest-stub:focus-within .activity-row-actions,
+.activity-latest-stub[data-open] .activity-row-actions,
 .activity [data-slot="comment-row"]:hover .activity-row-actions,
 .activity [data-slot="comment-row"]:focus-within .activity-row-actions,
 .activity [data-slot="comment-row"][data-open] .activity-row-actions,

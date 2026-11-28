@@ -31,7 +31,7 @@ export function Disclosure({
   children,
 }: {
   label: ReactNode;
-  count?: number;
+  count?: number | string;
   defaultOpen?: boolean;
   open?: boolean;
   onOpenChange?: (open: boolean) => void;
@@ -60,7 +60,7 @@ export function Disclosure({
       {/* Kept mounted while closed, as <details> is, so state inside survives;
           Expand keeps it inert and out of the accessibility tree. */}
       <Expand open={open}>
-        <div id={body} className="ui-disclosure-body">
+        <div id={body} className="ui-disclosure-body" aria-hidden={!open}>
           {children}
         </div>
       </Expand>

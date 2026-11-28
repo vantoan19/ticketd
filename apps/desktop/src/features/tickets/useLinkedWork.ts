@@ -1,6 +1,6 @@
 import { useStatusLine } from "@/components/ui/use-status-line";
 import { useRef, useState } from "react";
-import type { Relationships } from "@/lib/api/client";
+import type { Relationships, Ticket } from "@/lib/api/client";
 import {
   describeFailure,
   type FailureDescription,
@@ -23,10 +23,8 @@ type Loaded = {
 };
 
 /**
- * One bounded read of the core's relationships feeds the Subtickets section
- * under the description and the Relationships section of the rail. The Open
- * Ticket serves it and re-reads it whenever the workspace changes, so links
- * made elsewhere appear; a write here reports itself with `changed()`.
+ * Linked and the context line share the Open Ticket's relationship read.
+ * The Open Ticket re-reads on workspace changes and after these writes.
  */
 export function useLinkedWork() {
   const { record: ticket, changed } = useOpenTicket();
@@ -34,11 +32,7 @@ export function useLinkedWork() {
   const [linking, setLinking] = useState<AddableKind | null>(null);
   const [reviewing, setReviewing] = useState(false);
   const [redirecting, setRedirecting] = useState(false);
-  // A failed action, and which kind of row it was on: a subticket's shows under Subtickets, the rest in the rail.
-  const [error, setError] = useState<{
-    kind: LinkRow["kind"] | null;
-    failure: FailureDescription;
-  } | null>(null);
+  const [error, setError] = useState<FailureDescription | null>(null);
   const [pending, setPending] = useState(false);
   // A removal acts at once; the pane's status line offers Undo (P7).
   const statusLine = useStatusLine();
@@ -60,8 +54,6 @@ export function useLinkedWork() {
   // × already showing, so clicks on that slot wait out 400ms: a double-click
   // never removes a second relationship.
   const settling = useRef(false);
-  // The read's failure keeps the links; a failed "Show more" is the action's
-  // own failure, shown under the list like any other.
   const current: Loaded | null =
     links || read.failure ? { reference, links, failure: read.failure } : null;
   const rowKey = (row: Pick<LinkRow, "kind" | "reference">) =>
@@ -113,13 +105,12 @@ export function useLinkedWork() {
         });
     } catch (reason) {
       show(key, true);
-      setError({
-        kind: row.kind,
-        failure: describeFailure(
+      setError(
+        describeFailure(
           reason,
           `remove ${linkLabel(row.kind)} ${row.reference}`,
         ),
-      });
+      );
     } finally {
       setPending(false);
     }
@@ -141,8 +132,9 @@ export function useLinkedWork() {
     current,
     rows,
     more,
-    error:
-      error ?? (read.moreFailure && { kind: null, failure: read.moreFailure }),
+    error,
+    loadingMore: read.loadingMore,
+    moreFailure: read.moreFailure,
     pending,
     remove,
     showMore: read.showMore,
@@ -159,3 +151,23 @@ export function useLinkedWork() {
 }
 
 export type LinkedWorkState = ReturnType<typeof useLinkedWork>;
+
+export function orderBlockers(work: LinkedWorkState) {
+  const prerequisites = work.current?.links?.prerequisites;
+  if (!prerequisites)
+    return [...work.ticket.prerequisites].sort(
+      (a, b) => Number(b.unresolved) - Number(a.unresolved),
+    );
+  const rows: Ticket["prerequisites"] = work.rows.filter(
+    (row) => row.kind === "blocked_by",
+  );
+  if (prerequisites.next_offset !== null) {
+    // The ticket record already contains all blockers; the paged links hold
+    // the newer values and optimistic removals for the rows they have read.
+    const loaded = new Set(prerequisites.items.map((row) => row.reference));
+    rows.push(
+      ...work.ticket.prerequisites.filter((row) => !loaded.has(row.reference)),
+    );
+  }
+  return rows.sort((a, b) => Number(b.unresolved) - Number(a.unresolved));
+}

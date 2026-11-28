@@ -339,3 +339,327 @@ fn the_first_update_an_agent_wrote_is_found_without_reading_any_ticket() {
     assert_eq!(found.editing_agent, "codex");
     assert_eq!(found.reported_at, first.reported_at);
 }
+
+#[test]
+fn send_back_moves_the_review_and_posts_the_persons_update_together() {
+    use ticketd_core::{Error, Status, WriteRequest, WriteResult};
+
+    let dir = tempfile::tempdir().unwrap();
+    let mut workspace = Workspace::open(dir.path().join("reviews.sqlite3")).unwrap();
+    let ticket = workspace.create_ticket("Review the rail").unwrap();
+    let reference = ticket.reference.as_str();
+    let send = |brief: &str, expected_status_history_number| WriteRequest::SendBack {
+        reference: reference.into(),
+        brief: brief.into(),
+        expected_status_history_number,
+    };
+    assert!(matches!(
+        workspace.write(Some("return"), send("Handle a narrow window.", 0)),
+        Err(Error::TicketChanged(_))
+    ));
+    assert!(workspace.activities(reference, 10, 0).unwrap().is_empty());
+    assert!(workspace.ticket_history(reference).unwrap().is_empty());
+
+    let in_review = workspace
+        .change_ticket(
+            reference,
+            TicketPatch {
+                status: Some(Status::InReview),
+                ..Default::default()
+            },
+        )
+        .unwrap();
+    let review_number = in_review.status_history_number.unwrap();
+    assert!(
+        workspace
+            .write(Some("return"), send("  ", review_number))
+            .is_err()
+    );
+    assert_eq!(
+        workspace.show_ticket(reference).unwrap().status,
+        Status::InReview
+    );
+    assert!(workspace.activities(reference, 10, 0).unwrap().is_empty());
+    assert_eq!(workspace.ticket_history(reference).unwrap().len(), 1);
+
+    workspace.set_following(reference, true).unwrap();
+    let report = workspace
+        .add_activity(reference, "Implemented the rail.", Some("codex"))
+        .unwrap();
+    let outcome = workspace
+        .write(
+            Some("return"),
+            send("Handle a narrow window.", review_number),
+        )
+        .unwrap();
+    assert_eq!(
+        workspace
+            .write(
+                Some("return"),
+                send("Handle a narrow window.", review_number)
+            )
+            .unwrap(),
+        outcome
+    );
+    assert!(matches!(
+        workspace.write(Some("return"), send("Something else", review_number)),
+        Err(Error::RequestConflict(_))
+    ));
+    let updates = workspace.activities(reference, 10, 0).unwrap();
+    assert_eq!(updates.len(), 2);
+    assert_eq!(updates[1].brief, "Handle a narrow window.");
+    assert!(updates[1].editing_agent.is_none());
+    let inbox = workspace.inbox(20, 0).unwrap();
+    assert!(
+        inbox
+            .iter()
+            .any(|entry| entry.kind == "activity" && entry.from_value == updates[1].id)
+    );
+    assert_eq!(
+        workspace.show_ticket(reference).unwrap().status,
+        Status::InProgress
+    );
+    let history = workspace.ticket_history(reference).unwrap();
+    assert_eq!(history.len(), 2);
+    assert_eq!(
+        (&*history[1].from_value, &*history[1].to_value),
+        ("In review", "In progress")
+    );
+
+    let undo = || WriteRequest::UndoSendBack {
+        reference: reference.into(),
+        send_request_id: "return".into(),
+    };
+    let restored = workspace.write(Some("undo"), undo()).unwrap();
+    assert_eq!(workspace.write(Some("undo"), undo()).unwrap(), restored);
+    assert!(matches!(restored, WriteResult::Ticket(ticket) if ticket.status == Status::InReview));
+    let inbox = workspace.inbox(20, 0).unwrap();
+    let update_notices: Vec<_> = inbox
+        .iter()
+        .filter(|entry| entry.kind == "activity")
+        .map(|entry| entry.from_value.as_str())
+        .collect();
+    assert_eq!(update_notices, vec![report.id.as_str()]);
+    assert_eq!(
+        workspace.activities(reference, 10, 0).unwrap(),
+        vec![report]
+    );
+    assert_eq!(workspace.ticket_history(reference).unwrap().len(), 3);
+    assert_eq!(
+        workspace
+            .write(
+                Some("return"),
+                send("Handle a narrow window.", review_number)
+            )
+            .unwrap(),
+        outcome
+    );
+    assert_eq!(
+        workspace.show_ticket(reference).unwrap().status,
+        Status::InReview
+    );
+}
+
+#[test]
+fn send_back_applies_to_the_review_that_the_reviewer_loaded() {
+    use ticketd_core::{Error, Status, WriteRequest, WriteResult};
+
+    let dir = tempfile::tempdir().unwrap();
+    let mut workspace = Workspace::open(dir.path().join("reviews.sqlite3")).unwrap();
+    let ticket = workspace.create_ticket("Review the rail").unwrap();
+    let reference = ticket.reference.as_str();
+    let unguarded_request = serde_json::json!({
+        "operation": "send_back",
+        "reference": reference,
+        "brief": "Handle a narrow window."
+    });
+    assert!(serde_json::from_value::<WriteRequest>(unguarded_request).is_err());
+    let change = |workspace: &mut Workspace, status| {
+        workspace
+            .change_ticket(
+                reference,
+                TicketPatch {
+                    status: Some(status),
+                    ..Default::default()
+                },
+            )
+            .unwrap()
+    };
+    let send_back = |number| -> WriteRequest {
+        serde_json::from_value(serde_json::json!({
+            "operation": "send_back",
+            "reference": reference,
+            "brief": "Handle a narrow window.",
+            "expected_status_history_number": number
+        }))
+        .unwrap()
+    };
+    let first = change(&mut workspace, Status::InReview);
+    change(&mut workspace, Status::InProgress);
+    let second = change(&mut workspace, Status::InReview);
+
+    assert!(matches!(
+        workspace.write(Some("stale-review"), send_back(first.status_history_number)),
+        Err(Error::TicketChanged(_))
+    ));
+    assert!(workspace.activities(reference, 10, 0).unwrap().is_empty());
+    assert_eq!(workspace.show_ticket(reference).unwrap(), second);
+
+    let request = second.status_history_number;
+    let sent = workspace.write(Some("send"), send_back(request)).unwrap();
+    assert!(
+        matches!(&sent, WriteResult::SendBack(outcome) if outcome.ticket.status == Status::InProgress)
+    );
+    let new_review = change(&mut workspace, Status::InReview);
+    assert_eq!(
+        workspace.write(Some("send"), send_back(request)).unwrap(),
+        sent
+    );
+    assert_eq!(workspace.show_ticket(reference).unwrap(), new_review);
+    assert_eq!(workspace.activities(reference, 10, 0).unwrap().len(), 1);
+}
+
+#[test]
+fn undo_send_back_preserves_a_later_status_change_and_an_edited_update() {
+    use ticketd_core::{Error, Status, WriteRequest};
+
+    let dir = tempfile::tempdir().unwrap();
+    let mut workspace = Workspace::open(dir.path().join("reviews.sqlite3")).unwrap();
+    for (suffix, edit) in [("status", false), ("update", true)] {
+        let ticket = workspace.create_ticket("Review the rail").unwrap();
+        let reference = ticket.reference.as_str();
+        let change = |workspace: &mut Workspace, status| {
+            workspace
+                .change_ticket(
+                    reference,
+                    TicketPatch {
+                        status: Some(status),
+                        ..Default::default()
+                    },
+                )
+                .unwrap()
+        };
+        let review = change(&mut workspace, Status::InReview);
+        workspace
+            .write(
+                Some(suffix),
+                WriteRequest::SendBack {
+                    reference: reference.into(),
+                    brief: "Handle a narrow window.".into(),
+                    expected_status_history_number: review.status_history_number.unwrap(),
+                },
+            )
+            .unwrap();
+        let update = workspace.latest_update(reference).unwrap().unwrap();
+        if edit {
+            workspace
+                .edit_activity(
+                    reference,
+                    &update.activity_id,
+                    ActivityPatch {
+                        brief: Some("Handle a narrow window and improve keyboard focus.".into()),
+                        ..Default::default()
+                    },
+                )
+                .unwrap();
+        } else {
+            change(&mut workspace, Status::InReview);
+            change(&mut workspace, Status::InProgress);
+        }
+        let history = workspace.ticket_history(reference).unwrap();
+        let updates = workspace.activities(reference, 10, 0).unwrap();
+        assert!(matches!(
+            workspace.write(
+                Some("undo"),
+                WriteRequest::UndoSendBack {
+                    reference: reference.into(),
+                    send_request_id: suffix.into(),
+                }
+            ),
+            Err(Error::TicketChanged(_))
+        ));
+        assert_eq!(
+            workspace.show_ticket(reference).unwrap().status,
+            Status::InProgress
+        );
+        assert_eq!(workspace.activities(reference, 10, 0).unwrap(), updates);
+        assert_eq!(workspace.ticket_history(reference).unwrap(), history);
+    }
+}
+
+#[test]
+fn undo_done_applies_to_the_completion_that_offered_it() {
+    use ticketd_core::{Error, Status, WriteRequest, WriteResult};
+
+    let dir = tempfile::tempdir().unwrap();
+    let mut workspace = Workspace::open(dir.path().join("reviews.sqlite3")).unwrap();
+    let ticket = workspace.create_ticket("Review a change").unwrap();
+    let reference = ticket.reference.as_str();
+    let review = || TicketPatch {
+        status: Some(Status::InReview),
+        ..Default::default()
+    };
+    let complete = || WriteRequest::ChangeTicket {
+        reference: reference.into(),
+        patch: TicketPatch {
+            expected_status: Some(Status::InReview),
+            status: Some(Status::Done),
+            ..Default::default()
+        },
+    };
+    let undo = |number| WriteRequest::ChangeTicket {
+        reference: reference.into(),
+        patch: TicketPatch {
+            expected_status: Some(Status::Done),
+            expected_status_history_number: Some(number),
+            status: Some(Status::InReview),
+            ..Default::default()
+        },
+    };
+
+    workspace.change_ticket(reference, review()).unwrap();
+    let first = workspace.write(Some("complete-first"), complete()).unwrap();
+    let WriteResult::Ticket(first_ticket) = &first else {
+        panic!("completion returns a ticket");
+    };
+    let first_number = first_ticket.status_history_number.unwrap();
+    workspace.change_ticket(reference, review()).unwrap();
+    let WriteResult::Ticket(second_ticket) = workspace
+        .write(Some("complete-second"), complete())
+        .unwrap()
+    else {
+        panic!("completion returns a ticket");
+    };
+    let second_number = second_ticket.status_history_number.unwrap();
+    assert_ne!(first_number, second_number);
+    assert_eq!(
+        workspace.write(Some("complete-first"), complete()).unwrap(),
+        first
+    );
+    assert!(matches!(
+        workspace.write(Some("undo-first"), undo(first_number)),
+        Err(Error::TicketChanged(_))
+    ));
+    assert_eq!(
+        workspace.show_ticket(reference).unwrap().status,
+        Status::Done
+    );
+
+    workspace
+        .change_ticket(
+            reference,
+            TicketPatch {
+                title: Some("Title edited after completion".into()),
+                ..Default::default()
+            },
+        )
+        .unwrap();
+    let WriteResult::Ticket(restored) = workspace
+        .write(Some("undo-second"), undo(second_number))
+        .unwrap()
+    else {
+        panic!("Undo returns a ticket");
+    };
+    assert_eq!(restored.status, Status::InReview);
+    assert_eq!(restored.title, "Title edited after completion");
+}

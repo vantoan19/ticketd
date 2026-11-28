@@ -159,6 +159,9 @@ export const chatSummarySchema = z.object({
   harness_name: z.string(),
   /** Absent while the folder is missing. */
   folder_name: z.string().nullish(),
+  /** The main agent’s reported model and whether its turn is running. */
+  model: z.string().nullish(),
+  turn_running: z.boolean().optional(),
   first_ticket: z.string().nullish(),
   project: projectRefSchema.nullish(),
   /** The linked tickets, in link order: the row's context item. */
@@ -633,6 +636,8 @@ export const transcriptItemSchema = z.discriminatedUnion("kind", [
     folded: z.boolean().nullish(),
     /** Exactly what would run, when the subject shortens it or says it as sentences. */
     command: z.string().nullish(),
+    /** An execution folder that differs from the Chat’s folder. */
+    folder: z.string().nullish(),
     /** A command that only calls ticketd, said after the title ("wants to"). */
     ticketd: z.array(ticketdCallSchema).nullish(),
   }),
@@ -1028,13 +1033,15 @@ export interface Stopping {
 }
 
 /**
- * A command the host refused. `stale` means the request, turn or runtime it
+ * A command the host couldn't complete. `stale` means the request, turn or runtime it
  * named is no longer current; the view shows the current state instead. `gone`
- * means the file it named is no longer there.
+ * means the file it named is no longer there. `contact_lost` leaves the delivery
+ * of an answer unknown.
  */
 export class ChatError extends Error {
   constructor(
-    readonly code: "stale" | "gone" | "failed" | "project_archived",
+    readonly code:
+      "stale" | "gone" | "failed" | "project_archived" | "contact_lost",
     message: string,
   ) {
     super(message);
@@ -1092,12 +1099,14 @@ export interface ChatClient {
     effort?: string;
     permission?: string;
   }): Promise<CreatedChat>;
-  openChat(id: string): Promise<ChatSnapshot>;
-  /** Changes after `cursor`, in order. */
+  /** Give each open view its own signal to cancel and claim its feed. */
+  openChat(id: string, signal?: AbortSignal): Promise<ChatSnapshot>;
+  /** Changes after `cursor`, in order. Use the same signal as the open. */
   subscribe(
     id: string,
     cursor: number,
     listener: (change: ChatChange) => void,
+    signal?: AbortSignal,
   ): Unsubscribe;
   /**
    * Starts a turn, or steers the one in progress; the host queues it when steering is known not to have been accepted.

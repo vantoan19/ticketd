@@ -203,7 +203,8 @@ pub(crate) fn hydrate(connection: &Connection, tickets: &mut [Ticket]) -> Result
     let mut duplicates = duplicates(connection, &ids)?;
     let mut latest = grouped(
         connection,
-        "SELECT j.value, t.updated_at, a.id, a.reported_at, a.editing_agent
+        "SELECT j.value, t.updated_at, a.id, a.reported_at, a.editing_agent,
+                (SELECT MAX(h.number) FROM ticket_history h WHERE h.ticket_id = t.id AND h.kind = 'status')
            FROM json_each(?1) j JOIN tickets t ON t.id = j.value
            LEFT JOIN activities a ON a.number = (SELECT number FROM activities WHERE ticket_id = j.value ORDER BY number DESC LIMIT 1)",
         &ids,
@@ -216,7 +217,7 @@ pub(crate) fn hydrate(connection: &Connection, tickets: &mut [Ticket]) -> Result
                 }),
                 None => None,
             };
-            Ok((row.get::<_, Option<String>>(1)?, update))
+            Ok((row.get::<_, Option<String>>(1)?, update, row.get::<_, Option<i64>>(5)?))
         },
     )?;
     // Few tickets have a source or a publication under way: only those read theirs.
@@ -243,7 +244,11 @@ pub(crate) fn hydrate(connection: &Connection, tickets: &mut [Ticket]) -> Result
             None => None,
         };
         ticket.duplicate_of = direct.map(|(_, reference)| reference);
-        (ticket.updated_at, ticket.latest_update) = first(&mut latest, id).unwrap_or_default();
+        (
+            ticket.updated_at,
+            ticket.latest_update,
+            ticket.status_history_number,
+        ) = first(&mut latest, id).unwrap_or_default();
         ticket.source = None;
         if sourced.iter().any(|sourced| sourced == id) {
             crate::source::populate_tracking(connection, ticket)?;

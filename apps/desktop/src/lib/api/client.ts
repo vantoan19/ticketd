@@ -99,6 +99,7 @@ const ticketSchema = lazySchema(() =>
     reference: z.string(),
     title: z.string(),
     status: z.string(),
+    status_history_number: z.number().int().positive().optional(),
     body: z.string(),
     updated_at: z.string().nullish(),
     progress_summary: latestUpdateSchema.nullable().optional(),
@@ -411,6 +412,13 @@ const evidenceSchema = lazySchema(() =>
     editing_agent: z.string().nullable(),
   }),
 );
+const evidencePageSchema = lazySchema(() =>
+  z.object({
+    items: z.array(evidenceSchema),
+    total: z.number().int().nonnegative(),
+    proof: z.array(evidenceSchema).default([]),
+  }),
+);
 export type Evidence = z.infer<typeof evidenceSchema>;
 export type EvidenceInput = Pick<
   Evidence,
@@ -548,6 +556,13 @@ const agentUpdateSchema = lazySchema(() =>
   }),
 );
 export type AgentUpdate = z.infer<typeof agentUpdateSchema>;
+const mentionPassageSchema = z.object({
+  activity_id: z.string().nullable(),
+  passage: z.string(),
+  mention_start: z.number().int().nonnegative(),
+  mention_end: z.number().int().nonnegative(),
+});
+
 export const client = {
   /** The oldest Activity with an author name (an agent's), or null while no agent has written one. */
   async firstAgentUpdate() {
@@ -592,6 +607,14 @@ export const client = {
           invoke("bulk_change", { references, change, requestId }),
         ),
       );
+  },
+  async ticketPeekCounts(reference: string) {
+    return z
+      .object({
+        linked: z.number().int().nonnegative(),
+        files: z.number().int().nonnegative(),
+      })
+      .parse(await invoke("ticket_peek_counts", { reference }));
   },
   /** Every relationship of a ticket as the core reports it, one page of each kind. */
   async contextualRelationships(
@@ -831,6 +854,11 @@ export const client = {
       .array(evidenceSchema)
       .parse(await invoke("list_evidence", { reference, offset }));
   },
+  async evidencePage(reference: string, offset: number) {
+    return evidencePageSchema.parse(
+      await invoke("ticket_evidence_page", { reference, offset }),
+    );
+  },
   async addEvidence(
     reference: string,
     input: EvidenceInput,
@@ -855,25 +883,82 @@ export const client = {
   },
   async backlinks(reference: string, offset: number) {
     return z
-      .array(
-        z.object({
-          source_reference: z.string(),
-          source_title: z.string(),
-          activity_id: z.string().nullable(),
-          reported_at: z.string().nullable(),
-          passage: z.string(),
-          mention_start: z.number().int().nonnegative(),
-          mention_end: z.number().int().nonnegative(),
-        }),
-      )
+      .object({
+        total: z.number().int().nonnegative(),
+        items: z.array(
+          z.object({
+            reference: z.string(),
+            title: z.string(),
+            status: z.string(),
+            mentioned_at: z.string(),
+            passages: z.array(mentionPassageSchema).min(1),
+            next_offset: z
+              .number()
+              .int()
+              .nonnegative()
+              .nullable()
+              .default(null),
+          }),
+        ),
+      })
+      .parse(await invoke("ticket_backlinks", { reference, limit: 3, offset }));
+  },
+  async mentionPassages(
+    reference: string,
+    sourceReference: string,
+    offset: number,
+  ) {
+    return z
+      .object({
+        items: z.array(mentionPassageSchema),
+        next_offset: z.number().int().nonnegative().nullable(),
+      })
       .parse(
-        await invoke("ticket_backlinks", { reference, limit: 20, offset }),
+        await invoke("ticket_mention_passages", {
+          reference,
+          sourceReference,
+          limit: 3,
+          offset,
+        }),
       );
   },
-  async activityFeed(reference: string, offset: number) {
+  async documentMentions(reference: string, offset: number) {
     return z
-      .array(activityFeedSchema)
-      .parse(await invoke("activity_feed", { reference, limit: 50, offset }));
+      .object({
+        items: z.array(
+          z.object({
+            source_id: z.string(),
+            source_label: z.string(),
+            source_trashed: z.boolean(),
+            passage: z.string(),
+          }),
+        ),
+        total: z.number().int().nonnegative(),
+      })
+      .parse(
+        await invoke("ticket_document_mentions", {
+          reference,
+          limit: 3,
+          offset,
+        }),
+      );
+  },
+  async activityFeed(reference: string, offset: number, updatesOnly = false) {
+    return z.array(activityFeedSchema).parse(
+      await invoke("activity_feed", {
+        reference,
+        limit: 50,
+        offset,
+        ...(updatesOnly && { updatesOnly }),
+      }),
+    );
+  },
+  async activityUpdateCount(reference: string) {
+    return z
+      .number()
+      .int()
+      .nonnegative()
+      .parse(await invoke("activity_update_count", { reference }));
   },
   async activity(reference: string, id: string) {
     return activitySchema
@@ -1050,6 +1135,30 @@ export const client = {
       }),
     );
   },
+  async sendBack(
+    reference: string,
+    brief: string,
+    requestId: string,
+    expectedStatusHistoryNumber: number,
+  ) {
+    return ticketSchema.parse(
+      await invoke("send_back", {
+        reference,
+        brief,
+        requestId,
+        expectedStatusHistoryNumber,
+      }),
+    );
+  },
+  async undoSendBack(
+    reference: string,
+    sendRequestId: string,
+    requestId: string,
+  ) {
+    return ticketSchema.parse(
+      await invoke("undo_send_back", { reference, sendRequestId, requestId }),
+    );
+  },
   async changeTicket(
     reference: string,
     patch: {
@@ -1058,6 +1167,10 @@ export const client = {
       /** The title/body last loaded or saved; the core rejects a stale change. */
       expected_title?: string;
       expected_body?: string;
+      /** The status a decision applies to, checked in the same write. */
+      expected_status?: string;
+      /** The status change this decision applies to. Zero expects no history. */
+      expected_status_history_number?: number;
       project_id?: string | null;
       status?: string;
     },

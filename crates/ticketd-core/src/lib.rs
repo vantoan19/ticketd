@@ -3,7 +3,9 @@ pub mod agent_skills;
 pub mod harnesses;
 pub use search::{MetadataSelection, TicketMetadata, TicketMetadataPage, TicketWithUpdate};
 mod backlinks;
-pub use backlinks::Backlink;
+pub use backlinks::{
+    Backlink, MentionPassage, MentionPassagePage, MentioningTicket, TicketMentions,
+};
 mod backup;
 mod backup_archive;
 mod restore;
@@ -23,7 +25,10 @@ pub use context_graph::{
     WorkspaceGraph, WorkspaceGraphRequest,
 };
 mod document_links;
-pub use document_links::{ContextLink, DocumentBacklink, derive_brief_heading, derive_heading};
+pub use document_links::{
+    ContextLink, DocumentBacklink, TicketDocumentMention, TicketDocumentMentions,
+    derive_brief_heading, derive_heading,
+};
 mod current_work;
 pub use current_work::{CurrentWork, CurrentWorkGroup, CurrentWorkPlan};
 mod documents;
@@ -46,7 +51,7 @@ pub use portable_export::{
 };
 mod location;
 pub use context::{ContextOptions, TicketContext};
-pub use evidence::{Evidence, EvidenceInput, EvidenceKind};
+pub use evidence::{Evidence, EvidenceInput, EvidenceKind, EvidencePage};
 pub use location::{
     WorkspaceFile, WorkspaceHealth, WorkspaceInfo, default_workspace_file, workspace_file,
     workspace_health,
@@ -95,7 +100,7 @@ use serde::{Deserialize, Serialize};
 mod counts;
 mod history;
 mod readiness;
-pub use counts::{SidebarCounts, StatusCounts};
+pub use counts::{SidebarCounts, StatusCounts, TicketPeekCounts};
 mod inbox;
 pub use inbox::{AttentionEntry, InboxAttention, InboxEntry, ReminderState, ReviewState};
 mod activities;
@@ -497,6 +502,9 @@ pub struct Ticket {
     pub reference: String,
     pub title: String,
     pub status: Status,
+    /// Device-local identity of the latest status change.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub status_history_number: Option<i64>,
     pub body: String,
     /// Last content or organization change; unknown for legacy tickets with no dated records.
     #[serde(default)]
@@ -541,6 +549,14 @@ pub struct TicketPatch {
     /// The body the editor last loaded or saved; guards a body change like `expected_title`.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub expected_body: Option<String>,
+    /// The status a person acted on. Check it in the write transaction so a
+    /// decision can never overwrite a different status set elsewhere.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub expected_status: Option<Status>,
+    /// The status change a decision or Undo applies to, checked in the same
+    /// transaction. Zero expects a ticket with no recorded status change.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub expected_status_history_number: Option<i64>,
     pub status: Option<Status>,
     pub editing_agent: Option<String>,
     #[serde(
@@ -930,6 +946,26 @@ impl Workspace {
         })
     }
 
+    /// The authored part of the feed, in the same newest-first order.
+    pub fn activity_updates(
+        &self,
+        reference: &str,
+        limit: u32,
+        offset: u32,
+    ) -> Result<Vec<ActivityFeedEntry>, Error> {
+        self.read(|_| {
+            let id = relationships::id(&self.connection, reference)?;
+            activities::newest(&self.connection, &id, limit, offset)
+        })
+    }
+
+    pub fn activity_update_count(&self, reference: &str) -> Result<u32, Error> {
+        self.read(|_| {
+            let id = relationships::id(&self.connection, reference)?;
+            activities::count(&self.connection, &id)
+        })
+    }
+
     pub fn activity(&self, reference: &str, id: &str) -> Result<Activity, Error> {
         self.read(|_| {
             let ticket = self.show_ticket(reference)?;
@@ -1006,6 +1042,7 @@ fn ticket_from_row(row: &rusqlite::Row<'_>) -> rusqlite::Result<Ticket> {
                 Box::new(error),
             )
         })?,
+        status_history_number: None,
         body: row.get(4)?,
         updated_at: None,
         latest_update: None,
@@ -1027,7 +1064,7 @@ fn ticket_from_row(row: &rusqlite::Row<'_>) -> rusqlite::Result<Ticket> {
 mod batch;
 pub use batch::BatchOperation;
 mod ticket_change;
-pub use ticket_change::TicketChange;
+pub use ticket_change::{SendBackOutcome, TicketChange};
 
 /// Where the default workspace lives, without creating anything.
 fn default_path_unchecked() -> Result<std::path::PathBuf, Error> {

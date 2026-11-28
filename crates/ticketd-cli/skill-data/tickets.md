@@ -64,6 +64,15 @@ refuses a source with blocking dependencies; apply your reviewed decisions with
 Canceling, duplicating, or trashing an unfinished blocker does not satisfy its
 dependents.
 
+## Write tickets people can skim
+
+- Start the description with the intended outcome.
+- Record blockers, parents and subtickets as relationships using the commands below.
+- Link to supporting references and keep their details at the source.
+- End the description with a `## Acceptance criteria` heading followed by one
+  Markdown checklist item (`- [ ]`) per check.
+- Start updates with the outcome. The card shows the first four lines.
+
 ## Relationships and evidence
 
 ```sh
