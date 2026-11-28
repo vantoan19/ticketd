@@ -238,7 +238,7 @@ test("GitHub with an expired sign-in opens its integration page", () => {
     github: githubIntegration("not_signed_in"),
     sources: [
       health({
-        connection_id: null,
+        connection_id: undefined,
         health: "unavailable",
         error: { code: "unauthenticated", message: "Bad credentials" },
       }),

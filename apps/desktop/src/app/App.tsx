@@ -802,7 +802,11 @@ function AppContent() {
     if (projectSource.mode === "setup") setProjectSource(null);
   }
   const sourceRevision = JSON.stringify(
-    sourceEntries.map(({ saved }) => [saved?.id, saved?.saved_at]),
+    sourceEntries.map(({ saved, integration_revision }) => [
+      saved?.id,
+      saved?.saved_at,
+      integration_revision,
+    ]),
   );
   function finishProjectSourceSetup(connection: string) {
     if (!pendingSourceSetup) return;

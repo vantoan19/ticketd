@@ -116,7 +116,7 @@ function ProjectSourceReview({
   const candidates =
     choices && "candidates" in choices ? choices.candidates : [];
   const candidate = connection
-    ? candidates.find(({ connection_id }) => connection_id === connection)
+    ? candidates.find(({ source }) => source === connection)
     : selected
       ? candidates.find(({ source }) => source === selected)
       : candidates.length === 1

@@ -192,8 +192,8 @@ export function GithubRepositories({
           }}
           onSaved={() => {
             setAdding(false);
-            onChanged();
-            projectSetup?.onSaved();
+            if (projectSetup) projectSetup.onSaved();
+            else onChanged();
           }}
           returnFocus={add}
         />

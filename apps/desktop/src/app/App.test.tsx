@@ -1,5 +1,10 @@
 import { updateClient } from "@/features/updates/client";
-import { beaconIcon, beaconSource, githubSource } from "@/test/source-fixtures";
+import {
+  beaconIcon,
+  beaconSource,
+  githubIntegration,
+  githubSource,
+} from "@/test/source-fixtures";
 import { DraftRecoveryProvider } from "@/lib/draft-recovery";
 import type { Ticket } from "@/lib/api/client";
 import type { SourceHealth } from "@/lib/api/sources";
@@ -13818,27 +13823,12 @@ test("setting up the source from a project pre-fills discovery and resumes backf
   const project = { ...projectForRemote, remote: "github.com/acme/api" };
   let saved = false;
   let archived = false;
+  const rule = { repository: project.remote, assignee: null, labels: [] };
+  const available = githubIntegration();
   const configured = {
-    ...reviewSourceEntry,
-    next_id: "github",
-    saved: { ...reviewSourceEntry.saved, id: "github", name: "GitHub" },
-    connector: {
-      ...reviewSourceEntry.connector,
-      schema: {
-        fields: [
-          {
-            key: "repositories",
-            label: "Repositories",
-            required: true,
-            type: "multi_select",
-            options: { source: "dynamic", depends_on: [] },
-            allow_custom: true,
-            min_items: 1,
-            max_items: 2,
-          },
-        ],
-      },
-    },
+    ...available.repositories[0]!,
+    ...rule,
+    project: { id: project.id, name: project.name },
   };
   const discovery = {
     provider: "github",
@@ -13849,14 +13839,16 @@ test("setting up the source from a project pre-fills discovery and resumes backf
   };
   await renderReviewApp({
     list_projects: () => [{ ...project, archived }],
-    list_sources: () => [
-      { ...configured, saved: saved ? configured.saved : null },
-    ],
-    project_source_candidates: () => [
+    list_sources: [githubSource],
+    get_github_integration: () => ({
+      ...available,
+      repositories: saved ? [configured] : [],
+    }),
+    project_source_candidates: [
       {
-        source: saved ? "github" : "provider:github",
+        source: "github",
         provider: "github",
-        connection_id: saved ? "github" : null,
+        connection_id: null,
         name: "GitHub",
       },
     ],
@@ -13864,18 +13856,17 @@ test("setting up the source from a project pre-fills discovery and resumes backf
       project_id: project.id,
       project_remote: project.remote,
       provider: "github",
-      connection_id: saved ? "github" : null,
+      connection_id: null,
       repository: "acme/api",
-      source: saved ? "already_listed" : "not_connected",
+      source: saved ? "already_listed" : "add_repository",
       tickets: ["T-ABCDE"],
       fingerprint: saved ? "backfill" : "setup",
     }),
-    source_check_connection: { account: "octo" },
     source_options: [],
-    source_preview: discovery,
-    add_source_connection: () => {
+    preview_github_repository: discovery,
+    save_github_repository: () => {
       saved = true;
-      return { source: configured.saved, preview: discovery };
+      return configured;
     },
   });
   const sidebar = within(
@@ -13884,29 +13875,36 @@ test("setting up the source from a project pre-fills discovery and resumes backf
   fireEvent.click(await sidebar.findByRole("button", { name: "API repo" }));
   await screen.findByText("Issues from this repository aren't being imported.");
   fireEvent.click(screen.getByRole("button", { name: "Set up" }));
-  fireEvent.click(await screen.findByRole("button", { name: "Set up GitHub" }));
-  await screen.findByRole("button", { name: "Remove acme/api" });
-  fireEvent.click(screen.getByRole("button", { name: "Preview matches" }));
-  await screen.findByRole("region", { name: "Preview" });
-  fireEvent.click(screen.getByRole("button", { name: "Add connection" }));
+  fireEvent.click(
+    await screen.findByRole("button", { name: "Add repository…" }),
+  );
+  const setup = within(
+    await screen.findByRole("dialog", { name: "Add a repository" }),
+  );
+  expect(setup.getByText(project.remote)).toBeTruthy();
+  fireEvent.click(setup.getByRole("button", { name: "Preview matches" }));
+  await setup.findByRole("region", { name: "Preview" });
+  fireEvent.click(setup.getByRole("button", { name: "Add repository" }));
   const review = within(
     await screen.findByRole("dialog", { name: "Connect project to GitHub" }),
   );
   expect(await review.findByText("Link 1 existing ticket")).toBeTruthy();
   expect(review.queryByText(/Import issues from/)).toBeNull();
+  expect(
+    bridge.invoke.mock.calls.filter(
+      ([command, args]) =>
+        command === "preview_connect_source" && args?.projectId === project.id,
+    ).length,
+  ).toBeGreaterThan(1);
   expect(bridge.invoke).toHaveBeenCalledWith("preview_connect_source", {
-    source: "provider:github",
+    source: "github",
     projectId: project.id,
   });
-  expect(bridge.invoke).toHaveBeenCalledWith("preview_connect_source", {
-    source: configured.saved.id,
-    projectId: project.id,
+  expect(bridge.invoke).toHaveBeenCalledWith("preview_github_repository", {
+    rule,
   });
-  expect(bridge.invoke).toHaveBeenCalledWith("add_source_connection", {
-    provider: "github",
-    name: "GitHub",
-    connection: "github",
-    config: { repositories: ["acme/api"] },
+  expect(bridge.invoke).toHaveBeenCalledWith("save_github_repository", {
+    rule,
   });
   expect(
     bridge.invoke.mock.calls.some(([command]) => command === "connect_source"),
