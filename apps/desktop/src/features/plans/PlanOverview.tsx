@@ -23,6 +23,7 @@ import { PlanDocuments } from "./PlanDocuments";
 import { PlanOverviewChanges } from "./PlanOverviewChanges";
 import { PlanOverviewSections } from "./PlanOverviewSections";
 import { PlanOverviewStrip } from "./PlanOverviewStrip";
+import { PlanOverviewWrapUp } from "./PlanOverviewWrapUp";
 import { planWorkModel } from "./plan-work-model";
 import { usePlanAction, type PlanViewState } from "./usePlanView";
 import "./plan-overview.css";
@@ -33,6 +34,7 @@ export type PlanOverviewWork = ReturnType<
 
 export function PlanOverview({
   plan,
+  plans,
   state,
   work,
   projects,
@@ -41,6 +43,7 @@ export function PlanOverview({
   paneRef,
 }: {
   plan: Plan;
+  plans: readonly Plan[];
   state: PlanViewState;
   work: PlanOverviewWork | null;
   projects: readonly Project[];
@@ -103,7 +106,7 @@ export function PlanOverview({
                     />
                   </div>
                 )}
-                {/* PlanOverviewWrapUp */}
+                <PlanOverviewWrapUp view={view} plans={plans} state={state} />
                 {view.members.length > 0 && (
                   <PlanOverviewSections
                     work={work}

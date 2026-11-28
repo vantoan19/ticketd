@@ -431,6 +431,7 @@ export function TicketWorkspaceView({
                 <PlanOverview
                   key={overviewPlan.id}
                   plan={overviewPlan}
+                  plans={workspace.plans}
                   state={planState}
                   work={overviewWork}
                   projects={workspace.projects}

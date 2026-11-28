@@ -2,6 +2,7 @@ import { useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { client, type Project, type Ticket } from "@/lib/api/client";
 import { inboxClient } from "@/lib/api/inbox";
 import { failureText } from "@/lib/api/describe-failure";
+import { planAssignmentChoices } from "@/features/plans/plan-assignment";
 import {
   archivedProjectHint,
   archivedProjectMatch,
@@ -181,16 +182,7 @@ export function useTicketCommands({
         },
       ];
     if (scope === "Plan")
-      options = [
-        ...plans
-          .filter((p) => !p.archived)
-          .map((p) => ({
-            value: p.id,
-            label: p.name,
-            selected: p.id === ticket.plan_id,
-          })),
-        { value: "", label: "No Plan", selected: ticket.plan_id === null },
-      ];
+      options = planAssignmentChoices(plans, ticket.plan_id);
     if (scope === "Tags")
       options = [...new Set([...tags, ...ticket.tags])].map((value) => ({
         value,
