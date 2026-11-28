@@ -9,7 +9,9 @@ import { useSources } from "@/features/settings/sources/use-sources";
  * no publishing (DESIGN.md section 7).
  */
 export function useSourcesConfigured(): boolean {
-  return useSources().entries.some((entry) => entry.saved !== null);
+  return useSources().entries.some(
+    (entry) => entry.saved !== null || entry.integration_revision !== undefined,
+  );
 }
 
 /**
@@ -18,7 +20,7 @@ export function useSourcesConfigured(): boolean {
  * was saved, so changing it in Settings makes the answer change. A connector
  * that is not set up offers nothing to publish to.
  */
-export function usePublishTarget(): {
+export function usePublishTarget(ticket?: Ticket): {
   provider: string;
   saved: string;
   name: string;
@@ -26,13 +28,16 @@ export function usePublishTarget(): {
   const { entries } = useSources();
   const entry = entries.find(
     (item) =>
-      item.saved !== null && item.connector.capabilities.includes("publish"),
+      (item.saved !== null ||
+        item.integration_revision !== undefined ||
+        (item.connector.provider === "github" && ticket?.project_id)) &&
+      item.connector.capabilities.includes("publish"),
   );
   return entry
     ? {
         provider: entry.saved?.id ?? entry.connector.provider,
         name: entry.saved?.name ?? entry.connector.name,
-        saved: entry.saved?.saved_at ?? "",
+        saved: entry.saved?.saved_at ?? entry.integration_revision ?? "",
       }
     : null;
 }

@@ -367,15 +367,27 @@ impl Workspace {
              FROM (SELECT provider FROM source_status UNION SELECT provider FROM external_identities) p
              LEFT JOIN source_status s ON s.provider = p.provider
                AND NOT EXISTS (SELECT 1 FROM source_connections c WHERE c.provider = p.provider)
+             WHERE p.provider <> 'github' OR NOT EXISTS (SELECT 1 FROM github_repository_rules)
+             UNION ALL
+             SELECT 'github', s.last_attempt_at, s.last_refreshed_at, s.error_code, s.error_message,
+                    s.failing_since, s.retry_after, s.partial_message, s.last_checked_tickets, NULL
+             FROM (SELECT 1 WHERE EXISTS (SELECT 1 FROM github_repository_rules))
+             LEFT JOIN (
+                SELECT * FROM github_repository_status ORDER BY last_attempt_at DESC, repository LIMIT 1
+             ) s
              ORDER BY 1, 10",
         )?;
-        let sources = super::configured_sources(&self.connection)?;
+        let sources = super::refresh_sources_configuration(&self.connection)?;
         let mut counts = std::collections::HashMap::<(String, Option<String>), (u32, u32)>::new();
         for ticket in super::tracking::tracked(&self.connection, None)? {
             let id = ticket
                 .connection(&sources)
                 .map(|source| source.saved.id.clone());
-            let count = counts.entry((ticket.provider, id.clone())).or_default();
+            let public_id = id
+                .as_ref()
+                .filter(|id| super::github_integration::repository_job(id).is_none())
+                .cloned();
+            let count = counts.entry((ticket.provider, public_id)).or_default();
             count.0 += 1;
             if id.is_none()
                 || ticket
@@ -426,6 +438,7 @@ impl Workspace {
             .collect::<Result<Vec<_>, _>>()?;
         rows.retain(|status| {
             status.connection_id.is_some()
+                || status.provider == super::GITHUB_INTEGRATION
                 || status.tracked_tickets > 0
                 || !sources
                     .iter()
@@ -456,7 +469,9 @@ impl Workspace {
     /// asked not to be contacted again. `None` when no hold is recorded.
     pub fn source_hold_until(&self) -> Result<Option<u64>, Error> {
         let epoch: Option<i64> = self.connection.query_row(
-            "SELECT MAX(CAST(strftime('%s', retry_after) AS INTEGER)) FROM source_connection_status WHERE retry_after IS NOT NULL",
+            "SELECT MAX(CAST(strftime('%s', retry_after) AS INTEGER))
+             FROM (SELECT retry_after FROM source_connection_status UNION ALL SELECT retry_after FROM github_repository_status)
+             WHERE retry_after IS NOT NULL",
             [],
             |row| row.get(0),
         )?;

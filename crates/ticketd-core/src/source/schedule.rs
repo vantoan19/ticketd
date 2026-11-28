@@ -352,7 +352,7 @@ impl RefreshCoordinator {
             if ticket.is_none() {
                 self.feed_connections(&due, result)
             } else {
-                result.map(|run| run.report)
+                result.map(|run| run.report.for_client())
             }
         })
     }
@@ -363,7 +363,7 @@ impl RefreshCoordinator {
         result: Result<RefreshRun, Error>,
     ) -> Result<RefreshReport, Error> {
         if matches!(result, Err(Error::Source(SourceError::RefreshCanceled))) {
-            return result.map(|run| run.report);
+            return result.map(|run| run.report.for_client());
         }
         let due = result
             .as_ref()
@@ -392,6 +392,6 @@ impl RefreshCoordinator {
             );
             schedule.next_due = now.saturating_add(wait);
         }
-        result.map(|run| run.report)
+        result.map(|run| run.report.for_client())
     }
 }

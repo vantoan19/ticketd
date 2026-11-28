@@ -331,6 +331,22 @@ pub struct RefreshReport {
     pub refreshed_at: String,
 }
 
+impl RefreshReport {
+    pub(super) fn for_client(mut self) -> Self {
+        for failure in &mut self.failures {
+            if failure
+                .connection_id
+                .as_deref()
+                .and_then(super::github_integration::repository_job)
+                .is_some()
+            {
+                failure.connection_id = None;
+            }
+        }
+        self
+    }
+}
+
 pub(crate) fn migrate(connection: &Connection) -> Result<(), Error> {
     connection.execute_batch(
         "CREATE TABLE external_identities (\
@@ -1307,14 +1323,23 @@ impl Workspace {
                 candidates.push(source);
             }
         }
-        let saved = candidates
+        let integration;
+        let saved = if let Some(source) = candidates
             .iter()
             .copied()
             .find(|source| source.derived.partitions.contains(&partition))
             .or_else(|| candidates.first().copied())
-            .ok_or_else(|| {
-                invalid("connect GitHub on this host before confirming the issue".into())
-            })?;
+        {
+            source
+        } else {
+            integration = super::github_integration::workflow_target(
+                &self.connection,
+                &host,
+                ticket.project_id.as_deref(),
+                &[destination.to_owned()],
+            )?;
+            &integration
+        };
         let (scoped, _) = saved.check(engine)?;
         let issue = scoped.locate(
             github::PROVIDER,
@@ -1333,9 +1358,20 @@ impl Workspace {
 
         crate::write_scope::run(&self.connection, |transaction| {
             let id = transaction.editable(reference)?;
-            if !super::configured_source(transaction, &saved.saved.id)?
-                .is_some_and(|current| current.revision == saved.revision)
-            {
+            if if super::github_integration::is_integration_target(saved) {
+                let current = crate::read_ticket(transaction, reference)?;
+                super::github_integration::workflow_target(
+                    transaction,
+                    &host,
+                    current.project_id.as_deref(),
+                    &[],
+                )?
+                .revision
+                    != saved.revision
+            } else {
+                !super::configured_source(transaction, &saved.saved.id)?
+                    .is_some_and(|current| current.revision == saved.revision)
+            } {
                 return Err(super::stale_source());
             }
             if let Some(owner) = ticket_for_identity(transaction, &issue.reference.identity)? {
@@ -1470,7 +1506,7 @@ impl Workspace {
         selected: Option<&[String]>,
     ) -> Result<RefreshReport, Error> {
         self.refresh_selected_with_clock(engine, options, selected, &|| options.now.clone())
-            .map(|run| run.report)
+            .map(|run| run.report.for_client())
     }
 
     pub(super) fn refresh_selected_with_clock(

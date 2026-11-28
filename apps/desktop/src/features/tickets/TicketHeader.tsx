@@ -101,7 +101,7 @@ export function TicketHeader({
       (project) => project.id === ticket?.project_id && !project.archived,
     )?.path ?? null,
   );
-  const target = usePublishTarget();
+  const target = usePublishTarget(ticket);
   const preview = usePublicationPreview(ticket, target);
   const [publishing, setPublishing] = useState(false);
   const { copy } = useCopy();

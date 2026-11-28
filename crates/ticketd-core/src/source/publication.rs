@@ -1310,17 +1310,14 @@ fn publication_target(
         return Ok(saved);
     }
     let requested = destination
+        .map(str::trim)
         .filter(|value| value.split('/').count() == 3)
         .map(|value| {
-            crate::project_remote::normalize_project_remote(value)
+            super::github_integration::normalize_repository(value)
                 .ok_or(Error::InvalidProjectRemote)
         })
         .transpose()?;
-    let mut statement =
-        connection.prepare("SELECT repository FROM github_repository_rules ORDER BY repository")?;
-    let saved = statement
-        .query_map([], |row| row.get::<_, String>(0))?
-        .collect::<Result<Vec<_>, _>>()?;
+    let saved = github_publication_repositories(connection, ticket)?;
     let default = ticket
         .project_remote
         .as_deref()
@@ -1333,36 +1330,64 @@ fn publication_target(
         .or(default)
         .and_then(|value| value.split_once('/'))
         .map_or("github.com", |(host, _)| host);
-    let mut repositories: Vec<String> = saved
+    let repositories: Vec<String> = saved
         .iter()
         .filter_map(|value| value.split_once('/'))
         .filter(|(site, _)| site == &host)
         .map(|(_, name)| name.to_owned())
         .collect();
-    if let Some((_, repository)) = ticket
-        .project_remote
-        .as_deref()
-        .and_then(|remote| remote.split_once('/'))
-        .filter(|(site, _)| site == &host)
-        && !repositories
-            .iter()
-            .any(|name| name.eq_ignore_ascii_case(repository))
-    {
-        repositories.push(repository.to_owned());
-    }
+    let project = if ticket.project_id.is_none() {
+        let full = requested.clone().or_else(|| {
+            let bare = destination.map(str::trim).filter(|value| !value.is_empty());
+            bare.map(|bare| format!("{host}/{bare}"))
+                .or_else(|| default.map(str::to_owned))
+        });
+        if let Some(full) = full {
+            super::github_integration::project_route(connection, &full)?.map(|project| project.id)
+        } else {
+            None
+        }
+    } else {
+        ticket.project_id.clone()
+    };
     Ok(Some(super::github_integration::workflow_target(
         connection,
         host,
-        ticket.project_id.as_deref(),
+        project.as_deref(),
         &repositories,
     )?))
+}
+
+fn github_publication_repositories(
+    connection: &Connection,
+    ticket: &Subject,
+) -> Result<Vec<String>, Error> {
+    let mut statement =
+        connection.prepare("SELECT repository FROM github_repository_rules ORDER BY repository")?;
+    let mut repositories = statement
+        .query_map([], |row| row.get::<_, String>(0))?
+        .collect::<Result<Vec<_>, _>>()?;
+    if let Some(remote) = &ticket.project_remote
+        && !repositories
+            .iter()
+            .any(|name| name.eq_ignore_ascii_case(remote))
+    {
+        repositories.push(remote.to_owned());
+    }
+    Ok(repositories)
+}
+
+fn publication_basis<'a>(source: Option<&'a ConfiguredSource>, selected: &'a str) -> &'a str {
+    source
+        .filter(|source| super::github_integration::is_integration_target(source))
+        .map_or(selected, |source| source.revision.as_str())
 }
 
 fn github_destination<'a>(
     source: Option<&ConfiguredSource>,
     destination: Option<&'a str>,
 ) -> Option<&'a str> {
-    destination.map(|value| {
+    destination.map(str::trim).map(|value| {
         if source.is_some_and(super::github_integration::is_integration_target)
             && value.split('/').count() == 3
         {
@@ -1401,7 +1426,19 @@ fn default_publication_connection(
                 if connected.is_empty() {
                     "add a source connection that can publish first".to_owned()
                 } else {
-                    format!("select --connection from: {}", connected.join(", "))
+                    if connected.iter().any(|id| id == super::GITHUB_INTEGRATION) {
+                        let extension_ids: Vec<_> = connected
+                            .iter()
+                            .filter(|id| id.as_str() != super::GITHUB_INTEGRATION)
+                            .cloned()
+                            .collect();
+                        format!(
+                            "choose --provider github or select --connection from: {}",
+                            extension_ids.join(", ")
+                        )
+                    } else {
+                        format!("select --connection from: {}", connected.join(", "))
+                    }
                 },
             )])
             .into(),
@@ -1471,10 +1508,33 @@ impl Workspace {
         let fingerprint = fingerprint(
             scoped,
             provider,
-            connection_id,
+            publication_basis(target.as_ref(), connection_id),
             &ticket,
             destination.as_deref(),
         )?;
+        let (destination, destinations) = if target
+            .as_ref()
+            .is_some_and(super::github_integration::is_integration_target)
+        {
+            let destinations = github_publication_repositories(&self.connection, &ticket)?;
+            if destinations.is_empty()
+                && destination.is_none()
+                && matches!(eligibility, Eligibility::Eligible)
+            {
+                eligibility = ineligible(
+                    IneligibleReason::SourceNotConnected,
+                    "Set a Project remote or add a GitHub repository in Settings › Ticket sources."
+                        .into(),
+                );
+            }
+            let site = scoped.issue_site(provider)?.unwrap_or("github.com");
+            (
+                destination.map(|name| format!("{site}/{name}")),
+                destinations,
+            )
+        } else {
+            (destination, destinations)
+        };
         Ok(PublicationPreview {
             reference: ticket.reference,
             provider: provider.to_owned(),
@@ -1607,7 +1667,13 @@ impl Workspace {
                 // A cleared Project remote can also invalidate the preview by leaving no choice.
                 if let Some(expected) = &options.expected_fingerprint
                     && *expected
-                        != fingerprint(&scoped, provider, connection_id, &ticket, destination)?
+                        != fingerprint(
+                            &scoped,
+                            provider,
+                            publication_basis(Some(target), connection_id),
+                            &ticket,
+                            destination,
+                        )?
                 {
                     return Err(PublicationError::ChangedSincePreview {
                         reference: ticket.reference,
@@ -1970,19 +2036,15 @@ impl Workspace {
             let integrated = super::github_integration::is_integration_target(&started.source);
             if integrated {
                 let ticket = subject(transaction, &started.reference)?;
-                let host = started
-                    .source
-                    .saved
-                    .config
-                    .get(super::github::SITE_CONFIG)
-                    .and_then(serde_json::Value::as_str)
-                    .ok_or(Error::InvalidProjectRemote)?;
-                let current = super::github_integration::workflow_target(
+                let host = started.source.github_site();
+                let destination = format!("{host}/{}", started.request.destination);
+                let current = publication_target(
                     transaction,
-                    host,
-                    ticket.project_id.as_deref(),
-                    &[],
-                )?;
+                    super::GITHUB_INTEGRATION,
+                    &ticket,
+                    Some(&destination),
+                )?
+                .ok_or(Error::InvalidProjectRemote)?;
                 if current.revision != started.source.revision {
                     return Ok(false);
                 }
@@ -2175,6 +2237,23 @@ impl Workspace {
             // host narrows discovery holds without giving another connection
             // permission to settle the attempt.
             let source = publication_connection(transaction, &attempt)?;
+            let scoped_integration;
+            let source = if attempt.provider == super::GITHUB_INTEGRATION
+                && source
+                    .as_ref()
+                    .is_none_or(super::github_integration::is_integration_target)
+            {
+                let host = super::github_integration::normalized_host(original_host)?;
+                scoped_integration = super::github_integration::workflow_target(
+                    transaction,
+                    &host,
+                    ticket.project_id.as_deref(),
+                    &[],
+                )?;
+                Some(scoped_integration)
+            } else {
+                source
+            };
             let scoped = source.as_ref().map(|source| source.bind(engine));
             let scoped = scoped.as_ref().unwrap_or(engine);
             if let Some(source) = source {
@@ -2202,6 +2281,12 @@ impl Workspace {
                 .into());
             }
             record_publication_site(transaction, &attempt.id, &current)?;
+            if attempt.provider == super::GITHUB_INTEGRATION {
+                transaction.execute(
+                    "UPDATE github_publication_context SET host = ?2 WHERE attempt_id = ?1 AND host IN (?2, ?3)",
+                    params![attempt.id, current, super::github::site_host(&current)],
+                )?;
+            }
             transaction.execute(
                 "UPDATE publication_attempts SET updated_at = ?2 WHERE id = ?1",
                 params![attempt.id, now],
@@ -2361,7 +2446,10 @@ impl Workspace {
             ResolutionAction {
                 kind: ActionKind::Attach,
                 available: !running
-                    && source.is_some()
+                    && (source.is_some()
+                        || (attempt.provider == super::GITHUB_INTEGRATION
+                            && attempt.destination_host.is_some()
+                            && !attempt.destination_site_unconfirmed))
                     && host_failure.is_none()
                     && conflict.is_none(),
                 label: "Attach the created issue".into(),
@@ -2426,7 +2514,7 @@ impl Workspace {
             },
         ];
         Ok(PublicationReview {
-            connection_id: source.map(|source| source.saved.id),
+            connection_id: source.filter(|source| !super::github_integration::is_integration_target(source)).map(|source| source.saved.id),
             provider_name: name,
             known,
             unknown,
@@ -3135,7 +3223,7 @@ fn unbound_attach_help(attempt: &PublicationAttempt) -> String {
     }
     if attempt.destination_host.is_none() || attempt.destination_site_unconfirmed {
         return format!(
-            "Verify the original host and any nondefault port. For GitHub Enterprise, set TICKETD_GITHUB_API_URL to that site's API URL. Record the site with `ticketd source resolve {} --confirm-host HOST`.",
+            "Verify the original host and any nondefault port. Record the site with `ticketd source resolve {} --confirm-host HOST`.",
             attempt.reference
         );
     }

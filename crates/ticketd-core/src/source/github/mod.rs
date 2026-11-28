@@ -520,6 +520,7 @@ impl Connector for GithubConnector {
         let api_url = config
             .get(SITE_CONFIG)
             .and_then(Value::as_str)
+            .filter(|site| self.web_site.as_deref() != Some(*site))
             .map_or_else(|| self.api_url.clone(), api_url_for_host);
         Some(Box::new(Self::using_gh(api_url, gh)))
     }
@@ -723,7 +724,10 @@ impl Connector for GithubConnector {
                 tracker_time,
                 publication_requires_tracker_time: false,
             },
-            derived: Self::derived_configuration(config, self.web_site.as_deref()),
+            derived: Self::derived_configuration(
+                &super::github_integration::resolve_assignee(PROVIDER, config, account),
+                self.web_site.as_deref(),
+            ),
         })
     }
 
