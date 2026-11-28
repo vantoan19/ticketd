@@ -24,6 +24,7 @@ pub fn bare(result: WriteResult) -> Result<String, Failure> {
         WriteResult::Document(value) => serde_json::to_string(&value)?,
         WriteResult::Ticket(value) => serde_json::to_string(&value)?,
         WriteResult::Tickets(value) => serde_json::to_string(&value)?,
+        WriteResult::SendBack(value) => serde_json::to_string(&value)?,
         WriteResult::Activity(value) => serde_json::to_string(&value)?,
         WriteResult::Evidence(value) => serde_json::to_string(&value)?,
         WriteResult::Project(value) => serde_json::to_string(&value)?,

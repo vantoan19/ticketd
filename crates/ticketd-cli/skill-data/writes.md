@@ -106,6 +106,30 @@ later operations can change a ticket returned earlier in the same batch.
 Direct `batch FILE` takes just the operations array and has no retry ID. Wrap it
 in `write` as above for replay protection.
 
+## Return a ticket in review
+
+Send back moves an In review ticket to In progress and posts one local update in the same write. Use `ticketd write - --request-id REVIEW_DECISION_ID` with:
+
+```json
+{
+  "operation": "send_back",
+  "reference": "TICKET_REFERENCE",
+  "brief": "What needs to change"
+}
+```
+
+To undo it, use a new `--request-id` and send:
+
+```json
+{
+  "operation": "undo_send_back",
+  "reference": "TICKET_REFERENCE",
+  "send_request_id": "REVIEW_DECISION_ID"
+}
+```
+
+Undo restores In review and removes the decision's update together. The decision must still be the most recent status change, and its update must still be unchanged. Neither operation publishes to the ticket's external source.
+
 ## Replay and failure handling
 
 After a timeout, lost response, or output failure, retry with the same ID and

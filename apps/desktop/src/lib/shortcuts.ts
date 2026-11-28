@@ -329,6 +329,20 @@ export const SHORTCUTS = [
     note: "On a Ready for review card, outside a text field.",
   },
   {
+    id: "ticket-review-send-back",
+    keys: [["B"]],
+    scope: "Ticket",
+    label: "Send work back",
+    note: "On a Ready for review card, outside a menu or text field.",
+  },
+  {
+    id: "ticket-review-send-back-submit",
+    keys: [["Mod", "Enter"]],
+    scope: "Ticket",
+    label: "Send back with the update",
+    note: "In the Send back field.",
+  },
+  {
     id: "ticket-edit",
     keys: [["E"]],
     scope: "Ticket",
