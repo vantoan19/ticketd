@@ -59,8 +59,9 @@ export function GithubProjectLogin({
             aria-label={`GitHub login for ${site.project.name}`}
             aria-expanded={editing}
             aria-controls={editing ? formId : undefined}
-            disabled={busy}
+            aria-disabled={busy || undefined}
             onClick={() => {
+              if (busy) return;
               setDraft(site.login ?? "");
               setFailure("");
               setEditing(!editing);

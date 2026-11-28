@@ -91,7 +91,10 @@ export function GithubRepositories({
           type="button"
           variant="ghost"
           size="sm"
-          disabled={refreshing || !repositories.length}
+          disabled={
+            refreshing ||
+            (!repositories.length && !integration.has_tracked_tickets)
+          }
           onClick={() => void refresh()}
         >
           <RefreshCw data-icon="inline-start" />

@@ -41,6 +41,7 @@ const integrationSchema = z.object({
   repositories: z.array(repositorySchema),
   migration_notices: z.array(migrationNoticeSchema),
   project_sites_without_rules: z.array(projectSiteSchema).optional(),
+  has_tracked_tickets: z.boolean().optional(),
 });
 
 export type GithubHost = z.infer<typeof hostSchema>;
