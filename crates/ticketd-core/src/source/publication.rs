@@ -1318,13 +1318,10 @@ fn publication_target(
         })
         .transpose()?;
     let saved = github_publication_repositories(connection, ticket)?;
-    let default = ticket
-        .project_remote
-        .as_deref()
-        .or_else(|| match saved.as_slice() {
-            [only] => Some(only.as_str()),
-            _ => None,
-        });
+    let default = ticket.project_remote.as_deref().or(match saved.as_slice() {
+        [only] => Some(only.as_str()),
+        _ => None,
+    });
     let host = requested
         .as_deref()
         .or(default)
@@ -2599,7 +2596,7 @@ impl Workspace {
                     &self.connection,
                     host,
                     ticket.project_id.as_deref(),
-                    &[attempt.destination.clone()],
+                    std::slice::from_ref(&attempt.destination),
                 )?
             }
             (None, _) => return Err(unverified(publication_connection_missing())),

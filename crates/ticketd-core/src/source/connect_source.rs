@@ -445,11 +445,11 @@ fn read_effect(
         let (host, _) = remote.split_once('/').ok_or(Error::InvalidProjectRemote)?;
         let mut statement = connection.prepare(
             "SELECT host FROM github_repository_rules
-             WHERE repository = ?1 COLLATE NOCASE OR repository LIKE ?2 COLLATE NOCASE",
+             WHERE substr(repository, length(host) + 2) = ?2 COLLATE NOCASE
+               AND (host = ?1 OR substr(host, 1, length(?1) + 1) = ?1 || ':')",
         )?;
-        let with_port = format!("{host}:%/{repository}");
         let sites = statement
-            .query_map(params![remote, with_port], |row| row.get::<_, String>(0))?
+            .query_map(params![host, repository], |row| row.get::<_, String>(0))?
             .collect::<Result<Vec<_>, _>>()?;
         let site = match sites.as_slice() {
             [] => host,
