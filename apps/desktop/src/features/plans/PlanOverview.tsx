@@ -1,4 +1,11 @@
-import { useContext, useId, useRef, useState, type RefObject } from "react";
+import {
+  useContext,
+  useId,
+  useRef,
+  useState,
+  type KeyboardEvent,
+  type RefObject,
+} from "react";
 import { FileText, Pencil } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { FailureState } from "@/components/ui/failure-alert";
@@ -8,10 +15,13 @@ import { Skeleton } from "@/components/ui/skeleton";
 import { StatusLineRegion } from "@/components/ui/status-line";
 import { Tooltip } from "@/components/ui/tooltip";
 import { DocumentNavigation } from "@/features/documents/navigation";
+import type { Project } from "@/lib/api/client";
 import { plansClient, type Plan, type View } from "@/lib/api/plans";
 import { compactAgo, formatDateTime } from "@/lib/format";
+import { matchesShortcut } from "@/lib/shortcuts";
 import { PlanDocuments } from "./PlanDocuments";
 import { PlanOverviewChanges } from "./PlanOverviewChanges";
+import { PlanOverviewSections } from "./PlanOverviewSections";
 import { PlanOverviewStrip } from "./PlanOverviewStrip";
 import { planWorkModel } from "./plan-work-model";
 import { usePlanAction, type PlanViewState } from "./usePlanView";
@@ -25,6 +35,7 @@ export function PlanOverview({
   plan,
   state,
   work,
+  projects,
   selected,
   onOpen,
   paneRef,
@@ -32,6 +43,7 @@ export function PlanOverview({
   plan: Plan;
   state: PlanViewState;
   work: PlanOverviewWork | null;
+  projects: readonly Project[];
   selected: string | null;
   onOpen: (reference: string, trigger?: HTMLElement) => void;
   paneRef: RefObject<HTMLElement | null>;
@@ -44,7 +56,12 @@ export function PlanOverview({
     (document) => document.id === view.plan.spec_document_id,
   );
   return (
-    <section className="plan-overview" aria-labelledby={titleId} ref={paneRef}>
+    <section
+      className="plan-overview"
+      aria-labelledby={titleId}
+      onKeyDown={moveBetweenPlanOverviewRows}
+      ref={paneRef}
+    >
       <StatusLineRegion host={paneRef}>
         <div className="plan-overview-scroll">
           <div className="plan-overview-column">
@@ -87,7 +104,16 @@ export function PlanOverview({
                   </div>
                 )}
                 {/* PlanOverviewWrapUp */}
-                {/* PlanOverviewSections, or PlanEmptyState */}
+                {view.members.length > 0 && (
+                  <PlanOverviewSections
+                    work={work}
+                    updates={view.latest_updates}
+                    projects={projects}
+                    selected={selected}
+                    onOpen={onOpen}
+                  />
+                )}
+                {/* PlanEmptyState */}
                 {/* PlanOverviewFiles */}
                 {view.members.length > 0 && (
                   <PlanOverviewChanges
@@ -120,6 +146,39 @@ export function PlanOverview({
       </StatusLineRegion>
     </section>
   );
+}
+
+function moveBetweenPlanOverviewRows(event: KeyboardEvent<HTMLElement>) {
+  const key = event.key.toLowerCase();
+  const target = event.target;
+  if (
+    (key !== "j" && key !== "k") ||
+    !matchesShortcut(event, "list-move") ||
+    event.defaultPrevented ||
+    event.nativeEvent.isComposing ||
+    !(target instanceof HTMLElement) ||
+    target.isContentEditable ||
+    target.closest(
+      "input, textarea, select, [role=combobox], [role=menu], [role=dialog]",
+    )
+  )
+    return;
+  const rows = [
+    ...event.currentTarget.querySelectorAll<HTMLButtonElement>(
+      ".plan-overview-row-open",
+    ),
+  ].filter((row) => !row.closest("[inert]"));
+  const from = rows.findIndex((row) => row.closest("li")?.contains(target));
+  const index =
+    from === -1
+      ? key === "j"
+        ? 0
+        : rows.length - 1
+      : from + (key === "j" ? 1 : -1);
+  const next = rows[index];
+  if (!next) return;
+  event.preventDefault();
+  next.focus();
 }
 
 function PlanOverviewProgress({

@@ -23,6 +23,7 @@ import "./patterns.css";
  */
 export function Disclosure({
   label,
+  "aria-label": ariaLabel,
   count,
   defaultOpen = false,
   open: controlled,
@@ -31,6 +32,7 @@ export function Disclosure({
   children,
 }: {
   label: ReactNode;
+  "aria-label"?: string;
   count?: number;
   defaultOpen?: boolean;
   open?: boolean;
@@ -46,6 +48,7 @@ export function Disclosure({
       <button
         type="button"
         className="ui-disclosure-trigger"
+        aria-label={ariaLabel}
         aria-expanded={open}
         aria-controls={body}
         onClick={() => {

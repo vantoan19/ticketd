@@ -135,10 +135,17 @@ export function TicketWorkspaceView({
     planView === "overview" && !inboxMode ? scopedPlan : undefined;
   const ticketLayout = overviewPlan ? "list" : workspace.layout;
   const board = ticketLayout === "board" && !inboxMode;
-  const overviewMembers = overviewPlan ? planState.view?.members : undefined;
+  const overviewView = overviewPlan ? planState.view : null;
   const overviewWork = useMemo(
-    () => (overviewMembers ? planWorkModel(overviewMembers) : null),
-    [overviewMembers],
+    () =>
+      overviewView
+        ? planWorkModel(overviewView.members, {
+            latestUpdate: (ticket) =>
+              overviewView.latest_updates[ticket.reference]?.reported_at ??
+              ticket.latest_update?.reported_at,
+          })
+        : null,
+    [overviewView],
   );
   const overviewOrder = useMemo(
     () =>
@@ -426,6 +433,7 @@ export function TicketWorkspaceView({
                   plan={overviewPlan}
                   state={planState}
                   work={overviewWork}
+                  projects={workspace.projects}
                   paneRef={listRef}
                   selected={selected}
                   onOpen={(reference, trigger) => {

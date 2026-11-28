@@ -1,4 +1,6 @@
-use crate::{Error, Status, Ticket, TicketPatch, Workspace};
+use std::collections::BTreeMap;
+
+use crate::{Error, LatestUpdate, Status, Ticket, TicketPatch, Workspace};
 use rusqlite::{Connection, OptionalExtension, params};
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
@@ -35,6 +37,9 @@ pub struct PlanView {
     pub counts: PlanCounts,
     #[serde(default)]
     pub documents: Vec<PlanDocument>,
+    /// Latest updates for the Overview's In progress and In review rows, by reference.
+    #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
+    pub latest_updates: BTreeMap<String, LatestUpdate>,
 }
 
 /// What `ticketd plan context` prints. Fields serialize in this order, which is the
@@ -239,7 +244,7 @@ impl Workspace {
     pub fn show_plan(&self, id: &str) -> Result<PlanView, Error> {
         self.show_plan_bounded(id, None, 0, true)
     }
-    /// Read all members for the Desktop Overview and its Documents newest first.
+    /// Read the Desktop Overview's members, update briefs and newest Documents.
     pub fn show_plan_overview(&self, id: &str) -> Result<PlanView, Error> {
         self.read_plan(id, None, 0, true, true)
     }
@@ -259,7 +264,7 @@ impl Workspace {
         limit: Option<u32>,
         offset: u32,
         include_members: bool,
-        newest_documents: bool,
+        overview: bool,
     ) -> Result<PlanView, Error> {
         crate::read_scope::run(&self.connection, |tx| {
             let plan = get(tx, id)?;
@@ -277,8 +282,25 @@ impl Workspace {
                 .into_iter()
                 .map(|reference| self.show_ticket(&reference))
                 .collect::<Result<Vec<_>, _>>()?;
+            let latest_updates = if overview {
+                let reporting = members.iter().filter(|ticket| {
+                    ticket.latest_update.is_some()
+                        && matches!(ticket.status, Status::InProgress | Status::InReview)
+                });
+                let ids =
+                    crate::hydrate::Ids::of(reporting.clone().map(|ticket| ticket.id.as_str()))?;
+                let mut updates = crate::hydrate::latest_updates(tx, &ids)?;
+                reporting
+                    .filter_map(|ticket| {
+                        let latest = updates.remove(&ticket.id)?.pop()?;
+                        Some((ticket.reference.clone(), latest))
+                    })
+                    .collect()
+            } else {
+                BTreeMap::new()
+            };
             let documents = {
-                let sort = if newest_documents {
+                let sort = if overview {
                     "d.updated_at DESC, d.id"
                 } else {
                     "d.id"
@@ -298,6 +320,7 @@ impl Workspace {
                 members,
                 counts,
                 documents,
+                latest_updates,
             })
         })
     }
