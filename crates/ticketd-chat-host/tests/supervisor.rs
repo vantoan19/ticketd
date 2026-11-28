@@ -4258,6 +4258,7 @@ async fn a_message_sent_after_picking_full_access_starts_a_new_turn_with_it() {
         .await
         .unwrap();
     assert_eq!(held, SettingChangeState::Held);
+    assert_eq!(f.live().await.steering, None);
 
     let follow_up = f.send("Continue with Full access").await;
     assert_eq!(

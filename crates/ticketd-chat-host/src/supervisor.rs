@@ -884,19 +884,9 @@ impl Supervisor {
     /// runtime it was meant for is going away, and the next one must not open with the
     /// mode they left.
     fn keep_unanswered_permission(&mut self) {
-        let unanswered = self.runtime.as_ref().and_then(|runtime| {
-            runtime
-                .setting_changes
-                .iter()
-                .rfind(|change| {
-                    change.setting == SettingKey::Permission
-                        && matches!(
-                            change.state,
-                            SettingChangeState::Held | SettingChangeState::Sent
-                        )
-                })
-                .map(|change| change.value.clone())
-        });
+        let unanswered = self
+            .pending_setting(SettingKey::Permission)
+            .map(|change| change.value.clone());
         if let Some(value) = unanswered {
             // Kept for the next session whether or not it could be saved.
             let _ = self.record_permission(&value);
@@ -915,18 +905,19 @@ impl Supervisor {
         })
     }
 
-    /// Steering keeps the running turn's permissions. Hold new input for a new turn
-    /// while the person has a permission change waiting.
-    fn permission_change_pending(&self) -> bool {
-        self.runtime.as_ref().is_some_and(|runtime| {
-            runtime.setting_changes.iter().any(|change| {
-                change.setting == SettingKey::Permission
+    /// The latest change for this setting that the harness has yet to answer.
+    fn pending_setting(&self, setting: SettingKey) -> Option<&LiveSettingChange> {
+        self.runtime
+            .as_ref()?
+            .setting_changes
+            .iter()
+            .rfind(|change| {
+                change.setting == setting
                     && matches!(
                         change.state,
                         SettingChangeState::Held | SettingChangeState::Sent
                     )
             })
-        })
     }
 
     // ------------------------------------------------------------------
@@ -1374,19 +1365,10 @@ impl Supervisor {
         self.recover_storage()?;
         let has_images = attachments.iter().any(ChatAttachmentContent::is_image);
         let can_steer = self.active.is_some()
-            && !self.permission_change_pending()
             && self.steering().is_some()
             && !(has_images && self.images_refused(true));
         if !attachments.is_empty() {
-            let model_changing = self.runtime.as_ref().is_some_and(|runtime| {
-                runtime.setting_changes.iter().any(|change| {
-                    change.setting == SettingKey::Model
-                        && matches!(
-                            change.state,
-                            SettingChangeState::Held | SettingChangeState::Sent
-                        )
-                })
-            });
+            let model_changing = self.pending_setting(SettingKey::Model).is_some();
             let mut refusal = self.attachment_refusal(attachments);
             if refusal.is_none()
                 && has_images
@@ -1609,8 +1591,7 @@ impl Supervisor {
         if let Some(detail) = &self.storage_failed {
             return Err(HostError::StorageFailed(detail.clone()));
         }
-        if self.active.is_some() && (self.steering().is_none() || self.permission_change_pending())
-        {
+        if self.active.is_some() && self.steering().is_none() {
             return Err(HostError::Working);
         }
         let chat = self.chat_id.clone();
@@ -2854,6 +2835,10 @@ impl Supervisor {
     // ------------------------------------------------------------------
 
     fn steering(&self) -> Option<crate::SteeringBehavior> {
+        // Steering retains the running turn's permissions. A pending change needs a new turn.
+        if self.pending_setting(SettingKey::Permission).is_some() {
+            return None;
+        }
         self.runtime
             .as_ref()
             .and_then(|runtime| runtime.capabilities.steering.behavior().copied())
@@ -2904,7 +2889,7 @@ impl Supervisor {
             return;
         }
         if !idle
-            && (self.permission_change_pending()
+            && (self.pending_setting(SettingKey::Permission).is_some()
                 || self
                     .direct
                     .iter()

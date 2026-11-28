@@ -4590,12 +4590,11 @@ test("Full access is one pick away in a Chat and shows on the trigger once in ef
 });
 
 test("a follow-up queues while Full access is waiting for the next turn", async () => {
-  await open(
+  const client = await open(
     one({
       id: "c1",
       title: "Limiter",
       activity: "working",
-      steering: { available: true },
       settings: {
         permission: {
           current: "own",
@@ -4608,12 +4607,19 @@ test("a follow-up queues while Full access is waiting for the next turn", async 
           ],
           changeable: true,
           applies_from: "next_turn",
-          change: { value: "full-access", state: "held" },
         },
       },
     }),
   );
-  expect(button("Queue")).toHaveProperty("disabled", true);
+  expect(button("Steer")).toHaveProperty("disabled", true);
+  openMenu("Permissions: Codex settings");
+  fireEvent.click(
+    await screen.findByRole("menuitemradio", { name: "Full access" }),
+  );
+  expect(await screen.findByRole("button", { name: "Queue" })).toHaveProperty(
+    "disabled",
+    true,
+  );
   expect(
     button("Permissions: Full access, applies on the next turn"),
   ).toBeTruthy();
@@ -4623,6 +4629,15 @@ test("a follow-up queues while Full access is waiting for the next turn", async 
   const queue = await screen.findByRole("list", { name: "Queued messages" });
   expect(within(queue).getByText("Continue with Full access")).toBeTruthy();
   expect(within(queue).queryByRole("button", { name: "Send now" })).toBeNull();
+
+  act(() => client.patch("c1", { activity: "idle" }));
+  fireEvent.click(
+    await within(queue).findByRole("button", { name: "Send now" }),
+  );
+  expect(
+    await screen.findByRole("button", { name: "Permissions: Full access" }),
+  ).toBeTruthy();
+  expect(button("Steer")).toBeTruthy();
 });
 
 test("a refused change names its choice after the options go, and Stop clears it (#387 M16)", async () => {
