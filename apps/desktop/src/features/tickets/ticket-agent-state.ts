@@ -1,7 +1,9 @@
-import { useEffect, useState } from "react";
+import { useEffect, useEffectEvent, useRef, useState } from "react";
 import type { ChatSummary } from "@/features/chats/client";
 import type { TicketAgent } from "@/features/chats/ticket-agents";
 import type { ChatRequest } from "@/features/chats/ticket-chat";
+import { useChatFeature } from "@/features/chats/use-chats";
+import { matchesShortcut } from "@/lib/shortcuts";
 
 type ChatTarget = {
   chatId: string;
@@ -46,6 +48,64 @@ export function openAgentChat(
     retention,
     from: reference,
     ...(view && subAgent && { subAgent }),
+  };
+}
+
+function chatTarget(state: TicketAgentState): ChatTarget | undefined {
+  if (state.kind === "request") return state.target;
+  const first = state.kind === "working" ? state.agents[0] : undefined;
+  if (first) return agentTarget(first);
+  const chat = state.chat;
+  return chat && { chatId: chat.id, retention: chat.retention };
+}
+
+/** O is scoped to the open Ticket, including its compact header. */
+export function useOpenTicketAgentChat(
+  state: TicketAgentState | null,
+  reference: string,
+  active = true,
+) {
+  const origin = useRef<HTMLElement>(null);
+  const { requestChat } = useChatFeature();
+  const target = state && chatTarget(state);
+  const openChat = () => {
+    if (target)
+      requestChat(openAgentChat(target, reference, state?.kind === "request"));
+  };
+  const openOnKey = useEffectEvent((event: KeyboardEvent) => {
+    const target = event.target;
+    const pane = origin.current?.closest(".ticket-detail, .detail-content");
+    if (
+      !event.defaultPrevented &&
+      !event.isComposing &&
+      !event.repeat &&
+      matchesShortcut(event, "ticket-agent-chat") &&
+      target instanceof Element &&
+      pane?.contains(target) &&
+      !origin.current?.closest("[hidden], [inert]") &&
+      !target.closest(
+        "input, textarea, select, [contenteditable]:not([contenteditable=false]), [role=textbox]",
+      ) &&
+      !document.querySelector(
+        "[role=dialog], [role=alertdialog], [role=menu], [role=listbox], [data-slot=popover-content]",
+      )
+    ) {
+      event.preventDefault();
+      openChat();
+    }
+  });
+  const chatId = target?.chatId;
+  useEffect(() => {
+    if (!active || !chatId) return;
+    const press = (event: KeyboardEvent) => openOnKey(event);
+    window.addEventListener("keydown", press);
+    return () => window.removeEventListener("keydown", press);
+  }, [active, chatId]);
+  return {
+    openChat,
+    setOrigin: (element: HTMLElement | null) => {
+      origin.current = element;
+    },
   };
 }
 

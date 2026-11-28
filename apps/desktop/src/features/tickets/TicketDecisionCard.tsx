@@ -185,10 +185,7 @@ export function TicketDecisionCard({
     if (active && done) (next.current ?? nothing.current)?.focus();
   }, [active, done]);
 
-  const latest =
-    !ticket.trashed &&
-    ticket.status === "In progress" &&
-    (agent?.reference !== reference || agent.ready);
+  const latest = !ticket.trashed && ticket.status === "In progress";
   let panel: ReactNode = null;
   if (done) {
     panel = (

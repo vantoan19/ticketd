@@ -287,7 +287,7 @@ test("the agent’s question opens its Chat and is answered there", async () => 
 });
 
 test("working shows the report, current step, and other agents; O opens the main Chat", async () => {
-  agents = ticketAgentFixtures(Date.parse(now)).many;
+  agents = ticketAgentFixtures().many;
   linked = [summary("working")];
   open({ ...ticket, status: "In review" });
   const card = within(
@@ -412,6 +412,12 @@ test("working and approval stay in the header when the ticket opened without a c
   agents = [main];
   reopen(1);
   await screen.findByRole("status", { name: "Working" });
+  fireEvent.keyDown(screen.getByRole("button", { name: "Copy reference" }), {
+    key: "o",
+  });
+  expect(requestChat).toHaveBeenCalledWith(
+    expect.objectContaining({ chatId: main.chat_id }),
+  );
   expect(
     screen.queryByRole("region", { name: "Agents on this ticket" }),
   ).toBeNull();

@@ -9,12 +9,13 @@ import { HarnessMark } from "@/features/chats/HarnessMark";
 import { useChatFeature, useLinkedChats } from "@/features/chats/use-chats";
 import { useTicketAgents } from "@/features/chats/use-ticket-agents";
 import type { Ticket } from "@/lib/api/client";
+import { ariaKeyShortcuts } from "@/lib/shortcuts";
 import { useInboxAttention } from "./use-inbox-attention";
 import { useLatestUpdateOf } from "./open-ticket";
 import { AgentContext } from "./ticket-agent-context";
 import {
   agentState,
-  openAgentChat,
+  useOpenTicketAgentChat,
   useAgentActivityTime,
 } from "./ticket-agent-state";
 
@@ -106,26 +107,28 @@ export function TicketAgentSession({
 }
 
 export function TicketAgentHeader({ reference }: { reference: string }) {
-  const { requestChat } = useChatFeature();
   const agent = useContext(AgentContext);
-  if (
-    !agent?.ready ||
-    agent.openedWithCard !== false ||
-    agent.reference !== reference
-  )
-    return null;
-  const state = agent.state;
+  const showingCue =
+    agent?.ready &&
+    agent.openedWithCard === false &&
+    agent.reference === reference;
+  const state =
+    showingCue &&
+    (agent.state?.kind === "working" || agent.state?.kind === "request")
+      ? agent.state
+      : null;
+  const { openChat, setOrigin } = useOpenTicketAgentChat(state, reference);
   if (state?.kind === "request")
     return (
       <Tooltip content="Review the request in Chat">
         <Button
+          ref={setOrigin}
+          aria-keyshortcuts={ariaKeyShortcuts("ticket-agent-chat")}
           aria-label="Review request"
           aria-description="Approval needed"
           variant="attention"
           size="compact-responsive"
-          onClick={() =>
-            requestChat(openAgentChat(state.target, reference, true))
-          }
+          onClick={openChat}
         >
           <span className="ticket-agent-header-long">
             <StatusDot tone="attention" size={6} />
@@ -144,6 +147,7 @@ export function TicketAgentHeader({ reference }: { reference: string }) {
   return (
     <Tooltip content="Working">
       <Badge
+        ref={setOrigin}
         variant="record"
         size="compact-responsive"
         role="status"

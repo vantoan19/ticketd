@@ -18,17 +18,12 @@ import {
 } from "@/features/chats/client";
 import { stepWords } from "@/features/chats/model";
 import { agentName } from "@/features/chats/ticket-agents";
-import { useChat, useChatFeature } from "@/features/chats/use-chats";
+import { useChat } from "@/features/chats/use-chats";
 import type { LatestUpdate } from "@/lib/api/progress";
-import {
-  ariaKeyShortcuts,
-  matchesShortcut,
-  shortcutLabel,
-} from "@/lib/shortcuts";
+import { ariaKeyShortcuts, shortcutLabel } from "@/lib/shortcuts";
 import { Elapsed, TicketAgentsLabel } from "./TicketAgentsLabel";
 import {
-  agentTarget,
-  openAgentChat,
+  useOpenTicketAgentChat,
   type TicketAgentState,
 } from "./ticket-agent-state";
 
@@ -45,51 +40,12 @@ export function TicketAgentCard({
   report: LatestUpdate | null;
   onOpenUpdate: (id: string) => void;
 }) {
-  const { requestChat } = useChatFeature();
-  const body = useRef<HTMLDivElement>(null);
   const first = state.kind === "working" ? state.agents[0] : undefined;
-  const chat = state.chat;
-  const target =
-    state.kind === "request"
-      ? state.target
-      : first
-        ? agentTarget(first)
-        : chat
-          ? { chatId: chat.id, retention: chat.retention }
-          : null;
-  const openChat = () => {
-    if (target)
-      requestChat(openAgentChat(target, reference, state.kind === "request"));
-  };
-  const openOnKey = useEffectEvent((event: globalThis.KeyboardEvent) => {
-    const target = event.target;
-    const pane = body.current?.closest(".ticket-detail, .detail-content");
-    if (
-      event.defaultPrevented ||
-      event.isComposing ||
-      event.repeat ||
-      !matchesShortcut(event, "ticket-agent-chat") ||
-      !(target instanceof Element) ||
-      !pane?.contains(target) ||
-      pane.closest("[hidden], [inert]") ||
-      target.closest(
-        "input, textarea, select, [contenteditable]:not([contenteditable=false]), [role=textbox]",
-      ) ||
-      document.querySelector(
-        "[role=dialog], [role=alertdialog], [role=menu], [role=listbox], [data-slot=popover-content]",
-      )
-    )
-      return;
-    event.preventDefault();
-    openChat();
-  });
-  const chatId = target?.chatId;
-  useEffect(() => {
-    if (!active || !chatId) return;
-    const press = (event: globalThis.KeyboardEvent) => openOnKey(event);
-    window.addEventListener("keydown", press);
-    return () => window.removeEventListener("keydown", press);
-  }, [active, chatId]);
+  const { openChat, setOrigin } = useOpenTicketAgentChat(
+    state,
+    reference,
+    active,
+  );
   const open = (
     <Button
       variant={state.kind === "request" ? "ghost" : "outline"}
@@ -102,7 +58,7 @@ export function TicketAgentCard({
     </Button>
   );
   return (
-    <div ref={body} className="ticket-agent-content">
+    <div ref={setOrigin} className="ticket-agent-content">
       {state.kind === "request" ? (
         <AgentRequest key={state.target.chatId} state={state} open={open} />
       ) : (

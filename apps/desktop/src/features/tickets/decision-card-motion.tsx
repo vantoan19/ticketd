@@ -43,7 +43,8 @@ export function DecisionCardContent({
     const content = sizing.current;
     if (!box || !content || typeof ResizeObserver === "undefined") return;
     const syncHeight = () => {
-      box.style.height = `${content.getBoundingClientRect().height}px`;
+      const height = content.getBoundingClientRect().height;
+      if (height) box.style.height = `${height}px`;
     };
     const size = new ResizeObserver(syncHeight);
     syncHeight();
