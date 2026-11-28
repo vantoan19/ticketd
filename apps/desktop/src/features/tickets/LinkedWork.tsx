@@ -428,42 +428,43 @@ function RelationshipGroup({
   const unknownTotal = partial && kind !== "subticket" && kind !== "blocked_by";
   if (unknownTotal && !openCount) summary = "loading links";
   return (
-    <Disclosure
-      className="linked-work-disclosure"
-      label={
-        <>
-          {label} <span className="linked-work-note">{summary}</span>
-        </>
-      }
-      count={unknownTotal ? `${total}+` : total}
-      open={open}
-      onOpenChange={onOpenChange}
-    >
-      {note && <p className="linked-work-note">{note}</p>}
-      <ul className="reference-rows">
-        <Presence initial={false} mode="popLayout">
-          {openRows.slice(0, openLimit).map(renderRow)}
-        </Presence>
-      </ul>
-      <RelationshipFold
-        label="more open"
-        count={Math.max(0, openCount - openLimit)}
-        rows={openRows.slice(openLimit)}
-        renderRow={renderRow}
-      />
-      <RelationshipFold
-        label="done"
-        count={doneCount}
-        rows={doneRows}
-        renderRow={renderRow}
-      />
-      <RelationshipFold
-        label="finished"
-        count={otherFinished.length}
-        rows={otherFinished}
-        renderRow={renderRow}
-      />
-    </Disclosure>
+    <div className="linked-work-disclosure">
+      <Disclosure
+        label={
+          <>
+            {label} <span className="linked-work-note">{summary}</span>
+          </>
+        }
+        count={unknownTotal ? `${total}+` : total}
+        open={open}
+        onOpenChange={onOpenChange}
+      >
+        {note && <p className="linked-work-note">{note}</p>}
+        <ul className="reference-rows">
+          <Presence initial={false} mode="popLayout">
+            {openRows.slice(0, openLimit).map(renderRow)}
+          </Presence>
+        </ul>
+        <RelationshipFold
+          label="more open"
+          count={Math.max(0, openCount - openLimit)}
+          rows={openRows.slice(openLimit)}
+          renderRow={renderRow}
+        />
+        <RelationshipFold
+          label="done"
+          count={doneCount}
+          rows={doneRows}
+          renderRow={renderRow}
+        />
+        <RelationshipFold
+          label="finished"
+          count={otherFinished.length}
+          rows={otherFinished}
+          renderRow={renderRow}
+        />
+      </Disclosure>
+    </div>
   );
 }
 
@@ -484,16 +485,17 @@ function RelationshipFold({
     .filter(Boolean)
     .join(": ");
   return (
-    <Disclosure
-      className="linked-work-fold"
-      label={`${name}${preview.length > 0 && count > preview.length ? ` +${count - preview.length}` : ""}`}
-    >
-      <ul className="reference-rows">
-        <Presence initial={false} mode="popLayout">
-          {rows.map(renderRow)}
-        </Presence>
-      </ul>
-    </Disclosure>
+    <div className="linked-work-fold">
+      <Disclosure
+        label={`${name}${preview.length > 0 && count > preview.length ? ` +${count - preview.length}` : ""}`}
+      >
+        <ul className="reference-rows">
+          <Presence initial={false} mode="popLayout">
+            {rows.map(renderRow)}
+          </Presence>
+        </ul>
+      </Disclosure>
+    </div>
   );
 }
 
@@ -559,37 +561,35 @@ function RemoveDuplicate({
           <X aria-hidden="true" />
         </IconButton>
       </PopoverTrigger>
-      <PopoverContent
-        align="end"
-        aria-label="Remove duplicate link"
-        className="linked-work-confirm"
-      >
-        <PopoverHeader>
-          <PopoverTitle>Remove the duplicate link?</PopoverTitle>
-          <PopoverDescription>
-            {duplicate} returns to the status it had before. Dependencies moved
-            to {canonical} stay there.
-          </PopoverDescription>
-        </PopoverHeader>
-        <div className="linked-work-confirm-actions">
-          <Button
-            variant="ghost"
-            size="sm"
-            autoFocus
-            onClick={() => setOpen(false)}
-          >
-            Cancel
-          </Button>
-          <Button
-            variant="destructive"
-            size="sm"
-            onClick={() => {
-              setOpen(false);
-              onRemove();
-            }}
-          >
-            Remove duplicate link
-          </Button>
+      <PopoverContent align="end" aria-label="Remove duplicate link">
+        <div className="linked-work-confirm">
+          <PopoverHeader>
+            <PopoverTitle>Remove the duplicate link?</PopoverTitle>
+            <PopoverDescription>
+              {duplicate} returns to the status it had before. Dependencies
+              moved to {canonical} stay there.
+            </PopoverDescription>
+          </PopoverHeader>
+          <div className="linked-work-confirm-actions">
+            <Button
+              variant="ghost"
+              size="sm"
+              autoFocus
+              onClick={() => setOpen(false)}
+            >
+              Cancel
+            </Button>
+            <Button
+              variant="destructive"
+              size="sm"
+              onClick={() => {
+                setOpen(false);
+                onRemove();
+              }}
+            >
+              Remove duplicate link
+            </Button>
+          </div>
         </div>
       </PopoverContent>
     </Popover>

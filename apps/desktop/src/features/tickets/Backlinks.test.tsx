@@ -9,7 +9,11 @@ import { TestOpenTicket } from "./open-ticket/testing";
 const bridge = vi.hoisted(() => ({ invoke: vi.fn() }));
 vi.mock("@tauri-apps/api/core", () => bridge);
 const ticket = { id: "ticket", reference: "T-KQ1", trashed: false } as Ticket;
-function BacklinksPanel({ select }: { select: ReturnType<typeof vi.fn> }) {
+function BacklinksPanel({
+  select,
+}: {
+  select: (target: MentionTarget) => void;
+}) {
   const mentions = useOpenTicket("backlinks");
   const documentLinks = useOpenTicket("documentBacklinks");
   return (
