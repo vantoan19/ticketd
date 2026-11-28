@@ -27,7 +27,7 @@ function foldLabel(blocks: readonly { node: RootContent; text: string }[]) {
 }
 
 /** Fold the two runs around acceptance, using offsets into the whole description. */
-export function describeTicketMarkdown(markdown: string) {
+export function describeTicketMarkdown(markdown: string, peek = false) {
   const acceptance = acceptanceSection(markdown);
   const folds: Fold[] = [];
   const blocks = parser.parse(markdown).children.flatMap((node) => {
@@ -44,7 +44,7 @@ export function describeTicketMarkdown(markdown: string) {
     return [{ node, start, end, text, length: Array.from(text).length }];
   });
   const length = blocks.reduce((sum, block) => sum + block.length, 0);
-  if (length <= FOLD_THRESHOLD) return { acceptance, folds };
+  if (!peek && length <= FOLD_THRESHOLD) return { acceptance, folds };
 
   let openingLength = 0;
   let openingEnd = 0;
@@ -55,8 +55,9 @@ export function describeTicketMarkdown(markdown: string) {
       if (openingLength > OPENING_LENGTH && openingEnd > 0) break;
       openingEnd = block.end;
     }
-    if (openingLength > OPENING_LENGTH) break;
+    if (peek ? openingEnd > 0 : openingLength > OPENING_LENGTH) break;
   }
+  if (peek && openingEnd === 0) openingEnd = blocks[0]?.end ?? 0;
   const remainder = blocks.filter(({ start }) => start >= openingEnd);
   function addFold(id: string, hidden: typeof blocks) {
     const first = hidden[0];
@@ -69,7 +70,7 @@ export function describeTicketMarkdown(markdown: string) {
         label: foldLabel(hidden),
       });
   }
-  if (acceptance) {
+  if (!peek && acceptance) {
     addFold(
       "before-acceptance",
       remainder.filter(({ start }) => start < acceptance.start),

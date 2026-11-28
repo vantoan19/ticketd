@@ -258,6 +258,16 @@
   width: min(520px, 100%) !important;
   flex: none !important;
 }
+.ticket-peek-footer {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px 12px;
+  margin-top: 24px;
+}
+.ticket-peek-footer > [data-slot="button"]:last-child {
+  margin-inline-start: auto;
+}
 /* Card status glyphs keep the 14px specimen size inside shared buttons. */
 .board-card-top > .status-glyph,
 .board-card-status .status-glyph {

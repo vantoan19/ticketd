@@ -3,8 +3,10 @@ import { client, type Relationships, type Ticket } from "@/lib/api/client";
 import { mergePage, nextOffset } from "@/features/tickets/linked-work";
 import {
   pagedRead,
+  read,
   skip,
   usePagedRead,
+  useRead,
   withCurrent,
   type PagedState,
 } from "@/lib/workspace-reads";
@@ -59,4 +61,14 @@ export function useLinkedWork(record: Ticket | undefined): LinkedWorkRead {
     },
     () => state.current,
   );
+}
+
+const peekCountsRead = read({
+  key: "ticket-peek-counts",
+  call: (reference: string) => client.ticketPeekCounts(reference),
+  failure: "load ticket counts",
+});
+
+export function usePeekCounts(record: Ticket | undefined) {
+  return useRead(peekCountsRead, record?.reference ?? skip);
 }

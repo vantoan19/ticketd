@@ -25,7 +25,7 @@ import "./description.css";
 type Props = Pick<
   ComponentProps<typeof MarkdownDocument>,
   "source" | "select" | "revision" | "onChange" | "mention"
-> & { ticketId: string };
+> & { ticketId: string; peek?: boolean };
 
 function foldKey(ticketId: string) {
   return `ticketd.description-folds.${ticketId}`;
@@ -88,11 +88,12 @@ function Fold({
 }
 
 /** Shared reading surface for editable, externally owned, and trashed tickets. */
-export function TicketDescription({ ticketId, ...markdown }: Props) {
+export function TicketDescription({ ticketId, peek, ...markdown }: Props) {
   return (
     <TicketDescriptionReading
-      key={ticketId}
+      key={peek ? `${ticketId}:peek` : ticketId}
       ticketId={ticketId}
+      peek={peek ?? false}
       {...markdown}
     />
   );
@@ -112,13 +113,15 @@ const emptySearch: DescriptionSearch = {
   revealed: [],
 };
 
-function TicketDescriptionReading({ ticketId, ...markdown }: Props) {
+function TicketDescriptionReading({ ticketId, peek, ...markdown }: Props) {
   const { source, mention } = markdown;
   const { acceptance, folds } = useMemo(
-    () => describeTicketMarkdown(source),
-    [source],
+    () => describeTicketMarkdown(source, peek),
+    [source, peek],
   );
-  const [opened, setOpened] = useState(() => readOpenFolds(ticketId));
+  const [opened, setOpened] = useState(() =>
+    peek ? [] : readOpenFolds(ticketId),
+  );
   const [search, setSearch] = useState<DescriptionSearch | null>(null);
   const [jump, setJump] = useState<{ offset: number; atTop: boolean } | null>(
     null,
@@ -258,6 +261,7 @@ function TicketDescriptionReading({ ticketId, ...markdown }: Props) {
       });
     if (openedForJump === id) setOpenedForJump(undefined);
     setOpened(next);
+    if (peek) return;
     try {
       localStorage.setItem(foldKey(ticketId), JSON.stringify(next));
     } catch {
