@@ -16,6 +16,7 @@
   margin: 0;
 }
 .source-conversation [data-slot="section-header"] .source-link {
+  min-height: 28px;
   font-size: var(--text-caption);
 }
 .source-conversation .description-document {
