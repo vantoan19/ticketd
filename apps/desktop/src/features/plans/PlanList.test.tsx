@@ -248,32 +248,35 @@ for (const example of [
   },
   {
     rule: "omitted",
-    state: "1 to do",
-    attention: false,
+    state: "Ready to wrap up",
+    attention: true,
     prerequisites: [outside],
   },
 ]) {
   test(`the Plan row handles ${example.rule} blockers when deciding whether to show wrap-up`, async () => {
-    bridge.invoke.mockImplementation(async (command: string) => {
-      if (command === "show_plan")
-        return {
-          plan: launch,
-          counts: { ...emptyCounts, todo: 1, canceled: 1 },
-          members: [],
-        };
-      if (command === "find_tickets_with_updates")
-        return {
-          items: [
-            {
-              ...member("T-blocked", "Todo", "Blocked"),
-              prerequisites: example.prerequisites,
-            },
-            member("T-closed", "Canceled"),
-          ],
-          omitted: example.rule === "omitted",
-        };
-      return null;
-    });
+    const members = [
+      {
+        ...member("T-blocked", "Todo", "Blocked"),
+        prerequisites: example.prerequisites,
+      },
+      member("T-closed", "Canceled"),
+    ];
+    bridge.invoke.mockImplementation(
+      async (command: string, args?: { includeMembers?: boolean }) => {
+        if (command === "show_plan")
+          return {
+            plan: launch,
+            counts: { ...emptyCounts, todo: 1, canceled: 1 },
+            members: args?.includeMembers === false ? [] : members,
+          };
+        if (command === "find_tickets_with_updates")
+          return {
+            items: example.rule === "omitted" ? [] : members,
+            omitted: example.rule === "omitted",
+          };
+        return null;
+      },
+    );
     list(false, [launch]);
     const rows = await screen.findByRole("list", { name: "Active Plans" });
     expect(within(rows).getByText(example.state)).toBeTruthy();

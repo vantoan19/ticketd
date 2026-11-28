@@ -1,4 +1,9 @@
-import { plansClient, type Plan, type PlanCounts } from "@/lib/api/plans";
+import {
+  plansClient,
+  type Plan,
+  type PlanCounts,
+  type View,
+} from "@/lib/api/plans";
 import { flowPlanMembers, PlanMemberWindow } from "./plan-members";
 import { planWrapUp } from "./plan-work-model";
 
@@ -22,20 +27,27 @@ export async function readPlanIndexData(
     plansClient.show(plan.id, 0, 0, false),
     flowPlanMembers(plan.id),
   ]);
-  const counts =
-    summary.status === "fulfilled" ? summary.value.counts : undefined;
   if (summary.status === "rejected")
-    return { data: { counts, details: null }, error: summary.reason };
-  if (membership.status === "rejected") {
-    if (membership.reason instanceof PlanMemberWindow)
-      return { data: { counts, details: null } };
     return {
-      data: { counts, details: null },
-      error: membership.reason,
+      data: { counts: undefined, details: null },
+      error: summary.reason,
     };
+  let { counts } = summary.value;
+  let members: View["members"] | Awaited<ReturnType<typeof flowPlanMembers>>;
+  if (membership.status === "fulfilled") {
+    members = membership.value;
+  } else if (membership.reason instanceof PlanMemberWindow) {
+    // Flow bounds its projection. The full Plan read supplies counts and
+    // all prerequisites together from one snapshot when that projection omits any.
+    try {
+      ({ counts, members } = await plansClient.show(plan.id));
+    } catch (error) {
+      return { data: { counts, details: null }, error };
+    }
+  } else {
+    return { data: { counts, details: null }, error: membership.reason };
   }
-  const members = membership.value;
-  const total = Object.values(summary.value.counts).reduce((a, b) => a + b, 0);
+  const total = Object.values(counts).reduce((a, b) => a + b, 0);
   if (
     members.length !== total ||
     new Set(members.map((member) => member.reference)).size !== total
