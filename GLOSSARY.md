@@ -193,6 +193,9 @@ A workspace-scoped file identity with a display name, original filename, availab
 **Files**:
 The desktop view that lists a Workspace's Attachments.
 
+**File home**:
+The live owner a file belongs to. A direct ticket attachment takes precedence over a link in a ticket description, followed by a link in an update or its details Document (both belong to the update's ticket), then a link in a Document body. Ties go to the earliest-added reference. Owners in Trash, drafts, and Undo give a file no home. A file with no home is unused.
+
 **External attachment reference**:
 An Attachment resolving current provider content rather than a local snapshot. Google Drive references use the connected person's per-file application authorization and existing sharing permissions. Google Docs, Sheets, and Slides open in Drive without conversion. Last-known metadata survives access failures; removing a reference never deletes the remote file.
 

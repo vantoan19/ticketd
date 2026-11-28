@@ -107,50 +107,15 @@
   margin-left: auto;
   font-weight: 400;
 }
-/* A Current work group header (the board's .wgrp, 12/16): 14px above its name after rows, 10px
-   after another header, 6px under it. The spacing is the heading's padding and the button
-   inside is just the name's row, 8px in from each side like a Document row, so its focus ring
-   is inset and rounded like theirs and centred on the name. */
-.documents-list-view h2.documents-group-header {
-  margin: 0;
-  padding: 10px 8px 2px;
-}
-.documents-group-block:has(> .documents-group-header [aria-expanded="false"])
+/* A closed group is followed by a tighter header. */
+.documents-group-block:has(> [data-slot="group-header"] [aria-expanded="false"])
   + .documents-group-block
-  h2.documents-group-header {
+  h2[data-slot="group-header"] {
   padding-top: 6px;
 }
-.documents-group-toggle {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  width: 100%;
-  min-width: 0;
-  padding: 4px 10px;
-  text-align: start;
-}
-/* A name wraps to a second line before it is cut. */
 .documents-group-name {
-  display: -webkit-box;
-  flex: 1 1 0;
-  min-width: 0;
-  /* Fills the line before it breaks, as the board does (pretty would move words down). */
+  /* The name fills the line before it breaks. */
   text-wrap: wrap;
-  overflow: hidden;
-  -webkit-box-orient: vertical;
-  -webkit-line-clamp: 2;
-}
-.documents-group-toggle [data-slot="count"] {
-  font-weight: 400;
-}
-.documents-group-toggle svg {
-  flex: none;
-  width: 14px;
-  height: 14px;
-  margin-left: -4px;
-}
-.documents-group-toggle [data-slot="count"] {
-  margin-left: auto;
 }
 /* The two folds of old work sit apart, under a hairline. */
 .documents-folds {
@@ -158,7 +123,7 @@
 }
 .documents-folds
   > .documents-group-block:first-child
-  h2.documents-group-header {
+  h2[data-slot="group-header"] {
   padding-top: 12px;
 }
 .documents-list-view .document-list li {
