@@ -11,7 +11,7 @@ afterEach(() => {
 });
 
 test("says an unfolded empty evidence section is empty, with one Add evidence action", async () => {
-  bridge.invoke.mockResolvedValue([]);
+  bridge.invoke.mockResolvedValue({ items: [], total: 0 });
   render(<OpenEvidence reference="T-KQ5" />);
   expect(await screen.findByText("No evidence yet.")).toBeTruthy();
   expect(screen.getAllByRole("button", { name: "Add evidence" })).toHaveLength(
@@ -26,17 +26,20 @@ test("copies any evidence value and keeps Edit and Delete in the row menu", asyn
     configurable: true,
     value: { writeText: copy },
   });
-  bridge.invoke.mockResolvedValue([
-    {
-      id: "c",
-      kind: "commit",
-      name: "Fix",
-      value: "abc1234",
-      editing_agent: null,
-      created_at: "2026-10-31T10:00:00Z",
-      updated_at: "2026-10-31T10:00:00Z",
-    },
-  ]);
+  bridge.invoke.mockResolvedValue({
+    total: 1,
+    items: [
+      {
+        id: "c",
+        kind: "commit",
+        name: "Fix",
+        value: "abc1234",
+        editing_agent: null,
+        created_at: "2026-10-31T10:00:00Z",
+        updated_at: "2026-10-31T10:00:00Z",
+      },
+    ],
+  });
   render(<OpenEvidence reference="T-KQ6" />);
   await screen.findByText("abc1234");
   fireEvent.click(screen.getByRole("button", { name: "Copy Fix" }));

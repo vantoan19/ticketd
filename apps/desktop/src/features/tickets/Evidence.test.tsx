@@ -16,7 +16,8 @@ vi.mock("@tauri-apps/api/core", () => {
   return {
     invoke: vi.fn(
       async (command: string, args: { input?: object; id?: string }) => {
-        if (command === "list_evidence") return items;
+        if (command === "ticket_evidence_page")
+          return { items, total: items.length };
         if (command === "add_evidence") {
           const item = {
             ...args.input,
@@ -69,7 +70,7 @@ test("retries a lost response with the same request ID and uses a new ID for a d
   mock.mockClear();
   let first = true;
   mock.mockImplementation(async (command, args) => {
-    if (command === "list_evidence") return [];
+    if (command === "ticket_evidence_page") return { items: [], total: 0 };
     if (command === "add_evidence") {
       if (first) {
         first = false;
@@ -131,7 +132,7 @@ test("disables evidence controls while a write is pending", async () => {
   mock.mockReset();
   let complete: (value: unknown) => void = () => {};
   mock.mockImplementation(async (command) => {
-    if (command === "list_evidence") return [];
+    if (command === "ticket_evidence_page") return { items: [], total: 0 };
     if (command === "add_evidence")
       return new Promise((resolve) => {
         complete = resolve;
@@ -171,18 +172,21 @@ test("copies any evidence value on explicit request", async () => {
     value: { writeText: copy },
   });
   vi.mocked(invoke).mockImplementation(async (command) => {
-    if (command === "list_evidence")
-      return [
-        {
-          id: "pr",
-          kind: "pull_request",
-          name: "Review",
-          value: "https://example.com/pr/1",
-          editing_agent: null,
-          created_at: "now",
-          updated_at: "now",
-        },
-      ];
+    if (command === "ticket_evidence_page")
+      return {
+        total: 1,
+        items: [
+          {
+            id: "pr",
+            kind: "pull_request",
+            name: "Review",
+            value: "https://example.com/pr/1",
+            editing_agent: null,
+            created_at: "now",
+            updated_at: "now",
+          },
+        ],
+      };
   });
   const view = render(<OpenEvidence reference="T-KQ4" />);
   fireEvent.click(await screen.findByRole("button", { name: "Copy Review" }));
@@ -196,18 +200,21 @@ test("a full commit hash is shown short, with the whole value on hover", async (
   const { invoke } = await import("@tauri-apps/api/core");
   const full = "0123456789abcdef0123456789abcdef01234567";
   vi.mocked(invoke).mockImplementation(async (command: string) =>
-    command === "list_evidence"
-      ? [
-          {
-            id: "c1",
-            kind: "commit",
-            name: "Fix",
-            value: full,
-            created_at: "2026-01-01T00:00:00Z",
-            updated_at: "2026-01-01T00:00:00Z",
-            editing_agent: null,
-          },
-        ]
+    command === "ticket_evidence_page"
+      ? {
+          total: 1,
+          items: [
+            {
+              id: "c1",
+              kind: "commit",
+              name: "Fix",
+              value: full,
+              created_at: "2026-01-01T00:00:00Z",
+              updated_at: "2026-01-01T00:00:00Z",
+              editing_agent: null,
+            },
+          ],
+        }
       : undefined,
   );
   render(<OpenEvidence reference="T-KQ2" />);
@@ -262,12 +269,18 @@ test("Show more evidence reads one more page and lists it after the first", asyn
     updated_at: "2026-01-01T00:00:00Z",
   });
   mock.mockImplementation(async (command, args) => {
-    if (command !== "list_evidence") return undefined;
-    return (args as { offset: number }).offset === 0
-      ? Array.from({ length: 50 }, (_, index) => record(`first-${index}`))
-      : [record("second-0")];
+    if (command !== "ticket_evidence_page") return undefined;
+    const items =
+      (args as { offset: number }).offset === 0
+        ? Array.from({ length: 50 }, (_, index) => record(`first-${index}`))
+        : [record("second-0")];
+    return { items, total: 51 };
   });
   render(<OpenEvidence reference="T-KQ9" />);
+  const fold = await screen.findByRole("button", {
+    name: "48 more: first-3, first-4 +46",
+  });
+  fireEvent.click(fold);
   await screen.findByText("first-49");
   fireEvent.click(screen.getByRole("button", { name: "Show more evidence" }));
   await screen.findByText("second-0");
@@ -276,6 +289,6 @@ test("Show more evidence reads one more page and lists it after the first", asyn
     screen.queryByRole("button", { name: "Show more evidence" }),
   ).toBeNull();
   expect(
-    mock.mock.calls.filter(([command]) => command === "list_evidence"),
+    mock.mock.calls.filter(([command]) => command === "ticket_evidence_page"),
   ).toHaveLength(2);
 });
