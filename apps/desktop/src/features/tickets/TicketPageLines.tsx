@@ -35,7 +35,7 @@ export function TicketParentLine({
           <RecordLink
             ref={link}
             role="link"
-            className="truncate text-muted-foreground"
+            variant="context"
             aria-label={`${parent.reference} ${parent.title}${parent.trashed ? ", in Trash" : ""}`}
             onClick={() => select(parent.reference)}
             onContextMenu={(event) => {

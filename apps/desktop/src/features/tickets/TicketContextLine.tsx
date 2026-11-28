@@ -30,7 +30,7 @@ import {
   ticketCommandActions,
   type TicketCommandScope,
 } from "@/lib/ticket-command-actions";
-import type { Project, Ticket } from "@/lib/api/client";
+import type { Project } from "@/lib/api/client";
 import type { Plan } from "@/lib/api/plans";
 import { RailRow } from "./RailSection";
 import { StatusIcon } from "./StatusIcon";
@@ -38,7 +38,7 @@ import { TicketCommandPicker } from "./TicketCommandPicker";
 import type { AddableKind } from "./linked-work";
 import { useOpenTicket } from "./open-ticket";
 import { reminderSummary } from "./reminder-summary";
-import type { LinkedWorkState } from "./useLinkedWork";
+import { orderBlockers, type LinkedWorkState } from "./useLinkedWork";
 
 function addBlockerKey(event: KeyboardEvent, addBlocker: () => void) {
   if (
@@ -53,26 +53,6 @@ function addBlockerKey(event: KeyboardEvent, addBlocker: () => void) {
   event.preventDefault();
   event.stopPropagation();
   addBlocker();
-}
-
-export function orderBlockers(work: LinkedWorkState) {
-  const prerequisites = work.current?.links?.prerequisites;
-  if (!prerequisites)
-    return [...work.ticket.prerequisites].sort(
-      (a, b) => Number(b.unresolved) - Number(a.unresolved),
-    );
-  const rows: Ticket["prerequisites"] = work.rows.filter(
-    (row) => row.kind === "blocked_by",
-  );
-  if (prerequisites.next_offset !== null) {
-    // The ticket record already contains all blockers; the paged links hold
-    // the newer values and optimistic removals for the rows they have read.
-    const loaded = new Set(prerequisites.items.map((row) => row.reference));
-    rows.push(
-      ...work.ticket.prerequisites.filter((row) => !loaded.has(row.reference)),
-    );
-  }
-  return rows.sort((a, b) => Number(b.unresolved) - Number(a.unresolved));
 }
 
 /** The same blocker details and action can be opened from the context line or the card. */
@@ -99,48 +79,49 @@ export function TicketBlockersPopover({
       <PopoverContent
         align="start"
         aria-label="Blockers"
-        className="ticket-blockers-popover"
         onKeyDown={(event) => {
           if (!readOnly) addBlockerKey(event, addBlocker);
         }}
       >
-        <ul>
-          {rows.map((row) => (
-            <li key={row.reference}>
-              <RailRow
-                icon={<StatusIcon status={row.status} decorative />}
-                onClick={() => {
-                  setOpen(false);
-                  select(row.reference);
-                }}
-              >
-                <span>
-                  {row.reference} {row.title}
-                </span>
-                <span className="text-muted-foreground">
-                  {" "}
-                  · {row.status}
-                  {row.trashed && " · In Trash"}
-                </span>
-              </RailRow>
-            </li>
-          ))}
-        </ul>
-        <div className="ticket-blockers-footer text-muted-foreground">
-          <span>{ofTotal(unresolved, rows.length)} still open</span>
-          {!readOnly && (
-            <>
-              <span aria-hidden="true">·</span>
-              <Button
-                variant="ghost"
-                size="sm"
-                onClick={addBlocker}
-                aria-keyshortcuts="B"
-              >
-                Add a blocker <Kbd aria-hidden="true">B</Kbd>
-              </Button>
-            </>
-          )}
+        <div className="ticket-blockers-popover">
+          <ul>
+            {rows.map((row) => (
+              <li key={row.reference}>
+                <RailRow
+                  icon={<StatusIcon status={row.status} decorative />}
+                  onClick={() => {
+                    setOpen(false);
+                    select(row.reference);
+                  }}
+                >
+                  <span>
+                    {row.reference} {row.title}
+                  </span>
+                  <span className="text-muted-foreground">
+                    {" "}
+                    · {row.status}
+                    {row.trashed && " · In Trash"}
+                  </span>
+                </RailRow>
+              </li>
+            ))}
+          </ul>
+          <div className="ticket-blockers-footer text-muted-foreground">
+            <span>{ofTotal(unresolved, rows.length)} still open</span>
+            {!readOnly && (
+              <>
+                <span aria-hidden="true">·</span>
+                <Button
+                  variant="ghost"
+                  size="sm"
+                  onClick={addBlocker}
+                  aria-keyshortcuts="B"
+                >
+                  Add a blocker <Kbd aria-hidden="true">B</Kbd>
+                </Button>
+              </>
+            )}
+          </div>
         </div>
       </PopoverContent>
     </Popover>

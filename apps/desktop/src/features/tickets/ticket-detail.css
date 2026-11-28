@@ -88,7 +88,7 @@
   stroke-width: 2;
 }
 .ticket-blockers-popover {
-  max-height: var(--radix-popover-content-available-height);
+  max-height: calc(var(--radix-popover-content-available-height) - 32px);
   overflow: auto;
 }
 .ticket-blockers-popover .rail-row {

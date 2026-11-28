@@ -21,8 +21,8 @@ function RecordLink({
 }: React.ComponentProps<"button"> & {
   reference?: string;
   gone?: boolean;
-  /** Compact structured record row with a muted reference and truncated title. */
-  variant?: "prose" | "row";
+  /** Row for structured records, context for a muted line that truncates. */
+  variant?: "prose" | "row" | "context";
 }) {
   const content = (
     <>
