@@ -30,8 +30,12 @@ import { flowPlanMembers, PlanMemberWindow } from "./plan-members";
 import { flowLinkPath, planFlow, type FlowBox } from "./flow-model";
 import "./plan-flow.css";
 
-const names = ["Now", "Next", "Later"];
-const captions = ["No open blockers", "Waits on Now", "Waits on Next"];
+const names = ["Can start", "After one step", "Later"];
+const captions = [
+  "No open blockers",
+  "One layer of blockers",
+  "Longer chains or cycles",
+];
 
 /** Cascade steps between lanes (about 70ms), and from a heading to its first ticket. */
 const LANE_STEPS = 3;
@@ -88,6 +92,7 @@ export function PlanFlow({
     };
   }, [id, revision, version, attempt]);
   const flow = useMemo(() => planFlow(members ?? []), [members]);
+  const hasLater = Boolean(flow.lanes[2]?.length);
   const ordered = flow.lanes.flat();
   useLayoutEffect(() => {
     const element = frame.current;
@@ -152,7 +157,11 @@ export function PlanFlow({
       aria-busy={!members && !failure}
     >
       <div className="plan-flow-scroll">
-        <div className="plan-flow-lanes" ref={frame}>
+        <div
+          className="plan-flow-lanes"
+          data-has-later={hasLater || undefined}
+          ref={frame}
+        >
           <svg
             className="plan-flow-edges ui-graph-flow-edges"
             aria-hidden="true"
@@ -189,7 +198,7 @@ export function PlanFlow({
               />
             ))}
           </svg>
-          {flow.lanes.map((lane, index) => (
+          {flow.lanes.slice(0, hasLater ? 3 : 2).map((lane, index) => (
             <GraphFlowLane
               key={names[index]}
               index={index * LANE_STEPS}

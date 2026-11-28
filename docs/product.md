@@ -189,7 +189,8 @@ opens the graph to understand dependency chains.
   dependencies, tags, Documents, attachments, evidence, reminder, and Chats.
 - **Plan view.** Member tickets as a List or Board, a Flow view of dependencies,
   status counts, linked Documents, membership, and archive and reactivation.
-  Dependencies from outside the Plan appear as boundary nodes, not members.
+  List folds Done by default and remembers the choice per Plan on this computer.
+  Shared parent or project labels are hidden when every displayed row has the same one.
 - **Plans.** Two-line rows show progress, current status words, and the latest
   member change. Plans with reviews come first, then newest changes, with the
   order held while the page is open. An orange dot marks reviews or a Plan
@@ -336,9 +337,10 @@ change`; an empty value clears it) or by a person in the reader's Edit mode. The
 
 A Plan page shows its purpose, linked Documents, progress, and tickets. Set as spec
 selects an existing Document as the Plan's principal long-form entry point without
-copying it. Creating a ticket from inside a Plan makes it a member. The Flow view
-adds and removes blockers and rejects cycles. CLI: the `plan` command group, including
-`spec`, `document`, and `context`.
+copying it. Creating a ticket from inside a Plan makes it a member. Flow shows open
+tickets in Can start, After one step, and Later. Later appears when it has tickets.
+Outside blockers are named on the tickets that wait on them. The CLI's `plan`
+command group includes `spec`, `document`, and `context`.
 
 ### Context graph
 
