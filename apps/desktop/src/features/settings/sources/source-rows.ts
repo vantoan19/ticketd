@@ -105,21 +105,18 @@ function githubRow(
   const repoHosts = new Set(
     repositories.map((row) => row.repository.split("/")[0]?.toLowerCase()),
   );
-  const relevant =
-    repoHosts.size > 0
-      ? hosts.filter(({ host }) => repoHosts.has(host.toLowerCase()))
-      : hosts;
+  const relevant = hosts.filter(({ host }) =>
+    repoHosts.has(host.toLowerCase()),
+  );
+  const logins = [
+    ...new Set(hosts.flatMap(({ login }) => (login ? [login] : []))),
+  ];
   let status: SourceRowStatus = "Not connected";
-  if (
-    repoHosts.size > 0 &&
-    relevant.some(({ state }) => state === "not_signed_in")
-  )
+  if (relevant.some(({ state }) => state === "not_signed_in"))
     status = "Needs sign-in";
   else if (
     relevant.some(
-      ({ state }) =>
-        state === "unavailable" ||
-        (repoHosts.size > 0 && state === "not_installed"),
+      ({ state }) => state === "unavailable" || state === "not_installed",
     )
   )
     status = "Unavailable";
@@ -132,7 +129,7 @@ function githubRow(
     origin: "Built in",
     development: false,
     status,
-    signsInWith: "Your gh login",
+    signsInWith: (!repositories.length && logins.join(", ")) || "Your gh login",
     bringsIn: repositories.length
       ? `${repositories.length} ${plural("repository", repositories.length)}`
       : null,
