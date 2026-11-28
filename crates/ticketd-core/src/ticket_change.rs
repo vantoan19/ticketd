@@ -387,7 +387,7 @@ pub(crate) fn send_back(
     connection: &Connection,
     reference: &str,
     brief: &str,
-    expected_status_history_number: Option<i64>,
+    expected_status_history_number: i64,
 ) -> Result<SendBackOutcome, Error> {
     write_scope::run(connection, |scope| {
         edit(
@@ -395,7 +395,7 @@ pub(crate) fn send_back(
             reference,
             &TicketPatch {
                 expected_status: Some(Status::InReview),
-                expected_status_history_number,
+                expected_status_history_number: Some(expected_status_history_number),
                 status: Some(Status::InProgress),
                 ..Default::default()
             },

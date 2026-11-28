@@ -348,19 +348,19 @@ fn send_back_moves_the_review_and_posts_the_persons_update_together() {
     let mut workspace = Workspace::open(dir.path().join("reviews.sqlite3")).unwrap();
     let ticket = workspace.create_ticket("Review the rail").unwrap();
     let reference = ticket.reference.as_str();
-    let send = |brief: &str| WriteRequest::SendBack {
+    let send = |brief: &str, expected_status_history_number| WriteRequest::SendBack {
         reference: reference.into(),
         brief: brief.into(),
-        expected_status_history_number: None,
+        expected_status_history_number,
     };
     assert!(matches!(
-        workspace.write(Some("return"), send("Handle a narrow window.")),
+        workspace.write(Some("return"), send("Handle a narrow window.", 0)),
         Err(Error::TicketChanged(_))
     ));
     assert!(workspace.activities(reference, 10, 0).unwrap().is_empty());
     assert!(workspace.ticket_history(reference).unwrap().is_empty());
 
-    workspace
+    let in_review = workspace
         .change_ticket(
             reference,
             TicketPatch {
@@ -369,7 +369,12 @@ fn send_back_moves_the_review_and_posts_the_persons_update_together() {
             },
         )
         .unwrap();
-    assert!(workspace.write(Some("return"), send("  ")).is_err());
+    let review_number = in_review.status_history_number.unwrap();
+    assert!(
+        workspace
+            .write(Some("return"), send("  ", review_number))
+            .is_err()
+    );
     assert_eq!(
         workspace.show_ticket(reference).unwrap().status,
         Status::InReview
@@ -381,16 +386,22 @@ fn send_back_moves_the_review_and_posts_the_persons_update_together() {
         .add_activity(reference, "Implemented the rail.", Some("codex"))
         .unwrap();
     let outcome = workspace
-        .write(Some("return"), send("Handle a narrow window."))
+        .write(
+            Some("return"),
+            send("Handle a narrow window.", review_number),
+        )
         .unwrap();
     assert_eq!(
         workspace
-            .write(Some("return"), send("Handle a narrow window."))
+            .write(
+                Some("return"),
+                send("Handle a narrow window.", review_number)
+            )
             .unwrap(),
         outcome
     );
     assert!(matches!(
-        workspace.write(Some("return"), send("Something else")),
+        workspace.write(Some("return"), send("Something else", review_number)),
         Err(Error::RequestConflict(_))
     ));
     let updates = workspace.activities(reference, 10, 0).unwrap();
@@ -422,7 +433,10 @@ fn send_back_moves_the_review_and_posts_the_persons_update_together() {
     assert_eq!(workspace.ticket_history(reference).unwrap().len(), 3);
     assert_eq!(
         workspace
-            .write(Some("return"), send("Handle a narrow window."))
+            .write(
+                Some("return"),
+                send("Handle a narrow window.", review_number)
+            )
             .unwrap(),
         outcome
     );
@@ -440,6 +454,12 @@ fn send_back_applies_to_the_review_that_the_reviewer_loaded() {
     let mut workspace = Workspace::open(dir.path().join("reviews.sqlite3")).unwrap();
     let ticket = workspace.create_ticket("Review the rail").unwrap();
     let reference = ticket.reference.as_str();
+    let unguarded_request = serde_json::json!({
+        "operation": "send_back",
+        "reference": reference,
+        "brief": "Handle a narrow window."
+    });
+    assert!(serde_json::from_value::<WriteRequest>(unguarded_request).is_err());
     let change = |workspace: &mut Workspace, status| {
         workspace
             .change_ticket(
@@ -503,16 +523,16 @@ fn undo_send_back_preserves_a_later_status_change_and_an_edited_update() {
                         ..Default::default()
                     },
                 )
-                .unwrap();
+                .unwrap()
         };
-        change(&mut workspace, Status::InReview);
+        let review = change(&mut workspace, Status::InReview);
         workspace
             .write(
                 Some(suffix),
                 WriteRequest::SendBack {
                     reference: reference.into(),
                     brief: "Handle a narrow window.".into(),
-                    expected_status_history_number: None,
+                    expected_status_history_number: review.status_history_number.unwrap(),
                 },
             )
             .unwrap();

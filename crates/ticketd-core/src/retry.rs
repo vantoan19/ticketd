@@ -132,8 +132,7 @@ pub enum WriteRequest {
     SendBack {
         reference: String,
         brief: String,
-        #[serde(default, skip_serializing_if = "Option::is_none")]
-        expected_status_history_number: Option<i64>,
+        expected_status_history_number: i64,
     },
     UndoSendBack {
         reference: String,

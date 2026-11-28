@@ -968,7 +968,7 @@ fn send_back(
     reference: String,
     brief: String,
     request_id: String,
-    expected_status_history_number: Option<i64>,
+    expected_status_history_number: i64,
 ) -> Result<Ticket, BridgeFailure> {
     match open_workspace()
         .and_then(|mut workspace| {
