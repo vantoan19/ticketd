@@ -17,17 +17,33 @@ import {
   type TicketUpdateDraft,
 } from "./ticket-update-draft";
 
-export type ReviewQueue = readonly Pick<Ticket, "reference" | "status">[];
-type ReadReviewQueue = () => Promise<ReviewQueue>;
+type ReviewQueue = readonly Pick<Ticket, "reference" | "status">[];
+export type ReadReviewQueue = (fresh?: boolean) => Promise<ReviewQueue>;
 
-type NextReview =
-  { kind: "next"; reference: string } | { kind: "empty" | "unavailable" };
+type ReviewSuggestion = {
+  kind: "next";
+  reference: string;
+  successors: string[];
+};
+export type NextReview =
+  | ReviewSuggestion
+  | { kind: "empty"; staleReference?: string }
+  | { kind: "unavailable" };
 
 type ReviewDecision = (
   { kind: "done" } | { kind: "sent back"; brief: string; agent: string }
 ) & { nextReview: NextReview; statusHistoryNumber: number | undefined };
 
 type SendBackDraft = TicketUpdateDraft & { reviewNumber: number };
+
+function nextReviewFrom(
+  references: string[],
+  staleReference?: string,
+): NextReview {
+  const [reference, ...successors] = references;
+  if (reference) return { kind: "next", reference, successors };
+  return staleReference ? { kind: "empty", staleReference } : { kind: "empty" };
+}
 
 async function nextReviewAfter(
   reference: string,
@@ -37,15 +53,13 @@ async function nextReviewAfter(
   try {
     const queue = await readReviewQueue();
     const slot = queue.findIndex((item) => item.reference === reference);
-    const next = [
-      ...queue.slice(slot + 1),
-      ...queue.slice(0, Math.max(0, slot)),
-    ].find(
-      (item) => item.reference !== reference && item.status === "In review",
+    return nextReviewFrom(
+      [...queue.slice(slot + 1), ...queue.slice(0, Math.max(0, slot))]
+        .filter(
+          (item) => item.reference !== reference && item.status === "In review",
+        )
+        .map((item) => item.reference),
     );
-    return next
-      ? { kind: "next", reference: next.reference }
-      : { kind: "empty" };
   } catch {
     return { kind: "unavailable" };
   }
@@ -70,6 +84,8 @@ export function useTicketReviewDecision(
   const recoveryReady = useContext(DraftRecoveryReadyContext);
   const [decision, setDecision] = useState<ReviewDecision | null>(null);
   const [draft, setDraft] = useState<SendBackDraft | null>(null);
+  // The status-line action can outlive the form and a failed draft save.
+  const latestDraft = useRef<SendBackDraft | null>(null);
   const [pending, setPending] = useState(false);
   const moving = useRef(false);
   const canSend = reviewVisible && !blocked && !opening && recoveryReady;
@@ -82,10 +98,46 @@ export function useTicketReviewDecision(
   )
     setDraft(null);
 
+  async function replaceNextReview(
+    stale: ReviewSuggestion,
+    accept: () => boolean,
+  ) {
+    const queue = await readReviewQueue?.(true);
+    if (!queue) throw new Error("Review queue unavailable");
+    const eligible = new Set(
+      queue
+        .filter(
+          (item) =>
+            item.status === "In review" &&
+            item.reference !== reference &&
+            item.reference !== stale.reference,
+        )
+        .map((item) => item.reference),
+    );
+    // The decision removed its row. Continue from the original position when
+    // possible, then consider tickets that entered the queue since the decision.
+    const successors = stale.successors.filter((item) => eligible.delete(item));
+    const nextReview = nextReviewFrom(
+      [...successors, ...eligible],
+      stale.reference,
+    );
+    if (accept()) {
+      setDecision((current) =>
+        current?.nextReview === stale ? { ...current, nextReview } : current,
+      );
+    }
+  }
+
+  function showDraft(note: SendBackDraft) {
+    latestDraft.current = note;
+    setDraft(note);
+  }
+
   function openSendBack() {
     if (!canSend || moving.current) return;
-    const saved = readTicketUpdateDraft(recovery, id, "send-back");
-    setDraft({
+    const saved =
+      latestDraft.current ?? readTicketUpdateDraft(recovery, id, "send-back");
+    showDraft({
       brief: saved?.brief ?? "",
       requestId: saved?.reviewNumber === reviewNumber ? saved.requestId : null,
       reviewNumber,
@@ -99,7 +151,7 @@ export function useTicketReviewDecision(
       requestId: brief.trim() === draft?.brief.trim() ? draft.requestId : null,
       reviewNumber,
     };
-    setDraft(nextDraft);
+    showDraft(nextDraft);
     void keepTicketUpdateDraft(
       recovery,
       id,
@@ -136,17 +188,25 @@ export function useTicketReviewDecision(
       if (moving.current) return;
       moving.current = true;
       setPending(true);
+      let retainingNote = Boolean(send);
       try {
         if (send) {
-          const draft = { brief: send.brief, requestId: request, reviewNumber };
+          const submission = {
+            brief: send.brief,
+            requestId: request,
+            reviewNumber,
+          };
+          latestDraft.current = submission;
           setDraft((current) =>
-            current?.brief === send.brief ? draft : current,
+            current?.reviewNumber === reviewNumber &&
+            current.brief === send.brief
+              ? submission
+              : current,
           );
-          // A lost reply can be retried from the same saved draft with the same ID.
+          // Retain the exact request before sending so a lost reply can be replayed.
           await recovery.flush();
-          const saved = readTicketUpdateDraft(recovery, id, "send-back");
-          if (!saved || saved.brief === send.brief)
-            await keepTicketUpdateDraft(recovery, id, "send-back", draft);
+          await keepTicketUpdateDraft(recovery, id, "send-back", submission);
+          retainingNote = false;
         }
         // Keep the queue through a retry: the first write may have succeeded and removed its row.
         queueRead ??= nextReviewAfter(reference, readReviewQueue);
@@ -193,6 +253,7 @@ export function useTicketReviewDecision(
             void keepTicketUpdateDraft(recovery, id, "send-back", null).catch(
               () => {},
             );
+            latestDraft.current = null;
             setDraft(null);
           }
         }
@@ -238,12 +299,18 @@ export function useTicketReviewDecision(
       } catch (reason) {
         const failure = describeFailure(
           reason,
-          send ? `send ${reference} back` : `move ${reference} to Done`,
+          retainingNote
+            ? "save the Send back note"
+            : send
+              ? `send ${reference} back`
+              : `move ${reference} to Done`,
         );
         if (failure.code === "conflict") await retry();
         line.show({
           tone: "error",
-          message: `${failure.title}. ${failure.sentence}`,
+          message: retainingNote
+            ? `${failure.title}. The note is still available in Send back.`
+            : `${failure.title}. ${failure.sentence}`,
           details: failure.details,
           ...(failure.action === "retry" && {
             action: { label: "Retry", run: retryDecision },
@@ -257,8 +324,8 @@ export function useTicketReviewDecision(
 
     function retryDecision() {
       if (!send) return decide();
-      const saved = readTicketUpdateDraft(recovery, id, "send-back");
-      if (saved?.reviewNumber !== reviewNumber || !saved.brief.trim()) {
+      const current = latestDraft.current;
+      if (current?.reviewNumber !== reviewNumber || !current.brief.trim()) {
         line.show({
           tone: "error",
           message: "Open Send back to review the saved note before sending.",
@@ -266,13 +333,13 @@ export function useTicketReviewDecision(
         return;
       }
       if (
-        saved.brief === send.brief &&
-        (!saved.requestId || saved.requestId === request)
+        current.brief === send.brief &&
+        (!current.requestId || current.requestId === request)
       )
         return decide();
       return startDecision({
-        brief: saved.brief,
-        requestId: saved.requestId,
+        brief: current.brief,
+        requestId: current.requestId,
         agent: send.agent,
       });
     }
@@ -294,6 +361,7 @@ export function useTicketReviewDecision(
     updateDraft,
     sendBack,
     moveToDone,
+    replaceNextReview,
     cancelSendBack: () => setDraft(null),
   };
 }
