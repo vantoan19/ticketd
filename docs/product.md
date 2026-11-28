@@ -356,6 +356,11 @@ reviews that unblock the most work first, with longer waits breaking ties.
 The head links to the newest pull request attached as evidence to one of
 the Plan's tickets, when one exists.
 
+An active Plan with tickets shows Ready to wrap up on the Overview when all
+tickets are closed or the only open tickets are waiting solely on tickets
+outside the Plan. Move opens the Plan picker for the remaining tickets.
+Archive Plan acts immediately, with Undo and Retry on the status line.
+
 On an active Plan's Overview, Since you last looked shows the latest change
 for up to five tickets. It includes status changes, tickets joining the Plan,
 and the first sentence of authored updates. Each entry opens its ticket.

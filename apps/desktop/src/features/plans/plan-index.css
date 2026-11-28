@@ -47,8 +47,8 @@
 .plan-index-row:has(.plan-index-action) {
   grid-template-columns: 20px minmax(0, 1fr) auto auto;
   grid-template-areas:
-    "ring name count action"
-    ". state time action";
+    "ring name action count"
+    ". state action time";
 }
 .plan-index-action {
   position: relative;

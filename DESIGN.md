@@ -662,6 +662,14 @@ the space below the shared pane header for tickets.
   segments, and Home and End reach the ends. The open ticket's segment is
   taller and carries `aria-current`. Above 60 counted tickets, proportional
   status runs show the counts.
+- **Ready to wrap up** sits in an inline notice between progress and the work
+  sections on an active, nonempty Plan when all open tickets are blocked
+  solely by tickets outside the Plan. With no open tickets it says “Every
+  ticket is done.” For one ticket it says “Only T-X is left, blocked by
+  another Plan.” For several it says “N tickets are left, blocked by other
+  Plans.” The outline Move T-X… or Move N tickets… button opens the shared
+  Plan choices for those tickets. The primary Archive Plan button acts at
+  once, with Undo on the status line and Retry for a failed archive.
 - **Overview work:** Needs you leads with an orange dot, followed by In progress,
   Ready, Blocked and Done. Each heading has a muted count. Status icons and
   disclosure chevrons sit in the gutter. Rows are at least 36px tall, with a

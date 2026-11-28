@@ -41,7 +41,11 @@ import { plansClient, type Plan } from "@/lib/api/plans";
 import { AddTicketsDialog } from "./AddTicketsDialog";
 import { PlanDocumentPicker } from "./PlanDocuments";
 import { PlanRing } from "./PlanProgress";
-import { usePlanAction, type PlanViewState } from "./usePlanView";
+import {
+  useArchivePlan,
+  usePlanAction,
+  type PlanViewState,
+} from "./usePlanView";
 import "./plan.css";
 
 export type PlanMode = "overview" | "list" | "board" | "dependencies";
@@ -75,6 +79,7 @@ export function PlanHeader({
   const [optionsOpen, setOptionsOpen] = useState(false);
   // The list's own copy is current after a change; the loaded view adds counts.
   const current = view?.plan.id === plan.id ? view.plan : plan;
+  const archive = useArchivePlan(current, state);
 
   const header = useRef<HTMLDivElement>(null);
   const nameInput = useRef<HTMLInputElement>(null);
@@ -140,15 +145,6 @@ export function PlanHeader({
       endRename();
     }
   }
-  const archive = () =>
-    void act(
-      () => plansClient.change(plan.id, null, true),
-      `archive ${current.name}`,
-      {
-        message: `Archived ${current.name}`,
-        undo: () => state.apply(() => plansClient.change(plan.id, null, false)),
-      },
-    );
   const reactivate = () =>
     void act(
       () => plansClient.change(plan.id, null, false),

@@ -904,3 +904,254 @@ test("the Overview excludes changes at the last look and hides the feed after ar
     screen.queryByRole("region", { name: "Since you last looked" }),
   ).toBeNull();
 });
+
+test("a completed Plan offers to wrap up and archive", async () => {
+  tickets = [{ id: "1", reference: "T-KQ1", status: "Done", plan: "e1" }];
+  await openLaunch();
+
+  const panel = within(context()).getByRole("region", {
+    name: "Ready to wrap up",
+  });
+  expect(within(panel).getByText("Every ticket is done.")).toBeTruthy();
+  expect(within(panel).queryByRole("button", { name: /^Move/ })).toBeNull();
+  expect(
+    within(panel).getByRole("button", { name: "Archive Plan" }),
+  ).toBeTruthy();
+});
+
+const outsideBlocker = {
+  reference: "T-KQ3",
+  title: "Outside blocker",
+  status: "Todo",
+  trashed: false,
+  unresolved: true,
+};
+
+test("wrap-up opens the Plan picker and moves only tickets left blocked outside the Plan", async () => {
+  plans.push(
+    { id: "e2", name: "Follow-up", archived: false, purpose: "" },
+    { id: "e3", name: "Earlier work", archived: true, purpose: "" },
+  );
+  tickets = [
+    {
+      id: "1",
+      reference: "T-KQ1",
+      status: "Todo",
+      plan: "e1",
+      availability: "Blocked",
+      prerequisites: [outsideBlocker],
+    },
+    { id: "2", reference: "T-KQ2", status: "Done", plan: "e1" },
+    { id: "3", reference: "T-KQ3", status: "Todo", plan: "e2" },
+    {
+      id: "4",
+      reference: "T-KQ4",
+      status: "Todo",
+      plan: "e1",
+      availability: "Blocked",
+      prerequisites: [outsideBlocker],
+    },
+  ];
+  await openLaunch();
+
+  const panel = within(context()).getByRole("region", {
+    name: "Ready to wrap up",
+  });
+  expect(
+    within(panel).getByText("2 tickets are left, blocked by other Plans."),
+  ).toBeTruthy();
+  fireEvent.click(
+    within(panel).getByRole("button", { name: "Move 2 tickets…" }),
+  );
+  const choices = await screen.findByRole("dialog", { name: "Plan choices" });
+  expect(within(choices).getByPlaceholderText("Search plan…")).toBeTruthy();
+  expect(within(choices).queryByText("Earlier work")).toBeNull();
+  fireEvent.click(within(choices).getByRole("option", { name: "Follow-up" }));
+
+  expect(await screen.findByText("Moved 2 tickets to Follow-up")).toBeTruthy();
+  expect(bridge.invoke).toHaveBeenCalledWith("bulk_change", {
+    references: ["T-KQ1", "T-KQ4"],
+    change: { plan_id: "e2" },
+    requestId: expect.any(String),
+  });
+  expect(within(panel).getByText("Every ticket is done.")).toBeTruthy();
+
+  fireEvent.click(screen.getByRole("button", { name: "Undo" }));
+  expect(
+    await within(panel).findByText(
+      "2 tickets are left, blocked by other Plans.",
+    ),
+  ).toBeTruthy();
+});
+
+test("wrap-up names a single ticket left blocked outside the Plan", async () => {
+  tickets[0]!.availability = "Blocked";
+  tickets[0]!.prerequisites = [outsideBlocker];
+  await openLaunch();
+
+  const panel = within(context()).getByRole("region", {
+    name: "Ready to wrap up",
+  });
+  expect(
+    within(panel).getByText("Only T-KQ1 is left, blocked by another Plan."),
+  ).toBeTruthy();
+  expect(
+    within(panel).getByRole("button", { name: "Move T-KQ1…" }),
+  ).toBeTruthy();
+});
+
+test.each([
+  {
+    remaining: "In review",
+    status: "In review",
+    availability: "Blocked",
+    blocker: outsideBlocker,
+  },
+  {
+    remaining: "In progress",
+    status: "In progress",
+    availability: "Blocked",
+    blocker: outsideBlocker,
+  },
+  { remaining: "Ready", status: "Todo", availability: "Ready" },
+  {
+    remaining: "blocked inside the Plan",
+    status: "Todo",
+    availability: "Blocked",
+    blocker: { ...outsideBlocker, reference: "T-KQ2", status: "Canceled" },
+  },
+])(
+  "wrap-up stays hidden while a ticket is $remaining",
+  async ({ status, availability, blocker }) => {
+    tickets[0]!.status = status;
+    tickets[0]!.availability = availability;
+    if (blocker) tickets[0]!.prerequisites = [blocker];
+    if (blocker?.reference === "T-KQ2") tickets[1]!.status = "Canceled";
+    await openLaunch();
+
+    expect(
+      within(context()).queryByRole("region", { name: "Ready to wrap up" }),
+    ).toBeNull();
+  },
+);
+
+test("an empty Plan has no wrap-up panel", async () => {
+  tickets = [];
+  render(<App />);
+  fireEvent.click(await screen.findByRole("button", { name: "Launch" }));
+  const overview = await screen.findByRole("region", { name: "Launch" });
+  await waitFor(() =>
+    expect(
+      within(overview).queryByRole("status", { name: "Loading Plan" }),
+    ).toBeNull(),
+  );
+  expect(
+    within(overview).queryByRole("region", { name: "Ready to wrap up" }),
+  ).toBeNull();
+});
+
+test("wrap-up archives immediately and Undo brings the panel back", async () => {
+  tickets = [{ id: "1", reference: "T-KQ1", status: "Done", plan: "e1" }];
+  await openLaunch();
+
+  const panel = within(context()).getByRole("region", {
+    name: "Ready to wrap up",
+  });
+  fireEvent.click(within(panel).getByRole("button", { name: "Archive Plan" }));
+  expect(await screen.findByText("Archived Launch")).toBeTruthy();
+  expect(screen.getByRole("button", { name: "Reactivate" })).toBeTruthy();
+  expect(
+    within(context()).queryByRole("region", { name: "Ready to wrap up" }),
+  ).toBeNull();
+  expect(bridge.invoke).toHaveBeenCalledWith("change_plan", {
+    id: "e1",
+    name: null,
+    archived: true,
+  });
+
+  fireEvent.click(screen.getByRole("button", { name: "Undo" }));
+  expect(
+    await within(context()).findByRole("region", { name: "Ready to wrap up" }),
+  ).toBeTruthy();
+  expect(bridge.invoke).toHaveBeenCalledWith("change_plan", {
+    id: "e1",
+    name: null,
+    archived: false,
+  });
+});
+
+test("wrap-up puts a failed archive and its Retry on the status line", async () => {
+  tickets = [{ id: "1", reference: "T-KQ1", status: "Done", plan: "e1" }];
+  const answer = bridge.invoke.getMockImplementation()!;
+  let blocked = true;
+  bridge.invoke.mockImplementation(async (command: string, args: never) => {
+    if (command === "change_plan" && blocked)
+      throw new Error("The workspace is locked");
+    return answer(command, args);
+  });
+  await openLaunch();
+
+  const panel = within(context()).getByRole("region", {
+    name: "Ready to wrap up",
+  });
+  fireEvent.click(within(panel).getByRole("button", { name: "Archive Plan" }));
+  const failure = await screen.findByRole("alert");
+  expect(failure.textContent).toContain("Couldn't archive Launch.");
+  expect(
+    within(panel).getByRole("button", { name: "Archive Plan" }),
+  ).toBeTruthy();
+
+  blocked = false;
+  fireEvent.click(within(failure).getByRole("button", { name: "Retry" }));
+  expect(await screen.findByText("Archived Launch")).toBeTruthy();
+  expect(screen.getByRole("button", { name: "Undo" })).toBeTruthy();
+});
+
+test("retrying a large wrap-up move resumes with the batch that failed", async () => {
+  plans.push({ id: "e2", name: "Follow-up", archived: false, purpose: "" });
+  const references = Array.from({ length: 101 }, (_, index) => `T-B${index}`);
+  tickets = [
+    { id: "2", reference: "T-KQ2", status: "Done", plan: "e1" },
+    { id: "3", reference: "T-KQ3", status: "Todo", plan: "e2" },
+    ...references.map((reference) => ({
+      id: reference,
+      reference,
+      plan: "e1",
+      status: "Todo",
+      availability: "Blocked",
+      prerequisites: [outsideBlocker],
+    })),
+  ];
+  const answer = bridge.invoke.getMockImplementation()!;
+  const moves: { references: string[]; requestId: string }[] = [];
+  bridge.invoke.mockImplementation(async (command: string, args: never) => {
+    if (command === "bulk_change") {
+      moves.push(args);
+      if (moves.length === 2) throw new Error("The workspace is locked");
+    }
+    return answer(command, args);
+  });
+  await openLaunch();
+
+  fireEvent.click(
+    within(context()).getByRole("button", { name: "Move 101 tickets…" }),
+  );
+  const choices = await screen.findByRole("dialog", { name: "Plan choices" });
+  fireEvent.click(within(choices).getByRole("option", { name: "Follow-up" }));
+  const failure = await screen.findByRole("alert");
+  expect(failure.textContent).toContain("Couldn't move 101 tickets.");
+  expect(
+    await within(context()).findByRole("button", { name: "Move T-B100…" }),
+  ).toBeTruthy();
+
+  fireEvent.click(within(failure).getByRole("button", { name: "Retry" }));
+  expect(
+    await screen.findByText("Moved 101 tickets to Follow-up"),
+  ).toBeTruthy();
+  expect(moves.map((move) => move.references)).toEqual([
+    references.slice(0, 100),
+    ["T-B100"],
+    ["T-B100"],
+  ]);
+  expect(moves[2]?.requestId).toBe(moves[1]?.requestId);
+});

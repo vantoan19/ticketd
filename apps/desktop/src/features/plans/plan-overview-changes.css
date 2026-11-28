@@ -3,35 +3,48 @@
   padding: 0;
   list-style: none;
 }
+.plan-overview-changes li {
+  position: relative;
+}
+.plan-overview-change-icon {
+  position: absolute;
+  display: grid;
+  align-items: center;
+  inset-block-start: 0;
+  inset-inline-start: -20px;
+  height: 36px;
+}
 .plan-overview-changes [data-slot="record-link"] {
   align-items: center;
+  gap: 0;
   min-height: 36px;
   max-width: 100%;
+}
+.plan-overview-changes [data-slot="reference"] {
+  flex: 0 0 62px;
 }
 .plan-overview-changes [data-slot="record-title"] {
   display: flex;
   align-items: center;
   gap: 6px;
 }
-.plan-overview-changes [data-slot="record-title"] > svg {
-  flex: none;
-}
 .plan-overview-changes [data-slot="record-title"] > span:first-of-type {
   overflow: hidden;
   text-overflow: ellipsis;
 }
 :where([data-width~="max-600"])
-  .plan-overview-change
+  .plan-overview-changes
   [data-slot="record-title"] {
-  flex-wrap: wrap;
-  gap: 0 6px;
+  display: grid;
+  gap: 0;
 }
 :where([data-width~="max-600"])
-  .plan-overview-change
+  .plan-overview-changes
   [data-slot="record-title"]
   > span:first-of-type {
   display: -webkit-box;
   -webkit-box-orient: vertical;
   -webkit-line-clamp: 2;
   white-space: normal;
+  overflow-wrap: anywhere;
 }
