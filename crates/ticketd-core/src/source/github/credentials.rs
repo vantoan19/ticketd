@@ -86,6 +86,12 @@ pub(super) fn connection_token_variable(id: &str) -> String {
     )
 }
 
+pub(super) fn has_legacy_token(id: Option<&str>) -> bool {
+    let has_token = |name: &str| std::env::var(name).is_ok_and(|value| !value.trim().is_empty());
+    has_token("TICKETD_GITHUB_TOKEN")
+        || id.is_some_and(|id| has_token(&connection_token_variable(id)))
+}
+
 impl CredentialSource for AmbientCredentials {
     fn token(&self) -> Option<Secret> {
         if let Some(value) = self
@@ -123,14 +129,7 @@ impl CredentialSource for AmbientCredentials {
 }
 
 fn gh_token(host: &str, account: Option<&str>) -> Option<Secret> {
-    [
-        "gh",
-        "/opt/homebrew/bin/gh",
-        "/usr/local/bin/gh",
-        "/usr/bin/gh",
-    ]
-    .into_iter()
-    .find_map(|program| {
+    super::gh::PROGRAMS.into_iter().find_map(|program| {
         let mut command = Command::new(program);
         #[cfg(windows)]
         {
