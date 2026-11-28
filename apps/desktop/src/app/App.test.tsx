@@ -11262,7 +11262,7 @@ test.each([
   },
 );
 
-test("Plans initial read stays unknown, retries its own failure and preserves known cards", async () => {
+test("Plans initial read stays unknown, retries its own failure and recovers its rows", async () => {
   let rejectRead: ((reason: unknown) => void) | undefined;
   const pending = new Promise((_, reject) => {
     rejectRead = reject;
@@ -11286,7 +11286,9 @@ test("Plans initial read stays unknown, retries its own failure and preserves kn
   );
   fireEvent.click(await screen.findByRole("option", { name: /^Plans/ }));
   expect(screen.queryByText("No Plans yet")).toBeNull();
-  expect(screen.getByRole("status", { name: "Loading Plans" })).toBeTruthy();
+  expect(
+    await screen.findByRole("status", { name: "Loading Plans" }),
+  ).toBeTruthy();
   await act(async () => rejectRead?.(new Error("Plans unavailable")));
   const retry = await screen.findByRole("button", { name: "Retry" });
   expect(screen.queryByText("No Plans yet")).toBeNull();

@@ -49,9 +49,11 @@ export async function readPlanIndexData(
   }
   // The member update timestamp includes ticket changes, history and Activities.
   const updated = members.reduce<string | null>((latest, member) => {
-    const time = Date.parse(member.updated_at ?? "");
+    const updatedAt = member.updated_at;
+    if (!updatedAt) return latest;
+    const time = Date.parse(updatedAt);
     return Number.isFinite(time) && (!latest || time > Date.parse(latest))
-      ? member.updated_at
+      ? updatedAt
       : latest;
   }, null);
   return {
