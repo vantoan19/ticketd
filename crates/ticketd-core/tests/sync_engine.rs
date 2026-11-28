@@ -8,6 +8,7 @@ use std::io::Cursor;
 
 use ticketd_core::{
     ActivityFeedEntry, Error, RecordKind, Status, SyncKind, SyncValue, TicketPatch, Workspace,
+    WriteRequest,
     sync::{
         SyncChoice, SyncNoticeKind, SyncRecovery, SyncResolution, SyncState,
         remote::{RemoteCapabilities, RemoteError, RemoteKey, RemoteKind, RemoteOp, RemoteStorage},
@@ -241,6 +242,81 @@ fn changes_to_different_fields_combine_without_review() {
             assert_eq!(workspace.sync_conflicts().unwrap(), []);
         }
     }
+}
+
+#[test]
+fn sync_status_transitions_invalidate_stale_review_decisions() {
+    let mut devices = devices();
+    let reference = devices.shared_ticket("Review the change");
+    devices.workspaces[0]
+        .set_following(&reference, true)
+        .unwrap();
+
+    let mut sync_status = |status| {
+        devices.workspaces[0]
+            .change_ticket(
+                &reference,
+                TicketPatch {
+                    status: Some(status),
+                    ..Default::default()
+                },
+            )
+            .unwrap();
+        devices.sync(0);
+        let report = devices.sync(1);
+        assert_eq!((report.uploaded, report.conflicts), (0, 0));
+        let ticket = devices.workspaces[1].show_ticket(&reference).unwrap();
+        assert_eq!(ticket.status, status);
+        ticket.status_history_number.unwrap()
+    };
+    let first_review = sync_status(Status::InReview);
+    let sent_back = sync_status(Status::InProgress);
+    let later_review = sync_status(Status::InReview);
+    assert!(first_review < sent_back && sent_back < later_review);
+
+    let id = devices.workspaces[1].show_ticket(&reference).unwrap().id;
+    let (_, text) = devices.remote_text(RemoteKind::Ticket, &id);
+    let replay = text.replacen("\n---\n", "\n# Unchanged ticket fields\n---\n", 1);
+    devices.hand_edit(RemoteKind::Ticket, &id, &replay);
+    let report = devices.sync(1);
+    assert_eq!((report.skipped, report.conflicts), (0, 0));
+
+    let target = &mut devices.workspaces[1];
+    let ticket = target.show_ticket(&reference).unwrap();
+    assert_eq!(ticket.status_history_number, Some(later_review));
+    assert_eq!(target.ticket_history(&reference).unwrap().len(), 3);
+    assert!(target.is_following(&reference).unwrap());
+    assert!(target.inbox(10, 0).unwrap().is_empty());
+
+    for (request_id, decision) in [
+        (
+            "stale-send-back",
+            WriteRequest::SendBack {
+                reference: reference.clone(),
+                brief: "Feedback on the earlier review".into(),
+                expected_status_history_number: first_review,
+            },
+        ),
+        (
+            "stale-move-to-done",
+            WriteRequest::ChangeTicket {
+                reference: reference.clone(),
+                patch: TicketPatch {
+                    expected_status: Some(Status::InReview),
+                    expected_status_history_number: Some(first_review),
+                    status: Some(Status::Done),
+                    ..Default::default()
+                },
+            },
+        ),
+    ] {
+        assert!(matches!(
+            target.write(Some(request_id), decision),
+            Err(Error::TicketChanged(_))
+        ));
+    }
+    assert!(target.activities(&reference, 10, 0).unwrap().is_empty());
+    assert_eq!(target.show_ticket(&reference).unwrap(), ticket);
 }
 
 #[test]
