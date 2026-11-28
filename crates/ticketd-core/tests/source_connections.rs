@@ -1106,6 +1106,45 @@ fn values(account: &str, repository: &str) -> ticketd_core::source::ConfigValues
 }
 
 #[test]
+fn project_can_set_up_a_compatible_extension_alongside_github() {
+    let mut engine = Engine::builtin();
+    engine
+        .register(Box::new(fake_source::FakeSource::default()))
+        .unwrap();
+    let folder = tempfile::tempdir().unwrap();
+    let mut workspace = Workspace::open(folder.path().join("workspace.sqlite3")).unwrap();
+    let project = workspace
+        .create_project_with_remote(
+            "Project",
+            folder.path().to_str().unwrap(),
+            Some("example.test/a/project"),
+        )
+        .unwrap();
+    let candidates = workspace
+        .project_source_candidates(&engine, &project.id)
+        .unwrap();
+    assert_eq!(candidates.len(), 2);
+    assert!(
+        candidates
+            .iter()
+            .any(|candidate| candidate.source == "github")
+    );
+    let extension = candidates
+        .iter()
+        .find(|candidate| candidate.provider == "fake")
+        .unwrap();
+    assert_eq!(extension.connection_id, None);
+    let preview = workspace
+        .preview_connect_source(&engine, &extension.source, &project.id)
+        .unwrap();
+    assert_eq!(
+        preview.source,
+        ticketd_core::source::ConnectSourceAction::NotConnected
+    );
+    assert_eq!(preview.repository, "a/project");
+}
+
+#[test]
 fn project_source_review_binds_to_the_selected_connection() {
     let fake = fake_source::FakeSource::default();
     fake.0.lock().unwrap().account_from_assignee = true;

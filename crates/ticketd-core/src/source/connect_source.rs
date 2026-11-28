@@ -150,6 +150,22 @@ impl Workspace {
                     });
                 }
             }
+            if candidates.is_empty() {
+                for description in engine.descriptions() {
+                    let descriptor = description.descriptor;
+                    if descriptor.provider != GITHUB_INTEGRATION
+                        && descriptor.schema.field(REPOSITORIES).is_some()
+                        && matches_remote(engine, &descriptor.provider, repository, &remote)?
+                    {
+                        candidates.push(ProjectSourceCandidate {
+                            source: format!("{UNCONFIGURED_PROVIDER}{}", descriptor.provider),
+                            provider: descriptor.provider,
+                            connection_id: None,
+                            name: descriptor.name,
+                        });
+                    }
+                }
+            }
             if engine.descriptor(GITHUB_INTEGRATION).is_ok()
                 && !candidates
                     .iter()
@@ -161,21 +177,6 @@ impl Workspace {
                     connection_id: None,
                     name: "GitHub".into(),
                 });
-            }
-            if candidates.is_empty() {
-                for description in engine.descriptions() {
-                    let descriptor = description.descriptor;
-                    if descriptor.schema.field(REPOSITORIES).is_some()
-                        && matches_remote(engine, &descriptor.provider, repository, &remote)?
-                    {
-                        candidates.push(ProjectSourceCandidate {
-                            source: format!("{UNCONFIGURED_PROVIDER}{}", descriptor.provider),
-                            provider: descriptor.provider,
-                            connection_id: None,
-                            name: descriptor.name,
-                        });
-                    }
-                }
             }
             Ok(candidates)
         })
