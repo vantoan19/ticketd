@@ -648,9 +648,11 @@ the space below the shared pane header for tickets.
   and the newest pull request in the Plan's implementation evidence share one
   line when present. The pull request shows its number and opens in the browser.
   Countable progress leads the line in ink, with nonzero swatches for In review,
-  In progress, Ready and Blocked, and the last change at the right. Canceled
-  and Duplicate are excluded. Loading keeps the head and shows skeletons for
-  the count, strip and three rows. A failed read shows Retry below the head.
+  In progress, Ready and Blocked, and the last change at the right. Tickets
+  held by their source still count and get a separate swatch when present.
+  Canceled and Duplicate are excluded. Loading keeps the head and shows
+  skeletons for the count, strip and three rows. A failed read shows Retry
+  below the head. After a failed refresh the last successful work stays visible.
 - **Empty Plan:** Overview, Board and Flow share the centered block
   EmptyState with a Layers icon and “No tickets yet” above “Let an agent break
   the spec into tickets, or add tickets you already have.” The Overview
@@ -662,9 +664,10 @@ the space below the shared pane header for tickets.
   Send links the mentioned Document. Add tickets opens the standard Plan
   picker. An empty archived Plan prompts the person to reactivate it.
 - **Overview progress strip:** one segment per counted ticket, ordered Done
-  (oldest first), In review, In progress, Ready and Blocked, with open work
-  ordered by how many tickets it unblocks. Each 8px segment sits in a 24px
-  target, with 2px gaps. Segments and swatches use `--seg-done`,
+  (oldest first), In review, In progress, Ready, Blocked, then Held by source,
+  with open work ordered by how many tickets it unblocks. Each 8px segment sits
+  in a 24px-tall fine-pointer target, with 2px gaps. On touch the strip scrolls
+  horizontally within the column with 44px targets. Segments and swatches use `--seg-done`,
   `--seg-review`, `--seg-progress` and `--track`, with a 1px
   `--control-boundary` outline for Blocked. Hover or keyboard focus shows the
   reference, title and status. Click or Enter opens the ticket beside the
@@ -681,7 +684,7 @@ the space below the shared pane header for tickets.
   Plan choices for those tickets. The primary Archive Plan button acts at
   once, with Undo on the status line and Retry for a failed archive.
 - **Overview work:** Needs you leads with an orange dot, followed by In progress,
-  Ready, Blocked and Done. Each heading has a muted count. Status icons and
+  Ready, Blocked, Held by source and Done. Each heading has a muted count. Status icons and
   disclosure chevrons sit in the gutter. Rows are at least 36px tall, with a
   62px muted mono reference column, a single-line title, metadata and time at
   the right. Time is measured from entry into the ticket's current status.
