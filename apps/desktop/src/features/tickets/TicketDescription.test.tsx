@@ -213,6 +213,59 @@ test("find keeps the query and updates its count and folds when the description 
   }
 });
 
+test("find highlights stay with each cached ticket and closing one preserves the other", () => {
+  class TestHighlight extends Set<Range> {
+    constructor(...ranges: Range[]) {
+      super(ranges);
+    }
+  }
+  const highlights = new Map<string, TestHighlight>();
+  vi.stubGlobal("CSS", { ...globalThis.CSS, highlights });
+  vi.stubGlobal("Highlight", TestHighlight);
+  const platform = vi
+    .spyOn(window.navigator, "platform", "get")
+    .mockReturnValue("MacIntel");
+  const pages = (selected: string) => (
+    <>
+      <section hidden={selected !== "first"}>
+        <TicketDescription ticketId="first" source="Find the first phrase." />
+      </section>
+      <section hidden={selected !== "second"}>
+        <TicketDescription ticketId="second" source="Find the other phrase." />
+      </section>
+    </>
+  );
+  const highlighted = () =>
+    Array.from(highlights.get("ticket-description-find") ?? [], (range) =>
+      range.toString(),
+    );
+  const query = (value: string) => {
+    fireEvent.keyDown(window, { key: "f", metaKey: true });
+    fireEvent.change(screen.getByRole("searchbox"), { target: { value } });
+  };
+  try {
+    const view = render(pages("first"));
+    query("first phrase");
+    expect(highlighted()).toEqual(["first phrase"]);
+
+    view.rerender(pages("second"));
+    query("other phrase");
+    view.rerender(pages("first"));
+    expect(screen.getByRole("status").textContent).toBe("1 of 1");
+    expect(highlighted()).toEqual(["first phrase", "other phrase"]);
+
+    fireEvent.keyDown(screen.getByRole("searchbox"), { key: "Escape" });
+    expect(highlighted()).toEqual(["other phrase"]);
+    view.rerender(pages("second"));
+    expect(screen.getByRole("status").textContent).toBe("1 of 1");
+    view.unmount();
+    expect(highlights.size).toBe(0);
+  } finally {
+    platform.mockRestore();
+    vi.unstubAllGlobals();
+  }
+});
+
 test("the review card's acceptance count returns from Edit to the visible checklist", async () => {
   detail(longSpec, "in-review", "In review");
   const acceptance = screen.getByRole("button", { name: "Acceptance 0 of 1" });

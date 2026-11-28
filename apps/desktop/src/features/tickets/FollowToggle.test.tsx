@@ -263,36 +263,52 @@ test("the rail's Retry after a failed read of Follow reads again and writes noth
   expect(reads).toBe(2);
 });
 
-test("the rail's Retry after a failed change sends the change again", async () => {
-  let writes = 0;
-  let following = false;
-  bridge.invoke.mockImplementation(
-    async (command: string, args?: { reference?: string }) => {
-      if (command === "show_ticket") return ticket(args!.reference!);
-      if (command === "is_following") return following;
-      if (command === "set_following") {
-        writes += 1;
-        if (writes === 1) throw new Error("disk I/O error");
-        following = true;
-        return null;
-      }
-      throw new Error(`Unexpected ${command}`);
-    },
-  );
-  render(
-    <TestReads>
-      <FollowToggle reference="T-A" variant="rail" />
-    </TestReads>,
-  );
-  await waitFor(() => expect(calls("is_following")).toHaveLength(1));
-  fireEvent.click(toggle());
-  expect((await screen.findByRole("alert")).textContent).toContain("Not saved");
-  fireEvent.click(screen.getByRole("button", { name: "Retry" }));
-  await waitFor(() =>
-    expect(toggle().getAttribute("aria-pressed")).toBe("true"),
-  );
-  expect(calls("set_following")).toHaveLength(2);
-});
+test.each([false, true])(
+  "the rail's Retry after a failed Follow sends Follow again when the current value is %s",
+  async (alreadyFollowed) => {
+    let writes = 0;
+    let following = false;
+    bridge.invoke.mockImplementation(
+      async (
+        command: string,
+        args?: { reference?: string; following?: boolean },
+      ) => {
+        if (command === "show_ticket") return ticket(args!.reference!);
+        if (command === "is_following") return following;
+        if (command === "set_following") {
+          writes += 1;
+          if (writes === 1) throw new Error("disk I/O error");
+          following = args!.following!;
+          return null;
+        }
+        throw new Error(`Unexpected ${command}`);
+      },
+    );
+    const signal = fakeChangeSignal();
+    render(
+      <TestReads signal={signal}>
+        <FollowToggle reference="T-A" variant="rail" />
+      </TestReads>,
+    );
+    await waitFor(() => expect(calls("is_following")).toHaveLength(1));
+    fireEvent.click(toggle());
+    expect((await screen.findByRole("alert")).textContent).toContain(
+      "Not saved",
+    );
+    if (alreadyFollowed) {
+      following = true;
+      await act(async () => signal.change());
+      expect(toggle().getAttribute("aria-pressed")).toBe("true");
+    }
+    fireEvent.click(screen.getByRole("button", { name: "Retry" }));
+    await waitFor(() => expect(screen.queryByRole("alert")).toBeNull());
+    expect(toggle().getAttribute("aria-pressed")).toBe("true");
+    expect(calls("set_following").map(([, args]) => args)).toMatchObject([
+      { reference: "T-A", following: true },
+      { reference: "T-A", following: true },
+    ]);
+  },
+);
 
 test("the status line's Retry stays busy until the re-read answers", async () => {
   const answer = deferred<boolean>();
@@ -412,4 +428,8 @@ test.each([
       "Copied ticket link",
     );
   await act(async () => refresh.resolve(true));
+  if (replaced)
+    expect(screen.getByRole("status").textContent).toContain(
+      "Copied ticket link",
+    );
 });

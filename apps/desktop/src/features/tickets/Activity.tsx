@@ -418,6 +418,7 @@ function RecoveredActivity({
   const [detailDocuments, setDetailDocuments] = useState<
     Record<string, { heading: string; trashed: boolean; attached: boolean }>
   >({});
+  const detailReads = useRef<{ revision: number; ids: Set<string> }>(null);
   const [picking, setPicking] = useState(false);
   const [controlsOwner, setControlsOwner] = useState<"brief" | "details">(
     "brief",
@@ -639,6 +640,7 @@ function RecoveredActivity({
       latest.reported_at < representedUpdate.reported_at)
       ? representedUpdate
       : null;
+  const latestBadgeId = stub?.activity_id ?? latest?.id ?? latestNoteId;
   const pagedStubNote = sortedNotes.find(
     (note) => note.id === stub?.activity_id,
   );
@@ -708,13 +710,18 @@ function RecoveredActivity({
   if (stub?.supporting_document_id) detailIds.add(stub.supporting_document_id);
   const detailIdsKey = [...detailIds].join(",");
   useEffect(() => {
+    if (detailReads.current?.revision !== revision)
+      detailReads.current = { revision, ids: new Set() };
     if (!active || !detailIdsKey) return;
-    let current = true;
-    for (const id of detailIdsKey.split(","))
+    const reads = detailReads.current;
+    for (const id of detailIdsKey.split(",")) {
+      // Opening Earlier can add pages while earlier lookups are still in flight.
+      if (reads.ids.has(id)) continue;
+      reads.ids.add(id);
       void documents
         .show(id)
         .then((document) => {
-          if (current)
+          if (detailReads.current === reads)
             setDetailDocuments((previous) => ({
               ...previous,
               [id]: {
@@ -726,9 +733,7 @@ function RecoveredActivity({
             }));
         })
         .catch(() => {});
-    return () => {
-      current = false;
-    };
+    }
   }, [active, detailIdsKey, revision]);
   useLayoutEffect(() => {
     if (!active || targetId === undefined || targetKey === undefined) {
@@ -1052,7 +1057,7 @@ function RecoveredActivity({
                   </>
                 )}
                 <Presence initial={false}>
-                  {item.note.id === (latest?.id ?? latestNoteId) && (
+                  {item.note.id === latestBadgeId && (
                     <m.span
                       key="latest"
                       exit={{ opacity: 0, transition: exitTransition() }}

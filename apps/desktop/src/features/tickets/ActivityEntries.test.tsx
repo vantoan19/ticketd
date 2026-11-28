@@ -1,9 +1,18 @@
 // @vitest-environment jsdom
 import { githubSource } from "@/test/source-fixtures";
-import { cleanup, fireEvent, render, screen } from "@testing-library/react";
+import {
+  act,
+  cleanup,
+  fireEvent,
+  render,
+  screen,
+} from "@testing-library/react";
 import { afterEach, beforeAll, expect, test, vi } from "vitest";
 import type { ComponentProps } from "react";
 import type { ChangeSignal } from "@/lib/workspace-reads";
+import { fakeChangeSignal } from "@/lib/workspace-reads/fake-signal";
+import { deferred } from "@/lib/workspace-reads/test-support";
+import type { Document } from "@/features/documents/api";
 import { Activity as ActivitySection } from "./Activity";
 import { changeSummary } from "./history-sentence";
 import type { Entry } from "@/lib/api/history";
@@ -168,6 +177,80 @@ test("counts earlier authored updates even when recorded changes fill the All fe
     limit: 50,
     updatesOnly: true,
   });
+});
+
+test("Earlier reuses detail Document reads until the workspace revision changes", async () => {
+  const detailIds = new Map([
+    [0, "current"],
+    [1, "pending"],
+    [50, "earlier"],
+  ]);
+  const updates = Array.from({ length: 52 }, (_, index) => ({
+    type: "authored",
+    activity: {
+      ...note,
+      id: String(index),
+      supporting_document_id: detailIds.get(index) ?? null,
+    },
+  }));
+  const doc = (id: string, title: string, trashed = false): Document => ({
+    id,
+    title,
+    trashed,
+    body: "",
+    created_at: note.reported_at,
+    updated_at: note.updated_at,
+  });
+  const pending = deferred<Document>();
+  const reads: string[] = [];
+  let revised = false;
+  bridge.invoke.mockImplementation(
+    async (command: string, args?: { id?: string; offset?: number }) => {
+      if (command === "activity_feed") {
+        const offset = args?.offset ?? 0;
+        return updates.slice(offset, offset + 50);
+      }
+      if (command === "activity_update_count") return updates.length;
+      if (command === "show_document" && args?.id) {
+        const { id } = args;
+        reads.push(id);
+        if (id === "pending" && !revised) return pending.promise;
+        if (id === "current" && revised) return doc(id, "Renamed", true);
+        return doc(id, id);
+      }
+      throw new Error(`Unexpected ${command}`);
+    },
+  );
+  const signal = fakeChangeSignal();
+  render(<Activity {...props} reference="T-KQ20" signal={signal} />);
+  await screen.findByRole("button", { name: "Attached: current" });
+  expect(reads).toEqual(["current", "pending"]);
+
+  fireEvent.click(
+    await screen.findByRole("button", { name: "49 earlier updates" }),
+  );
+  await screen.findByRole("button", { name: "Attached: earlier" });
+  expect(reads).toEqual(["current", "pending", "earlier"]);
+
+  revised = true;
+  await act(async () => signal.change());
+  await screen.findByRole("button", { name: "Attached: Renamed" });
+  expect(screen.getByText("In Trash")).toBeTruthy();
+  expect(reads).toEqual([
+    "current",
+    "pending",
+    "earlier",
+    "current",
+    "pending",
+    "earlier",
+  ]);
+  await act(async () => pending.resolve(doc("pending", "Stale title")));
+  expect(
+    screen.getByRole("button", { name: "Attached: pending" }),
+  ).toBeTruthy();
+  expect(
+    screen.queryByRole("button", { name: "Attached: Stale title" }),
+  ).toBeNull();
 });
 
 test("an update that occupies seven lines offers Show more", async () => {

@@ -8,6 +8,8 @@ import { inboxClient } from "@/lib/api/inbox";
 import { editingBlockedReason, useWorkspaceState } from "@/lib/workspace-state";
 import { followingFill, useTicket, useTicketChanged } from "./open-ticket";
 
+type ChangeFailure = { following: boolean; failure: FailureDescription };
+
 /** Keep the Follow read, pending write and error alive even while its menu is closed. */
 export function useFollow(
   reference: string | null,
@@ -26,11 +28,12 @@ export function useFollow(
     ReadonlySet<string>
   >(new Set());
   const [changeFailures, setChangeFailures] = useState<
-    Readonly<Record<string, FailureDescription>>
+    Readonly<Record<string, ChangeFailure>>
   >({});
   const pending = reference !== null && pendingReferences.has(reference);
-  const changeError =
+  const failedChange =
     reference === null ? null : (changeFailures[reference] ?? null);
+  const changeError = failedChange?.failure ?? null;
   const error = changeError ?? read.failure;
   function setPending(target: string, on: boolean) {
     setPendingReferences((current) => {
@@ -40,10 +43,7 @@ export function useFollow(
       return next;
     });
   }
-  function setChangeFailure(
-    target: string,
-    failure: FailureDescription | null,
-  ) {
+  function setChangeFailure(target: string, failure: ChangeFailure | null) {
     setChangeFailures((current) => {
       const others = Object.entries(current).filter(([key]) => key !== target);
       return Object.fromEntries(
@@ -51,21 +51,20 @@ export function useFollow(
       );
     });
   }
-  async function toggle() {
+  async function setFollowing(next: boolean) {
     const target = reference;
     if (!target || pending || blocked) return;
-    const next = !following;
     setPending(target, true);
     try {
       await inboxClient.setFollowing(target, next);
     } catch (reason) {
-      setChangeFailure(
-        target,
-        describeFailure(
+      setChangeFailure(target, {
+        following: next,
+        failure: describeFailure(
           reason,
-          following ? `unfollow ${target}` : `follow ${target}`,
+          next ? `follow ${target}` : `unfollow ${target}`,
         ),
-      );
+      });
       setPending(target, false);
       return;
     }
@@ -79,7 +78,8 @@ export function useFollow(
   // A failed read offers a read again; a failed change offers sending it again.
   // Both settle when that action does, so the status line stays busy until
   // then.
-  const retry = (): Promise<void> => (changeError ? toggle() : read.retry());
+  const retry = () =>
+    failedChange ? setFollowing(failedChange.following) : read.retry();
   // A line is about the Ticket it was shown for: once the header moves on it
   // goes (below), and a Retry that still reaches here does nothing.
   const retryFromLine = useEffectEvent((target: string) =>
@@ -96,7 +96,7 @@ export function useFollow(
   return {
     following,
     blocked: blocked || pending,
-    toggle,
+    toggle: () => setFollowing(!following),
     error,
     changeError,
     retry,
