@@ -17,7 +17,7 @@ use ticketd_core::{
     ChatInteractionState, ChatMessage, ChatMessageNote, ChatMessageNoteKind, ChatObservation,
     ChatOwner, ChatRole, ChatSessionOrigin, ChatSubAgent, ChatSubAgentState, ChatSubAgentStopper,
     ChatSubmissionIntent, ChatToolState, ChatTurnOrigin, ChatTurnReceipt, ChatTurnStarter,
-    ChatTurnState, Error, Workspace,
+    ChatTurnState, Error, FailureKind, Workspace,
 };
 use tokio::sync::{mpsc, oneshot};
 use tokio::task::JoinHandle;
@@ -752,7 +752,14 @@ impl Supervisor {
     // ponytail: SQLite runs on the supervisor task; move to spawn_blocking if a slow
     // disk shows up as stalled Chats.
     fn core<T>(&self, call: impl FnOnce(&mut Workspace) -> Result<T, Error>) -> Result<T, Error> {
-        let mut workspace = (self.open_workspace)()?;
+        let mut workspace = (self.open_workspace)().or_else(|error| {
+            if error.kind() != FailureKind::WorkspaceLocked {
+                return Err(error);
+            }
+            // Retry opening once, before the caller can write anything.
+            std::thread::sleep(Duration::from_millis(25));
+            (self.open_workspace)()
+        })?;
         call(&mut workspace)
     }
 
@@ -767,6 +774,13 @@ impl Supervisor {
         if let Err(error) = &result
             && !is_refusal(error)
         {
+            if self.storage_failed.is_none() {
+                tracing::error!(
+                    chat_id = %self.chat_id,
+                    error_kind = error.kind().code(),
+                    "chat storage failed"
+                );
+            }
             self.storage_failed = Some(error.to_string());
         }
         result

@@ -7,6 +7,7 @@
 //! delivered or completed one. Nothing here dispatches work.
 
 use std::collections::{HashMap, HashSet};
+use std::time::Duration;
 
 use rusqlite::{Connection, OptionalExtension, Row, params, types::Type};
 use serde::{Deserialize, Serialize, de::DeserializeOwned};
@@ -14,7 +15,7 @@ use serde_json::{Value, json};
 use sha2::{Digest, Sha256};
 use uuid::Uuid;
 
-use crate::{Error, Workspace};
+use crate::{Error, FailureKind, Workspace};
 
 pub(crate) mod attachments;
 pub use attachments::{ChatAttachment, ChatAttachmentContent};
@@ -2569,12 +2570,28 @@ impl Workspace {
         &mut self,
         write: impl FnOnce(&Connection) -> Result<T, Error>,
     ) -> Result<T, Error> {
-        let transaction = self
-            .connection
-            .transaction_with_behavior(rusqlite::TransactionBehavior::Immediate)?;
-        let result = write(&transaction)?;
-        transaction.commit()?;
-        Ok(result)
+        let mut retry_available = true;
+        loop {
+            match self
+                .connection
+                .transaction_with_behavior(rusqlite::TransactionBehavior::Immediate)
+            {
+                Ok(transaction) => {
+                    let result = write(&transaction)?;
+                    transaction.commit()?;
+                    return Ok(result);
+                }
+                Err(error) => {
+                    let error = Error::from(error);
+                    if !retry_available || error.kind() != FailureKind::WorkspaceLocked {
+                        return Err(error);
+                    }
+                    // A failed BEGIN did no work. Retry once before running the write.
+                    retry_available = false;
+                    std::thread::sleep(Duration::from_millis(25));
+                }
+            }
+        }
     }
 
     fn update_chat(
