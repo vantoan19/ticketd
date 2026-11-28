@@ -13,6 +13,11 @@ import { afterEach, beforeEach, expect, test, vi } from "vitest";
 import { StrictMode } from "react";
 import { loadPreferences, setPreference } from "@/lib/preferences";
 import { App } from "@/app/App";
+import { ChatClientContext } from "@/features/chats/client";
+import {
+  createHostChatClient,
+  tauriBridge,
+} from "@/features/chats/host-client";
 import { bridgeDefault } from "@/test/bridge-defaults";
 import type { Ticket } from "@/lib/api/client";
 
@@ -88,6 +93,19 @@ beforeEach(() => {
     const input = args as Record<string, never> | undefined;
     calls.push([command, input]);
     switch (command) {
+      case "chat_set_enabled":
+      case "chat_set_notify":
+        return null;
+      case "chat_overview":
+        return { needs_you: 0, unread: 0, app_icon: 0, working: 0 };
+      case "chat_harnesses":
+        return [
+          { id: "claude", name: "Claude", status: "ready", usable: true },
+        ];
+      case "chat_harness_options":
+        return { harness_id: "claude", models: [] };
+      case "chat_create":
+        return { chat_id: "chat-1" };
       case "list_plans":
         return plans;
       case "show_plan": {
@@ -263,6 +281,72 @@ test("an empty Plan offers Add tickets from Overview, Board and Flow", async () 
   await within(emptyOverview).findByText("0 of 1 done");
   expect(within(emptyOverview).queryByText(noTickets)).toBeNull();
 });
+
+test.each([
+  {
+    view: "Board",
+    spec: { id: "spec", heading: "Release specification", trashed: false },
+    prompt: "Break Release specification into tickets in the Plan Launch",
+  },
+  {
+    view: "Overview",
+    spec: null,
+    prompt: "Break the Plan Launch into tickets",
+  },
+])(
+  "$view starts an editable Plan draft and waits for Send",
+  async ({ view, spec, prompt }) => {
+    tickets = [];
+    if (spec) documents = [spec];
+    setPreference("chat", true);
+    setPreference("notifyChats", false);
+    const chat = createHostChatClient({
+      ...tauriBridge(),
+      listen: async () => () => {},
+      channel: () => undefined,
+    });
+    render(
+      <ChatClientContext value={chat}>
+        <App />
+      </ChatClientContext>,
+    );
+    fireEvent.click(await screen.findByRole("button", { name: "Launch" }));
+    if (view === "Board")
+      fireEvent.click(screen.getByRole("radio", { name: "Board" }));
+    fireEvent.click(
+      await screen.findByRole("button", { name: "Plan it with an agent" }),
+    );
+
+    const newChat = await screen.findByRole("region", { name: "New Chat" });
+    const draft = within(newChat).getByRole<HTMLTextAreaElement>("textbox", {
+      name: "Describe a task or ask a question",
+    });
+    expect(draft.value).toBe(prompt);
+    expect(calls.some(([command]) => command === "chat_create")).toBe(false);
+
+    const message = `${prompt}. Start with verification.`;
+    fireEvent.change(draft, { target: { value: message } });
+    expect(draft.value).toBe(message);
+    const send = within(newChat).getByRole<HTMLButtonElement>("button", {
+      name: /^Send/,
+    });
+    await waitFor(() => expect(send.disabled).toBe(false));
+    expect(calls.some(([command]) => command === "chat_create")).toBe(false);
+    fireEvent.click(send);
+
+    await waitFor(() =>
+      expect(calls).toContainEqual([
+        "chat_create",
+        {
+          input: expect.objectContaining({
+            message,
+            links: spec ? [{ kind: "document", id: "spec" }] : [],
+          }),
+        },
+      ]),
+    );
+  },
+);
 
 test("the header counts the Plan's tickets and its progress, and Remove from Plan offers Undo", async () => {
   tickets.push({

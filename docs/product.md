@@ -357,6 +357,12 @@ reviews that unblock the most work first, with longer waits breaking ties.
 The head links to the newest pull request attached as evidence to one of
 the Plan's tickets, when one exists.
 
+An active Plan without tickets shows how to start on Overview, Board, and
+Flow. Add tickets opens the existing ticket picker. With Chat enabled,
+Plan it with an agent opens New Chat with an editable draft that names the
+Plan and mentions its spec Document when available. The person sends the
+message when ready.
+
 An active Plan with tickets shows Ready to wrap up on the Overview when all
 tickets are closed or the only open tickets are waiting solely on tickets
 outside the Plan. Move opens the Plan picker for the remaining tickets.

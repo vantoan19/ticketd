@@ -30,9 +30,9 @@ export type ChatFeature = {
   revision: number;
   /** The last clicked Chat notification; `n` rises with each click. */
   openRequest: { request: OpenRequest; n: number } | null;
-  /** The last Chat asked for from a ticket; `n` rises with each request. */
+  /** The last Chat asked for from another view; `n` rises with each request. */
   chatRequest: { request: ChatRequest; n: number } | null;
-  /** Shows a Chat, or New Chat about a ticket, on the Chats screen. */
+  /** Shows a Chat or starts New Chat on the Chats screen. */
   requestChat: (request: ChatRequest) => void;
   replaceWorkspace?: () => void;
 };

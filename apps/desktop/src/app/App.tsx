@@ -280,7 +280,7 @@ function AppContent() {
     setSeenChatOpen(chat.openRequest.n);
     setViewState("chats");
   }
-  // A Chat asked for from a ticket shows the Chats screen; it opens the Chat itself.
+  // A Chat requested from another view brings the person to the Chats screen.
   const [seenChatRequest, setSeenChatRequest] = useState(0);
   if (chat.chatRequest && chat.chatRequest.n !== seenChatRequest) {
     setSeenChatRequest(chat.chatRequest.n);
