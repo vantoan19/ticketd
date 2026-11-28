@@ -44,13 +44,10 @@ fn migrates_the_predecessor_and_keeps_publication_and_recovery_evidence() {
     drop(old);
 
     let workspace = Workspace::open(&path).unwrap();
-    let connection = workspace.source_connection("github").unwrap();
-    assert_eq!(connection.id, "github");
-    assert_eq!(connection.account, "first-account");
-    assert_eq!(connection.saved_at, "2026-01-01T00:00:00Z");
+    assert!(workspace.saved_sources().unwrap().is_empty());
     assert_eq!(
-        connection.config["repositories"],
-        serde_json::json!(["work/fixtures"])
+        workspace.github_repositories().unwrap()[0].rule.repository,
+        "github.com/work/fixtures"
     );
     let ticket = workspace.show_ticket("T-QZ1").unwrap();
     let source = ticket.source.unwrap();
@@ -98,23 +95,30 @@ fn assert_portable_boundary(path: &Path, folder: &Path) {
     let backup = folder.join("portable.sqlite3");
     // An opaque reference from an OS user vault. No real keychain item is needed
     // to prove the portable boundaries and same-device restore behavior.
-    Connection::open(path)
-        .unwrap()
-        .execute(
-            "INSERT INTO source_secret_references (connection_id, field, reference) VALUES ('github', 'test_credential', ?1)",
-            [CREDENTIAL_REF],
-        )
+    let mut workspace = Workspace::open(path).unwrap();
+    let mut engine = Engine::new();
+    engine
+        .register(Box::new(fake_source::FakeSource::default()))
         .unwrap();
-    const RETRY_AFTER: &str = "2099-01-01T00:00:00.000Z";
-    Connection::open(path)
+    let settings =
+        serde_json::from_value(serde_json::json!({"repositories": ["work/fixture"]})).unwrap();
+    let source = workspace
+        .add_source_connection(&engine, "fake", None, Some(LOCAL_NAME), &settings)
         .unwrap()
+        .source;
+    let connection = Connection::open(path).unwrap();
+    connection.execute(
+        "INSERT INTO source_secret_references (connection_id, field, reference) VALUES (?1, 'test_credential', ?2)",
+        rusqlite::params![source.id, CREDENTIAL_REF],
+    ).unwrap();
+    const RETRY_AFTER: &str = "2099-01-01T00:00:00.000Z";
+    connection
         .execute(
-            "UPDATE source_connection_status SET retry_after = ?1",
+            "UPDATE github_repository_status SET retry_after = ?1",
             [RETRY_AFTER],
         )
         .unwrap();
-    let mut workspace = Workspace::open(path).unwrap();
-    workspace.rename_source("github", LOCAL_NAME).unwrap();
+    drop(connection);
     let export = workspace.export().unwrap().to_string();
     assert!(!export.contains(LOCAL_NAME));
     assert!(!export.contains(CREDENTIAL_REF));
@@ -152,7 +156,12 @@ fn assert_portable_boundary(path: &Path, folder: &Path) {
     assert_eq!(legacy_statuses, 0);
     drop(raw);
     assert_eq!(
-        workspace.source_statuses().unwrap()[0]
+        workspace
+            .source_statuses()
+            .unwrap()
+            .into_iter()
+            .find(|status| status.provider == "github")
+            .unwrap()
             .error
             .as_ref()
             .unwrap()
@@ -160,7 +169,7 @@ fn assert_portable_boundary(path: &Path, folder: &Path) {
         "unauthenticated"
     );
     assert_eq!(
-        workspace.source_connection("github").unwrap().name,
+        workspace.source_connection("fake").unwrap().name,
         LOCAL_NAME
     );
     drop(workspace);
@@ -177,7 +186,7 @@ fn assert_portable_boundary(path: &Path, folder: &Path) {
         "not_configured"
     );
     let review = restored
-        .review_publication(&Engine::builtin(), "T-QZ2", true)
+        .review_publication(&Engine::new(), "T-QZ2", false)
         .unwrap();
     assert_eq!(review.attempt.id, "pending-attempt");
     assert!(review.connection_id.is_none());
@@ -202,13 +211,19 @@ fn assert_portable_boundary(path: &Path, folder: &Path) {
 
     Workspace::restore(path, &backup).unwrap();
     let same = Workspace::open(path).unwrap();
-    assert_eq!(same.source_connection("github").unwrap().name, LOCAL_NAME);
+    assert_eq!(same.source_connection("fake").unwrap().name, LOCAL_NAME);
     assert_eq!(
-        same.source_statuses().unwrap()[0].retry_after.as_deref(),
+        same.source_statuses()
+            .unwrap()
+            .into_iter()
+            .find(|status| status.provider == "github")
+            .unwrap()
+            .retry_after
+            .as_deref(),
         Some(RETRY_AFTER)
     );
     assert_eq!(
-        same.source_connection("github").unwrap().secret_fields,
+        same.source_connection("fake").unwrap().secret_fields,
         ["test_credential"]
     );
     assert_eq!(
@@ -1091,6 +1106,45 @@ fn values(account: &str, repository: &str) -> ticketd_core::source::ConfigValues
 }
 
 #[test]
+fn project_can_set_up_a_compatible_extension_alongside_github() {
+    let mut engine = Engine::builtin();
+    engine
+        .register(Box::new(fake_source::FakeSource::default()))
+        .unwrap();
+    let folder = tempfile::tempdir().unwrap();
+    let mut workspace = Workspace::open(folder.path().join("workspace.sqlite3")).unwrap();
+    let project = workspace
+        .create_project_with_remote(
+            "Project",
+            folder.path().to_str().unwrap(),
+            Some("example.test/a/project"),
+        )
+        .unwrap();
+    let candidates = workspace
+        .project_source_candidates(&engine, &project.id)
+        .unwrap();
+    assert_eq!(candidates.len(), 2);
+    assert!(
+        candidates
+            .iter()
+            .any(|candidate| candidate.source == "github")
+    );
+    let extension = candidates
+        .iter()
+        .find(|candidate| candidate.provider == "fake")
+        .unwrap();
+    assert_eq!(extension.connection_id, None);
+    let preview = workspace
+        .preview_connect_source(&engine, &extension.source, &project.id)
+        .unwrap();
+    assert_eq!(
+        preview.source,
+        ticketd_core::source::ConnectSourceAction::NotConnected
+    );
+    assert_eq!(preview.repository, "a/project");
+}
+
+#[test]
 fn project_source_review_binds_to_the_selected_connection() {
     let fake = fake_source::FakeSource::default();
     fake.0.lock().unwrap().account_from_assignee = true;
@@ -1179,10 +1233,12 @@ fn restoring_a_legacy_backup_preserves_the_devices_own_settings() {
     );
 
     let safety = Workspace::restore(&current, &backup).unwrap();
-    let restored = Workspace::open(&current).unwrap();
+    let mut restored = Workspace::open(&current).unwrap();
+    let notices = restored.reconcile_github_migration(|_, _| None).unwrap();
+    assert!(notices[0].message.contains("device-account"));
     assert_eq!(
-        restored.source_connection("github").unwrap().account,
-        "device-account"
+        restored.github_repositories().unwrap()[0].rule.repository,
+        "github.com/owner/repo"
     );
     let recovery = Connection::open(safety).unwrap();
     let account: String = recovery

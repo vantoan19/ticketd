@@ -33,15 +33,18 @@ write, so the publication workflow keeps its uncertain-result recovery rules.
 
 ## Integration
 
-The target is one built-in GitHub integration per device. It holds the issue
-import repository list, with optional filters per repository. Routing uses the
+One built-in GitHub integration per device holds the issue import repository
+list, with optional filters per repository. Routing uses the
 [Project remote](0021-route-external-tickets-to-projects-by-project-remote.md).
-Source extensions keep their connections. A separate Workspace migration will
-consolidate the saved GitHub connections while preserving external identities,
-repository rules and publication records.
+Source extensions keep their connections.
 
-The first transport change moves the repository picker through `gh` for the
-active github.com login. Existing named accounts, token overrides and custom
-API endpoints keep their established behavior during the transition. Account
-checks and the requests they authorize must migrate together so the same
-verified login is used for an entire workflow.
+Workspace format 106 consolidates GitHub connections without changing ticket
+identity or authority. Discovery filters and refresh coverage stay specific to
+each repository. Publication recovery retains the original site, account
+identity, and tracker clock. The format step saves legacy account and rule
+candidates without invoking the GitHub CLI. A later account check reconciles
+them with the verified active login and reports cases that require review.
+
+The repository picker, issue import, refresh, publication and recovery use the
+GitHub CLI. Each workflow uses the same credential for its account check and
+subsequent requests.

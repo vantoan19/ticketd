@@ -43,3 +43,23 @@ pub fn add_ticket(path: &Path, id: &str, title: &str) {
         )
         .unwrap();
 }
+
+/// Removes the format-106 tables when a test needs to reconstruct an older
+/// fixture from live-generated Chat or sync state.
+#[allow(clippy::unwrap_used)]
+pub fn remove_github_integration(connection: &Connection) {
+    connection
+        .execute_batch(
+            "DROP TABLE github_ticket_bindings;
+         DROP TABLE github_tracked_status;
+         DROP TABLE github_publication_context;
+         DROP TABLE github_legacy_ticket_bindings;
+         DROP TABLE github_legacy_status;
+         DROP TABLE github_legacy_repository_rules;
+         DROP TABLE github_legacy_accounts;
+         DROP TABLE github_project_logins;
+         DROP TABLE github_repository_status;
+         DROP TABLE github_repository_rules;",
+        )
+        .unwrap();
+}

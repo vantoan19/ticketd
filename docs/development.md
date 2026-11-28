@@ -24,6 +24,9 @@ Desktop builds need [Tauri's platform prerequisites](https://v2.tauri.app/start/
 WSL interoperability is not validated. Do not mix a Windows checkout's build
 dependencies with a WSL installation and assume they share paths or credentials.
 
+The source CLI integration tests run GitHub CLI 2.40 or later against a
+loopback GitHub API fixture. The tests supply their own credentials.
+
 ## First checkout
 
 Clone your fork, enter the checkout, then run:

@@ -453,8 +453,19 @@ system's secure store.
 
 ### Ticket sources
 
-GitHub Issues is built in. Linear ships with the desktop app as a ticket
-source extension. Extensions use the same ticket authority and refresh
+GitHub Issues is built in as one integration per device. It uses the GitHub
+CLI login for each repository host. Settings › Ticket sources shows one GitHub
+row, the sign-in state for its hosts and the repository list. Each repository
+has its own assignee and label filters. To use an Enterprise host for the first
+repository, choose **Add a repository**, enter its host and any nondefault
+port, then choose **Check sign-in**. Sign in opens the browser and shows the
+one-time code. Open a repository to choose a different login already signed
+into the GitHub CLI for its Project, or choose **Use active login** to clear
+that choice. Projects without an import rule appear under **Project logins**.
+Removing a repository stops
+import and refresh for its tickets, which keep their last synced content and
+local work. Adding it again resumes refresh of the existing tickets.
+Linear ships with the desktop app as a ticket source extension. Extensions use the same ticket authority and refresh
 workflows as GitHub. [External ticket authority](adr/0006-external-ticket-authority.md)
 
 Install another extension from a local folder with `ticketd source extension add PATH`,
@@ -472,9 +483,9 @@ the TypeScript example and conformance. [Write a ticket source extension](ticket
   project. ticketd syncs the issue's current state and its comments and
   timeline.
 - Settings › Ticket sources is one table of every source with its status, what it
-  signs in with and what it brings in; selecting a row opens that source's page, where
-  you connect it, rename it or remove it. Several accounts can connect to the same
-  provider. Connections stay on this device and are excluded
+  signs in with and what it brings in. An extension's page lets you add,
+  rename or remove its account connections. Several accounts can connect to the
+  same extension. Connections stay on this device and are excluded
   from Workspace sync, portable backups, and JSON exports.
 - Extension credentials go in the system keychain. When a tracker rejects
   authentication, **Needs sign-in** opens the credential fields for that
@@ -485,7 +496,8 @@ the TypeScript example and conformance. [Write a ticket source extension](ticket
 - Preview discovery rules before saving. The available rules depend on the provider.
   Matching issues are imported on refresh, which runs at desktop startup,
   periodically while the desktop is open, and on demand
-  (`ticketd source CONNECTION refresh`). When connections overlap, one ticket is
+  (`ticketd source github refresh` or `ticketd source CONNECTION refresh`).
+  When extension connections overlap, one ticket is
   imported and refreshed through one connection. When no local connection covers
   a ticket, it shows its last synced content and says the provider isn’t connected
   on this desktop. The ticket carries the provider’s display name and icon.
@@ -501,22 +513,26 @@ the TypeScript example and conformance. [Write a ticket source extension](ticket
   issue returns to Todo. The detail shows the tracker's state name alongside
   ticketd's status, for example “GitHub: Closed (not planned)”.
 - A **locally owned** ticket in Todo, In progress, or In review can be published once
-  through a connection that supports publication. The preview shows exactly what
-  would be sent. When the selected connection lists the ticket's Project remote
-  on the matching host, the preview selects that repository. You can choose
+  through GitHub or a connection that supports publication. The preview shows
+  exactly what would be sent. GitHub selects the ticket's Project remote or uses
+  the saved repositories as choices. An extension selects the Project remote
+  when its connection lists that repository on the matching host. You can choose
   another allowed destination. Using the Project remote as the default requires
   the preview's fingerprint. Ownership transfers after ticketd confirms that the
   issue exists. Resolve an uncertain result before retrying to avoid creating a
   second issue. Local Activities, Plan membership,
   dependencies, and subtickets are not published, and workspace-only attachment
-  links block publication until removed. Ongoing synchronization is inbound only.
+  links block publication until removed. GitHub refresh keeps the published
+  ticket up to date even without an import rule for its repository. Only an
+  import rule brings in additional issues. Ongoing synchronization is inbound only.
   Linear publishes to one of the connection’s selected teams. Desktop shows the
   team name and key. On the CLI, pass the team UUID from `--preview` as
   `--destination` when more than one team is configured. The Linear key must
   allow issue creation.
-- Recovery of an unresolved GitHub publication uses the original host. If the
-  original connection is unavailable, the CLI can attach a verified issue
-  through an explicitly selected connection on that host.
+- Recovery of an unresolved GitHub publication uses the original host and
+  verified login. A legacy attempt with an unknown login can attach a verified
+  issue on the confirmed original host. Ruling out creation requires the
+  original login.
   [Recover an unresolved publication](cli.md#recover-an-unresolved-publication)
 - If an issue disappears or becomes unavailable, ticketd keeps its status, content,
   and local work and shows a warning. **Take ownership** makes it local and stops
@@ -555,8 +571,8 @@ its own Project remotes alongside checkout and source settings. Workspace export
 and backups include them.
 [ADR 0021](adr/0021-route-external-tickets-to-projects-by-project-remote.md)
 
-After setting a Project remote, you can pick a matching connection, review its
-effect, and confirm. This adds the repository to discovery when needed and links the existing non-trashed,
+After setting a Project remote, review the GitHub backfill or select a matching
+extension connection and review its effect, then confirm. This adds the repository to discovery when needed and links the existing non-trashed,
 unlinked tickets whose source still owns them and reports the same repository.
 Backfill includes tickets outside the current discovery filters and records an
 ordinary project membership change for each ticket. If the repository is already

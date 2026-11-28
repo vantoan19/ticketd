@@ -25,6 +25,7 @@ import { WorkspaceSyncPage } from "@/features/settings/pages/WorkspaceSyncPage";
 import { KeyboardShortcutsPage } from "@/features/settings/pages/KeyboardShortcutsPage";
 import { SearchPage } from "@/features/settings/pages/SearchPage";
 import { SetupPage } from "@/features/settings/pages/SetupPage";
+import { GithubPage } from "@/features/settings/pages/GithubPage";
 import { SourcePage } from "@/features/settings/pages/SourcePage";
 import { SourcesPage } from "@/features/settings/pages/SourcesPage";
 import { useFadeThrough } from "@/features/settings/fade-through";
@@ -87,7 +88,7 @@ export function SettingsView({
     setRestores((count) => count + 1);
     await onRestore();
   };
-  const { entries: sources } = useSources();
+  const { entries: sources, github, githubFailure, readCatalog } = useSources();
   const chosen = resolveSettingsPage(chosenName);
   // Choosing another page fades the open one out, then the next arrives.
   const { shown: selected, leaving } = useFadeThrough(chosen);
@@ -147,6 +148,7 @@ export function SettingsView({
       ref={scroller}
       className="settings-page"
       data-own-entrance=""
+      data-github={selected === "source-github" || undefined}
       data-leaving={leaving || undefined}
       // Fading out, the page is out of reach: nothing in it takes focus or a click.
       inert={leaving || undefined}
@@ -193,6 +195,7 @@ export function SettingsView({
           onOpen={(id) => onSelect?.(`source-${id}`)}
           onChanged={onSourcesChanged}
           {...(projectSourceSetup &&
+            projectSourceSetup.provider !== "github" &&
             onProjectSourceSaved &&
             onProjectSourceCancel && {
               projectSetup: {
@@ -203,21 +206,46 @@ export function SettingsView({
             })}
         />
       )}
-      {sources.map((entry) => (
-        <SourcePage
-          key={`${restores}:${entry.saved?.id ?? entry.connector.provider}`}
-          entry={entry}
-          active={
-            selected === `source-${entry.saved?.id ?? entry.connector.provider}`
-          }
+      {selected === "source-github" && (
+        <GithubPage
+          key={restores}
+          integration={github}
+          failure={githubFailure}
+          onCheck={() => readCatalog?.()}
           onBack={() => onSelect?.("ticket-sources")}
-          {...(onSourcesChanged && {
-            onChanged: (added?: SourceEntry) => onSourcesChanged(added),
-          })}
-          onOpen={(id) => onSelect?.(`source-${id}`)}
-          {...(onProjectLinked && { onProjectLinked })}
+          {...(projectSourceSetup?.provider === "github" &&
+            onProjectSourceSaved &&
+            onProjectSourceCancel && {
+              projectSetup: {
+                repository: projectSourceSetup.repository,
+                onSaved: () => onProjectSourceSaved("github"),
+                onCancel: onProjectSourceCancel,
+              },
+            })}
+          onChanged={() => {
+            if (onSourcesChanged) void onSourcesChanged();
+            else readCatalog?.();
+          }}
         />
-      ))}
+      )}
+      {sources
+        .filter(({ connector }) => connector.provider !== "github")
+        .map((entry) => (
+          <SourcePage
+            key={`${restores}:${entry.saved?.id ?? entry.connector.provider}`}
+            entry={entry}
+            active={
+              selected ===
+              `source-${entry.saved?.id ?? entry.connector.provider}`
+            }
+            onBack={() => onSelect?.("ticket-sources")}
+            {...(onSourcesChanged && {
+              onChanged: (added?: SourceEntry) => onSourcesChanged(added),
+            })}
+            onOpen={(id) => onSelect?.(`source-${id}`)}
+            {...(onProjectLinked && { onProjectLinked })}
+          />
+        ))}
     </div>
   );
 }

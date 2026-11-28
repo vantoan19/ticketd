@@ -1,4 +1,5 @@
 import { expect, test, vi } from "vitest";
+import { githubIntegration } from "@/test/source-fixtures";
 import type { AgentSkill } from "@/lib/api/agent-skills";
 import type { CliStatus } from "@/lib/api/cli";
 import type { SourceEntry } from "@/lib/api/sources";
@@ -240,32 +241,25 @@ test("step 2 names the day in the app's own date format, not a fixed locale", ()
   dates.mockRestore();
 });
 
-test("step 3 says gh only for a GitHub connection that signs in with gh", () => {
-  const withKey = {
-    connector: {
-      provider: "github",
-      name: "GitHub",
-      schema: {
-        fields: [{ key: "token", label: "Access token", type: "secret" }],
-      },
-    },
-    saved: { provider: "github", config: {}, account: "a", saved_at: "x" },
-  } as unknown as SourceEntry;
+test("step 3 names an extension connection even when gh is signed in without import rules", () => {
+  const github = { ...githubIntegration(), repositories: [] };
   expect(
-    setupStep(deriveSetup({ ...fresh, sources: [withKey] }), "sources")
-      .description,
-  ).toBe("GitHub.");
+    setupStep(
+      deriveSetup({ ...fresh, github, sources: [source("linear", "Linear")] }),
+      "sources",
+    ).description,
+  ).toBe("Linear.");
 });
 
-test("steps 3 to 5 tick from a connected source, sync and the system's permission", () => {
+test("steps 3 to 5 tick from GitHub issue import, sync and the system's permission", () => {
   const state = deriveSetup({
     ...fresh,
-    sources: [source("github", "GitHub"), source("github", "GitHub")],
+    github: githubIntegration(),
     sync: synced("s3"),
     notifications: { state: "allowed", reported: true, settings: true },
   });
   expect(setupStep(state, "sources").description).toBe(
-    "GitHub, 2 connections, through your gh login.",
+    "GitHub, through your gh login.",
   );
   expect(setupStep(state, "sync").description).toBe("Synced through S3.");
   expect(setupStep(state, "notifications").done).toBe(true);

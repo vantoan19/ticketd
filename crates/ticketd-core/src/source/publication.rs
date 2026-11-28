@@ -699,10 +699,11 @@ pub(crate) fn awaited_by_open_attempt(
             })
     };
     let mut statement = connection.prepare(
-        "SELECT a.title, a.body, COALESCE(c.tracker_started_at, a.started_at),
+        "SELECT a.title, a.body, COALESCE(g.tracker_started_at, c.tracker_started_at, a.started_at),
                 a.destination, s.derived_configuration, a.destination_host, a.destination_site_unconfirmed
          FROM publication_attempts a LEFT JOIN publication_connections c ON c.attempt_id = a.id
          LEFT JOIN source_connections s ON s.id = c.connection_id
+         LEFT JOIN github_publication_context g ON g.attempt_id = a.id
          WHERE a.provider = ?1 AND a.status IN ('in_flight', 'unresolved')",
     )?;
     let attempts = statement
@@ -1101,12 +1102,13 @@ struct Subject {
     status: Status,
     trashed: bool,
     project_remote: Option<String>,
+    project_id: Option<String>,
 }
 
 fn subject(connection: &Connection, reference: &str) -> Result<Subject, Error> {
     connection
         .query_row(
-            "SELECT t.id, t.reference, t.title, t.body, t.status, t.trashed, p.remote \
+            "SELECT t.id, t.reference, t.title, t.body, t.status, t.trashed, p.remote, t.project_id \
              FROM tickets t LEFT JOIN projects p ON p.id = t.project_id WHERE t.reference = ?1",
             [reference],
             |row| {
@@ -1125,6 +1127,7 @@ fn subject(connection: &Connection, reference: &str) -> Result<Subject, Error> {
                     })?,
                     trashed: row.get(5)?,
                     project_remote: row.get(6)?,
+                    project_id: row.get(7)?,
                 })
             },
         )
@@ -1296,15 +1299,122 @@ fn require_target<'a>(
     })
 }
 
+fn publication_target(
+    connection: &Connection,
+    selected: &str,
+    ticket: &Subject,
+    destination: Option<&str>,
+) -> Result<Option<ConfiguredSource>, Error> {
+    let saved = configured_source(connection, selected)?;
+    if saved.is_some() || selected != super::GITHUB_INTEGRATION {
+        return Ok(saved);
+    }
+    let requested = destination
+        .map(str::trim)
+        .filter(|value| value.split('/').count() == 3)
+        .map(|value| {
+            super::github_integration::normalize_repository(value)
+                .ok_or(Error::InvalidProjectRemote)
+        })
+        .transpose()?;
+    let saved = github_publication_repositories(connection, ticket)?;
+    let default = ticket.project_remote.as_deref().or(match saved.as_slice() {
+        [only] => Some(only.as_str()),
+        _ => None,
+    });
+    let host = requested
+        .as_deref()
+        .or(default)
+        .and_then(|value| value.split_once('/'))
+        .map_or("github.com", |(host, _)| host);
+    let repositories: Vec<String> = saved
+        .iter()
+        .filter_map(|value| value.split_once('/'))
+        .filter(|(site, _)| site == &host)
+        .map(|(_, name)| name.to_owned())
+        .collect();
+    let project = if ticket.project_id.is_none() {
+        let full = requested.clone().or_else(|| {
+            let bare = destination.map(str::trim).filter(|value| !value.is_empty());
+            bare.map(|bare| format!("{host}/{bare}"))
+                .or_else(|| default.map(str::to_owned))
+        });
+        if let Some(full) = full {
+            super::github_integration::project_route(connection, &full)?.map(|project| project.id)
+        } else {
+            None
+        }
+    } else {
+        ticket.project_id.clone()
+    };
+    Ok(Some(super::github_integration::workflow_target(
+        connection,
+        host,
+        project.as_deref(),
+        &repositories,
+    )?))
+}
+
+fn github_publication_repositories(
+    connection: &Connection,
+    ticket: &Subject,
+) -> Result<Vec<String>, Error> {
+    let mut statement =
+        connection.prepare("SELECT repository FROM github_repository_rules ORDER BY repository")?;
+    let mut repositories = statement
+        .query_map([], |row| row.get::<_, String>(0))?
+        .collect::<Result<Vec<_>, _>>()?;
+    if let Some(remote) = &ticket.project_remote
+        && !repositories
+            .iter()
+            .any(|name| name.eq_ignore_ascii_case(remote))
+    {
+        repositories.push(remote.to_owned());
+    }
+    Ok(repositories)
+}
+
+fn publication_basis<'a>(source: Option<&'a ConfiguredSource>, selected: &'a str) -> &'a str {
+    source
+        .filter(|source| super::github_integration::is_integration_target(source))
+        .map_or(selected, |source| source.revision.as_str())
+}
+
+fn github_destination<'a>(
+    source: Option<&ConfiguredSource>,
+    destination: Option<&'a str>,
+) -> Option<&'a str> {
+    destination.map(str::trim).map(|value| {
+        if source.is_some_and(super::github_integration::is_integration_target)
+            && value.split('/').count() == 3
+        {
+            value.split_once('/').map_or(value, |(_, name)| name)
+        } else {
+            value
+        }
+    })
+}
+
 fn default_publication_connection(
     connection: &Connection,
     engine: &Engine,
 ) -> Result<String, Error> {
-    let connected: Vec<_> = super::configured_sources(connection)?
+    let mut connected: Vec<_> = super::configured_sources(connection)?
         .into_iter()
         .filter(|source| engine.can_publish(&source.saved.provider))
         .map(|source| source.saved.id)
         .collect();
+    if engine.can_publish(super::GITHUB_INTEGRATION)
+        && !connected.iter().any(|id| id == super::GITHUB_INTEGRATION)
+        && (connected.is_empty()
+            || connection.query_row(
+                "SELECT EXISTS(SELECT 1 FROM github_repository_rules)",
+                [],
+                |row| row.get::<_, bool>(0),
+            )?)
+    {
+        connected.push(super::GITHUB_INTEGRATION.into());
+    }
     match connected.as_slice() {
         [id] => Ok(id.clone()),
         _ => Err(
@@ -1313,7 +1423,19 @@ fn default_publication_connection(
                 if connected.is_empty() {
                     "add a source connection that can publish first".to_owned()
                 } else {
-                    format!("select --connection from: {}", connected.join(", "))
+                    if connected.iter().any(|id| id == super::GITHUB_INTEGRATION) {
+                        let extension_ids: Vec<_> = connected
+                            .iter()
+                            .filter(|id| id.as_str() != super::GITHUB_INTEGRATION)
+                            .cloned()
+                            .collect();
+                        format!(
+                            "choose --provider github or select --connection from: {}",
+                            extension_ids.join(", ")
+                        )
+                    } else {
+                        format!("select --connection from: {}", connected.join(", "))
+                    }
                 },
             )])
             .into(),
@@ -1337,12 +1459,13 @@ impl Workspace {
         destination: Option<&str>,
     ) -> Result<PublicationPreview, Error> {
         let connection_id = provider;
-        let target = configured_source(&self.connection, connection_id)?;
+        let ticket = subject(&self.connection, reference)?;
+        let target = publication_target(&self.connection, connection_id, &ticket, destination)?;
+        let destination = github_destination(target.as_ref(), destination);
         let provider = target
             .as_ref()
             .map_or(connection_id, |source| source.saved.provider.as_str());
         let descriptor = engine.descriptor(provider)?;
-        let ticket = subject(&self.connection, reference)?;
         let scoped = target.as_ref().map(|source| source.bind(engine));
         let scoped = scoped.as_ref().unwrap_or(engine);
         if let Some(source) = &target {
@@ -1382,10 +1505,33 @@ impl Workspace {
         let fingerprint = fingerprint(
             scoped,
             provider,
-            connection_id,
+            publication_basis(target.as_ref(), connection_id),
             &ticket,
             destination.as_deref(),
         )?;
+        let (destination, destinations) = if target
+            .as_ref()
+            .is_some_and(super::github_integration::is_integration_target)
+        {
+            let destinations = github_publication_repositories(&self.connection, &ticket)?;
+            if destinations.is_empty()
+                && destination.is_none()
+                && matches!(eligibility, Eligibility::Eligible)
+            {
+                eligibility = ineligible(
+                    IneligibleReason::SourceNotConnected,
+                    "Set a Project remote or add a GitHub repository in Settings › Ticket sources."
+                        .into(),
+                );
+            }
+            let site = scoped.issue_site(provider)?.unwrap_or("github.com");
+            (
+                destination.map(|name| format!("{site}/{name}")),
+                destinations,
+            )
+        } else {
+            (destination, destinations)
+        };
         Ok(PublicationPreview {
             reference: ticket.reference,
             provider: provider.to_owned(),
@@ -1464,7 +1610,14 @@ impl Workspace {
                         default.as_str()
                     }
                 };
-                let configured = configured_source(transaction, connection_id)?;
+                let configured = publication_target(
+                    transaction,
+                    connection_id,
+                    &ticket,
+                    options.destination.as_deref(),
+                )?;
+                let requested =
+                    github_destination(configured.as_ref(), options.destination.as_deref());
                 let provider = configured
                     .as_ref()
                     .map_or(connection_id, |source| source.saved.provider.as_str());
@@ -1494,7 +1647,7 @@ impl Workspace {
                 let choice = chosen_destination(
                     &scoped,
                     provider,
-                    options.destination.as_deref(),
+                    requested,
                     ticket.project_remote.as_deref(),
                     &rules.destinations,
                 )?;
@@ -1511,7 +1664,13 @@ impl Workspace {
                 // A cleared Project remote can also invalidate the preview by leaving no choice.
                 if let Some(expected) = &options.expected_fingerprint
                     && *expected
-                        != fingerprint(&scoped, provider, connection_id, &ticket, destination)?
+                        != fingerprint(
+                            &scoped,
+                            provider,
+                            publication_basis(Some(target), connection_id),
+                            &ticket,
+                            destination,
+                        )?
                 {
                     return Err(PublicationError::ChangedSincePreview {
                         reference: ticket.reference,
@@ -1564,10 +1723,17 @@ impl Workspace {
                     destination_host,
                 ],
             )?;
-                transaction.execute(
-                "INSERT INTO publication_connections (attempt_id, connection_id) VALUES (?1, ?2)",
-                params![attempt_id, connection_id],
-            )?;
+                if super::github_integration::is_integration_target(target) {
+                    transaction.execute(
+                        "INSERT INTO github_publication_context (attempt_id, host) VALUES (?1, ?2)",
+                        params![attempt_id, destination_host],
+                    )?;
+                } else {
+                    transaction.execute(
+                        "INSERT INTO publication_connections (attempt_id, connection_id) VALUES (?1, ?2)",
+                        params![attempt_id, connection_id],
+                    )?;
+                }
                 let started = Started {
                     attempt_id,
                     reference: ticket.reference,
@@ -1864,6 +2030,29 @@ impl Workspace {
             let attempt = &started.attempt_id;
             // Recovery compares the observed lease. A successful dispatch must
             // change it even if the wall clock moved backward during preflight.
+            let integrated = super::github_integration::is_integration_target(&started.source);
+            if integrated {
+                let ticket = subject(transaction, &started.reference)?;
+                let host = started.source.github_site();
+                let destination = format!("{host}/{}", started.request.destination);
+                let current = publication_target(
+                    transaction,
+                    super::GITHUB_INTEGRATION,
+                    &ticket,
+                    Some(&destination),
+                )?
+                .ok_or(Error::InvalidProjectRemote)?;
+                if current.revision != started.source.revision
+                    || !current
+                        .derived
+                        .publication
+                        .destinations
+                        .iter()
+                        .any(|allowed| allowed.eq_ignore_ascii_case(&started.request.destination))
+                {
+                    return Ok(false);
+                }
+            }
             let changed = transaction.execute(
                 "UPDATE publication_attempts AS a
                  SET lease_expires_at = MAX(
@@ -1872,26 +2061,34 @@ impl Workspace {
                  )
                  WHERE a.id = ?1 AND a.status = 'in_flight'
                    AND julianday(a.lease_expires_at) > julianday(?2)
-                   AND EXISTS (
+                   AND (?5 OR EXISTS (
                        SELECT 1 FROM publication_connections p
                        JOIN source_connections c ON c.id = p.connection_id
                        WHERE p.attempt_id = a.id AND c.revision = ?4
-                   )",
+                   ))",
                 params![
                     attempt,
                     now,
                     format!("+{DISPATCH_LEASE_SECONDS} seconds"),
-                    started.source.revision
+                    started.source.revision,
+                    integrated,
                 ],
             )?;
             if changed == 0 {
                 return Ok(false);
             }
             super::record_verified_account(transaction, &started.source, connection)?;
-            transaction.execute(
-                "UPDATE publication_connections SET tracker_started_at = ?2 WHERE attempt_id = ?1",
-                params![attempt, tracker_time],
-            )?;
+            if integrated {
+                transaction.execute(
+                    "UPDATE github_publication_context SET tracker_started_at = ?2, login = ?3, account_key = ?4 WHERE attempt_id = ?1",
+                    params![attempt, tracker_time, connection.account, connection.account_key()],
+                )?;
+            } else {
+                transaction.execute(
+                    "UPDATE publication_connections SET tracker_started_at = ?2 WHERE attempt_id = ?1",
+                    params![attempt, tracker_time],
+                )?;
+            }
             Ok(true)
         });
         match claimed {
@@ -2044,6 +2241,23 @@ impl Workspace {
             // host narrows discovery holds without giving another connection
             // permission to settle the attempt.
             let source = publication_connection(transaction, &attempt)?;
+            let scoped_integration;
+            let source = if attempt.provider == super::GITHUB_INTEGRATION
+                && source
+                    .as_ref()
+                    .is_none_or(super::github_integration::is_integration_target)
+            {
+                let host = super::github_integration::normalized_host(original_host)?;
+                scoped_integration = super::github_integration::workflow_target(
+                    transaction,
+                    &host,
+                    ticket.project_id.as_deref(),
+                    &[],
+                )?;
+                Some(scoped_integration)
+            } else {
+                source
+            };
             let scoped = source.as_ref().map(|source| source.bind(engine));
             let scoped = scoped.as_ref().unwrap_or(engine);
             if let Some(source) = source {
@@ -2071,6 +2285,12 @@ impl Workspace {
                 .into());
             }
             record_publication_site(transaction, &attempt.id, &current)?;
+            if attempt.provider == super::GITHUB_INTEGRATION {
+                transaction.execute(
+                    "UPDATE github_publication_context SET host = ?2 WHERE attempt_id = ?1 AND host IN (?2, ?3)",
+                    params![attempt.id, current, super::github::site_host(&current)],
+                )?;
+            }
             transaction.execute(
                 "UPDATE publication_attempts SET updated_at = ?2 WHERE id = ?1",
                 params![attempt.id, now],
@@ -2230,7 +2450,10 @@ impl Workspace {
             ResolutionAction {
                 kind: ActionKind::Attach,
                 available: !running
-                    && source.is_some()
+                    && (source.is_some()
+                        || (attempt.provider == super::GITHUB_INTEGRATION
+                            && attempt.destination_host.is_some()
+                            && !attempt.destination_site_unconfirmed))
                     && host_failure.is_none()
                     && conflict.is_none(),
                 label: "Attach the created issue".into(),
@@ -2295,7 +2518,7 @@ impl Workspace {
             },
         ];
         Ok(PublicationReview {
-            connection_id: source.map(|source| source.saved.id),
+            connection_id: source.filter(|source| !super::github_integration::is_integration_target(source)).map(|source| source.saved.id),
             provider_name: name,
             known,
             unknown,
@@ -2369,6 +2592,19 @@ impl Workspace {
                             "choose a saved GitHub connection on the original host",
                         ))
                     })?
+            }
+            (None, Resolution::Attach { .. }) if attempt.provider == super::GITHUB_INTEGRATION => {
+                let host = attempt.destination_host.as_deref().ok_or_else(|| {
+                    unverified(host_configuration_error(
+                        "Verify the original GitHub host before attaching an issue.".into(),
+                    ))
+                })?;
+                super::github_integration::workflow_target(
+                    &self.connection,
+                    host,
+                    ticket.project_id.as_deref(),
+                    std::slice::from_ref(&attempt.destination),
+                )?
             }
             (None, _) => return Err(unverified(publication_connection_missing())),
         };
@@ -2671,8 +2907,24 @@ impl Workspace {
                 )));
             }
             if let Some(source) = recovery
-                && !configured_source(transaction, &source.saved.id)?
-                    .is_some_and(|current| current.revision == source.revision)
+                && if super::github_integration::is_integration_target(source) {
+                    let current = subject(transaction, &ticket.reference)?;
+                    let host = attempt
+                        .destination_host
+                        .as_deref()
+                        .ok_or(Error::InvalidProjectRemote)?;
+                    super::github_integration::workflow_target(
+                        transaction,
+                        host,
+                        current.project_id.as_deref(),
+                        &[],
+                    )?
+                    .revision
+                        != source.revision
+                } else {
+                    !configured_source(transaction, &source.saved.id)?
+                        .is_some_and(|current| current.revision == source.revision)
+                }
             {
                 return Err(PublicationError::Unverified {
                     reference: ticket.reference.clone(),
@@ -2744,7 +2996,9 @@ impl Workspace {
                     agent,
                     adopt: adopt.as_deref(),
                     attached: Some(different),
-                    recovery_connection: recovery.map(|source| source.saved.id.as_str()),
+                    recovery_connection: recovery
+                        .filter(|source| !super::github_integration::is_integration_target(source))
+                        .map(|source| source.saved.id.as_str()),
                 },
                 issue,
                 &now,
@@ -2895,7 +3149,8 @@ const RULED_OUT: &str = "ruled_out";
 fn tracker_started_at(connection: &Connection, id: &str) -> Result<Option<String>, Error> {
     Ok(connection
         .query_row(
-            "SELECT tracker_started_at FROM publication_connections WHERE attempt_id = ?1",
+            "SELECT tracker_started_at FROM github_publication_context WHERE attempt_id = ?1
+             UNION ALL SELECT tracker_started_at FROM publication_connections WHERE attempt_id = ?1",
             [id],
             |row| row.get(0),
         )
@@ -2926,6 +3181,22 @@ fn publication_connection(
     connection: &Connection,
     attempt: &PublicationAttempt,
 ) -> Result<Option<super::ConfiguredSource>, Error> {
+    if attempt.provider == super::GITHUB_INTEGRATION {
+        type Context = (String, Option<String>, Option<String>);
+        let context: Option<Context> = connection.query_row(
+            "SELECT host, login, account_key FROM github_publication_context WHERE attempt_id = ?1",
+            [&attempt.id],
+            |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?)),
+        ).optional()?;
+        if let Some((host, Some(login), account_key)) = context {
+            return Ok(Some(super::github_integration::recovery_target(
+                &host,
+                Some(login),
+                account_key,
+                &attempt.destination,
+            )));
+        }
+    }
     let id: Option<String> = connection
         .query_row(
             "SELECT connection_id FROM publication_connections WHERE attempt_id = ?1",
@@ -2956,12 +3227,12 @@ fn unbound_attach_help(attempt: &PublicationAttempt) -> String {
     }
     if attempt.destination_host.is_none() || attempt.destination_site_unconfirmed {
         return format!(
-            "Verify the original host and any nondefault port. For GitHub Enterprise, set TICKETD_GITHUB_API_URL to that site's API URL. Record the site with `ticketd source resolve {} --confirm-host HOST`.",
+            "Verify the original host and any nondefault port. Record the site with `ticketd source resolve {} --confirm-host HOST`.",
             attempt.reference
         );
     }
     format!(
-        "The original publication connection is unavailable. Attach the verified issue with `ticketd source resolve {} --issue ISSUE --using-connection ID`.",
+        "The original GitHub login is unavailable. Attach the verified issue with `ticketd source resolve {} --issue ISSUE`.",
         attempt.reference
     )
 }
@@ -3189,7 +3460,10 @@ fn complete_attempt(
         .optional()?;
     // An explicit recovery can select how to refresh the verified issue
     // without attributing the historical create to that connection.
-    if let Some(connection_id) = connection_id.as_deref().or(sent.recovery_connection) {
+    if let Some(connection_id) = connection_id.as_deref().or(sent
+        .recovery_connection
+        .filter(|id| *id != super::GITHUB_INTEGRATION))
+    {
         // Adoption cascades discovery's affinity. The connection that confirmed
         // publication takes precedence over the one that happened to import it.
         transaction.execute(
@@ -3198,6 +3472,23 @@ fn complete_attempt(
             params![sent.ticket_id, connection_id],
         )?;
         super::bind_ticket(transaction, sent.ticket_id, connection_id)?;
+    } else if identity.provider == super::GITHUB_INTEGRATION {
+        let host: Option<String> = transaction
+            .query_row(
+                "SELECT destination_host FROM publication_attempts WHERE id = ?1
+             AND (EXISTS (SELECT 1 FROM github_publication_context WHERE attempt_id = ?1) OR ?2)",
+                params![
+                    sent.attempt_id,
+                    sent.recovery_connection == Some(super::GITHUB_INTEGRATION)
+                ],
+                |row| row.get::<_, Option<String>>(0),
+            )
+            .optional()?
+            .flatten();
+        if let Some(host) = host {
+            let repository = format!("{host}/{}", sent.destination);
+            super::github_integration::bind_ticket(transaction, sent.ticket_id, &repository)?;
+        }
     }
     // An issue that is already closed (attached after the fact) brings its
     // closure with it, as a refresh would apply it.

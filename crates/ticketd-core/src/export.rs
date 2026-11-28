@@ -98,6 +98,10 @@ const EXPORTED: &[(&str, &str)] = &[
         "provider, last_attempt_at, last_refreshed_at, error_code, error_message, failing_since, retry_after, last_checked_tickets",
     ),
     (
+        "github_publication_context",
+        "attempt_id, host, login, account_key, tracker_started_at",
+    ),
+    (
         "publication_attempts",
         "id, ticket_id, provider, destination, title, body, status, started_at, lease_expires_at, updated_at, failure_code, failure_message, external_id, locator, display, url, partition, destination_host, destination_site_unconfirmed",
     ),
@@ -222,6 +226,42 @@ const OMITTED_TABLES: &[(&str, &str)] = &[
     (
         "embedded_attachments",
         "an index derived from the files linked in Markdown",
+    ),
+    (
+        "github_repository_rules",
+        "device-local GitHub issue import rules",
+    ),
+    (
+        "github_repository_status",
+        "device-local GitHub repository refresh scheduling and coverage",
+    ),
+    (
+        "github_project_logins",
+        "device-local GitHub login choices for Projects",
+    ),
+    (
+        "github_legacy_accounts",
+        "device-local migration records for GitHub accounts",
+    ),
+    (
+        "github_legacy_repository_rules",
+        "device-local GitHub import rules pending review",
+    ),
+    (
+        "github_legacy_status",
+        "device-local GitHub refresh status before migration",
+    ),
+    (
+        "github_legacy_ticket_bindings",
+        "device-local GitHub discovery affinity before migration",
+    ),
+    (
+        "github_ticket_bindings",
+        "device-local GitHub ticket refresh bindings",
+    ),
+    (
+        "github_tracked_status",
+        "device-local refresh status for GitHub tickets outside import rules",
     ),
     ("last_backup", "device-local record of the last backup"),
     ("plan_graph_fts", "a search index derived from Plans"),

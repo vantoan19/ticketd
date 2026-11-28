@@ -425,7 +425,9 @@ impl Engine {
         let mut issues = Vec::new();
         let mut matched = 0;
         let mut already_here = 0;
-        let summary = self.discover(provider, config, |issue| {
+        let discovery_config =
+            super::github_integration::resolve_assignee(provider, config, &connection.account);
+        let summary = self.discover(provider, &discovery_config, |issue| {
             matched += 1;
             let ticket = existing(&issue.reference.identity);
             already_here += usize::from(ticket.is_some());
@@ -620,6 +622,21 @@ impl Engine {
             verify_issue(provider, issue)?;
         }
         Ok(found)
+    }
+
+    pub(super) fn empty_conversations(
+        &self,
+        provider: &str,
+        references: &[&ExternalRef],
+    ) -> Result<HashSet<ExternalIdentity>, SourceError> {
+        const BATCH_SIZE: usize = 25;
+        let connector = self.connector(provider)?;
+        let mut empty = HashSet::new();
+        for chunk in references.chunks(BATCH_SIZE) {
+            self.check_refresh_canceled()?;
+            empty.extend(connector.empty_conversations(chunk));
+        }
+        Ok(empty)
     }
 
     /// Reads an issue's conversation with repeated ids dropped, and the comments and

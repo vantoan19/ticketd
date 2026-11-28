@@ -119,6 +119,7 @@ function context(
     refreshing: false,
     sources: [],
     entries,
+    github: null,
     readCatalog,
     intervalSecs: null,
     openSettings: () => {},

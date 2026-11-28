@@ -389,7 +389,9 @@ function AppContent() {
   function setupProjectSource(setup: ProjectSourceSetup) {
     setProjectSource({ mode: "setup", ...setup });
     openView("settings");
-    setSettingsSection("ticket-sources");
+    setSettingsSection(
+      setup.provider === "github" ? "source-github" : "ticket-sources",
+    );
   }
   useSyncNavigation({
     openSettings: () => {
@@ -566,7 +568,10 @@ function AppContent() {
     sourceHealthReadFailure,
     readSourceHealth,
     sourceEntries,
-    sourceCatalogObservation,
+    githubIntegration,
+    sourceCatalogFailure,
+    githubCatalogFailure,
+    sourceCatalogLoading,
     readSourceEntries,
     sourceConnectionsChanged,
     sourceRefresh,
@@ -797,7 +802,11 @@ function AppContent() {
     if (projectSource.mode === "setup") setProjectSource(null);
   }
   const sourceRevision = JSON.stringify(
-    sourceEntries.map(({ saved }) => [saved?.id, saved?.saved_at]),
+    sourceEntries.map(({ saved, integration_revision }) => [
+      saved?.id,
+      saved?.saved_at,
+      integration_revision,
+    ]),
   );
   function finishProjectSourceSetup(connection: string) {
     if (!pendingSourceSetup) return;
@@ -1002,8 +1011,11 @@ function AppContent() {
                       sourceHealth.refreshing || sourceRefresh.running,
                     sources: sourceHealth.sources,
                     entries: sourceEntries,
-                    catalogObservation: sourceCatalogObservation,
-                    readCatalog: () => readSourceEntries().generation,
+                    github: githubIntegration,
+                    catalogFailure: sourceCatalogFailure,
+                    githubFailure: githubCatalogFailure,
+                    catalogLoading: sourceCatalogLoading,
+                    readCatalog: readSourceEntries,
                     intervalSecs: sourceHealth.interval_secs ?? null,
                     openSettings: (connection) => {
                       openView("settings");

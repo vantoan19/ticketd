@@ -87,7 +87,7 @@ function NeedLine({
 
 export function SourceStatusFooter() {
   const now = useNow();
-  const { entries } = useSources();
+  const { entries, github } = useSources();
   const { refreshing, sources, refreshAll, openSettings, intervalSecs } =
     useSourceActivity();
   // Only the folded rail hides the two lines, so only it repeats them.
@@ -112,11 +112,13 @@ export function SourceStatusFooter() {
       ? updates.snapshot.update
       : null;
   // A connection whose extension is missing has no health to show; say it here.
-  const missing = sourcesNeedYou(entries, sources).filter(
+  const sourceNeeds = sourcesNeedYou(entries, sources, github);
+  const githubNeed = sourceNeeds.find((row) => row.id === "github");
+  const missing = sourceNeeds.filter(
     (row) =>
       row.status === "Unavailable" &&
-      row.entry.saved &&
-      !sources.some((status) => status.connection_id === row.entry.saved?.id),
+      row.entry?.saved &&
+      !sources.some((status) => status.connection_id === row.entry?.saved?.id),
   );
   const open =
     (page: Parameters<NonNullable<typeof openSettingsPage>>[0]) => () =>
@@ -126,7 +128,8 @@ export function SourceStatusFooter() {
     needing("command-line") ||
     needing("agent-skills") ||
     !!update ||
-    missing.length > 0;
+    missing.length > 0 ||
+    !!githubNeed;
   if (sources.length === 0 && !synced && !loggingSince && !others) return null;
   return (
     <div
@@ -213,11 +216,33 @@ export function SourceStatusFooter() {
           action="Open"
           actionName={`Open ${row.name}`}
           folded={folded}
-          onOpen={() => openSettings(row.entry.saved?.id)}
+          onOpen={() => openSettings(row.id)}
         />
       ))}
+      {githubNeed && (
+        <NeedLine
+          id="sidebar-github-needs"
+          tone="attention"
+          label={
+            githubNeed.status === "Needs sign-in"
+              ? "GitHub needs sign-in"
+              : "GitHub unavailable"
+          }
+          detail="Showing saved content"
+          action={githubNeed.status === "Needs sign-in" ? "Sign in" : "Open"}
+          actionName={
+            githubNeed.status === "Needs sign-in"
+              ? "Sign in to GitHub"
+              : "Open GitHub"
+          }
+          folded={folded}
+          onOpen={() => openSettings("github")}
+        />
+      )}
       {sources.map((status) => {
+        if (status.provider === "github" && githubNeed) return null;
         const connection = status.connection_id;
+        const settingsId = status.provider === "github" ? "github" : connection;
         const row = connection
           ? `connection-${connection}`
           : `unassigned-${status.provider}`;
@@ -273,7 +298,7 @@ export function SourceStatusFooter() {
               <button
                 type="button"
                 className="sidebar-source-line"
-                onClick={() => openSettings(connection)}
+                onClick={() => openSettings(settingsId)}
                 aria-describedby={detailId}
               >
                 <span className="sidebar-source-label">
@@ -302,7 +327,7 @@ export function SourceStatusFooter() {
                 // and the line's tooltip names what Retry would retry.
                 data-rail-hidden=""
                 onClick={() =>
-                  signedOut ? openSettings(connection) : void refreshAll()
+                  signedOut ? openSettings(settingsId) : void refreshAll()
                 }
               >
                 {signedOut ? "Sign in" : "Retry"}

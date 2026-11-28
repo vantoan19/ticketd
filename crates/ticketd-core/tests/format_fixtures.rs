@@ -67,7 +67,7 @@ fn a_backup_saved_by_older_code_validates_restores_and_migrates_to_the_current_v
 }
 
 #[test]
-fn restoring_older_source_workspaces_keeps_local_binding_and_credential_reference() {
+fn restoring_older_github_workspaces_keeps_rules_and_publication_recovery() {
     use ticketd_core::source::{ActionKind, AttemptState, Engine};
 
     const DEVICE_REFERENCE: &str = "73f84c02-9d14-41d9-930f-bb8504b08a92";
@@ -125,21 +125,16 @@ fn restoring_older_source_workspaces_keeps_local_binding_and_credential_referenc
             restored.show_ticket("T-QZ92").unwrap().title,
             "Legacy publication"
         );
-        let connection = restored.source_connection("github").unwrap();
-        assert_eq!(connection.name, "Saved on this device");
-        assert_eq!(connection.account, "device-account");
-        if version == 95 {
-            assert_eq!(connection.secret_fields, ["fixture_secret"]);
-            let reference: String = Connection::open(&current)
-                .unwrap()
-                .query_row(
-                    "SELECT reference FROM source_secret_references WHERE connection_id = 'github' AND field = 'fixture_secret'",
-                    [],
-                    |row| row.get(0),
-                )
-                .unwrap();
-            assert_eq!(reference, DEVICE_REFERENCE);
-        }
+        assert!(restored.saved_sources().unwrap().is_empty());
+        assert_eq!(
+            restored.github_repositories().unwrap()[0].rule.repository,
+            "github.com/owner/repo"
+        );
+        let export = restored.export().unwrap();
+        assert_eq!(
+            export["github_publication_context"][0]["login"],
+            "device-account"
+        );
         let review = restored
             .review_publication(&Engine::builtin(), "T-QZ92", false)
             .unwrap();
@@ -208,8 +203,8 @@ fn opening_a_format_89_workspace_keeps_github_provenance_and_local_routing() {
     assert_eq!(attempt["destination_host"], "git.example.test");
     assert_eq!(attempt["status"], "unresolved");
     assert_eq!(
-        workspace.source_connection("github").unwrap().account,
-        "engineering"
+        workspace.github_repositories().unwrap()[0].rule.repository,
+        "git.example.test/acme/site"
     );
 }
 

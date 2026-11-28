@@ -261,6 +261,21 @@ impl Workspace {
             crate::sync::remember_replaced_folder(&restored, &current)?;
         }
         if !local_recovery {
+            // Convert the old connection binding before discarding settings
+            // carried by the incoming backup. The attempt's original GitHub
+            // account and tracker clock remain useful on the restored ticket.
+            if backup::table_exists(&restored, "source_connections")?
+                && !backup::table_exists(&restored, "github_publication_context")?
+                && restored.query_row(
+                    "SELECT EXISTS(SELECT 1 FROM source_connections WHERE provider = 'github')",
+                    [],
+                    |row| row.get::<_, bool>(0),
+                )?
+            {
+                let version =
+                    restored.pragma_query_value(None, "user_version", |row| row.get(0))?;
+                crate::format::migrate(&mut restored, version)?;
+            }
             crate::source::forget_connections(&restored)?;
             crate::source::retain_connections(&mut restored, &current)?;
         }

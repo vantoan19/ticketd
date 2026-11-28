@@ -3,8 +3,6 @@
 
 use std::{
     collections::{BTreeMap, VecDeque},
-    io::{Read, Write},
-    net::TcpListener,
     ops::ControlFlow,
     sync::{Arc, Mutex},
 };
@@ -119,10 +117,6 @@ fn setup_at(api: &str, token: Option<&'static str>) -> (Arc<Fixture>, Engine) {
     (fixture, engine)
 }
 
-fn connector(fixture: &Arc<Fixture>, token: Option<&'static str>) -> GithubConnector {
-    connector_at(API, fixture, token)
-}
-
 fn connector_at(api: &str, fixture: &Arc<Fixture>, token: Option<&'static str>) -> GithubConnector {
     GithubConnector::new(
         api,
@@ -172,17 +166,14 @@ fn issue(id: u64, number: u64, repo: &str) -> Value {
 fn repository_picker_filters_paginated_results_from_the_github_cli() {
     let http = Arc::new(Fixture::default());
     let mut connector = connector_at(DEFAULT_API_URL, &http, None);
-    connector.repository_options_gh = Some(gh::GhApi::new(|args| {
-        let [api, hostname, host, include, endpoint] = args else {
-            panic!("unexpected GitHub CLI arguments: {args:?}");
-        };
-        assert_eq!(
-            [*api, *hostname, *host, *include],
-            ["api", "--hostname", "github.com", "--include"]
-        );
+    connector.gh = Some(gh::GhApi::new(|args, body, auth, _| {
+        assert_eq!(&args[..4], ["api", "--hostname", "github.com", "--include"]);
+        assert!(matches!(auth, gh::Authentication::Ambient));
+        assert!(body.is_none());
+        let endpoint = *args.last().unwrap();
         let first = "user/repos?per_page=100&sort=pushed&affiliation=owner,collaborator,organization_member";
         let next = "user/repos?affiliation=owner%2Ccollaborator%2Corganization_member&page=2&per_page=100&sort=pushed";
-        let (page, link) = match *endpoint {
+        let (page, link) = match endpoint {
             endpoint if endpoint == first => (
                 json!([{"full_name": "acme/gizmo", "private": false}]),
                 format!("Link: <https://api.github.com/{next}>; rel=\"next\"\r\n"),
@@ -608,14 +599,6 @@ fn enterprise_issue_scopes_keep_nondefault_ports_separate() {
         .unwrap();
     assert_eq!(backfill.linked_tickets, ["T-KQ8"]);
     assert!(workspace.show_ticket("T-KQ9").unwrap().project_id.is_none());
-}
-
-#[test]
-fn a_pinned_github_connection_names_its_script_token() {
-    let connector = GithubConnector::ambient_for(Some("github-2"), Some("octo"));
-    let hint = connector.presentation().sign_in.terminal_hint.unwrap();
-    assert!(hint.contains("TICKETD_SOURCE_GITHUB_2_TOKEN"));
-    assert!(!hint.contains("TICKETD_GITHUB_TOKEN"));
 }
 
 #[test]
@@ -2557,54 +2540,6 @@ fn label_options_come_from_the_selected_repositories() {
 }
 
 #[test]
-fn the_real_transport_pages_over_http_and_sends_the_credential() {
-    let listener = TcpListener::bind("127.0.0.1:0").unwrap();
-    let base = format!("http://{}", listener.local_addr().unwrap());
-    let server_base = base.clone();
-    let server = std::thread::spawn(move || {
-        let mut seen = Vec::new();
-        for _ in 0..2 {
-            let (mut stream, _) = listener.accept().unwrap();
-            let mut buffer = [0u8; 4096];
-            let read = stream.read(&mut buffer).unwrap();
-            let request = String::from_utf8_lossy(&buffer[..read]).to_string();
-            let path = request.split_whitespace().nth(1).unwrap().to_owned();
-            let (body, link) = if path.contains("page=2") {
-                (json!([issue(2, 2, "o/one")]).to_string(), String::new())
-            } else {
-                (
-                    json!([issue(1, 1, "o/one")]).to_string(),
-                    format!("Link: <{server_base}/repos/o/one/issues?page=2>; rel=\"next\"\r\n"),
-                )
-            };
-            let response = format!(
-                "HTTP/1.1 200 OK\r\nContent-Type: application/json\r\n{link}Content-Length: {}\r\nConnection: close\r\n\r\n{body}",
-                body.len()
-            );
-            stream.write_all(response.as_bytes()).unwrap();
-            seen.push(request);
-        }
-        seen
-    });
-
-    let connector = GithubConnector::new(
-        base,
-        Box::new(UreqTransport::new()),
-        Box::new(Token(Some(TOKEN))),
-    );
-    let mut engine = Engine::new();
-    engine.register(Box::new(connector)).unwrap();
-    let issues = discover_all(&engine, &config(json!({"repositories": ["o/one"]}))).unwrap();
-    assert_eq!(issues.len(), 2);
-    let requests = server.join().unwrap();
-    for request in &requests {
-        let lower = request.to_lowercase();
-        assert!(lower.contains(&format!("authorization: bearer {TOKEN}").to_lowercase()));
-        assert!(lower.contains("user-agent: ticketd"));
-    }
-}
-
-#[test]
 fn secrets_and_requests_never_debug_print_the_credential() {
     let secret = Secret::new(TOKEN);
     assert!(!format!("{secret:?}").contains(TOKEN));
@@ -3486,9 +3421,8 @@ fn credential_failures_end_in_a_sentence_and_take_the_hint_of_their_surface() {
     for error in [&missing, &rejected] {
         let terminal = error.message_for(Surface::Terminal);
         assert!(
-            terminal.ends_with(
-                ". From a script, set TICKETD_GITHUB_TOKEN to a token that can read and create issues instead."
-            ),
+            terminal
+                .ends_with(". For scripts, the GitHub CLI reads GH_TOKEN or GH_ENTERPRISE_TOKEN."),
             "{terminal}"
         );
         assert!(!terminal.contains("Settings"), "{terminal}");
@@ -3497,7 +3431,7 @@ fn credential_failures_end_in_a_sentence_and_take_the_hint_of_their_surface() {
             desktop.ends_with(". Then choose Check connection in Settings › Ticket sources."),
             "{desktop}"
         );
-        assert!(!desktop.contains("TICKETD_GITHUB_TOKEN"), "{desktop}");
+        assert!(!desktop.contains("GH_TOKEN"), "{desktop}");
     }
     // Other failures read the same everywhere.
     let other = SourceError::Unavailable("GitHub is unavailable".into());
@@ -3568,5 +3502,763 @@ fn github_describes_how_to_present_its_configuration() {
             .map(|part| part.text.as_str())
             .collect::<String>(),
         "Imports open issues from example/api that have the labels bug and help, assigned to someone."
+    );
+}
+
+#[test]
+fn removing_a_rule_during_auth_preflight_prevents_dispatch_without_a_project_destination() {
+    use std::sync::atomic::{AtomicBool, Ordering};
+
+    use crate::source::{AttemptState, GithubRepositoryRule, PublicationError, PublishOptions};
+
+    let directory = tempfile::tempdir().unwrap();
+    let path = directory.path().join("workspace.sqlite3");
+    let remove = Arc::new(AtomicBool::new(false));
+    let gh = gh::GhApi::new({
+        let path = path.clone();
+        let remove = remove.clone();
+        move |args, _, _, _| {
+            let response = match *args.last().unwrap() {
+                "github.com" if args[0] == "auth" => gh::Output {
+                    success: true,
+                    stdout: b"fixture-token".to_vec(),
+                    stderr: Vec::new(),
+                },
+                "user" => {
+                    if remove.swap(false, Ordering::AcqRel) {
+                        crate::Workspace::open(&path)
+                            .unwrap()
+                            .remove_github_repository("github.com/o/r")
+                            .unwrap();
+                    }
+                    recorded_gh(200, &json!({"id": 1, "login": "octo"}))
+                }
+                "repos/o/r/issues?state=open&per_page=100" => recorded_gh(200, &json!([])),
+                "repos/o/r/issues" => recorded_gh(201, &public_issue(107, 7, "o/r")),
+                endpoint => panic!("unexpected GitHub endpoint: {endpoint}"),
+            };
+            Ok(response)
+        }
+    });
+    let mut engine = Engine::new();
+    engine
+        .register(Box::new(GithubConnector::using_gh(
+            DEFAULT_API_URL.into(),
+            gh,
+        )))
+        .unwrap();
+    let mut workspace = crate::Workspace::open(path).unwrap();
+    workspace
+        .save_github_repository(
+            &engine,
+            GithubRepositoryRule {
+                repository: "github.com/o/r".into(),
+                assignee: None,
+                labels: vec![],
+            },
+        )
+        .unwrap();
+    let ticket = workspace.create_ticket("Publish this ticket").unwrap();
+    remove.store(true, Ordering::Release);
+    let result = workspace.publish_ticket(&engine, &ticket.reference, &PublishOptions::default());
+    assert!(
+        matches!(
+            result,
+            Err(crate::Error::Publication(PublicationError::Failed { .. }))
+        ),
+        "{result:?}"
+    );
+    let attempts = workspace.publication_attempts(&ticket.reference).unwrap();
+    assert_eq!(attempts[0].state, AttemptState::Failed);
+    assert!(
+        attempts[0]
+            .failure
+            .as_ref()
+            .unwrap()
+            .message
+            .contains("before the request could be sent")
+    );
+    assert!(
+        workspace
+            .show_ticket(&ticket.reference)
+            .unwrap()
+            .source
+            .is_none()
+    );
+}
+
+#[test]
+fn publication_keeps_its_verified_login_and_recovers_a_lost_answer_without_repeating_the_write() {
+    use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
+
+    use crate::source::{
+        GithubRepositoryRule, PublicationError, PublishOptions, Resolution, ResolveOptions,
+    };
+
+    let active_changed = Arc::new(AtomicBool::new(false));
+    let armed = Arc::new(AtomicBool::new(false));
+    let writes = Arc::new(AtomicUsize::new(0));
+    let gh = gh::GhApi::new({
+        let active_changed = active_changed.clone();
+        let armed = armed.clone();
+        let writes = writes.clone();
+        move |args, input, auth, _| {
+            if args[0] == "auth" {
+                if matches!(auth, gh::Authentication::NamedLookup) {
+                    return Ok(gh::Output {
+                        success: false,
+                        stdout: Vec::new(),
+                        stderr: b"no stored GitHub CLI credentials".to_vec(),
+                    });
+                }
+                assert!(matches!(auth, gh::Authentication::Ambient));
+                let token = if active_changed.load(Ordering::Acquire) {
+                    "different-credential"
+                } else {
+                    "first-credential"
+                };
+                return Ok(gh::Output {
+                    success: true,
+                    stdout: token.as_bytes().to_vec(),
+                    stderr: Vec::new(),
+                });
+            }
+            let endpoint = *args.last().unwrap();
+            let body = match endpoint {
+                "user" => {
+                    if matches!(auth, gh::Authentication::Scoped("different-credential")) {
+                        return Ok(recorded_gh(200, &json!({"id": 2, "login": "other"})));
+                    }
+                    assert!(matches!(
+                        auth,
+                        gh::Authentication::Scoped("first-credential")
+                    ));
+                    if armed.load(Ordering::Acquire) {
+                        active_changed.store(true, Ordering::Release);
+                    }
+                    json!({"id": 1, "login": "octo"})
+                }
+                "repos/o/r/issues?state=open&per_page=100" => json!([]),
+                "repos/o/r/issues" => {
+                    assert!(matches!(
+                        auth,
+                        gh::Authentication::Scoped("first-credential")
+                    ));
+                    writes.fetch_add(1, Ordering::AcqRel);
+                    let body: Value = serde_json::from_slice(input.unwrap()).unwrap();
+                    assert_eq!(body["title"], "Publish this ticket");
+                    return Ok(gh::Output {
+                        success: false,
+                        stdout: Vec::new(),
+                        stderr: b"connection reset after sending".to_vec(),
+                    });
+                }
+                "repos/o/r/issues/7" => {
+                    assert!(matches!(
+                        auth,
+                        gh::Authentication::Scoped("first-credential")
+                    ));
+                    let mut remote = public_issue(107, 7, "o/r");
+                    remote["title"] = json!("Publish this ticket");
+                    remote["body"] = json!("");
+                    remote["user"] = json!({"id": 1, "login": "octo"});
+                    remote["created_at"] = json!("2026-01-02T00:00:00Z");
+                    remote
+                }
+                _ => panic!("unexpected GitHub endpoint: {endpoint}"),
+            };
+            Ok(recorded_gh(200, &body))
+        }
+    });
+    let mut engine = Engine::new();
+    engine
+        .register(Box::new(GithubConnector::using_gh(
+            DEFAULT_API_URL.into(),
+            gh,
+        )))
+        .unwrap();
+    let directory = tempfile::tempdir().unwrap();
+    let mut workspace = crate::Workspace::open(directory.path().join("workspace.sqlite3")).unwrap();
+    workspace
+        .save_github_repository(
+            &engine,
+            GithubRepositoryRule {
+                repository: "github.com/o/r".into(),
+                assignee: None,
+                labels: vec![],
+            },
+        )
+        .unwrap();
+    let ticket = workspace.create_ticket("Publish this ticket").unwrap();
+
+    armed.store(true, Ordering::Release);
+    let error = workspace
+        .publish_ticket(&engine, &ticket.reference, &PublishOptions::default())
+        .unwrap_err();
+    assert!(matches!(
+        error,
+        crate::Error::Publication(PublicationError::Unresolved { .. })
+    ));
+    assert_eq!(writes.load(Ordering::Acquire), 1);
+
+    armed.store(false, Ordering::Release);
+    let options = ResolveOptions {
+        resolution: Resolution::Attach {
+            issue: Some("7".into()),
+        },
+        now: None,
+        agent: None,
+        accept_different_content: false,
+    };
+    let error = workspace
+        .resolve_publication(&engine, &ticket.reference, &options)
+        .unwrap_err();
+    assert!(matches!(
+        error,
+        crate::Error::Publication(PublicationError::Unverified { .. })
+    ));
+    assert_eq!(writes.load(Ordering::Acquire), 1);
+
+    active_changed.store(false, Ordering::Release);
+    let resolved = workspace
+        .resolve_publication(&engine, &ticket.reference, &options)
+        .unwrap();
+    assert_eq!(resolved.ticket.source.unwrap().id, "107");
+    assert_eq!(writes.load(Ordering::Acquire), 1);
+}
+
+#[test]
+fn a_project_publication_syncs_without_discovering_issues_until_a_rule_is_saved() {
+    use crate::source::{GithubRepositoryRule, PublishOptions, RefreshOptions};
+
+    let allow_discovery = Arc::new(std::sync::atomic::AtomicBool::new(false));
+    let gh = gh::GhApi::new({
+        let allow_discovery = allow_discovery.clone();
+        move |args, _, _, _| {
+            let response = match *args.last().unwrap() {
+                "github.com" if args[0] == "auth" => gh::Output {
+                    success: true,
+                    stdout: b"fixture-token".to_vec(),
+                    stderr: Vec::new(),
+                },
+                "user" => recorded_gh(200, &json!({"id": 1, "login": "octo"})),
+                "repos/o/r/issues" => recorded_gh(201, &public_issue(107, 7, "o/r")),
+                "repos/o/r/issues/7" => {
+                    let mut issue = public_issue(107, 7, "o/r");
+                    issue["title"] = json!("Changed on GitHub");
+                    recorded_gh(200, &issue)
+                }
+                "repos/o/r/issues/7/comments?per_page=100"
+                | "repos/o/r/issues/7/events?per_page=100" => recorded_gh(200, &json!([])),
+                "repos/o/r/issues?state=open&per_page=100" => {
+                    assert!(allow_discovery.load(std::sync::atomic::Ordering::Acquire));
+                    recorded_gh(200, &json!([]))
+                }
+                "graphql" => recorded_gh(200, &json!({"data": {}})),
+                endpoint => panic!("unexpected GitHub endpoint: {endpoint}"),
+            };
+            Ok(response)
+        }
+    });
+    let mut engine = Engine::new();
+    engine
+        .register(Box::new(GithubConnector::using_gh(
+            DEFAULT_API_URL.into(),
+            gh,
+        )))
+        .unwrap();
+    let directory = tempfile::tempdir().unwrap();
+    let mut workspace = crate::Workspace::open(directory.path().join("workspace.sqlite3")).unwrap();
+    let project = workspace
+        .create_project_with_remote(
+            "Project",
+            directory.path().to_str().unwrap(),
+            Some("github.com/o/r"),
+        )
+        .unwrap();
+    let ticket = workspace.create_ticket("Publish this ticket").unwrap();
+    workspace
+        .change_ticket(
+            &ticket.reference,
+            crate::TicketPatch {
+                project_id: Some(Some(project.id)),
+                ..Default::default()
+            },
+        )
+        .unwrap();
+    let preview = workspace
+        .preview_publication(&engine, &ticket.reference, PROVIDER, None)
+        .unwrap();
+    workspace
+        .publish_ticket(
+            &engine,
+            &ticket.reference,
+            &PublishOptions {
+                expected_fingerprint: Some(preview.fingerprint),
+                ..Default::default()
+            },
+        )
+        .unwrap();
+    let note = workspace
+        .add_activity(&ticket.reference, "Local note", None)
+        .unwrap();
+    assert_eq!(
+        workspace
+            .ticket_source_connection(&ticket.reference)
+            .unwrap()
+            .as_deref(),
+        Some("github")
+    );
+    assert!(workspace.github_repositories().unwrap().is_empty());
+
+    let report = workspace
+        .refresh_connection(&engine, "github", &RefreshOptions::default())
+        .unwrap();
+    assert_eq!(
+        report.updated.as_slice(),
+        std::slice::from_ref(&ticket.reference),
+        "{report:?}"
+    );
+    assert!(report.imported.is_empty());
+    assert_eq!(
+        workspace.show_ticket(&ticket.reference).unwrap().title,
+        "Changed on GitHub"
+    );
+
+    allow_discovery.store(true, std::sync::atomic::Ordering::Release);
+    workspace
+        .save_github_repository(
+            &engine,
+            GithubRepositoryRule {
+                repository: "github.com/o/r".into(),
+                assignee: None,
+                labels: vec![],
+            },
+        )
+        .unwrap();
+    workspace
+        .remove_github_repository("github.com/o/r")
+        .unwrap();
+    assert_eq!(
+        workspace
+            .ticket_source_connection(&ticket.reference)
+            .unwrap(),
+        None
+    );
+    let report = workspace
+        .refresh_connection(&engine, "github", &RefreshOptions::default())
+        .unwrap();
+    assert!(report.updated.is_empty());
+    let cached = workspace.show_ticket(&ticket.reference).unwrap();
+    assert_eq!(cached.title, "Changed on GitHub");
+    assert_eq!(
+        workspace
+            .activity(&ticket.reference, &note.id)
+            .unwrap()
+            .brief,
+        "Local note"
+    );
+}
+
+#[test]
+fn the_project_account_resolver_uses_a_pin_without_an_import_rule_and_can_clear_it() {
+    let gh = gh::GhApi::new(|args, _, auth, _| {
+        if args[0] == "auth" {
+            let token = match auth {
+                gh::Authentication::Ambient => "ambient-credential",
+                gh::Authentication::NamedLookup => {
+                    assert_eq!(
+                        args,
+                        ["auth", "token", "--hostname", "github.com", "--user", "pat"]
+                    );
+                    "pinned-credential"
+                }
+                gh::Authentication::Scoped(_) => panic!("unexpected scoped lookup"),
+            };
+            return Ok(gh::Output {
+                success: true,
+                stdout: token.as_bytes().to_vec(),
+                stderr: Vec::new(),
+            });
+        }
+        assert_eq!(args.last(), Some(&"user"));
+        let account = match auth {
+            gh::Authentication::Scoped("pinned-credential") => json!({ "id": 22, "login": "pat" }),
+            gh::Authentication::Scoped("ambient-credential") => json!({ "id": 1, "login": "octo" }),
+            _ => panic!("account was not scoped"),
+        };
+        Ok(recorded_gh(200, &account))
+    });
+    let mut engine = Engine::new();
+    engine
+        .register(Box::new(GithubConnector::using_gh(
+            DEFAULT_API_URL.into(),
+            gh,
+        )))
+        .unwrap();
+    let directory = tempfile::tempdir().unwrap();
+    let mut workspace = crate::Workspace::open(directory.path().join("workspace.sqlite3")).unwrap();
+    let project = workspace
+        .create_project_with_remote(
+            "Platform",
+            directory.path().to_str().unwrap(),
+            Some("github.com/o/r"),
+        )
+        .unwrap();
+    let first_token = workspace.change_token().unwrap();
+    workspace
+        .set_github_project_login(&engine, &project.id, "github.com", Some("pat"))
+        .unwrap();
+    assert!(workspace.change_token().unwrap() > first_token);
+    let (_, verified) = workspace
+        .github_account_for_project(&engine, Some(&project.id), "github.com")
+        .unwrap();
+    assert_eq!(verified.account, "pat");
+    let integration = workspace.github_integration(&engine).unwrap();
+    assert!(integration.repositories.is_empty());
+    assert_eq!(
+        integration.project_sites_without_rules[0].login.as_deref(),
+        Some("pat")
+    );
+    workspace
+        .set_github_project_login(&engine, &project.id, "github.com", None)
+        .unwrap();
+    let (_, verified) = workspace
+        .github_account_for_project(&engine, Some(&project.id), "github.com")
+        .unwrap();
+    assert_eq!(verified.account, "octo");
+}
+
+#[test]
+fn a_migrated_ticket_still_refreshes_after_its_issue_moved_outside_import_rules() {
+    use crate::source::RefreshOptions;
+
+    let directory = tempfile::tempdir().unwrap();
+    let path = directory.path().join("workspace.sqlite3");
+    crate::create_workspace_at_format_version(&path, 105).unwrap();
+    let fixture = rusqlite::Connection::open(&path).unwrap();
+    fixture.execute_batch(
+        "INSERT INTO source_connections
+           (id, name, provider, site, configuration, account, account_key, contract_version, saved_at, revision)
+         VALUES ('github','Account','github','','{\"repositories\":[\"o/original\"]}','octo','id:1',2,'2026-01-01T00:00:00Z','old');
+         INSERT INTO tickets (id, reference, title, status) VALUES ('moved', 'T-OLD', 'Before transfer', 'In progress');
+         INSERT INTO external_identities (ticket_id,provider,external_id,locator,display,url,origin,partition,repository)
+         VALUES ('moved','github','107','o/destination#7','o/destination#7','https://github.com/o/destination/issues/7','imported','o/destination','github.com/o/destination');
+         INSERT INTO external_ownership (ticket_id,authority) VALUES ('moved','external');
+         INSERT INTO source_sync (ticket_id,state_category,state_name) VALUES ('moved','open','Open');
+         INSERT INTO source_connection_tickets VALUES ('moved','github');",
+    ).unwrap();
+    drop(fixture);
+    let gh = gh::GhApi::new(|args, _, auth, _| {
+        let response = match *args.last().unwrap() {
+            "github.com" if args[0] == "auth" => gh::Output {
+                success: true,
+                stdout: b"fixture-token".to_vec(),
+                stderr: Vec::new(),
+            },
+            "user" => {
+                assert!(matches!(auth, gh::Authentication::Scoped("fixture-token")));
+                recorded_gh(200, &json!({ "id": 1, "login": "octo" }))
+            }
+            "repos/o/destination/issues/7" => {
+                let mut issue = public_issue(107, 7, "o/destination");
+                issue["title"] = json!("After transfer");
+                recorded_gh(200, &issue)
+            }
+            "repos/o/destination/issues/7/comments?per_page=100"
+            | "repos/o/destination/issues/7/events?per_page=100" => recorded_gh(200, &json!([])),
+            "graphql" => recorded_gh(200, &json!({"data": {}})),
+            endpoint => panic!("unexpected GitHub endpoint: {endpoint}"),
+        };
+        Ok(response)
+    });
+    let mut engine = Engine::new();
+    engine
+        .register(Box::new(GithubConnector::using_gh(
+            DEFAULT_API_URL.into(),
+            gh,
+        )))
+        .unwrap();
+    let mut workspace = crate::Workspace::open(path).unwrap();
+    let report = workspace
+        .refresh_connection(
+            &engine,
+            PROVIDER,
+            &RefreshOptions {
+                ticket: Some("T-OLD".into()),
+                ..Default::default()
+            },
+        )
+        .unwrap();
+    assert_eq!(report.updated, ["T-OLD"], "{report:?}");
+    let ticket = workspace.show_ticket("T-OLD").unwrap();
+    assert_eq!(ticket.title, "After transfer");
+    assert_eq!(ticket.status, crate::Status::InProgress);
+    assert_eq!(
+        workspace.github_repositories().unwrap()[0].rule.repository,
+        "github.com/o/original"
+    );
+    workspace
+        .remove_github_repository("github.com/o/original")
+        .unwrap();
+    assert_eq!(workspace.ticket_source_connection("T-OLD").unwrap(), None);
+    assert_eq!(
+        workspace.show_ticket("T-OLD").unwrap().title,
+        "After transfer"
+    );
+}
+
+fn recorded_gh(status: u16, body: &Value) -> gh::Output {
+    gh::Output {
+        success: (200..300).contains(&status),
+        stdout: format!(
+            "HTTP/2.0 {status} recorded\r\nDate: Thu, 01 Jan 2026 00:00:00 GMT\r\nContent-Type: application/json\r\n\r\n{body}"
+        ).into_bytes(),
+        stderr: Vec::new(),
+    }
+}
+
+#[test]
+fn refresh_batches_empty_conversations_and_reads_existing_events_with_their_rest_ids() {
+    let gh = gh::GhApi::new(|args, input, _, _| {
+        if args[0] == "auth" {
+            return Ok(gh::Output {
+                success: true,
+                stdout: b"fixture".to_vec(),
+                stderr: Vec::new(),
+            });
+        }
+        let body = match *args.last().unwrap() {
+            "user" => json!({"id": 1, "login": "octo"}),
+            "repos/o/r/issues?state=open&per_page=100" => {
+                json!([public_issue(107, 7, "o/r"), public_issue(108, 8, "o/r"),])
+            }
+            "graphql" => {
+                let body: Value = serde_json::from_slice(input.unwrap()).unwrap();
+                let query = body["query"].as_str().unwrap();
+                assert!(query.contains("i0:"));
+                assert!(query.contains("i1:"));
+                json!({"data": {
+                    "i0": {"issue": {
+                        "databaseId": 107,
+                        "comments": {"totalCount": 0},
+                        "timelineItems": {"nodes": [], "pageInfo": {"hasNextPage": false}}
+                    }},
+                    "i1": {"issue": {
+                        "databaseId": 108,
+                        "comments": {"totalCount": 0},
+                        "timelineItems": {"nodes": [{"__typename": "AssignedEvent"}], "pageInfo": {"hasNextPage": false}}
+                    }}
+                }})
+            }
+            "repos/o/r/issues/8/comments?per_page=100" => json!([]),
+            "repos/o/r/issues/8/events?per_page=100" => json!([{
+                "id": 901, "event": "assigned", "assignee": {"login": "octo"}, "created_at": "2026-01-01T00:00:00Z"
+            }]),
+            endpoint => panic!("unexpected GitHub endpoint: {endpoint}"),
+        };
+        Ok(recorded_gh(200, &body))
+    });
+    let mut engine = Engine::new();
+    engine
+        .register(Box::new(GithubConnector::using_gh(
+            DEFAULT_API_URL.into(),
+            gh,
+        )))
+        .unwrap();
+    let directory = tempfile::tempdir().unwrap();
+    let mut workspace = crate::Workspace::open(directory.path().join("workspace.sqlite3")).unwrap();
+    workspace
+        .add_source_connection(
+            &engine,
+            PROVIDER,
+            None,
+            None,
+            &config(json!({"repositories": ["o/r"]})),
+        )
+        .unwrap();
+
+    let refresh = workspace
+        .refresh_connection(&engine, PROVIDER, &Default::default())
+        .unwrap();
+    assert!(refresh.failures.is_empty());
+    assert_eq!(refresh.imported.len(), 2);
+    let event = |reference| {
+        workspace
+            .source_conversation(reference)
+            .unwrap()
+            .iter()
+            .any(|entry| {
+                matches!(
+                    entry, crate::source::ConversationEntry::Event { id, .. } if id == "901"
+                )
+            })
+    };
+    assert!(!event(&refresh.imported[0]));
+    assert!(event(&refresh.imported[1]));
+}
+
+#[test]
+fn the_github_cli_confirms_each_permanent_hop_of_a_transferred_issue() {
+    let gh = gh::GhApi::new(|args, _, _, _| {
+        let endpoint = *args.last().unwrap();
+        if endpoint == "repos/o/one/issues/7" {
+            return Ok(recorded_gh(200, &public_issue(785, 10, "o/two")));
+        }
+        assert_eq!(endpoint, "https://api.github.com/repos/o/one/issues/7");
+        assert!(args.windows(2).any(|pair| pair == ["--method", "HEAD"]));
+        Ok(gh::Output {
+            success: true,
+            stdout: b"< HTTP/2.0 301 Moved Permanently\n< Location: /repos/o/renamed/issues/7\n\n< HTTP/2.0 308 Permanent Redirect\n< Location: /repos/o/two/issues/10\n\n< HTTP/2.0 200 OK\n\n".to_vec(),
+            stderr: Vec::new(),
+        })
+    });
+    let mut engine = Engine::new();
+    engine
+        .register(Box::new(GithubConnector::using_gh(
+            DEFAULT_API_URL.into(),
+            gh,
+        )))
+        .unwrap();
+    let original = ExternalRef {
+        identity: ExternalIdentity {
+            provider: PROVIDER.into(),
+            id: "700".into(),
+        },
+        locator: "o/one#7".into(),
+        partition: "o/one".into(),
+    };
+    let found = engine
+        .fetch_tracked(
+            PROVIDER,
+            &config(json!({"repositories": ["o/one"]})),
+            &original,
+        )
+        .unwrap();
+    assert_eq!(found.transferred_from, Some(original));
+    assert_eq!(found.issue.reference.identity.id, "785");
+}
+
+#[test]
+fn removing_a_repository_during_refresh_preserves_its_tickets_and_leaves_the_other_rule_running() {
+    use std::sync::atomic::{AtomicBool, Ordering};
+
+    use crate::source::GithubRepositoryRule;
+
+    let directory = tempfile::tempdir().unwrap();
+    let path = directory.path().join("workspace.sqlite3");
+    let mut workspace = crate::Workspace::open(&path).unwrap();
+    let removing = Arc::new(AtomicBool::new(false));
+    let gh = gh::GhApi::new({
+        let removing = removing.clone();
+        let path = path.clone();
+        move |args, _, _, _| {
+            if args[0] == "auth" {
+                return Ok(gh::Output {
+                    success: true,
+                    stdout: b"fixture".to_vec(),
+                    stderr: Vec::new(),
+                });
+            }
+            let endpoint = *args.last().unwrap();
+            let body = match endpoint {
+                "user" => json!({"id": 1, "login": "octo"}),
+                "repos/o/one/issues?state=open&per_page=100" => {
+                    if removing.swap(false, Ordering::AcqRel) {
+                        crate::Workspace::open(&path)
+                            .unwrap()
+                            .remove_github_repository("GITHUB.COM/O/one")
+                            .unwrap();
+                        json!([public_issue(101, 1, "o/one"), public_issue(102, 2, "o/one")])
+                    } else {
+                        json!([public_issue(101, 1, "o/one")])
+                    }
+                }
+                "repos/o/two/issues?state=open&per_page=100" => {
+                    json!([public_issue(201, 1, "o/two")])
+                }
+                "repos/o/one/issues/1" => public_issue(101, 1, "o/one"),
+                "repos/o/two/issues/1" => public_issue(201, 1, "o/two"),
+                "graphql" => json!({"data": {}}),
+                "/user" => json!({"id": 1, "login": "octo"}),
+                endpoint if endpoint.ends_with("per_page=100") => json!([]),
+                _ => panic!("unexpected GitHub endpoint: {endpoint}"),
+            };
+            Ok(recorded_gh(200, &body))
+        }
+    });
+    let mut engine = Engine::new();
+    engine
+        .register(Box::new(GithubConnector::using_gh(
+            DEFAULT_API_URL.into(),
+            gh,
+        )))
+        .unwrap();
+    let rule = |repository: &str| GithubRepositoryRule {
+        repository: repository.into(),
+        assignee: None,
+        labels: Vec::new(),
+    };
+    workspace
+        .save_github_repository(&engine, rule("github.com/o/one"))
+        .unwrap();
+    workspace
+        .save_github_repository(&engine, rule("github.com/o/two"))
+        .unwrap();
+
+    let first = workspace
+        .refresh_connection(&engine, PROVIDER, &Default::default())
+        .unwrap();
+    assert!(first.failures.is_empty(), "{:?}", first.failures);
+    assert_eq!(first.imported.len(), 2);
+    let one = workspace
+        .list_tickets()
+        .unwrap()
+        .into_iter()
+        .find(|ticket| {
+            ticket
+                .source
+                .as_ref()
+                .is_some_and(|source| source.id == "101")
+        })
+        .unwrap();
+
+    removing.store(true, Ordering::Release);
+    let removed_during_refresh = workspace
+        .refresh_connection(&engine, PROVIDER, &Default::default())
+        .unwrap();
+    assert!(
+        removed_during_refresh.failures.is_empty(),
+        "{:?}",
+        removed_during_refresh.failures
+    );
+    assert!(removed_during_refresh.imported.is_empty());
+    let repositories = workspace.github_repositories().unwrap();
+    assert_eq!(repositories.len(), 1);
+    assert_eq!(repositories[0].rule.repository, "github.com/o/two");
+    assert_eq!(repositories[0].tracked_tickets, 1);
+    assert!(repositories[0].last_refreshed_at.is_some());
+    let preserved = workspace.show_ticket(&one.reference).unwrap();
+    assert_eq!(preserved.id, one.id);
+    let source = preserved.source.unwrap();
+    assert_eq!(source.id, "101");
+    assert_eq!(source.unavailable.unwrap().code, "connection_removed");
+
+    workspace
+        .save_github_repository(&engine, rule("github.com/o/one"))
+        .unwrap();
+    let again = workspace
+        .refresh_connection(&engine, PROVIDER, &Default::default())
+        .unwrap();
+    assert!(again.imported.is_empty());
+    assert_eq!(workspace.show_ticket(&one.reference).unwrap().id, one.id);
+    assert!(
+        workspace
+            .show_ticket(&one.reference)
+            .unwrap()
+            .source
+            .unwrap()
+            .unavailable
+            .is_none()
     );
 }

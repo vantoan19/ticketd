@@ -4,7 +4,7 @@ import type { CliStatus } from "@/lib/api/cli";
 import type { NotificationPermission } from "@/lib/api/notifications";
 import type { SourceEntry } from "@/lib/api/sources";
 import type { SyncStatus } from "@/lib/sync-api";
-import { signsInWithGh } from "@/features/settings/sources/source-rows";
+import type { GithubIntegration } from "@/lib/api/github";
 import {
   commandLineFix,
   type CommandLineFix,
@@ -22,6 +22,7 @@ export interface SetupReadings {
   agentUpdate: AgentUpdate | null | undefined;
   /** The connections ticketd offers, saved or not; `null` while unread. */
   sources: readonly SourceEntry[] | null;
+  github?: GithubIntegration | null;
   sync: SyncStatus | null;
   notifications: NotificationPermission | null;
 }
@@ -245,8 +246,10 @@ function agentUpdateStep(update: AgentUpdate | null | undefined): SetupStep {
   };
 }
 
-/** "GitHub, 2 connections, through your gh login." */
-function sourcesFact(connected: readonly SourceEntry[]) {
+function sourcesFact(
+  connected: readonly SourceEntry[],
+  githubConnected: boolean,
+) {
   const providers = new Map<string, { name: string; count: number }>();
   for (const { connector } of connected) {
     const known = providers.get(connector.provider);
@@ -256,11 +259,14 @@ function sourcesFact(connected: readonly SourceEntry[]) {
   const parts = [...providers.values()].map(({ name, count }) =>
     count > 1 ? `${name}, ${count} connections` : name,
   );
-  const gh = connected.some(signsInWithGh) ? ", through your gh login" : "";
-  return `${joinNames(parts)}${gh}.`;
+  if (githubConnected) parts.unshift("GitHub, through your gh login");
+  return `${joinNames(parts)}.`;
 }
 
-function sourcesStep(sources: readonly SourceEntry[] | null): SetupStep {
+function sourcesStep(
+  sources: readonly SourceEntry[] | null,
+  github: GithubIntegration | null | undefined,
+): SetupStep {
   const base = {
     id: "sources" as const,
     title: "Bring in GitHub or Linear issues",
@@ -268,8 +274,18 @@ function sourcesStep(sources: readonly SourceEntry[] | null): SetupStep {
   };
   if (!sources)
     return { ...base, settled: false, done: false, description: "" };
-  const connected = sources.filter((entry) => entry.saved !== null);
-  if (connected.length === 0)
+  const connected = sources.filter(
+    (entry) => entry.connector.provider !== "github" && entry.saved !== null,
+  );
+  const githubConnected =
+    github?.repositories.some(({ repository }) =>
+      github.hosts.some(
+        ({ host, state }) =>
+          state === "connected" &&
+          repository.toLowerCase().startsWith(`${host.toLowerCase()}/`),
+      ),
+    ) ?? false;
+  if (connected.length === 0 && !githubConnected)
     return {
       ...base,
       settled: true,
@@ -280,7 +296,7 @@ function sourcesStep(sources: readonly SourceEntry[] | null): SetupStep {
     ...base,
     settled: true,
     done: true,
-    description: sourcesFact(connected),
+    description: sourcesFact(connected, githubConnected),
   };
 }
 
@@ -344,7 +360,7 @@ export function deriveSetup(readings: SetupReadings): SetupState {
   const steps = [
     agentsStep(readings.cli, readings.skills),
     agentUpdateStep(readings.agentUpdate),
-    sourcesStep(readings.sources),
+    sourcesStep(readings.sources, readings.github),
     syncStep(readings.sync),
     notificationsStep(readings.notifications),
   ];

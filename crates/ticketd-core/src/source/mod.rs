@@ -5,7 +5,7 @@
 //! - [`contract`]: provider-neutral types and the [`Connector`] trait.
 //! - [`schema`]: configuration fields, selectors and validation.
 //! - [`engine`]: runs connectors, pages, bounds and de-duplicates.
-//! - [`github`]: the built-in connector and its HTTP transport.
+//! - [`github`]: the built-in connector and its GitHub CLI transport.
 //! - this module: `Workspace` workflows that persist configuration. They call
 //!   the engine first and write in one short transaction afterwards, so no
 //!   network I/O ever happens while the database is locked.
@@ -19,6 +19,7 @@ mod engine;
 mod extension;
 mod freshness;
 mod github;
+mod github_integration;
 mod presentation;
 mod publication;
 mod refresh_control;
@@ -62,6 +63,11 @@ pub use freshness::{SourceHealth, SourceStatus, SourceUnavailable};
 pub(crate) use github::{
     issue_id_site as github_issue_id_site, issue_site_from_url as github_issue_site_from_url,
     legacy_issue_origin_matches, unverified_issue_id as unverified_github_issue_id,
+};
+pub(crate) use github_integration::migrate as migrate_github_integration;
+pub use github_integration::{
+    GITHUB_INTEGRATION, GithubHost, GithubIntegration, GithubMigrationNotice, GithubProjectSite,
+    GithubReadiness, GithubRepository, GithubRepositoryRule, VerifiedGithubLogin, sign_in_github,
 };
 pub use presentation::{
     FieldPresentation, IssueName, PullRequestLink, SignInGuidance, SourceDescription,
@@ -1330,17 +1336,35 @@ struct ConfiguredSource {
     credentials: credentials::References,
     permitted_env: std::collections::HashSet<String>,
     account_key: String,
+    github_integration: bool,
 }
 
 impl ConfiguredSource {
     fn bind(&self, engine: &Engine) -> Engine {
+        let config = if self.github_integration {
+            let mut config = self.saved.config.clone();
+            config.insert(
+                github::SITE_CONFIG.into(),
+                serde_json::Value::String(self.github_site().into()),
+            );
+            Cow::Owned(config)
+        } else {
+            Cow::Borrowed(&self.saved.config)
+        };
         engine.for_connection_with_secret_refs(
             &self.saved.provider,
             &self.saved.id,
-            &self.saved.config,
+            &config,
             &self.credentials,
             Some(&self.permitted_env),
         )
+    }
+    fn github_site(&self) -> &str {
+        if self.site.is_empty() {
+            "github.com"
+        } else {
+            &self.site
+        }
     }
     fn verify_effective_site(&self, engine: &Engine) -> Result<(), SourceError> {
         if engine
@@ -1361,12 +1385,30 @@ impl ConfiguredSource {
     }
 
     fn check(&self, engine: &Engine) -> Result<(Engine, ConnectionCheck), SourceError> {
+        if self.github_integration
+            && github::account_database_id(&self.account_key).is_some()
+            && self.saved.config.contains_key("account")
+        {
+            // Environment-only credentials have no named gh login. The
+            // ambient workflow is safe only if it proves the recorded account ID.
+            let mut ambient = self.clone();
+            ambient.saved.config.remove("account");
+            if let Ok(checked) = ambient.check_credentials(engine) {
+                return Ok(checked);
+            }
+        }
+        self.check_credentials(engine)
+    }
+
+    fn check_credentials(&self, engine: &Engine) -> Result<(Engine, ConnectionCheck), SourceError> {
         let scoped = self.bind(engine);
         self.verify_effective_site(&scoped)?;
         let scoped = scoped.with_workflow_credentials(&self.saved.provider, &self.saved.config)?;
         let config = self.account_check_configuration(&self.saved.config);
         let checked = scoped.check(&self.saved.provider, &config)?;
-        self.verify_account(&checked.connection)?;
+        if !github_integration::is_integration_target(self) || !self.account_key.is_empty() {
+            self.verify_account(&checked.connection)?;
+        }
         Ok((scoped, checked))
     }
 
@@ -1414,7 +1456,9 @@ fn record_verified_account(
     source: &ConfiguredSource,
     actual: &ConnectionInfo,
 ) -> Result<(), Error> {
-    if actual.account_key() == source.account_key {
+    if github_integration::is_integration_target(source)
+        || actual.account_key() == source.account_key
+    {
         return Ok(());
     }
     let current = configured_source(connection, &source.saved.id)?
@@ -1455,6 +1499,11 @@ const CONFIGURED_SOURCE: &str = "SELECT id, name, provider, configuration, accou
      FROM source_connections WHERE (?1 IS NULL OR id = ?1) ORDER BY rowid";
 
 fn configured_source(connection: &Connection, id: &str) -> Result<Option<ConfiguredSource>, Error> {
+    if github_integration::GithubRefreshJob::parse(id).is_some() {
+        return Ok(github_integration::refresh_jobs(connection)?
+            .into_iter()
+            .find(|job| job.saved.id == id));
+    }
     let mut statement = connection.prepare_cached(CONFIGURED_SOURCE)?;
     let mut rows = statement.query([id])?;
     rows.next()?
@@ -1469,6 +1518,12 @@ fn configured_sources(connection: &Connection) -> Result<Vec<ConfiguredSource>, 
     while let Some(row) = rows.next()? {
         sources.push(configured_row(connection, row)?);
     }
+    Ok(sources)
+}
+
+fn refresh_sources_configuration(connection: &Connection) -> Result<Vec<ConfiguredSource>, Error> {
+    let mut sources = configured_sources(connection)?;
+    sources.extend(github_integration::refresh_jobs(connection)?);
     Ok(sources)
 }
 
@@ -1510,6 +1565,7 @@ fn configured_row(
         credentials,
         permitted_env,
         account_key: row.get(9)?,
+        github_integration: false,
     })
 }
 
@@ -1576,6 +1632,12 @@ fn selected_connection(
             |row| row.get(0),
         )
         .optional()?;
+    if provider == GITHUB_INTEGRATION
+        && affinity.is_none()
+        && let Some(job) = github_integration::selected_job(connection, ticket_id, part)?
+    {
+        return Ok(Some(job));
+    }
     Ok(select_connection(
         &configured_sources(connection)?,
         affinity.as_deref(),
@@ -1586,6 +1648,16 @@ fn selected_connection(
 }
 
 fn bind_ticket(connection: &Connection, ticket_id: &str, id: &str) -> Result<(), Error> {
+    if let Some(job) = github_integration::GithubRefreshJob::parse(id) {
+        if let github_integration::GithubRefreshJob::Rule(repository) = job {
+            github_integration::bind_ticket(connection, ticket_id, repository)?;
+            connection.execute(
+                "DELETE FROM source_connection_removals WHERE ticket_id = ?1",
+                [ticket_id],
+            )?;
+        }
+        return Ok(());
+    }
     connection.execute(
         "INSERT INTO source_connection_tickets (ticket_id, connection_id)
          SELECT ?1, ?2 FROM external_ownership WHERE ticket_id = ?1 AND authority = 'external'
@@ -1604,6 +1676,7 @@ fn bind_ticket(connection: &Connection, ticket_id: &str, id: &str) -> Result<(),
 /// which could otherwise retain deleted credential references.
 pub(crate) fn forget_connections(connection: &Connection) -> Result<(), Error> {
     connection.execute_batch("PRAGMA secure_delete = ON")?;
+    github_integration::forget_device_settings(connection)?;
     if crate::backup::table_exists(connection, "source_secret_references")? {
         connection.execute_batch("DELETE FROM source_secret_references")?;
     }
@@ -1651,7 +1724,7 @@ pub(crate) fn retain_connections(
     restored: &mut Connection,
     current: &Connection,
 ) -> Result<(), Error> {
-    if !crate::backup::table_exists(current, "source_connection_id_reservations")? {
+    if !crate::backup::table_exists(current, "github_repository_rules")? {
         let has_connections = crate::backup::table_exists(current, "source_connections")?;
         let has_legacy_connections = crate::backup::table_exists(current, "source_configurations")?
             && current.query_row(
@@ -1690,16 +1763,24 @@ pub(crate) fn retain_connections(
         [],
         |row| row.get(0),
     )?;
-    if !has_connections && !has_removals && !has_reservations {
+    let has_github_settings = current.query_row(
+        "SELECT EXISTS(SELECT 1 FROM github_repository_rules UNION SELECT 1 FROM github_legacy_accounts UNION SELECT 1 FROM github_project_logins UNION SELECT 1 FROM github_ticket_bindings)",
+        [], |row| row.get::<_, bool>(0),
+    )?;
+    if !has_connections && !has_removals && !has_reservations && !has_github_settings {
         return Ok(());
     }
-    if !crate::backup::table_exists(restored, "source_connection_id_reservations")?
+    if !crate::backup::table_exists(restored, "github_repository_rules")?
         || (has_removals && !crate::backup::table_exists(restored, "source_connection_removals")?)
         || (has_secret_references
             && !crate::backup::table_exists(restored, "source_secret_references")?)
     {
         let version = restored.pragma_query_value(None, "user_version", |row| row.get(0))?;
         crate::format::migrate(restored, version)?;
+    }
+    if has_github_settings {
+        github_integration::forget_device_settings(restored)?;
+        github_integration::retain_device_settings(restored, current)?;
     }
     for (select, insert) in [
         (

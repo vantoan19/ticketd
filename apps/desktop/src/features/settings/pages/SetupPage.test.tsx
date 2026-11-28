@@ -21,13 +21,16 @@ import { agentSkillsClient, type AgentSkill } from "@/lib/api/agent-skills";
 import { client } from "@/lib/api/client";
 import { cliClient, type CliStatus } from "@/lib/api/cli";
 import { notificationClient } from "@/lib/api/notifications";
+import { getGithubIntegration } from "@/lib/api/github";
 import { sourcesClient } from "@/lib/api/sources";
 import { workspaceClient } from "@/lib/api/workspace";
 import { resetNotificationPermission } from "@/lib/notification-permission";
 import { loadPreferences } from "@/lib/preferences";
 import { WorkspaceChangeProvider } from "@/lib/workspace-change";
 import type { SyncStatus } from "@/lib/sync-api";
-import { githubSource } from "@/test/source-fixtures";
+import { githubSource, githubIntegration } from "@/test/source-fixtures";
+
+vi.mock("@/lib/api/github", () => ({ getGithubIntegration: vi.fn() }));
 
 vi.mock("@tauri-apps/api/core", () => ({
   invoke: vi.fn().mockResolvedValue(104857600),
@@ -118,17 +121,6 @@ const agentUpdate = {
   editing_agent: "codex",
   reported_at: "2026-11-25T10:00:00Z",
 };
-const connectedSource = {
-  ...githubSource,
-  saved: {
-    id: "github",
-    name: "GitHub",
-    provider: "github",
-    config: {},
-    account: "octo",
-    saved_at: "2026-01-01T00:00:00Z",
-  },
-};
 const synced = {
   connection: "connected",
   provider: "google_drive",
@@ -197,6 +189,10 @@ beforeEach(() => {
     { reference: "T-KQ27" },
   ] as never);
   vi.mocked(sourcesClient.list).mockResolvedValue([]);
+  vi.mocked(getGithubIntegration).mockResolvedValue({
+    ...githubIntegration("not_signed_in"),
+    repositories: [],
+  });
   vi.mocked(notificationClient.permission).mockResolvedValue({
     state: "not_asked",
     reported: true,
@@ -221,7 +217,8 @@ const settle = () => act(async () => {});
 
 test("every step ticks from what is true on this computer, and the row counts them", async () => {
   vi.mocked(client.firstAgentUpdate).mockResolvedValue(agentUpdate);
-  vi.mocked(sourcesClient.list).mockResolvedValue([connectedSource]);
+  vi.mocked(sourcesClient.list).mockResolvedValue([githubSource]);
+  vi.mocked(getGithubIntegration).mockResolvedValue(githubIntegration());
   vi.mocked(notificationClient.permission).mockResolvedValue(allowed);
   render(<Settings sync={synced} />);
   await settle();
@@ -256,7 +253,8 @@ test("every step ticks from what is true on this computer, and the row counts th
 
 test("the finished line opens the repository and the maintainer's Ko-fi profile", async () => {
   vi.mocked(client.firstAgentUpdate).mockResolvedValue(agentUpdate);
-  vi.mocked(sourcesClient.list).mockResolvedValue([connectedSource]);
+  vi.mocked(sourcesClient.list).mockResolvedValue([githubSource]);
+  vi.mocked(getGithubIntegration).mockResolvedValue(githubIntegration());
   vi.mocked(notificationClient.permission).mockResolvedValue(allowed);
   render(<Settings sync={synced} />);
   await settle();
@@ -595,7 +593,8 @@ test("a hidden checklist's row is gone the next time Settings opens", async () =
 
 test("once every step ticked, the row stays until Settings is closed and then leaves for good", async () => {
   vi.mocked(client.firstAgentUpdate).mockResolvedValue(agentUpdate);
-  vi.mocked(sourcesClient.list).mockResolvedValue([connectedSource]);
+  vi.mocked(sourcesClient.list).mockResolvedValue([githubSource]);
+  vi.mocked(getGithubIntegration).mockResolvedValue(githubIntegration());
   vi.mocked(notificationClient.permission).mockResolvedValue(allowed);
   const first = render(<Settings sync={synced} />);
   await settle();
@@ -611,7 +610,8 @@ test("once every step ticked, the row stays until Settings is closed and then le
 
 test("after finishing, a broken step goes to the pages that need it and never brings the row back", async () => {
   vi.mocked(client.firstAgentUpdate).mockResolvedValue(agentUpdate);
-  vi.mocked(sourcesClient.list).mockResolvedValue([connectedSource]);
+  vi.mocked(sourcesClient.list).mockResolvedValue([githubSource]);
+  vi.mocked(getGithubIntegration).mockResolvedValue(githubIntegration());
   vi.mocked(notificationClient.permission).mockResolvedValue(allowed);
   const first = render(<Settings sync={synced} />);
   await settle();

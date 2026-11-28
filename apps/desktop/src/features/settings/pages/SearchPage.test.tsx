@@ -206,7 +206,7 @@ test("a query with no match says so, offers other words and no shortcuts", () =>
   expect(openSetting).not.toHaveBeenCalled();
 });
 
-test("a connection is a result on Ticket sources, and its own rows open its page", () => {
+test("GitHub has one result on Ticket sources and its repositories have their own result", () => {
   sourceList = [githubSource];
   const openSetting = vi.fn();
   render(<Harness openSetting={openSetting} query="github" />);
@@ -215,8 +215,8 @@ test("a connection is a result on Ticket sources, and its own rows open its page
   expect(first.textContent).toContain("Connections › Ticket sources");
   fireEvent.click(first);
   expect(openSetting).toHaveBeenLastCalledWith("ticket-sources", "GitHub");
-  fireEvent.click(screen.getByRole("link", { name: /^Discovery/ }));
-  expect(openSetting).toHaveBeenLastCalledWith("source-github", "Discovery");
+  fireEvent.click(screen.getByRole("link", { name: /^Repositories/ }));
+  expect(openSetting).toHaveBeenLastCalledWith("source-github", "Repositories");
 });
 
 test("arrows and Enter still drive the results after the nav replaces the search field", () => {
@@ -239,10 +239,11 @@ test("arrows and Enter still drive the results after the nav replaces the search
 test("a selection past the end of a shortened result list falls back to the last result", () => {
   const second: SourceEntry = {
     ...githubSource,
+    connector: { ...githubSource.connector, provider: "work-issues" },
     saved: {
-      id: "github-work",
+      id: "work-issues",
       name: "GitHub work",
-      provider: "github",
+      provider: "work-issues",
       config: {},
       account: "octo",
       saved_at: "2026-01-01T00:00:00Z",

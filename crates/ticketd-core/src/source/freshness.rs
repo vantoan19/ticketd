@@ -20,6 +20,7 @@
 //! ticket's content, status or ownership, and it has no grace period.
 //! A rate limit is *delayed*, not unavailable.
 
+use super::github_integration::GithubRefreshJob;
 use std::collections::{BTreeSet, HashSet};
 
 use chrono::{DateTime, Datelike, SecondsFormat, TimeDelta, Timelike, Utc};
@@ -178,6 +179,29 @@ pub(crate) fn migrate_read_partitions(connection: &Connection) -> Result<(), Err
     Ok(())
 }
 
+pub(super) fn scoped_partition(partition: &str, scope: &str) -> String {
+    let mut partition = partition.replace('%', "%25").replace('?', "%3F");
+    if !scope.is_empty() {
+        partition.push('?');
+        partition.push_str(scope);
+    }
+    partition
+}
+
+// Both refresh jobs persist the same observations. Repository rules keep their
+// own status rows and lifetimes, independently of extension connections.
+fn status_location(id: &str) -> (&'static str, &'static str, &str) {
+    match GithubRefreshJob::parse(id) {
+        Some(GithubRefreshJob::Rule(repository)) => {
+            ("github_repository_status", "repository", repository)
+        }
+        Some(GithubRefreshJob::Tracked(_) | GithubRefreshJob::Legacy(_)) => {
+            ("github_tracked_status", "job_id", id)
+        }
+        None => ("source_connection_status", "connection_id", id),
+    }
+}
+
 /// The parts of `provider` that have been read. For a source read before they
 /// were kept, those are the parts tickets were already imported from
 /// (`imported`): a part nothing came from is read again as if for the first time.
@@ -186,10 +210,11 @@ pub(crate) fn read_partitions(
     connection_id: &str,
     imported: Option<&HashSet<String>>,
 ) -> Result<HashSet<String>, Error> {
+    let (table, key, id) = status_location(connection_id);
     let stored: Option<(Option<String>, bool)> = connection
         .query_row(
-            "SELECT read_partitions, last_refreshed_at IS NOT NULL FROM source_connection_status WHERE connection_id = ?1",
-            [connection_id],
+            &format!("SELECT read_partitions, last_refreshed_at IS NOT NULL FROM {table} WHERE {key} = ?1"),
+            [id],
             |row| Ok((row.get(0)?, row.get(1)?)),
         )
         .optional()?;
@@ -226,6 +251,7 @@ pub(crate) fn record_run(
     read_before: &HashSet<String>,
     now: &str,
 ) -> Result<(), Error> {
+    let (table, key, id) = status_location(&run.connection_id);
     match &run.failure {
         None => {
             let read: BTreeSet<&String> = run
@@ -240,25 +266,25 @@ pub(crate) fn record_run(
             let read = serde_json::to_string(&read)?;
             let partial = (!run.skipped.is_empty()).then(|| run.skipped.join("; "));
             connection.execute(
-                "INSERT INTO source_connection_status (connection_id, last_attempt_at, last_refreshed_at, partial_message, last_checked_tickets, read_partitions) VALUES (?1, ?2, ?2, ?3, ?4, ?5) \
-                 ON CONFLICT(connection_id) DO UPDATE SET last_attempt_at = ?2, last_refreshed_at = ?2, \
+                &format!("INSERT INTO {table} ({key}, last_attempt_at, last_refreshed_at, partial_message, last_checked_tickets, read_partitions) VALUES (?1, ?2, ?2, ?3, ?4, ?5) \
+                 ON CONFLICT({key}) DO UPDATE SET last_attempt_at = ?2, last_refreshed_at = ?2, \
                  error_code = NULL, error_message = NULL, failing_since = NULL, \
-                 retry_after = CASE WHEN julianday(source_connection_status.retry_after) <= julianday(?2) \
-                             THEN NULL ELSE source_connection_status.retry_after END, \
+                 retry_after = CASE WHEN julianday({table}.retry_after) <= julianday(?2) \
+                             THEN NULL ELSE {table}.retry_after END, \
                  partial_message = ?3, last_checked_tickets = ?4, \
                  read_partitions = ?5 \
-                 WHERE source_connection_status.last_attempt_at IS NULL OR source_connection_status.last_attempt_at <= ?2",
-                params![run.connection_id, now, partial, run.checked_tickets, read],
+                 WHERE {table}.last_attempt_at IS NULL OR {table}.last_attempt_at <= ?2"),
+                params![id, now, partial, run.checked_tickets, read],
             )?;
         }
         Some(failure) => {
             connection.execute(
-                "INSERT INTO source_connection_status (connection_id, last_attempt_at, error_code, error_message, failing_since) \
+                &format!("INSERT INTO {table} ({key}, last_attempt_at, error_code, error_message, failing_since) \
                  VALUES (?1, ?2, ?3, ?4, ?2) \
-                 ON CONFLICT(connection_id) DO UPDATE SET last_attempt_at = ?2, error_code = ?3, error_message = ?4, \
+                 ON CONFLICT({key}) DO UPDATE SET last_attempt_at = ?2, error_code = ?3, error_message = ?4, \
                  failing_since = COALESCE(failing_since, ?2), partial_message = NULL \
-                 WHERE source_connection_status.last_attempt_at IS NULL OR source_connection_status.last_attempt_at <= ?2",
-                params![run.connection_id, now, failure.code, failure.message],
+                 WHERE {table}.last_attempt_at IS NULL OR {table}.last_attempt_at <= ?2"),
+                params![id, now, failure.code, failure.message],
             )?;
         }
     }
@@ -270,11 +296,14 @@ pub(super) fn record_hold(
     id: &str,
     hold: &RateLimitHold,
 ) -> Result<(), Error> {
+    let (table, key, id) = status_location(id);
     connection.execute(
-        "INSERT INTO source_connection_status (connection_id, retry_after)
+        &format!(
+            "INSERT INTO {table} ({key}, retry_after)
          VALUES (?1, ?2)
-         ON CONFLICT(connection_id) DO UPDATE SET retry_after = excluded.retry_after
-         WHERE retry_after IS NULL OR retry_after < excluded.retry_after",
+         ON CONFLICT({key}) DO UPDATE SET retry_after = excluded.retry_after
+         WHERE retry_after IS NULL OR retry_after < excluded.retry_after"
+        ),
         params![id, hold.until],
     )?;
     Ok(())
@@ -344,15 +373,28 @@ impl Workspace {
              FROM (SELECT provider FROM source_status UNION SELECT provider FROM external_identities) p
              LEFT JOIN source_status s ON s.provider = p.provider
                AND NOT EXISTS (SELECT 1 FROM source_connections c WHERE c.provider = p.provider)
+             WHERE p.provider <> 'github' OR NOT EXISTS (SELECT 1 FROM github_repository_rules UNION ALL SELECT 1 FROM github_tracked_status)
+             UNION ALL
+             SELECT 'github', s.last_attempt_at, s.last_refreshed_at, s.error_code, s.error_message,
+                    s.failing_since, s.retry_after, s.partial_message, s.last_checked_tickets, NULL
+             FROM (SELECT 1 WHERE EXISTS (SELECT 1 FROM github_repository_rules UNION ALL SELECT 1 FROM github_tracked_status))
+             LEFT JOIN (
+                SELECT * FROM github_repository_status UNION ALL SELECT * FROM github_tracked_status
+                ORDER BY last_attempt_at DESC, repository LIMIT 1
+             ) s
              ORDER BY 1, 10",
         )?;
-        let sources = super::configured_sources(&self.connection)?;
+        let sources = super::refresh_sources_configuration(&self.connection)?;
         let mut counts = std::collections::HashMap::<(String, Option<String>), (u32, u32)>::new();
         for ticket in super::tracking::tracked(&self.connection, None)? {
             let id = ticket
                 .connection(&sources)
                 .map(|source| source.saved.id.clone());
-            let count = counts.entry((ticket.provider, id.clone())).or_default();
+            let public_id = id
+                .as_ref()
+                .filter(|id| GithubRefreshJob::parse(id).is_none())
+                .cloned();
+            let count = counts.entry((ticket.provider, public_id)).or_default();
             count.0 += 1;
             if id.is_none()
                 || ticket
@@ -403,6 +445,7 @@ impl Workspace {
             .collect::<Result<Vec<_>, _>>()?;
         rows.retain(|status| {
             status.connection_id.is_some()
+                || status.provider == super::GITHUB_INTEGRATION
                 || status.tracked_tickets > 0
                 || !sources
                     .iter()
@@ -413,17 +456,25 @@ impl Workspace {
 
     pub(super) fn source_schedule(&self) -> Result<Vec<(String, u64)>, Error> {
         self.read(|workspace| {
-            let mut statement = workspace.connection.prepare(
-                "SELECT c.id, CAST(strftime('%s', s.retry_after) AS INTEGER)
-                 FROM source_connections c LEFT JOIN source_connection_status s ON s.connection_id = c.id
-                 ORDER BY c.rowid",
+            let connection = &workspace.connection;
+            let mut jobs = super::refresh_sources_configuration(connection)?
+                .into_iter().map(|job| job.saved.id).collect::<Vec<_>>();
+            // A migration may need an account check even when none of its rules
+            // has been verified yet and there are no tracked issues to refresh.
+            let mut statement = connection.prepare_cached(
+                "SELECT DISTINCT r.repository FROM github_repository_rules r
+                 JOIN github_legacy_repository_rules l USING(repository) WHERE l.resolved = 0",
             )?;
-            Ok(statement
-                .query_map([], |row| {
-                    let hold: Option<i64> = row.get(1)?;
-                    Ok((row.get(0)?, hold.and_then(|time| u64::try_from(time).ok()).unwrap_or(0)))
-                })?
-                .collect::<Result<Vec<_>, _>>()?)
+            let pending = statement.query_map([], |row| row.get::<_, String>(0))?
+                .collect::<Result<Vec<_>, _>>()?;
+            jobs.extend(pending.iter().map(|rule| GithubRefreshJob::Rule(rule).id()));
+            jobs.into_iter().map(|job| {
+                let (table, key, id) = status_location(&job);
+                let hold = connection.prepare_cached(&format!(
+                    "SELECT CAST(strftime('%s', retry_after) AS INTEGER) FROM {table} WHERE {key} = ?1",
+                ))?.query_row([id], |row| row.get::<_, Option<i64>>(0)).optional()?.flatten();
+                Ok((job, hold.and_then(|time| u64::try_from(time).ok()).unwrap_or(0)))
+            }).collect()
         })
     }
 
@@ -431,7 +482,9 @@ impl Workspace {
     /// asked not to be contacted again. `None` when no hold is recorded.
     pub fn source_hold_until(&self) -> Result<Option<u64>, Error> {
         let epoch: Option<i64> = self.connection.query_row(
-            "SELECT MAX(CAST(strftime('%s', retry_after) AS INTEGER)) FROM source_connection_status WHERE retry_after IS NOT NULL",
+            "SELECT MAX(CAST(strftime('%s', retry_after) AS INTEGER))
+             FROM (SELECT retry_after FROM source_connection_status UNION ALL SELECT retry_after FROM github_repository_status UNION ALL SELECT retry_after FROM github_tracked_status)
+             WHERE retry_after IS NOT NULL",
             [],
             |row| row.get(0),
         )?;

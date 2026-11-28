@@ -16,6 +16,7 @@ import { usePlanView } from "@/features/plans/usePlanView";
 import type { Ticket } from "@/lib/api/client";
 import type { Plan } from "@/lib/api/plans";
 import { plansClient } from "@/lib/api/plans";
+import { githubIntegration, githubSource } from "@/test/source-fixtures";
 import { bridgeDefault, unknownCommands } from "@/test/bridge-defaults";
 import { fakeChangeSignal } from "@/lib/workspace-reads/fake-signal";
 import { deferred } from "@/lib/workspace-reads/test-support";
@@ -415,4 +416,68 @@ test("creating a Ticket reloads the list once: its write report already moves th
   );
   for (let turn = 0; turn < 5; turn += 1) await act(async () => {});
   expect(lists() - before).toBe(1);
+});
+
+function SourceCatalog() {
+  const workspace = useTicketWorkspace(vi.fn(), vi.fn());
+  return (
+    <>
+      <output aria-label="source name">
+        {workspace.sourceEntries[0]?.connector.name}
+      </output>
+      <output aria-label="GitHub login">
+        {workspace.githubIntegration?.hosts[0]?.login}
+      </output>
+      {workspace.githubCatalogFailure && (
+        <button type="button" onClick={workspace.readSourceEntries}>
+          Retry GitHub read
+        </button>
+      )}
+    </>
+  );
+}
+
+test("source reads use workspace changes, retain the last answer, and can be retried", async () => {
+  const signal = fakeChangeSignal();
+  let failed = false;
+  let integration = githubIntegration();
+  const defaults = bridge.invoke.getMockImplementation();
+  bridge.invoke.mockImplementation(async (command: string, args) => {
+    if (command === "list_sources") return [githubSource];
+    if (command === "get_github_integration") {
+      if (failed) throw { code: "failed", message: "database is busy" };
+      return integration;
+    }
+    return defaults?.(command, args);
+  });
+  render(
+    <TestOpenTicket ticket={ticket} signal={signal}>
+      <SourceCatalog />
+    </TestOpenTicket>,
+  );
+  expect(await screen.findByText("octo")).toBeTruthy();
+  expect(screen.getByLabelText("source name").textContent).toBe("GitHub");
+  const catalogReads = reads("list_sources");
+  const githubReads = reads("get_github_integration");
+  act(() => window.dispatchEvent(new Event("focus")));
+  await turns();
+  expect(reads("list_sources")).toBe(catalogReads);
+  expect(reads("get_github_integration")).toBe(githubReads);
+
+  failed = true;
+  act(() => signal.change());
+  const retry = await screen.findByRole("button", {
+    name: "Retry GitHub read",
+  });
+  expect(screen.getByLabelText("GitHub login").textContent).toBe("octo");
+  failed = false;
+  integration = {
+    ...integration,
+    hosts: integration.hosts.map((host) => ({ ...host, login: "work" })),
+  };
+  fireEvent.click(retry);
+  expect(await screen.findByText("work")).toBeTruthy();
+  expect(
+    screen.queryByRole("button", { name: "Retry GitHub read" }),
+  ).toBeNull();
 });

@@ -1160,16 +1160,15 @@ The code lives in `ticketd_core::source`, from the inside out:
 - **Engine** (`engine.rs`): the only caller of connectors. It validates
   configuration, walks pages with a progress guard, de-duplicates by external
   identity, bounds previews, and holds no database handle.
-- **Connectors** translate tracker data. The built-in GitHub connector uses a
-  `gh` process seam for repository picker results with the active github.com
-  login. Operations and configurations still being migrated use the
-  `HttpTransport` seam. Both have deterministic fixtures.
+- **Connectors** translate tracker data. The built-in GitHub connector uses
+  a bounded, non-interactive `gh` process for each GitHub request. It shares a
+  bounded conditional REST cache scoped to the verified credential, batches
+  issue conversation probes with GraphQL, and pauses a rate-limited host and
+  API bucket until reset. Issue publication is dispatched once.
   [ADR 0028](adr/0028-github-goes-through-the-github-cli.md) describes the move
   to one GitHub integration through the GitHub CLI. Linear implements the
   Rust SDK's `Extension` trait and uses the same process adapter as locally
-  installed or linked extensions. GitHub uses the person's own credential
-  (environment token or `gh auth token`), which is never stored, exported,
-  backed up, logged, or sent to any host other than the API.
+  installed or linked extensions.
 - **Workflows** (`source/tracking.rs`, `publication.rs`, `takeover.rs`,
   `conversation.rs`, `freshness.rs`, `connect_source.rs`, and `mod.rs` for saved configuration):
   methods on `Workspace` that call the engine first and then write in one short
@@ -1182,29 +1181,42 @@ instructions, settings fields and summary, required target, and network hosts.
 Clients render those descriptions using their own components. Saving a source
 caches its description locally so existing tickets can still name their source.
 
-Each device stores its named source connections in `source_connections`. The
-verified account and site are unique per provider. A connection check returns
-the account, site, discovery parts, filters, and publication destinations. The
-core caches successful answers for offline routing and previews. GitHub can
-use the active GitHub CLI account, a named account already signed in with it,
-or a connection-specific token override such as `TICKETD_SOURCE_GITHUB_2_TOKEN`.
-GitHub binds a checked connection to the authenticated account's numeric ID.
-A same-site authenticated check for the saved login upgrades an older binding.
-Each request that can change authority checks the saved account and site first.
-When upgrading a pre-connection Workspace that used GitHub Enterprise, keep its
-`TICKETD_GITHUB_API_URL` configured for the first open. The old format recorded
-no API URL. The upgrade uses the configured endpoint first, then a distinct
-known issue host if there is one. GitHub recovery uses tracker time recorded
-before dispatch. For an older attempt with no tracker time, only a complete
-listing with no issues in its destination can clear the attempt as not created.
-A listing with issues can still supply candidates for review.
+Extensions store their named, device-local source connections in
+`source_connections`. A connection check returns the verified account, site,
+discovery parts, filters and publication destinations. The core caches those
+answers for offline routing and previews.
 
-External identity uses the provider and its stable opaque ID. A device refreshes a ticket
-through its local discovery connection, or the first saved connection that
-covers the issue's part. Tickets with no covering connection keep their cached
-source content. Connection settings, discovery affinity and refresh scheduling
-stay off portable backups, SQLite exports, and Workspace sync. A restore keeps
-the destination device's settings. The private copy taken before a migration
+The built-in GitHub integration stores issue import rules and refresh coverage
+per repository. A Project may choose a GitHub CLI login for a repository host.
+The host and optional login bind the engine to one checked credential for a
+workflow. Ticketd keeps tokens out of storage, exports, backups, logs and
+diagnostics. Account choices store the login name. Publication additionally
+records the verified account ID, original site, and tracker clock before
+dispatch so recovery can verify that same account. For an older attempt with
+no tracker clock, only a complete listing with no issues in its destination
+can clear the attempt as not created. A listing with issues can still supply
+candidates for review.
+
+Format 106 copies GitHub rules, refresh observations, ticket bindings, and
+original publication context from Source connections. It leaves ticket
+identity and authority in place. When legacy connections overlap, their
+observations remain separate until the account and filters match the selected
+rule. Only matching observations can establish discovery coverage. An active-login check after migration proposes or applies Project
+login choices. Conflicting filters, unverifiable accounts, and repositories
+without an active Project can keep their migration notices until reviewed.
+The migration ladder performs its writes without starting the GitHub CLI.
+
+External identity uses the provider and its stable opaque ID. A GitHub issue
+uses its saved repository rule when one applies. Device-local ticket bindings
+keep previously tracked issues current after publication or a repository
+transfer outside the import rules. A refresh routed through a ticket binding
+reads tracked issues only. An explicit repository removal stops refresh for
+its tickets and keeps their cached source content and local work. An extension
+uses the local discovery connection or the first saved connection that covers
+the issue's part.
+Repository rules, Project login choices, extension settings, discovery
+affinity and refresh scheduling stay off portable backups, SQLite exports and
+Workspace sync. A restore keeps the destination device's settings. The private copy taken before a migration
 keeps the pre-migration Workspace intact.
 
 An imported ticket stores three things apart, each keyed by the ticket:

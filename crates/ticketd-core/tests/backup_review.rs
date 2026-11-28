@@ -1,3 +1,6 @@
+#[path = "support/old_workspace.rs"]
+mod old_workspace;
+
 use rusqlite::Connection;
 use ticketd_core::FORMAT_VERSION;
 use ticketd_core::{
@@ -140,6 +143,7 @@ fn attachment_preview_backups_inspect_and_restore_with_their_chat_data() {
         let backup = dir.path().join(format!("preview-{version}.sqlite3"));
         std::fs::copy(&source, &backup).unwrap();
         let fixture = Connection::open(&backup).unwrap();
+        old_workspace::remove_github_integration(&fixture);
         fixture
             .execute_batch("ALTER TABLE documents DROP COLUMN summary")
             .unwrap();

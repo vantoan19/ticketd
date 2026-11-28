@@ -64,17 +64,39 @@ and `linked_tickets`. If several connections match, pass `--connection ID` for
 preview and confirmation. If the effect changed, get a new preview. An
 unconfigured preview gives the `provider` and `repository` to use with
 `ticketd source add PROVIDER --set repositories=OWNER/NAME` before previewing again.
-For GitHub Enterprise Server, set `TICKETD_GITHUB_API_URL` to your API address
-(for example `https://git.example.com/api/v3`) before adding and using the connection.
 
-If you selected a GitHub CLI account and its login changes, sign in to `gh` with
-the new login and run `ticketd source CONNECTION edit --set account=NEW_LOGIN`.
-Ticketd keeps the connection when GitHub confirms the same user ID.
+## Configure GitHub issue import
+
+GitHub has one device integration named `github`. Sign in with the GitHub CLI,
+including `--hostname HOST` for an Enterprise host. Project login choices
+select another login already signed in on that host.
+
+```sh
+gh auth login --hostname github.com --web
+ticketd source github show
+ticketd source github repository github.com/OWNER/NAME --label bug --preview
+ticketd source github repository github.com/OWNER/NAME --label bug
+ticketd source github refresh
+ticketd source github project-login PROJECT_ID --host github.com --login LOGIN
+ticketd source github project-login PROJECT_ID --host github.com --clear
+ticketd source github remove github.com/OWNER/NAME
+```
+
+For GitHub backfill, use `project connect-source PROJECT_ID` with `--preview`
+and then `--expect FINGERPRINT`. A GitHub publication uses the ticket's Project
+remote or a saved repository. Use `--provider github` to choose GitHub when
+several sources support publication. A published ticket continues to refresh
+when its Project remote has no import rule. Add a rule to bring in other issues.
+
+```sh
+ticketd source publish T-KQ12 --provider github --preview
+ticketd source publish T-KQ12 --provider github --expect FINGERPRINT
+```
 
 ## Recover a legacy GitHub issue link
 
-If refresh asks you to confirm a legacy ticket's GitHub host, connect the
-GitHub source to the host where that issue belongs. If the ticket is in Trash,
+If refresh asks you to confirm a legacy ticket's GitHub host, sign into the
+GitHub CLI on the host where that issue belongs. If the ticket is in Trash,
 run `ticketd restore T-KQ12` first. Use the issue's current full URL.
 
 ```sh
@@ -84,47 +106,31 @@ ticketd source reconcile-github T-KQ12 --issue https://github.com/OWNER/NAME/iss
 GitHub must confirm the saved stable issue ID at the URL you supply. A new
 repository or issue number is accepted when that ID stays the same. The command
 repairs the existing ticket's source link and keeps its current ownership.
-Run `ticketd source CONNECTION refresh --ticket T-KQ12` afterward if GitHub still owns the
+Run `ticketd source github refresh --ticket T-KQ12` afterward if GitHub still owns the
 ticket. If discovery held a separate issue with the same ID on another GitHub
 host, refresh that host again after confirming the legacy ticket's link.
 
 ## Recover an unresolved publication
 
-Run `ticketd source resolve T-KQ12` to review the attempt. Recovery uses the
-original connection when available. For GitHub, the connection must use the
-same hostname and port that received the create request.
+Run `ticketd source resolve T-KQ12` to review the attempt. GitHub recovery
+verifies the original GitHub account on the hostname and port that received
+the create request. It can use the active GitHub CLI credential, including one
+supplied by `GH_TOKEN` or `GH_ENTERPRISE_TOKEN`, only if its account ID matches
+the one recorded before sending. Extension recovery uses the original connection.
 
-For an older attempt with an unknown host or port, verify which site received
-the original request. Connect the source to that site and supply its hostname,
-such as `github.com`. For a nondefault port use `hostname:port`, without a
-protocol or repository path.
-
-```sh
-ticketd source resolve T-KQ12 --confirm-host github.com
-ticketd source resolve T-KQ12
-```
-
-For GitHub Enterprise Server, set `TICKETD_GITHUB_API_URL` to the original
-site's API URL for both confirmation and recovery.
+For an older GitHub attempt with an unknown host or port, independently verify
+the original site and record it using `--confirm-host`. For a nondefault port
+use `hostname:port`.
 
 ```sh
-TICKETD_GITHUB_API_URL=https://git.example.com:8443/api/v3 \
-  ticketd source resolve T-KQ12 --confirm-host git.example.com:8443
+ticketd source resolve T-KQ12 --confirm-host git.example.com:8443
+ticketd source resolve T-KQ12 --issue owner/repo#7
 ```
 
-`--confirm-host` records the site locally. If the original GitHub connection
-is unavailable and you have verified the issue, explicitly choose a saved
-GitHub connection on the original site.
-
-```sh
-ticketd source resolve T-KQ12 --issue owner/repo#7 --using-connection github
-```
-
-GitHub verifies the issue in the original repository. When the create response
-didn't record an issue, the selected account must match the issue's creator and
-the issue's date must be consistent with the attempt. The usual review for
-different content still applies. Confirming that nothing was created requires
-the original connection.
+GitHub verifies the issue in the original repository. A legacy attempt without
+a recorded login can attach a verified issue if its creator and creation time
+match the evidence. Confirming that nothing was created requires the original
+login and a complete read of the recovery window.
 
 ## JSON output
 

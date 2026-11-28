@@ -1,3 +1,5 @@
+import type { GithubIntegration } from "@/lib/api/github";
+import { lastGithubRefresh } from "./github-repositories";
 import type { SourceEntry, SourceStatus } from "@/lib/api/sources";
 import { relativeDateTime } from "@/lib/format";
 
@@ -24,7 +26,7 @@ export type SourceRow = {
   bringsIn: string | null;
   /** "Refreshed 4 min ago", when the source has something to refresh. */
   refreshed: string | null;
-  entry: SourceEntry;
+  entry: SourceEntry | null;
 };
 
 const BUILT_IN = new Set(["github", "linear"]);
@@ -94,36 +96,89 @@ function statusOf(
   return "Connected";
 }
 
-/** One row per connection, plus one for each source with no connection yet. */
+function githubRow(
+  integration: GithubIntegration | null,
+  now: number,
+): SourceRow {
+  const repositories = integration?.repositories ?? [];
+  const hosts = integration?.hosts ?? [];
+  const repoHosts = new Set(
+    repositories.map((row) => row.repository.split("/")[0]?.toLowerCase()),
+  );
+  const relevant = hosts.filter(({ host }) =>
+    repoHosts.has(host.toLowerCase()),
+  );
+  const logins = [
+    ...new Set(hosts.flatMap(({ login }) => (login ? [login] : []))),
+  ];
+  let status: SourceRowStatus = "Not connected";
+  if (relevant.some(({ state }) => state === "not_signed_in"))
+    status = "Needs sign-in";
+  else if (
+    relevant.some(
+      ({ state }) => state === "unavailable" || state === "not_installed",
+    )
+  )
+    status = "Unavailable";
+  else if (relevant.some(({ state }) => state === "connected"))
+    status = "Connected";
+  const latest = lastGithubRefresh(repositories);
+  return {
+    id: "github",
+    name: "GitHub",
+    origin: "Built in",
+    development: false,
+    status,
+    signsInWith: (!repositories.length && logins.join(", ")) || "Your gh login",
+    bringsIn: repositories.length
+      ? `${repositories.length} ${plural("repository", repositories.length)}`
+      : null,
+    refreshed: latest
+      ? `Refreshed ${relativeDateTime(latest, now)}`
+      : "Not refreshed yet",
+    entry: null,
+  };
+}
+
+/** GitHub has one integration. Other sources show each saved connection. */
 export function sourceRows(
   entries: readonly SourceEntry[],
   health: readonly SourceStatus[],
+  github: GithubIntegration | null,
   now = Date.now(),
 ): SourceRow[] {
-  return entries.map((entry) => {
-    const { saved, connector } = entry;
-    const id = saved?.id ?? connector.provider;
-    const status = health.find((item) =>
-      saved?.id
-        ? item.connection_id === saved.id
-        : item.provider === connector.provider && !item.connection_id,
-    );
-    const brings = saved ? bringsIn(entry) : null;
-    return {
-      id,
-      name: saved?.name ?? connector.name,
-      origin: BUILT_IN.has(connector.provider) ? "Built in" : "Custom",
-      development: entry.development === true,
-      status: statusOf(entry, status),
-      signsInWith: signsInWith(entry),
-      bringsIn: brings,
-      refreshed:
-        saved && !entry.unavailable
-          ? status?.last_refreshed_at
-            ? `Refreshed ${relativeDateTime(status.last_refreshed_at, now)}`
-            : "Not refreshed yet"
-          : null,
-      entry,
-    };
-  });
+  const rows: SourceRow[] = entries
+    .filter(({ connector }) => connector.provider !== "github")
+    .map((entry) => {
+      const { saved, connector } = entry;
+      const id = saved?.id ?? connector.provider;
+      const status = health.find((item) =>
+        saved?.id
+          ? item.connection_id === saved.id
+          : item.provider === connector.provider && !item.connection_id,
+      );
+      const brings = saved ? bringsIn(entry) : null;
+      return {
+        id,
+        name: saved?.name ?? connector.name,
+        origin: BUILT_IN.has(connector.provider) ? "Built in" : "Custom",
+        development: entry.development === true,
+        status: statusOf(entry, status),
+        signsInWith: signsInWith(entry),
+        bringsIn: brings,
+        refreshed:
+          saved && !entry.unavailable
+            ? status?.last_refreshed_at
+              ? `Refreshed ${relativeDateTime(status.last_refreshed_at, now)}`
+              : "Not refreshed yet"
+            : null,
+        entry,
+      };
+    });
+  if (
+    github ||
+    entries.some(({ connector }) => connector.provider === "github")
+  )
+    rows.unshift(githubRow(github, now));
+  return rows;
 }

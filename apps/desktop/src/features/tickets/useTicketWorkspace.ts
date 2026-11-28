@@ -1,3 +1,4 @@
+import { getGithubIntegration } from "@/lib/api/github";
 import {
   useCallback,
   useEffect,
@@ -31,7 +32,7 @@ import {
   useOnWorkspaceChange,
   useWorkspaceChange,
 } from "@/lib/workspace-change";
-import { useWrote } from "@/lib/workspace-reads";
+import { read, updateRead, useRead, useWrote } from "@/lib/workspace-reads";
 import type { MentionTarget } from "./Backlinks";
 export const PAGE_SIZE = 50;
 
@@ -53,6 +54,18 @@ async function readPages(filter: FindFilter, pages: number) {
   // A ticket that moved between reads is listed once.
   return [...new Map(tickets.map((ticket) => [ticket.id, ticket])).values()];
 }
+const sourceCatalogRead = read({
+  key: "source-catalog",
+  call: sourcesClient.list,
+  failure: "load ticket sources",
+});
+const githubIntegrationRead = read({
+  key: "github-integration",
+  call: getGithubIntegration,
+  failure: "load GitHub settings",
+});
+const EMPTY_SOURCES: SourceEntry[] = [];
+
 type RefreshOptions = { reportFailure?: boolean };
 type View = "tickets" | "projects" | "plans" | "settings" | "inbox";
 /**
@@ -123,16 +136,21 @@ export function useTicketWorkspace(
   // "all", "local", or a provider id such as "github".
   const [source, setSourceFilter] = useState("all");
   // The connectors and what is saved for each. The source filter appears once one is saved.
-  const [
-    { entries: sourceEntries, observation: sourceCatalogObservation },
-    setSourceCatalog,
-  ] = useState({ entries: [] as SourceEntry[], observation: 0 });
-  const sourceRead = useRef(0);
+  const sourceCatalog = useRead(sourceCatalogRead, undefined);
+  const githubCatalog = useRead(githubIntegrationRead, undefined);
+  const sourceEntries = sourceCatalog.value ?? EMPTY_SOURCES;
+  const githubIntegration = githubCatalog.value ?? null;
+  const retryCatalog = sourceCatalog.retry;
+  const retryGithub = githubCatalog.retry;
+  const readSourceEntries = useCallback(() => {
+    void Promise.all([retryCatalog(), retryGithub()]);
+  }, [retryCatalog, retryGithub]);
   const configuredSources = [
     ...new Set(
       sourceEntries
         .filter((entry) => entry.saved)
-        .map((entry) => entry.connector.provider),
+        .map((entry) => entry.connector.provider)
+        .concat(githubIntegration?.repositories.length ? ["github"] : []),
     ),
   ];
   const [sourceCounts, setSourceCounts] = useState<SourceCounts | null>(null);
@@ -355,23 +373,6 @@ export function useTicketWorkspace(
     currentRefresh.current = refresh;
   }, [refresh]);
   const refreshCurrentScope = useCallback(() => currentRefresh.current(), []);
-  const readSourceEntries = useCallback(() => {
-    const request = ++sourceRead.current;
-    const complete = sourcesClient.list().then(
-      (entries) => {
-        if (request === sourceRead.current)
-          setSourceCatalog({ entries, observation: request });
-      },
-      () => {},
-    );
-    return { generation: request, complete };
-  }, []);
-  useEffect(() => {
-    void readSourceEntries();
-    return () => {
-      sourceRead.current += 1;
-    };
-  }, [pollTick, readSourceEntries]);
   const readSourceHealth = useCallback(
     (verified?: { connection: string; account: string }) => {
       const request = ++healthRead.current;
@@ -427,24 +428,22 @@ export function useTicketWorkspace(
   async function sourceConnectionsChanged(added?: SourceEntry) {
     const id = added?.saved?.id;
     if (!added || !id) {
-      await refresh();
+      await wrote();
       return;
     }
-    // The save already committed. Make its settings page available while the
-    // catalog read catches up. Its saved ID disables the stale Add action
-    // until Core assigns the next ID.
-    setSourceCatalog((current) => ({
-      ...current,
-      entries: [
-        ...current.entries.filter(
-          ({ connector, saved }) =>
-            connector.provider !== added.connector.provider ||
-            (saved && saved.id !== id),
-        ),
-        added,
+    // Show the saved connection immediately, including when the next read fails.
+    await wrote({
+      fills: [
+        updateRead(sourceCatalogRead, undefined, (current) => [
+          ...current.filter(
+            ({ connector, saved }) =>
+              connector.provider !== added.connector.provider ||
+              (saved && saved.id !== id),
+          ),
+          added,
+        ]),
       ],
-    }));
-    await readSourceEntries().complete;
+    });
   }
   // Next past the last shown ticket opens the next one once it has loaded.
   if (pendingNext !== null && tickets.length > pendingNext) {
@@ -646,7 +645,10 @@ export function useTicketWorkspace(
     sourceCounts,
     configuredSources,
     sourceEntries,
-    sourceCatalogObservation,
+    githubIntegration,
+    sourceCatalogFailure: sourceCatalog.failure,
+    githubCatalogFailure: githubCatalog.failure,
+    sourceCatalogLoading: sourceCatalog.status === "loading",
     readSourceEntries,
     sourceConnectionsChanged,
     sourceRefresh,

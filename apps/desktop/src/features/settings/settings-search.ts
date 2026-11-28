@@ -341,6 +341,23 @@ export function sourceEntries(
   label: string = name,
 ): SettingsEntry[] {
   const section: SettingsPageId = `source-${connection}`;
+  if (connection === "github")
+    return [
+      {
+        title: "GitHub",
+        description:
+          "Your GitHub issues arrive as tickets. Edit them in GitHub.",
+        keywords: "GitHub source sources gh login account sign in",
+        section: "ticket-sources",
+      },
+      {
+        title: "Repositories",
+        description: "Pull requests aren’t brought in.",
+        keywords:
+          "GitHub rules repository assignee labels import issue preview refresh remove filters",
+        section,
+      },
+    ];
   return [
     {
       title: label,

@@ -15,6 +15,7 @@ mod cli_status;
 mod diagnostics_commands;
 mod drive_commands;
 mod folder_probe;
+mod github_commands;
 mod notification_permission;
 mod restore_points;
 #[cfg(test)]
@@ -1545,6 +1546,8 @@ struct SourceEntry {
     connector: ticketd_core::source::SourceDescription,
     saved: Option<ticketd_core::source::SavedSource>,
     #[serde(skip_serializing_if = "Option::is_none")]
+    integration_revision: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
     next_id: Option<String>,
     /// The program behind a source a person added: what it runs and where from.
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -1579,7 +1582,15 @@ fn list_sources(
     let mut entries = Vec::new();
     for connector in engine.descriptions() {
         let provider = &connector.descriptor.provider;
-        let next_id = workspace.next_source_connection_id(provider)?;
+        let builtin = provider == ticketd_core::source::GITHUB_INTEGRATION;
+        let next_id = (!builtin)
+            .then(|| workspace.next_source_connection_id(provider))
+            .transpose()?;
+        let integration_revision = if builtin {
+            workspace.github_integration_revision()?
+        } else {
+            None
+        };
         let development = sources.is_development(provider);
         // A source whose files changed stays listed, stopped, until it is added again.
         let extension = extensions
@@ -1597,7 +1608,8 @@ fn list_sources(
                     unavailable,
                     connector: connector.clone(),
                     saved: Some(source.clone()),
-                    next_id: Some(next_id.clone()),
+                    next_id: next_id.clone(),
+                    integration_revision: None,
                     extension: extension.clone(),
                 }),
         );
@@ -1607,7 +1619,8 @@ fn list_sources(
                 unavailable,
                 connector,
                 saved: None,
-                next_id: Some(next_id),
+                next_id,
+                integration_revision,
                 extension,
             });
         }
@@ -1620,6 +1633,7 @@ fn list_sources(
                 connector: workspace.unavailable_source_description(&source.provider)?,
                 saved: Some(source),
                 next_id: None,
+                integration_revision: None,
                 extension: None,
             });
         }
@@ -1784,6 +1798,16 @@ async fn save_source(
     connection: Option<String>,
     sources: tauri::State<'_, SourceRegistry>,
 ) -> Result<ticketd_core::source::SaveOutcome, SourceFailure> {
+    if provider == ticketd_core::source::GITHUB_INTEGRATION {
+        return Err(
+            ticketd_core::source::SourceError::InvalidConfiguration(vec![
+                ticketd_core::source::FieldIssue::for_form(
+                    "Save repositories on the GitHub integration page.",
+                ),
+            ])
+            .into(),
+        );
+    }
     source_task(sources, move |registry| {
         let mut workspace = open_workspace()?;
         let engine = registry.engine()?;
@@ -1802,6 +1826,16 @@ async fn add_source_connection(
     config: ticketd_core::source::ConfigValues,
     sources: tauri::State<'_, SourceRegistry>,
 ) -> Result<ticketd_core::source::SaveOutcome, SourceFailure> {
+    if provider == ticketd_core::source::GITHUB_INTEGRATION {
+        return Err(
+            ticketd_core::source::SourceError::InvalidConfiguration(vec![
+                ticketd_core::source::FieldIssue::for_form(
+                    "Save repositories on the GitHub integration page.",
+                ),
+            ])
+            .into(),
+        );
+    }
     source_task(sources, move |registry| {
         Ok(open_workspace()?.add_source_connection(
             &registry.engine()?,
@@ -2352,6 +2386,8 @@ pub fn run() -> Result<(), tauri::Error> {
             ActiveRefreshes::default(),
         ))
         .manage(sources.clone())
+        .manage(github_commands::GithubSignIns::default())
+        .manage(github_commands::GithubReadinessChecks::default())
         .manage(sync_commands::SyncHost {
             scheduler: std::sync::Arc::clone(&sync),
             started,
@@ -2587,6 +2623,14 @@ pub fn run() -> Result<(), tauri::Error> {
             link_source_repository_project,
             create_source_repository_project,
             refresh_sources,
+            github_commands::get_github_integration,
+            github_commands::get_github_host_readiness,
+            github_commands::preview_github_repository,
+            github_commands::save_github_repository,
+            github_commands::remove_github_repository,
+            github_commands::set_github_project_login,
+            github_commands::start_github_sign_in,
+            github_commands::cancel_github_sign_in,
             cancel_source_refresh,
             take_ownership,
             source_health,

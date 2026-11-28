@@ -1,4 +1,4 @@
-//! `ticketd source` against a loopback server standing in for GitHub's API.
+//! `ticketd source` through `gh` against a loopback GitHub API fixture.
 //! The desktop is never involved, and nothing here reaches the real network.
 // Clippy exempts #[test] functions but not the fake connector and fixture helpers they
 // share; those unwrap so a broken setup fails the test loudly.
@@ -13,151 +13,22 @@ use std::{
 use serde_json::{Value, json};
 
 #[test]
-fn migrates_the_site_of_a_legacy_enterprise_connection() {
-    let directory = tempfile::tempdir().unwrap();
-    let workspace = directory.path().join("workspace.sqlite3");
-    let registry = directory.path().join("extensions");
-    ticketd_core::create_workspace_at_format_version(&workspace, 91).unwrap();
-    let legacy = rusqlite::Connection::open(&workspace).unwrap();
-    legacy
-        .execute(
-            "INSERT INTO source_configurations
-               (provider, configuration, account, contract_version, saved_at, revision)
-             VALUES ('github', ?1, 'first-account', 1, '2026-01-01T00:00:00Z', 'old-revision')",
-            [json!({"repositories": ["work/fixtures"]}).to_string()],
-        )
-        .unwrap();
-    legacy.execute_batch(
-        "INSERT INTO tickets (id, reference, title, status) VALUES
-             ('imported', 'T-QZ1', 'Legacy ticket', 'Todo');
-         INSERT INTO external_identities (ticket_id, provider, external_id, locator, display, url, origin, partition)
-             VALUES ('imported', 'github', '@issue-links.invalid:1', 'work/fixtures#1', 'work/fixtures#1',
-                     'https://issue-links.invalid/work/fixtures/issues/1', 'imported', '@issue-links.invalid/work/fixtures');",
-    ).unwrap();
-    drop(legacy);
-    // A local proxy sees the requested Enterprise host and never opens a
-    // connection to it. The test can distinguish a site refusal from a call.
-    let proxy = TcpListener::bind("127.0.0.1:0").unwrap();
-    let proxy_url = format!("http://{}", proxy.local_addr().unwrap());
-    proxy.set_nonblocking(true).unwrap();
-    let call = |api: &str, args: &[&str]| {
-        let mut child = Command::new(env!("CARGO_BIN_EXE_ticketd"))
-            .env("TICKETD_TEST_WORKSPACE", &workspace)
-            .env("TICKETD_SOURCE_EXTENSIONS_DIR", &registry)
-            .env("TICKETD_GITHUB_API_URL", api)
-            .env("TICKETD_SOURCE_GITHUB_TOKEN", TOKEN)
-            .env("HTTPS_PROXY", &proxy_url)
-            .env("https_proxy", &proxy_url)
-            .env("ALL_PROXY", &proxy_url)
-            .env("all_proxy", &proxy_url)
-            .env_remove("NO_PROXY")
-            .env_remove("no_proxy")
-            .args(args)
-            .stdout(std::process::Stdio::piped())
-            .stderr(std::process::Stdio::piped())
-            .spawn()
-            .unwrap();
-        let deadline = std::time::Instant::now() + std::time::Duration::from_secs(5);
-        let mut intercepted = None;
-        while child.try_wait().unwrap().is_none() {
-            if let Ok((stream, _)) = proxy.accept() {
-                stream.set_nonblocking(false).unwrap();
-                stream
-                    .set_read_timeout(Some(std::time::Duration::from_secs(1)))
-                    .unwrap();
-                let mut request = String::new();
-                BufReader::new(&stream).read_line(&mut request).unwrap();
-                intercepted = Some(request);
-                break;
-            }
-            if std::time::Instant::now() >= deadline {
-                child.kill().unwrap();
-                break;
-            }
-            std::thread::sleep(std::time::Duration::from_millis(10));
-        }
-        (child.wait_with_output().unwrap(), intercepted)
-    };
-    let (saved, _) = call("https://Git.Corporate.Invalid/api/v3", &["source", "list"]);
-    assert!(saved.status.success(), "{:?}", saved.stderr);
-    let saved: Value = serde_json::from_slice(&saved.stdout).unwrap();
-    assert_eq!(saved[0]["saved"]["id"], "github");
-    assert_eq!(saved[0]["saved"]["account"], "first-account");
-    let (_, intercepted) = call(
-        "https://git.corporate.invalid/api/v3",
-        &["source", "github", "test"],
-    );
-    assert_eq!(
-        intercepted.as_deref(),
-        Some("CONNECT git.corporate.invalid:443 HTTP/1.1\r\n")
-    );
-    let (refused, intercepted) = call(
-        "https://replacement.invalid/api/v3",
-        &["source", "github", "test"],
-    );
-    assert!(!refused.status.success());
-    assert!(intercepted.is_none());
-    assert!(String::from_utf8_lossy(&refused.stderr).contains("differs from the site saved"));
-
-    let (refused, intercepted) = call(
-        "https://replacement.invalid/api/v3",
-        &[
-            "source",
-            "github",
-            "options",
-            "repositories",
-            "--query",
-            "fixture",
-        ],
-    );
-    assert!(!refused.status.success());
-    assert!(intercepted.is_none());
-    assert!(String::from_utf8_lossy(&refused.stderr).contains("differs from the site saved"));
-}
-
-#[test]
-fn the_same_legacy_issue_id_from_another_site_never_reclaims_a_ticket() {
+fn migration_keeps_the_saved_enterprise_repository_host() {
     let cli = Cli::new();
-    let add = ["source", "add", "github", "--set", "repositories=o/r"];
-    cli.run(&add);
-    let original = cli.run(&["source", "github", "refresh"]);
-    let reference = original["imported"][0].as_str().unwrap();
-    let before = cli.run(&["show", reference]);
-    cli.run(&["source", "github", "remove"]);
-
-    let replacement = Cli {
-        api: serve_site("https://other-enterprise.invalid", 1),
-        dir: cli.dir,
-    };
-    let source = replacement.run(&add);
-    assert_eq!(source["source"]["id"], "github-2");
-    let after = replacement.run(&["show", reference]);
-    assert_eq!(after["source"]["url"], before["source"]["url"]);
-    assert_eq!(after["source"]["unavailable"]["code"], "connection_removed");
-
-    // Give the cached ticket a link time after the attempt, as if a refresh
-    // imported it mid-publication. Matching numeric IDs alone cannot adopt it.
-    let workspace = replacement.dir.path().join("workspace.sqlite3");
-    rusqlite::Connection::open(workspace)
-        .unwrap()
-        .execute(
-            "UPDATE external_identities SET linked_at = '2999-01-01T00:00:00Z'",
-            [],
-        )
-        .unwrap();
-    let local_reference = local_ticket(&replacement);
-    let published = replacement.run(&[
-        "source",
-        "publish",
-        &local_reference,
-        "--connection",
-        "github-2",
-    ]);
-    assert_eq!(published["attempt"]["state"], "succeeded");
-    assert_ne!(published["ticket"]["source"]["id"], before["source"]["id"]);
-    let after_publish = replacement.run(&["show", reference]);
-    assert_eq!(after_publish["source"]["url"], before["source"]["url"]);
-    assert_eq!(after_publish["trashed"], false);
+    let path = cli.dir.path().join("workspace.sqlite3");
+    ticketd_core::create_workspace_at_format_version(&path, 105).unwrap();
+    rusqlite::Connection::open(path).unwrap().execute_batch(
+        r#"INSERT INTO source_connections
+         (id, name, provider, site, configuration, account, account_key, contract_version, saved_at, revision)
+         VALUES ('github', 'Work', 'github', 'git.example.test:8443', '{"repositories":["Work/Fixtures"]}',
+                 'first-account', 'first-account', 2, '2026-01-01T00:00:00Z', 'test');"#,
+    ).unwrap();
+    let integration = cli.run(&["source", "github", "status"]);
+    assert_eq!(
+        integration["repositories"][0]["repository"],
+        "git.example.test:8443/work/fixtures"
+    );
+    assert_eq!(cli.run(&["source", "list"])[0]["saved"], Value::Null);
 }
 
 const TOKEN: &str = "ghp_cli_test_secret";
@@ -181,6 +52,11 @@ fn serve_site_with_login(
 ) -> String {
     let listener = TcpListener::bind("127.0.0.1:0").unwrap();
     let base = format!("http://{}", listener.local_addr().unwrap());
+    let issue_origin = if issue_origin == "https://github.example" {
+        base.clone()
+    } else {
+        issue_origin.into()
+    };
     std::thread::spawn(move || {
         for stream in listener.incoming() {
             let Ok(mut stream) = stream else { continue };
@@ -209,10 +85,10 @@ fn serve_site_with_login(
             let path = request.split_whitespace().nth(1).unwrap_or("").to_owned();
             let request_headers = request.to_lowercase();
             let second = request_headers
-                .contains(&format!("authorization: bearer {SECOND_TOKEN}").to_lowercase());
+                .contains(&format!("authorization: token {SECOND_TOKEN}").to_lowercase());
             let authorized = second
                 || request_headers
-                    .contains(&format!("authorization: bearer {TOKEN}").to_lowercase());
+                    .contains(&format!("authorization: token {TOKEN}").to_lowercase());
             let (status, body) = if !authorized {
                 ("401 Unauthorized", json!({"message": "Bad credentials"}))
             } else if request.starts_with("POST ") && path == "/repos/o/r/issues" {
@@ -300,7 +176,7 @@ fn serve_site_with_login(
             };
             let body = body
                 .to_string()
-                .replace("https://github.example", issue_origin);
+                .replace("https://github.example", &issue_origin);
             let response = format!(
                 "HTTP/1.1 {status}\r\nDate: Thu, 01 Jan 2026 00:00:00 GMT\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{body}",
                 body.len()
@@ -324,6 +200,14 @@ impl Cli {
         }
     }
 
+    fn remote(&self, repository: &str) -> String {
+        format!("{}/{repository}", self.api.strip_prefix("http://").unwrap())
+    }
+
+    fn add(&self, repository: &str) -> Value {
+        self.run(&["source", "github", "repository", &self.remote(repository)])
+    }
+
     fn command(&self, args: &[&str], token: Option<&str>) -> Output {
         self.command_with_second(args, token, None)
     }
@@ -335,11 +219,8 @@ impl Cli {
         second: Option<&str>,
     ) -> Output {
         let mut command = self.process(args);
-        if let Some(token) = token {
-            command.env("TICKETD_GITHUB_TOKEN", token);
-        }
-        if let Some(second) = second {
-            command.env("TICKETD_SOURCE_GITHUB_2_TOKEN", second);
+        if let Some(token) = second.or(token) {
+            command.env("GH_ENTERPRISE_TOKEN", token);
         }
         command.output().unwrap()
     }
@@ -350,17 +231,22 @@ impl Cli {
             .args(args)
             .env("HOME", self.dir.path())
             .env("XDG_DATA_HOME", self.dir.path())
+            .env("GH_CONFIG_DIR", self.dir.path().join("gh-config"))
             .env(
                 "TICKETD_TEST_WORKSPACE",
                 self.dir.path().join("workspace.sqlite3"),
+            )
+            .env(
+                "TICKETD_SOURCE_EXTENSIONS_DIR",
+                self.dir.path().join("extensions"),
             )
             .env("TICKETD_GITHUB_API_URL", &self.api)
             .env("TICKETD_LOG", "ticketd_core::source=debug")
             .env_remove("GH_TOKEN")
             .env_remove("GITHUB_TOKEN")
-            .env_remove("TICKETD_GITHUB_TOKEN")
-            .env_remove("TICKETD_SOURCE_GITHUB_TOKEN")
-            .env_remove("TICKETD_SOURCE_GITHUB_2_TOKEN");
+            .env_remove("GH_ENTERPRISE_TOKEN")
+            .env_remove("GITHUB_ENTERPRISE_TOKEN")
+            .env_remove("GH_HOST");
         command
     }
 
@@ -402,7 +288,7 @@ fn list_describes_the_github_connector_and_its_schema() {
         presentation["sign_in"]["terminal_hint"]
             .as_str()
             .unwrap()
-            .contains("TICKETD_GITHUB_TOKEN")
+            .contains("GH_ENTERPRISE_TOKEN")
     );
     assert_eq!(github["saved"], Value::Null);
     let fields: Vec<_> = github["connector"]["schema"]["fields"]
@@ -419,60 +305,44 @@ fn list_describes_the_github_connector_and_its_schema() {
 }
 
 #[test]
-fn set_reports_required_pattern_and_connector_problems_before_preview() {
+fn github_repository_preview_validates_assignee_and_labels() {
     let cli = Cli::new();
-    let required = cli.fail(
-        &[
-            "source",
-            "add",
-            "github",
-            "--preview",
-            "--set",
-            "assignee=octo",
-        ],
-        Some(TOKEN),
-    );
-    assert!(required.contains("repositories are required"), "{required}");
-
+    let repository = cli.remote("o/r");
     let pattern = cli.fail(
         &[
             "source",
-            "add",
             "github",
+            "repository",
+            &repository,
+            "--assignee=-octo",
             "--preview",
-            "--set",
-            "repositories=o/r",
-            "--set",
-            "assignee=-octo",
         ],
         Some(TOKEN),
     );
-    assert!(pattern.contains("assignee must be a username"), "{pattern}");
-
+    assert!(pattern.contains("assignee"), "{pattern}");
     let connector = cli.fail(
         &[
             "source",
-            "add",
             "github",
-            "--set",
-            "repositories=o/r",
-            "--set",
-            "labels=first
+            "repository",
+            &repository,
+            "--label",
+            "first
 second",
         ],
         Some(TOKEN),
     );
-    assert!(
-        connector.contains("labels") && connector.contains("without commas or line breaks"),
-        "{connector}"
+    assert!(connector.contains("labels"), "{connector}");
+    assert_eq!(
+        cli.run(&["source", "github", "status"])["repositories"],
+        json!([])
     );
-    assert!(cli.run(&["source", "list"])[0]["saved"].is_null());
 }
 
 #[test]
 fn project_connect_source_translates_the_offline_preview_and_confirmation() {
     let cli = Cli::new();
-    cli.run(&["source", "add", "github", "--set", "repositories=o/r"]);
+    cli.add("o/r");
     let refresh = cli.run(&["source", "github", "refresh"]);
     let ticket = refresh["imported"][0].as_str().unwrap();
     let created = cli.command(
@@ -502,7 +372,7 @@ fn project_connect_source_translates_the_offline_preview_and_confirmation() {
     assert_eq!(preview["project_id"], id);
     assert_eq!(preview["project_remote"], "127.0.0.1/o/r");
     assert_eq!(preview["provider"], "github");
-    assert_eq!(preview["connection_id"], "github");
+    assert_eq!(preview["connection_id"], Value::Null);
     assert_eq!(preview["repository"], "o/r");
     assert_eq!(preview["source"], "already_listed");
     assert_eq!(preview["tickets"], json!([ticket]));
@@ -532,190 +402,85 @@ fn project_connect_source_translates_the_offline_preview_and_confirmation() {
 }
 
 #[test]
-fn test_names_the_account_and_a_bad_credential_is_explained_without_echoing_it() {
+fn github_test_reports_host_readiness_without_printing_the_credential() {
     let cli = Cli::new();
-    cli.run(&["source", "add", "github", "--set", "repositories=o/r"]);
-    assert_eq!(cli.run(&["source", "github", "test"])["account"], "octo");
-    let stderr = cli.fail(&["source", "github", "test"], Some("wrong-token"));
-    let user_message = stderr
-        .lines()
-        .find(|line| line.starts_with("error:"))
-        .unwrap();
-    assert!(user_message.contains("rejected the credential"), "{stderr}");
-    assert!(!user_message.contains("Bad credentials"), "{stderr}");
-    assert!(
-        stderr
-            .lines()
-            .any(|line| line.contains("error_kind=\"unauthenticated\"")
-                && line.contains("error_class=\"auth\"")
-                && line.contains("HTTP 401")),
-        "{stderr}"
-    );
-    assert!(!stderr.contains("wrong-token"));
-    let stderr = cli.fail(&["source", "github", "test"], None);
-    assert!(stderr.contains("gh auth login"), "{stderr}");
-    // The cause and the script hint are separate sentences, and a terminal is
-    // never sent to a desktop Settings button.
-    assert!(
-        stderr.contains("to sign in. From a script, set TICKETD_GITHUB_TOKEN"),
-        "{stderr}"
-    );
-    assert!(!stderr.contains("Settings"), "{stderr}");
-}
-
-#[test]
-fn a_named_github_account_gets_connection_specific_sign_in_guidance() {
-    let cli = Cli::new();
-    cli.run(&["source", "add", "github", "--set", "repositories=o/r"]);
-    let named = cli.command_with_second(
-        &[
-            "source",
-            "add",
-            "github",
-            "--set",
-            "repositories=o/r",
-            "--set",
-            "account=other",
-        ],
-        Some(TOKEN),
-        Some(SECOND_TOKEN),
-    );
-    assert!(named.status.success(), "{:?}", named.stderr);
-    let failure = cli.fail(&["source", "github-2", "test"], Some(TOKEN));
-    assert!(
-        failure.contains("TICKETD_SOURCE_GITHUB_2_TOKEN"),
-        "{failure}"
-    );
-    assert!(!failure.contains("set TICKETD_GITHUB_TOKEN"), "{failure}");
-}
-
-#[cfg(unix)]
-#[test]
-fn a_renamed_pinned_github_account_can_change_its_cli_selector_in_place() {
-    use std::os::unix::fs::PermissionsExt;
-
-    let directory = tempfile::tempdir().unwrap();
-    let renamed = directory.path().join("renamed");
-    let marker = renamed.clone();
-    let api = serve_site_with_login("https://github.example", 50, move || {
-        if marker.exists() {
-            "octo-renamed"
-        } else {
-            "octo"
-        }
-    });
-    let command = directory.path().join("gh");
-    std::fs::write(
-        &command,
-        format!(
-            r#"#!/bin/sh
-[ "$1 $2" = "auth token" ] && [ "$3" = "--hostname" ] && [ "$5" = "--user" ] || exit 1
-case "$6" in
-  octo) [ ! -f "$TICKETD_GH_RENAMED" ] && printf '%s\n' '{TOKEN}' ;;
-  octo-renamed) [ -f "$TICKETD_GH_RENAMED" ] && printf '%s\n' '{TOKEN}' ;;
-  other) printf '%s\n' '{SECOND_TOKEN}' ;;
-  *) exit 1 ;;
-esac
-"#
-        ),
-    )
-    .unwrap();
-    std::fs::set_permissions(command, std::fs::Permissions::from_mode(0o700)).unwrap();
-
-    let run = |args: &[&str]| -> Output {
-        Command::new(env!("CARGO_BIN_EXE_ticketd"))
-            .args(args)
-            .env_clear()
-            .env("PATH", directory.path())
-            .env("HOME", directory.path())
-            .env("XDG_DATA_HOME", directory.path())
-            .env("GH_CONFIG_DIR", directory.path().join("gh-config"))
-            .env("TICKETD_GH_RENAMED", &renamed)
-            .env(
-                "TICKETD_TEST_WORKSPACE",
-                directory.path().join("workspace.sqlite3"),
-            )
-            .env("TICKETD_GITHUB_API_URL", &api)
-            .output()
-            .unwrap()
-    };
-    let checked = |output: Output| -> Value {
-        assert!(
-            output.status.success(),
-            "{}",
-            String::from_utf8_lossy(&output.stderr)
-        );
-        serde_json::from_slice(&output.stdout).unwrap()
-    };
-
-    let added = checked(run(&[
-        "source",
-        "add",
-        "github",
-        "--set",
-        "repositories=o/r",
-        "--set",
-        "account=octo",
-    ]));
-    assert_eq!(added["source"]["id"], "github");
-    std::fs::write(&renamed, "").unwrap();
-    assert!(!run(&["source", "github", "test"]).status.success());
-    let wrong = run(&["source", "github", "edit", "--set", "account=other"]);
-    assert!(!wrong.status.success());
-    assert!(String::from_utf8_lossy(&wrong.stderr).contains("sign in as octo"));
+    let host = cli.api.strip_prefix("http://").unwrap();
+    let arguments = ["source", "github", "test", "--host", host];
+    let signed_in = cli.run(&arguments);
+    assert_eq!(signed_in["state"], "connected");
+    assert_eq!(signed_in["login"], "octo");
+    let wrong = cli.command(&arguments, Some("wrong-token"));
+    assert!(wrong.status.success());
+    let text = String::from_utf8(wrong.stdout).unwrap();
+    assert!(!text.contains("wrong-token"));
     assert_eq!(
-        checked(run(&["source", "github", "show"]))["config"]["account"],
-        "octo"
+        serde_json::from_str::<Value>(&text).unwrap()["state"],
+        "not_signed_in"
     );
+    let absent = cli.command(&arguments, None);
+    let status: Value = serde_json::from_slice(&absent.stdout).unwrap();
+    assert_eq!(status["state"], "not_signed_in");
+}
 
-    let updated = checked(run(&[
-        "source",
-        "github",
-        "edit",
-        "--set",
-        "account=octo-renamed",
-    ]));
-    assert_eq!(updated["source"]["id"], "github");
-    assert_eq!(updated["source"]["config"]["account"], "octo-renamed");
-    let tested = checked(run(&["source", "github", "test"]));
-    assert_eq!(tested["account"], "octo-renamed");
-    assert_eq!(tested["account_id"], "id:1");
+fn gh_accounts(directory: &std::path::Path, accounts: &[(&str, &str)]) {
+    let config = directory.join("gh-config");
+    std::fs::create_dir_all(&config).unwrap();
+    let mut hosts = String::from("127.0.0.1:\n    users:\n");
+    for (account, token) in accounts {
+        hosts.push_str(&format!(
+            "        {account}:\n            oauth_token: {token}\n"
+        ));
+    }
+    std::fs::write(config.join("hosts.yml"), hosts).unwrap();
 }
 
 #[test]
-fn a_settings_file_that_cannot_be_used_is_named_with_what_was_wrong() {
+fn project_pins_a_named_login_for_the_github_host() {
     let cli = Cli::new();
-    let missing = cli.dir.path().join("missing.json");
-    let stderr = cli.fail(
+    gh_accounts(cli.dir.path(), &[("octo", TOKEN), ("other", SECOND_TOKEN)]);
+    let site = cli.api.strip_prefix("http://").unwrap();
+    let project = cli.run(&[
+        "project",
+        "create",
+        "GitHub",
+        cli.dir.path().to_str().unwrap(),
+        "--remote",
+        "127.0.0.1/o/r",
+    ]);
+    let project_id = project["id"].as_str().unwrap();
+    let set = |login| {
+        cli.run(&[
+            "source",
+            "github",
+            "project-login",
+            project_id,
+            "--host",
+            site,
+            "--login",
+            login,
+        ])
+    };
+    assert_eq!(set("other")["ok"], true);
+    let row = cli.add("o/r");
+    assert_eq!(row["project_login"], "other");
+    let failure = cli.fail(
         &[
             "source",
-            "add",
             "github",
-            "--preview",
-            "--config-file",
-            missing.to_str().unwrap(),
+            "project-login",
+            project_id,
+            "--host",
+            site,
+            "--login",
+            "unknown",
         ],
         Some(TOKEN),
     );
-    assert!(
-        stderr.contains("could not read the --config-file"),
-        "{stderr}"
+    assert!(failure.contains("unavailable"), "{failure}");
+    assert_eq!(
+        cli.run(&["source", "github", "status"])["repositories"][0]["project_login"],
+        "other"
     );
-    assert!(stderr.contains("missing.json"), "{stderr}");
-    let bad = cli.dir.path().join("bad.json");
-    std::fs::write(&bad, "{bad").unwrap();
-    let stderr = cli.fail(
-        &[
-            "source",
-            "add",
-            "github",
-            "--preview",
-            "--config-file",
-            bad.to_str().unwrap(),
-        ],
-        Some(TOKEN),
-    );
-    assert!(stderr.contains("bad.json is not valid JSON"), "{stderr}");
 }
 
 #[test]
@@ -734,15 +499,18 @@ fn preview_lists_issues_without_pull_requests_and_without_descriptions() {
     let output = cli.command(
         &[
             "source",
-            "add",
             "github",
+            "repository",
+            &cli.remote("o/r"),
             "--preview",
-            "--set",
-            "repositories=o/r",
         ],
         Some(TOKEN),
     );
-    assert!(output.status.success());
+    assert!(
+        output.status.success(),
+        "{}",
+        String::from_utf8_lossy(&output.stderr)
+    );
     let text = String::from_utf8(output.stdout).unwrap();
     assert!(!text.contains(TOKEN) && !text.contains("secret description"));
     let preview: Value = serde_json::from_str(&text).unwrap();
@@ -750,64 +518,51 @@ fn preview_lists_issues_without_pull_requests_and_without_descriptions() {
     assert_eq!(preview["matched"], 1);
     assert_eq!(preview["complete"], true);
     assert_eq!(preview["issues"][0]["display"], "o/r#1");
-    // Previewing neither saves a source nor imports a ticket.
-    assert!(cli.run(&["source", "list"])[0]["saved"].is_null());
+    assert_eq!(
+        cli.run(&["source", "github", "status"])["repositories"],
+        json!([])
+    );
     assert_eq!(cli.run(&["list"]), json!([]));
 }
 
 #[test]
-fn add_validates_previews_persists_and_imports_nothing() {
+fn adding_a_repository_saves_its_filters_and_imports_nothing() {
     let cli = Cli::new();
+    let repository = cli.remote("o/r");
     let saved = cli.run(&[
         "source",
-        "add",
         "github",
-        "--set",
-        "repositories=o/r",
-        "--set",
-        "assignee=octo",
+        "repository",
+        &repository,
+        "--assignee",
+        "octo",
     ]);
-    assert_eq!(saved["source"]["account"], "octo");
-    assert_eq!(saved["preview"]["matched"], 1);
-    let shown = cli.run(&["source", "github", "show"]);
+    assert_eq!(saved["assignee"], "octo");
+    assert_eq!(saved["repository"], repository);
     assert_eq!(
-        shown["config"],
-        json!({"repositories": ["o/r"], "assignee": "octo"})
+        cli.run(&["source", "github", "status"])["repositories"],
+        json!([saved])
     );
     assert_eq!(cli.run(&["list"]), json!([]));
-    // Without settings, preview reuses the saved configuration.
-    assert_eq!(cli.run(&["source", "github", "preview"])["matched"], 1);
-    let listed = cli.run(&["source", "list"]);
-    assert_eq!(listed[0]["saved"]["config"]["repositories"], json!(["o/r"]));
 }
 
 #[test]
-fn invalid_settings_and_provider_failures_do_not_save() {
+fn invalid_credentials_and_missing_repositories_do_not_save() {
     let cli = Cli::new();
     let stderr = cli.fail(
-        &["source", "add", "github", "--set", "repositories=nonsense"],
-        Some(TOKEN),
-    );
-    assert!(stderr.contains("repositories"), "{stderr}");
-    assert!(stderr.contains("owner/name"), "{stderr}");
-    let stderr = cli.fail(
-        &["source", "add", "github", "--set", "bogus=1"],
-        Some(TOKEN),
-    );
-    assert!(stderr.contains("bogus"), "{stderr}");
-    let stderr = cli.fail(&["source", "add", "github"], Some(TOKEN));
-    assert!(stderr.contains("are required"), "{stderr}");
-    let stderr = cli.fail(
-        &["source", "add", "github", "--set", "repositories=o/missing"],
+        &["source", "github", "repository", &cli.remote("o/missing")],
         Some(TOKEN),
     );
     assert!(stderr.contains("was not found"), "{stderr}");
     let stderr = cli.fail(
-        &["source", "add", "github", "--set", "repositories=o/r"],
+        &["source", "github", "repository", &cli.remote("o/r")],
         Some("wrong"),
     );
     assert!(stderr.contains("rejected the credential"), "{stderr}");
-    assert!(cli.run(&["source", "list"])[0]["saved"].is_null());
+    assert_eq!(
+        cli.run(&["source", "github", "status"])["repositories"],
+        json!([])
+    );
     let stderr = cli.fail(&["source", "nowhere", "show"], Some(TOKEN));
     assert!(
         stderr.contains("no saved source connection named nowhere"),
@@ -816,35 +571,9 @@ fn invalid_settings_and_provider_failures_do_not_save() {
 }
 
 #[test]
-fn a_json_settings_file_and_option_suggestions_work_from_the_command_line() {
-    let cli = Cli::new();
-    let file = cli.dir.path().join("settings.json");
-    std::fs::write(&file, r#"{"repositories": ["o/r"]}"#).unwrap();
-    let preview = cli.run(&[
-        "source",
-        "add",
-        "github",
-        "--preview",
-        "--config-file",
-        file.to_str().unwrap(),
-    ]);
-    assert_eq!(preview["matched"], 1);
-    cli.run(&["source", "add", "github", "--set", "repositories=o/r"]);
-    let options = cli.run(&[
-        "source",
-        "github",
-        "options",
-        "repositories",
-        "--query",
-        "BET",
-    ]);
-    assert_eq!(options[0]["value"], "o/beta");
-}
-
-#[test]
 fn refresh_imports_then_tracks_and_protects_external_tickets_without_the_desktop() {
     let cli = Cli::new();
-    cli.run(&["source", "add", "github", "--set", "repositories=o/r"]);
+    cli.add("o/r");
     let report = cli.run(&["source", "github", "refresh"]);
     assert_eq!(report["imported"], json!(["T-KQ1"]));
     assert_eq!(report["failures"], json!([]));
@@ -919,7 +648,7 @@ fn refresh_imports_then_tracks_and_protects_external_tickets_without_the_desktop
 #[test]
 fn an_attributed_agent_records_progress_on_an_external_ticket_but_cannot_edit_its_content() {
     let cli = Cli::new();
-    cli.run(&["source", "add", "github", "--set", "repositories=o/r"]);
+    cli.add("o/r");
     cli.run(&["source", "github", "refresh"]);
     let agent = ["--agent", "codex"];
 
@@ -1004,7 +733,7 @@ fn local_ticket(cli: &Cli) -> String {
 #[test]
 fn publish_reports_the_core_attachment_preflight_without_creating_an_issue() {
     let cli = Cli::new();
-    cli.run(&["source", "add", "github", "--set", "repositories=o/r"]);
+    cli.add("o/r");
     let reference = local_ticket(&cli);
     let uri = "ticketd://attachment/foreign-workspace/trace-file";
     cli.run(&["change", &reference, "--body", &format!("[trace]({uri})")]);
@@ -1023,13 +752,13 @@ fn publish_reports_the_core_attachment_preflight_without_creating_an_issue() {
 #[test]
 fn publish_previews_then_creates_one_issue_and_replays_without_another() {
     let cli = Cli::new();
-    cli.run(&["source", "add", "github", "--set", "repositories=o/r"]);
+    cli.add("o/r");
     let reference = local_ticket(&cli);
 
     let preview = cli.run(&["source", "publish", &reference, "--preview"]);
     assert_eq!(preview["title"], "Escalate me");
     assert_eq!(preview["body"], "Why it matters");
-    assert_eq!(preview["destination"], "o/r");
+    assert_eq!(preview["destination"], cli.remote("o/r"));
     assert_eq!(preview["eligibility"]["kind"], "eligible");
     assert_eq!(cli.run(&["show", &reference])["source"], Value::Null);
 
@@ -1040,12 +769,6 @@ fn publish_previews_then_creates_one_issue_and_replays_without_another() {
     assert_eq!(outcome["ticket"]["source"]["origin"], "published");
     assert_eq!(outcome["ticket"]["source"]["ownership"], "external");
 
-    let added = cli.command_with_second(
-        &["source", "add", "github", "--set", "repositories=o/r"],
-        Some(TOKEN),
-        Some(SECOND_TOKEN),
-    );
-    assert!(added.status.success(), "{:?}", added.stderr);
     let again = cli.run(&["source", "publish", &reference]);
     assert_eq!(again["replayed"], true);
     assert_eq!(again["attempt"]["id"], outcome["attempt"]["id"]);
@@ -1055,37 +778,33 @@ fn publish_previews_then_creates_one_issue_and_replays_without_another() {
 }
 
 #[test]
-fn publication_replays_when_the_named_connection_has_been_removed() {
+fn publication_replays_after_removing_the_repository() {
     let cli = Cli::new();
-    let add = ["source", "add", "github", "--set", "repositories=o/r"];
-    cli.run(&add);
-    cli.run(&["source", "github", "remove"]);
-    assert_eq!(cli.run(&add)["source"]["id"], "github-2");
+    cli.add("o/r");
     let reference = local_ticket(&cli);
-    let args = ["source", "publish", &reference, "--connection", "github-2"];
+    let args = ["source", "publish", &reference, "--provider", "github"];
     let first = cli.run(&args);
     assert_eq!(first["replayed"], false);
-    cli.run(&["source", "github-2", "remove"]);
+    cli.run(&["source", "github", "remove", &cli.remote("o/r")]);
     let replay = cli.run(&args);
     assert_eq!(replay["replayed"], true);
     assert_eq!(replay["attempt"]["id"], first["attempt"]["id"]);
-    let implicit = cli.run(&["source", "publish", &reference]);
-    assert_eq!(implicit["attempt"]["id"], first["attempt"]["id"]);
 }
 
 #[test]
 fn a_refused_publication_fails_with_the_reason_and_leaves_the_ticket_local() {
     let cli = Cli::new();
-    cli.run(&[
-        "source",
-        "add",
-        "github",
-        "--set",
-        "repositories=o/r,o/denied",
-    ]);
+    cli.add("o/r");
+    cli.add("o/denied");
     let reference = local_ticket(&cli);
     let output = cli.command(
-        &["source", "publish", &reference, "--destination", "o/denied"],
+        &[
+            "source",
+            "publish",
+            &reference,
+            "--destination",
+            &cli.remote("o/denied"),
+        ],
         Some(TOKEN),
     );
     assert_eq!(output.status.code(), Some(1));
@@ -1100,15 +819,16 @@ fn a_refused_publication_fails_with_the_reason_and_leaves_the_ticket_local() {
 #[test]
 fn an_unclear_answer_is_unresolved_visible_and_blocks_publishing_again() {
     let cli = Cli::new();
-    cli.run(&[
-        "source",
-        "add",
-        "github",
-        "--set",
-        "repositories=o/r,o/flaky",
-    ]);
+    cli.add("o/r");
+    cli.add("o/flaky");
     let reference = local_ticket(&cli);
-    let args = ["source", "publish", &reference, "--destination", "o/flaky"];
+    let args = [
+        "source",
+        "publish",
+        &reference,
+        "--destination",
+        &cli.remote("o/flaky"),
+    ];
     let output = cli.command(&args, Some(TOKEN));
     assert_eq!(output.status.code(), Some(1));
     let attempt: Value = serde_json::from_slice(&output.stdout).unwrap();
@@ -1131,15 +851,16 @@ fn an_unclear_answer_is_unresolved_visible_and_blocks_publishing_again() {
 }
 
 fn unresolved_ticket(cli: &Cli) -> String {
-    cli.run(&[
-        "source",
-        "add",
-        "github",
-        "--set",
-        "repositories=o/r,o/flaky",
-    ]);
+    cli.add("o/r");
+    cli.add("o/flaky");
     let reference = local_ticket(cli);
-    let args = ["source", "publish", &reference, "--destination", "o/flaky"];
+    let args = [
+        "source",
+        "publish",
+        &reference,
+        "--destination",
+        &cli.remote("o/flaky"),
+    ];
     assert_eq!(cli.command(&args, Some(TOKEN)).status.code(), Some(1));
     age_attempts(cli);
     reference
@@ -1158,258 +879,10 @@ fn age_attempts(cli: &Cli) {
 }
 
 #[test]
-fn legacy_publication_recovery_uses_only_verified_original_hosts() {
-    let cli = Cli::new();
-    let site = cli.api.strip_prefix("http://").unwrap();
-    let path = cli.dir.path().join("workspace.sqlite3");
-    ticketd_core::create_workspace_at_format_version(&path, 88).unwrap();
-    let legacy = rusqlite::Connection::open(path).unwrap();
-    legacy.execute_batch(
-            "INSERT INTO source_configurations
-                (provider, configuration, account, contract_version, saved_at)
-             VALUES ('github', '{\"repositories\":[\"o/r\",\"o/flaky\"]}', 'octo', 1, '2025-12-01T00:00:00Z');
-             INSERT INTO tickets (id, reference, title, body, status) VALUES
-                ('11111111-1111-4111-8111-111111111111', 'T-KQ12', 'Escalate me', 'Why it matters', 'Todo'),
-                ('22222222-2222-4222-8222-222222222222', 'T-KQ13', 'Other ticket', '', 'Todo');
-             INSERT INTO publication_attempts
-                (id, ticket_id, provider, destination, title, body, status, started_at, lease_expires_at, updated_at)
-                VALUES ('attempt', '11111111-1111-4111-8111-111111111111', 'github', 'o/flaky',
-                    'Escalate me', 'Why it matters', 'unresolved',
-                    '2026-01-01T00:00:00Z', '2026-01-01T00:02:00Z', '2026-01-01T00:00:00Z');
-             INSERT INTO publication_attempts
-                (id, ticket_id, provider, destination, title, body, status, started_at, lease_expires_at, updated_at,
-                 external_id, locator, display, url)
-                VALUES ('known-attempt', '22222222-2222-4222-8222-222222222222', 'github', 'O/R',
-                    'Other ticket', '', 'unresolved', '2026-01-01T00:00:00Z', '2026-01-01T00:02:00Z',
-                    '2026-01-01T00:00:00Z', '@127.0.0.1:50', 'o/r#7', 'o/r#7',
-                    'http://127.0.0.1/o/r/issues/7');",
-        )
-        .unwrap();
-    legacy
-        .execute(
-            "UPDATE publication_attempts SET url = ?1 WHERE id = 'known-attempt'",
-            [format!("{}/o/r/issues/7", cli.api)],
-        )
-        .unwrap();
-    drop(legacy);
-
-    let reference = "T-KQ12";
-    let review = cli.run(&["source", "resolve", reference, "--no-search"]);
-    assert_eq!(review["attempt"]["destination_host"], Value::Null);
-    assert_eq!(review["actions"][0]["available"], false);
-    assert_eq!(review["actions"][1]["available"], false);
-    assert!(
-        review["lookup_failure"]["message"]
-            .as_str()
-            .unwrap()
-            .contains("--confirm-host")
-    );
-    let previously_recorded = cli.run(&["source", "resolve", "T-KQ13", "--no-search"]);
-    assert_eq!(previously_recorded["attempt"]["destination_host"], site);
-    assert_eq!(previously_recorded["actions"][0]["available"], true);
-    assert_eq!(previously_recorded["actions"][1]["available"], false);
-
-    let wrong = cli.fail(
-        &[
-            "source",
-            "resolve",
-            reference,
-            "--confirm-host",
-            "github.com",
-        ],
-        None,
-    );
-    assert!(wrong.contains("uses 127.0.0.1"), "{wrong}");
-    let wrong_port = cli.fail(
-        &[
-            "source",
-            "resolve",
-            reference,
-            "--confirm-host",
-            "127.0.0.1:1",
-        ],
-        None,
-    );
-    assert!(wrong_port.contains(site), "{wrong_port}");
-
-    let confirmed = cli.command(
-        &["source", "resolve", reference, "--confirm-host", site],
-        None,
-    );
-    assert!(
-        confirmed.status.success(),
-        "{}",
-        String::from_utf8_lossy(&confirmed.stderr)
-    );
-    let attempt: Value = serde_json::from_slice(&confirmed.stdout).unwrap();
-    assert_eq!(attempt["destination_host"], site);
-    assert_eq!(attempt["state"], "unresolved");
-    assert_eq!(cli.run(&["show", reference])["source"], Value::Null);
-
-    let overwrite = cli.fail(
-        &[
-            "source",
-            "resolve",
-            reference,
-            "--confirm-host",
-            "github.com",
-        ],
-        None,
-    );
-    assert!(
-        overwrite.contains("already recorded as 127.0.0.1"),
-        "{overwrite}"
-    );
-    cli.run(&["source", "github", "edit", "--set", "repositories=o/flaky"]);
-    let outcome = cli.run(&["source", "resolve", reference, "--issue", "7"]);
-    assert_eq!(outcome["attempt"]["state"], "succeeded");
-}
-
-#[test]
-fn an_unbound_publication_can_confirm_a_configured_enterprise_site_and_port() {
-    let cli = Cli::new();
-    let path = cli.dir.path().join("workspace.sqlite3");
-    ticketd_core::create_workspace_at_format_version(&path, 88).unwrap();
-    rusqlite::Connection::open(&path)
-        .unwrap()
-        .execute_batch(
-            "INSERT INTO tickets (id, reference, title, status)
-                 VALUES ('11111111-1111-4111-8111-111111111111', 'T-KQ12', 'Escalate me', 'Todo');
-             INSERT INTO publication_attempts
-                (id, ticket_id, provider, destination, title, body, status, started_at, lease_expires_at, updated_at)
-                 VALUES ('attempt', '11111111-1111-4111-8111-111111111111', 'github', 'o/r',
-                    'Escalate me', '', 'unresolved', '2026-01-01T00:00:00Z', '2026-01-01T00:02:00Z',
-                    '2026-01-01T00:00:00Z');",
-        )
-        .unwrap();
-    let site = "git.example.test:8443";
-    let args = ["source", "resolve", "T-KQ12", "--confirm-host", site];
-    let default = cli
-        .process(&args)
-        .env_remove("TICKETD_GITHUB_API_URL")
-        .output()
-        .unwrap();
-    assert!(!default.status.success());
-    assert!(String::from_utf8_lossy(&default.stderr).contains("uses github.com"));
-
-    let confirmed = cli
-        .process(&args)
-        .env(
-            "TICKETD_GITHUB_API_URL",
-            "https://git.example.test:8443/api/v3",
-        )
-        .output()
-        .unwrap();
-    assert!(
-        confirmed.status.success(),
-        "{}",
-        String::from_utf8_lossy(&confirmed.stderr)
-    );
-    let attempt: Value = serde_json::from_slice(&confirmed.stdout).unwrap();
-    assert_eq!(attempt["destination_host"], site);
-    assert_eq!(attempt["state"], "unresolved");
-    let review = cli.run(&["source", "resolve", "T-KQ12", "--no-search"]);
-    assert!(review.get("connection_id").is_none());
-}
-
-#[test]
-fn a_legacy_publication_without_a_binding_can_only_attach_explicitly() {
-    let cli = Cli::new();
-    let site = cli.api.strip_prefix("http://").unwrap();
-    let path = cli.dir.path().join("workspace.sqlite3");
-    ticketd_core::create_workspace_at_format_version(&path, 88).unwrap();
-    rusqlite::Connection::open(&path)
-        .unwrap()
-        .execute_batch(
-            "INSERT INTO source_configurations
-                (provider, configuration, account, contract_version, saved_at)
-             VALUES ('github', '{\"repositories\":[\"o/flaky\"]}', 'octo', 1, '2026-01-02T00:00:00Z');
-             INSERT INTO tickets (id, reference, title, body, status) VALUES
-                ('11111111-1111-4111-8111-111111111111', 'T-KQ12', 'Escalate me', 'Why it matters', 'Todo');
-             INSERT INTO publication_attempts
-                (id, ticket_id, provider, destination, title, body, status, started_at, lease_expires_at, updated_at)
-                VALUES ('attempt', '11111111-1111-4111-8111-111111111111', 'github', 'o/flaky',
-                    'Escalate me', 'Why it matters', 'unresolved',
-                    '2026-01-01T00:00:00Z', '2026-01-01T00:02:00Z', '2026-01-01T00:00:00Z');",
-        )
-        .unwrap();
-
-    let reference = "T-KQ12";
-    let explicit = [
-        "source",
-        "resolve",
-        reference,
-        "--issue",
-        "7",
-        "--using-connection",
-        "github",
-    ];
-    let unknown_host = cli.command(&explicit, Some(TOKEN));
-    assert_eq!(unknown_host.status.code(), Some(1));
-    assert!(String::from_utf8_lossy(&unknown_host.stderr).contains("--confirm-host"));
-    cli.run(&["source", "resolve", reference, "--confirm-host", site]);
-    let review = cli.run(&["source", "resolve", reference, "--no-search"]);
-    assert!(review.get("connection_id").is_none());
-    assert!(
-        review["actions"][0]["detail"]
-            .as_str()
-            .unwrap()
-            .contains("--using-connection")
-    );
-
-    for flag in ["--issue", "--not-created"] {
-        let mut args = vec!["source", "resolve", reference, flag];
-        if flag == "--issue" {
-            args.push("7");
-        }
-        let rejected = cli.command(&args, Some(TOKEN));
-        assert_eq!(rejected.status.code(), Some(1));
-        assert!(String::from_utf8_lossy(&rejected.stderr).contains("originally used"));
-    }
-    let second = cli.command_with_second(
-        &["source", "add", "github", "--set", "repositories=o/flaky"],
-        Some(TOKEN),
-        Some(SECOND_TOKEN),
-    );
-    assert!(second.status.success(), "{:?}", second.stderr);
-    let mut incorrect = explicit;
-    incorrect[6] = "github-2";
-    let rejected = cli.command_with_second(&incorrect, Some(TOKEN), Some(SECOND_TOKEN));
-    assert_eq!(rejected.status.code(), Some(1));
-    assert!(String::from_utf8_lossy(&rejected.stderr).contains("selected account created"));
-    assert_eq!(
-        cli.run(&["show", reference])["publication"]["state"],
-        "unresolved"
-    );
-
-    let recovered = cli.run(&explicit);
-    assert_eq!(recovered["attempt"]["state"], "succeeded");
-    assert_eq!(recovered["ticket"]["source"]["display"], "o/flaky#7");
-    let mut different_issue = explicit;
-    different_issue[4] = "8";
-    let rejected = cli.command(&different_issue, Some(TOKEN));
-    assert_eq!(rejected.status.code(), Some(1));
-    let error = String::from_utf8_lossy(&rejected.stderr);
-    assert!(error.contains("could not be matched"), "{error}");
-    let settled: Value = serde_json::from_slice(&rejected.stdout).unwrap();
-    assert_eq!(settled["issue"]["display"], "o/flaky#7");
-    assert_eq!(
-        cli.run(&["show", reference])["source"]["display"],
-        "o/flaky#7"
-    );
-    let historical_bindings: i64 = rusqlite::Connection::open(path)
-        .unwrap()
-        .query_row("SELECT COUNT(*) FROM publication_connections", [], |row| {
-            row.get(0)
-        })
-        .unwrap();
-    assert_eq!(historical_bindings, 0);
-}
-
-#[test]
 fn resolve_reviews_then_attaches_a_verified_issue_without_creating_another() {
     let cli = Cli::new();
     let reference = unresolved_ticket(&cli);
+    gh_accounts(cli.dir.path(), &[("octo", TOKEN)]);
 
     // The review changes nothing and states what is known and unknown.
     let review = cli.run(&["source", "resolve", &reference]);
@@ -1428,7 +901,11 @@ fn resolve_reviews_then_attaches_a_verified_issue_without_creating_another() {
     assert_eq!(wrong.status.code(), Some(1));
     let stderr = String::from_utf8(wrong.stderr).unwrap();
     assert!(stderr.contains("the issue is not in o/flaky"), "{stderr}");
-    let no_credential = cli.command(&["source", "resolve", &reference, "--issue", "7"], None);
+    let no_credential = cli
+        .process(&["source", "resolve", &reference, "--issue", "7"])
+        .env("GH_CONFIG_DIR", cli.dir.path().join("empty-gh-config"))
+        .output()
+        .unwrap();
     assert_eq!(no_credential.status.code(), Some(1));
     assert_eq!(
         cli.run(&["show", &reference])["publication"]["state"],
@@ -1460,32 +937,40 @@ fn resolve_not_created_needs_evidence_and_then_allows_publishing_again() {
         "unresolved"
     );
 
+    gh_accounts(cli.dir.path(), &[("octo", TOKEN)]);
     let outcome = cli.run(&["source", "resolve", &reference, "--not-created"]);
     assert_eq!(outcome["attempt"]["state"], "failed");
     assert_eq!(outcome["attempt"]["failure"]["code"], "ruled_out");
     assert_eq!(outcome["ticket"]["publication"], Value::Null);
-    let preview = cli.run(&["source", "publish", &reference, "--preview"]);
+    let preview = cli.run(&[
+        "source",
+        "publish",
+        &reference,
+        "--destination",
+        &cli.remote("o/flaky"),
+        "--preview",
+    ]);
     assert_eq!(preview["eligibility"]["kind"], "eligible");
 }
 
 #[test]
 fn status_reports_freshness_and_what_is_unavailable_after_a_failed_refresh() {
     let cli = Cli::new();
-    cli.run(&["source", "add", "github", "--set", "repositories=o/r"]);
+    cli.add("o/r");
     cli.run(&["source", "github", "refresh"]);
     let status = cli.run(&["source", "github", "status"]);
-    assert_eq!(status["provider"], "github");
-    assert_eq!(status["error"], Value::Null);
-    assert!(status["last_refreshed_at"].is_string());
-    assert_eq!(status["unavailable_tickets"], 0);
+    assert_eq!(status["id"], "github");
+    assert_eq!(status["repositories"][0]["error"], Value::Null);
+    assert!(status["repositories"][0]["last_refreshed_at"].is_string());
 
     // A refresh that cannot read the source fails, keeps the ticket, and says so.
     let output = cli.command(&["source", "github", "refresh"], Some("wrong"));
     assert_eq!(output.status.code(), Some(1));
     let status = cli.run(&["source", "github", "status"]);
-    assert_eq!(status["error"]["code"], "unauthenticated");
-    assert!(status["failing_since"].is_string());
-    assert_eq!(status["unavailable_tickets"], 1);
+    assert_eq!(
+        status["repositories"][0]["error"]["code"],
+        "unauthenticated"
+    );
     let shown = cli.run(&["show", "T-KQ1"]);
     assert_eq!(shown["title"], "Real issue");
     assert_eq!(shown["source"]["unavailable"]["code"], "unauthenticated");
@@ -1498,7 +983,7 @@ fn status_reports_freshness_and_what_is_unavailable_after_a_failed_refresh() {
 #[test]
 fn take_ownership_makes_an_unavailable_ticket_local_and_stops_synchronizing_it() {
     let cli = Cli::new();
-    cli.run(&["source", "add", "github", "--set", "repositories=o/r"]);
+    cli.add("o/r");
     cli.run(&["source", "github", "refresh"]);
     // Reachable tickets are not taken over.
     let stderr = cli.fail(&["source", "take-ownership", "T-KQ1"], None);
@@ -1538,7 +1023,7 @@ fn take_ownership_makes_an_unavailable_ticket_local_and_stops_synchronizing_it()
 #[test]
 fn local_source_commands_work_when_the_extension_registry_cannot_be_opened() {
     let cli = Cli::new();
-    cli.run(&["source", "add", "github", "--set", "repositories=o/r"]);
+    cli.add("o/r");
     let imported = cli.run(&["source", "github", "refresh"]);
     let reference = imported["imported"][0].as_str().unwrap();
     let registry = cli.dir.path().join("broken-registry");
@@ -1557,10 +1042,11 @@ fn local_source_commands_work_when_the_extension_registry_cannot_be_opened() {
         serde_json::from_slice::<Value>(&output.stdout).unwrap()
     };
 
-    assert_eq!(run(&["source", "github", "show"])["id"], "github");
-    assert_eq!(run(&["source", "github", "status"])["provider"], "github");
-    assert_eq!(run(&["source", "github", "rename", "Work"])["name"], "Work");
-    assert_eq!(run(&["source", "github", "remove"])["ok"], true);
+    assert_eq!(run(&["source", "github", "status"])["id"], "github");
+    assert_eq!(
+        run(&["source", "github", "remove", &cli.remote("o/r")])["ok"],
+        true
+    );
     assert_eq!(
         run(&["source", "take-ownership", reference])["source"]["ownership"],
         "local"
@@ -1568,159 +1054,50 @@ fn local_source_commands_work_when_the_extension_registry_cannot_be_opened() {
 }
 
 #[test]
-fn two_connections_refresh_once_per_issue_and_publish_requires_a_choice() {
+fn repository_rules_share_the_integration_and_publish_uses_the_selected_destination() {
     let cli = Cli::new();
-    let first = cli.run(&["source", "add", "github", "--set", "repositories=o/r"]);
-    assert_eq!(first["source"]["id"], "github");
-    let duplicate = cli.fail(
-        &["source", "add", "github", "--set", "repositories=o/r"],
-        Some(TOKEN),
-    );
-    assert!(
-        duplicate.contains("octo is already connected"),
-        "{duplicate}"
-    );
-    let run_second = |args: &[&str]| {
-        let output = cli.command_with_second(args, Some(TOKEN), Some(SECOND_TOKEN));
-        assert!(
-            output.status.success(),
-            "{}",
-            String::from_utf8_lossy(&output.stderr)
-        );
-        assert!(!String::from_utf8_lossy(&output.stdout).contains(SECOND_TOKEN));
-        serde_json::from_slice::<Value>(&output.stdout).unwrap()
-    };
-    let second = run_second(&[
-        "source",
-        "add",
-        "github",
-        "--name",
-        "Other GitHub",
-        "--set",
-        "repositories=o/r,o/beta",
-    ]);
-    assert_eq!(second["source"]["id"], "github-2");
-    assert_eq!(second["source"]["account"], "other");
-    assert_eq!(
-        cli.run(&["source", "github", "refresh"])["imported"]
-            .as_array()
-            .unwrap()
-            .len(),
-        1
-    );
-    assert_eq!(
-        run_second(&["source", "github-2", "refresh"])["imported"]
-            .as_array()
-            .unwrap()
-            .len(),
-        1
-    );
-    assert_eq!(cli.run(&["list"]).as_array().unwrap().len(), 2);
-    assert_eq!(
-        cli.run(&["source", "github-2", "rename", "Work"])["name"],
-        "Work"
-    );
-    assert_eq!(cli.run(&["source", "github-2", "show"])["id"], "github-2");
+    cli.add("o/r");
+    cli.add("o/beta");
+    let listed = cli.run(&["source", "github", "status"]);
+    assert_eq!(listed["repositories"].as_array().unwrap().len(), 2);
+    let report = cli.run(&["source", "github", "refresh"]);
+    assert_eq!(report["imported"].as_array().unwrap().len(), 2);
     let local = local_ticket(&cli);
-    let error = cli.fail(&["source", "publish", &local, "--preview"], Some(TOKEN));
-    assert!(error.contains("select --connection"), "{error}");
     let preview = cli.run(&[
         "source",
         "publish",
         &local,
-        "--connection",
-        "github-2",
         "--destination",
-        "o/beta",
+        &cli.remote("o/beta"),
         "--preview",
     ]);
-    assert_eq!(preview["destination"], "o/beta");
+    assert_eq!(preview["destination"], cli.remote("o/beta"));
     assert_eq!(preview["eligibility"]["kind"], "eligible");
-    let error = cli.command(&["source", "github-2", "refresh"], Some(TOKEN));
-    assert_eq!(error.status.code(), Some(1));
-    let failure: Value = serde_json::from_slice(&error.stdout).unwrap();
-    assert_eq!(failure["failures"][0]["code"], "unauthenticated");
-    assert_eq!(cli.run(&["source", "github", "status"])["health"], "synced");
 }
 
 #[test]
-fn connection_help_and_edits_use_the_connection_first() {
+fn github_help_lists_repository_operations_without_opening_a_workspace() {
     let cli = Cli::new();
     let help = cli.command(&["source", "github", "--help"], None);
     assert!(help.status.success());
     let text = String::from_utf8(help.stdout).unwrap();
     assert!(
-        text.contains("ticketd source github") && text.contains("edit"),
+        text.contains(" source github") && text.contains("repository"),
         "{text}"
     );
     assert!(!cli.dir.path().join("workspace.sqlite3").exists());
-    assert!(
-        !cli.command(&["source", "save", "github"], None)
-            .status
-            .success()
-    );
-
-    cli.run(&["source", "add", "github", "--set", "repositories=o/r"]);
-    let saved = cli.run(&["source", "github", "edit", "--set", "assignee=octo"]);
-    assert_eq!(
-        saved["source"]["config"],
-        json!({"repositories":["o/r"], "assignee":"octo"})
-    );
 }
 
 #[test]
-fn removing_a_connection_keeps_unresolved_publication_and_reserves_its_id() {
+fn removing_a_repository_keeps_the_open_publication_attempt() {
     let cli = Cli::new();
     let reference = unresolved_ticket(&cli);
     let before = cli.run(&["show", &reference]);
-    let removed = cli.command(&["source", "github", "remove"], None);
-    assert!(
-        removed.status.success(),
-        "{}",
-        String::from_utf8_lossy(&removed.stderr)
-    );
-    assert_eq!(
-        serde_json::from_slice::<Value>(&removed.stdout).unwrap(),
-        json!({"ok": true})
-    );
-    assert_eq!(cli.run(&["source", "list"])[0]["saved"], Value::Null);
+    cli.run(&["source", "github", "remove", &cli.remote("o/flaky")]);
     assert_eq!(
         cli.run(&["show", &reference])["publication"],
         before["publication"]
     );
-
-    let added = cli.command(
-        &[
-            "source",
-            "add",
-            "github",
-            "--set",
-            "repositories=o/r,o/flaky",
-        ],
-        Some(SECOND_TOKEN),
-    );
-    assert!(
-        added.status.success(),
-        "{}",
-        String::from_utf8_lossy(&added.stderr)
-    );
-    let replacement: Value = serde_json::from_slice(&added.stdout).unwrap();
-    assert_eq!(replacement["source"]["id"], "github-2");
     let review = cli.run(&["source", "resolve", &reference, "--no-search"]);
-    assert!(
-        review["actions"]
-            .as_array()
-            .unwrap()
-            .iter()
-            .all(|action| action["available"] == false)
-    );
-    let preview = cli.run(&[
-        "source",
-        "publish",
-        &reference,
-        "--preview",
-        "--destination",
-        "o/flaky",
-    ]);
-    assert_eq!(preview["eligibility"]["reason"], "attempt_open");
+    assert_eq!(review["attempt"]["state"], "unresolved");
 }

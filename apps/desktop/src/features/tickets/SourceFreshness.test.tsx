@@ -145,7 +145,7 @@ test("the footer's status line opens the source's settings", () => {
   expect(openSettings).toHaveBeenCalled();
 });
 
-test("unassigned tickets retain their own footer row alongside the default connection", () => {
+test("unassigned GitHub tickets retain their own footer row and open GitHub Settings", () => {
   const openSettings = vi.fn();
   render(
     withActivity(
@@ -167,7 +167,7 @@ test("unassigned tickets retain their own footer row alongside the default conne
   fireEvent.click(connected);
   expect(openSettings).toHaveBeenLastCalledWith("github");
   fireEvent.click(unassigned);
-  expect(openSettings).toHaveBeenLastCalledWith(undefined);
+  expect(openSettings).toHaveBeenLastCalledWith("github");
 });
 
 test("the footer reads Refreshing GitHub… without a dot while a refresh runs", () => {

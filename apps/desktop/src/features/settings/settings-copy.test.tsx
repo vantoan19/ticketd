@@ -20,21 +20,23 @@ import { sourcesClient } from "@/lib/api/sources";
 import { workspaceClient } from "@/lib/api/workspace";
 import { syncApi } from "@/lib/sync-api";
 import { TestReads } from "@/lib/workspace-reads/testing";
-import { githubSource } from "@/test/source-fixtures";
+import { githubSource, githubIntegration } from "@/test/source-fixtures";
 
 vi.mock("@tauri-apps/api/core", () => ({
   invoke: vi.fn().mockImplementation(async (command: string) =>
-    command === "attachment_upload_destination"
-      ? {
-          kind: "google_drive",
-          destination: {
-            connection_id: "account",
-            folder_id: "folder",
-            resource_key: null,
-          },
-          folder_name: "Specs",
-        }
-      : 104857600,
+    command === "get_github_integration"
+      ? githubIntegration()
+      : command === "attachment_upload_destination"
+        ? {
+            kind: "google_drive",
+            destination: {
+              connection_id: "account",
+              folder_id: "folder",
+              resource_key: null,
+            },
+            folder_name: "Specs",
+          }
+        : 104857600,
   ),
 }));
 vi.mock("@/lib/api/workspace", () => ({
