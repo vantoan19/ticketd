@@ -140,6 +140,7 @@ beforeEach(() => {
         );
         return member ? ticket(member) : null;
       }
+      case "open_document":
       case "show_document":
         return {
           id: "spec",
@@ -150,6 +151,10 @@ beforeEach(() => {
           created_at: "2026-11-28T01:00:00Z",
           trashed: false,
         };
+      case "document_context_links":
+        return [[], []];
+      case "current_work_documents":
+        return { groups: [], finished: 0, unlinked: 0, trashed: 0 };
       case "search_tickets":
         return tickets
           .filter((item) =>
@@ -437,6 +442,62 @@ test("the progress strip names counted tickets in progress order", async () => {
   expect(segments).toEqual(
     ordered.map((name) => within(strip).getByRole("button", { name })),
   );
+});
+
+test("a source-held Todo still appears in work and progress", async () => {
+  tickets[0]!.availability = null;
+  await openLaunch();
+
+  const overview = within(context());
+  expect(overview.getByText("1 of 2 done")).toBeTruthy();
+  expect(overview.getByText("1 held by source")).toBeTruthy();
+  const held = within(overview.getByRole("region", { name: "Held by source" }));
+  expect(
+    held.getByRole("button", {
+      name: "T-KQ1 Title of T-KQ1, Held by source",
+    }),
+  ).toBeTruthy();
+  const strip = within(
+    overview.getByRole("toolbar", { name: "Plan progress" }),
+  );
+  expect(
+    strip.getByRole("button", {
+      name: "T-KQ1 Title of T-KQ1 · Held by source",
+    }),
+  ).toBeTruthy();
+  expect(overview.queryByRole("region", { name: "Ready" })).toBeNull();
+  expect(
+    overview.queryByRole("region", { name: "Ready to wrap up" }),
+  ).toBeNull();
+});
+
+test("a blocked row names every unresolved blocker, including one in Trash", async () => {
+  tickets[0]!.availability = "Blocked";
+  tickets[0]!.prerequisites = [
+    outsideBlocker,
+    {
+      ...outsideBlocker,
+      reference: "T-KQ4",
+      title: "Trashed blocker",
+      trashed: true,
+    },
+    {
+      ...outsideBlocker,
+      reference: "T-KQ5",
+      status: "Done",
+      unresolved: false,
+    },
+  ];
+  await openLaunch();
+
+  const overview = within(context());
+  const row = overview.getByRole("button", {
+    name: "T-KQ1 Title of T-KQ1, Blocked by T-KQ3 Outside blocker, T-KQ4 Trashed blocker (in Trash)",
+  });
+  expect(within(row).getByText("after T-KQ3 +1")).toBeTruthy();
+  expect(
+    overview.queryByRole("region", { name: "Ready to wrap up" }),
+  ).toBeNull();
 });
 
 test("the progress strip has one Tab stop and opens the focused ticket beside it", async () => {
@@ -872,6 +933,19 @@ test("a long purpose expands and the spec opens with a route back to its Plan", 
   documents = [
     { id: "spec", heading: "Release specification", trashed: false },
   ];
+  const respond = bridge.invoke.getMockImplementation()!;
+  bridge.invoke.mockImplementation((command, args) =>
+    command === "document_row"
+      ? {
+          id: "spec",
+          heading: "Release specification",
+          plans: [{ id: "e1", name: "Launch", archived: false, spec: true }],
+          tickets: [],
+          tags: [],
+        }
+      : respond(command, args),
+  );
+  setPreference("openDocuments", "expanded");
   await openLaunch();
   const more = within(context()).getByRole("button", { name: "Show more" });
   expect(more.getAttribute("aria-expanded")).toBe("false");
@@ -883,9 +957,13 @@ test("a long purpose expands and the spec opens with a route back to its Plan", 
       name: "Spec: Release specification",
     }),
   );
-  const back = await screen.findByRole("button", { name: "Back to Launch" });
-  fireEvent.click(back);
-  expect(await screen.findByRole("region", { name: "Launch" })).toBeTruthy();
+  await screen.findByRole("heading", { name: "Release specification" });
+  expect(screen.queryByRole("button", { name: "Open Plan Launch" })).toBeNull();
+  fireEvent.click(screen.getByRole("button", { name: "Back to Launch" }));
+  const overview = await screen.findByRole("region", { name: "Launch" });
+  expect(
+    within(overview).getByRole("button", { name: "Show less" }),
+  ).toBeTruthy();
 });
 
 test("a first visit records a last look only after leaving the Plan", async () => {

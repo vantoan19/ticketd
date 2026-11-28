@@ -7,7 +7,13 @@ export type PlanWorkTicket = Pick<
   Partial<Pick<Ticket, "trashed" | "updated_at">>;
 
 type PlanWorkGroup =
-  "In review" | "In progress" | "Ready" | "Blocked" | "Done" | "Not counted";
+  | "In review"
+  | "In progress"
+  | "Ready"
+  | "Blocked"
+  | "Held by source"
+  | "Done"
+  | "Not counted";
 
 function groupOf(ticket: PlanWorkTicket): PlanWorkGroup | null {
   switch (ticket.status) {
@@ -19,10 +25,11 @@ function groupOf(ticket: PlanWorkTicket): PlanWorkGroup | null {
     case "Duplicate":
       return "Not counted";
     case "Todo":
+      // Visible Todo tickets without a readiness indicator are held by their source.
       return ticket.availability === "Ready" ||
         ticket.availability === "Blocked"
         ? ticket.availability
-        : null;
+        : "Held by source";
     default:
       return null;
   }
@@ -66,6 +73,7 @@ const flowRank: Record<PlanWorkGroup, number> = {
   "In review": 1,
   Ready: 2,
   Blocked: 3,
+  "Held by source": 3,
   Done: 3,
   "Not counted": 3,
 };
@@ -206,12 +214,10 @@ export function planWorkModel<T extends PlanWorkTicket>(
     ticket,
     group: groupOf(ticket),
     unblocks: countUnblocked(ticket.reference, dependents),
-    waitsOn: (unresolved.get(ticket.reference) ?? [])
-      .filter((blocker) => !blocker.trashed)
-      .map((blocker) => ({
-        ...blocker,
-        insidePlan: references.has(blocker.reference),
-      })),
+    waitsOn: (unresolved.get(ticket.reference) ?? []).map((blocker) => ({
+      ...blocker,
+      insidePlan: references.has(blocker.reference),
+    })),
   }));
   type Item = (typeof items)[number];
   const inGroup = <Group extends PlanWorkGroup>(group: Group) =>
@@ -248,6 +254,7 @@ export function planWorkModel<T extends PlanWorkTicket>(
       (a, b) => byUnblocks(a, b) || byReference(a, b),
     ),
     blocked,
+    held: inGroup("Held by source").sort(byReference),
     done: inGroup("Done").sort(
       (a, b) =>
         compareTimes(statusSince(a.ticket), statusSince(b.ticket), true) ||
@@ -265,6 +272,7 @@ export function planWorkModel<T extends PlanWorkTicket>(
     ...[...sections.inProgress].sort(byUnblocks),
     ...sections.ready,
     ...[...sections.blocked].sort(byUnblocks),
+    ...[...sections.held].sort(byUnblocks),
   ];
   return {
     countable: items.filter(

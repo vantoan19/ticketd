@@ -11,6 +11,7 @@ const statusStyles: Record<Status, string> = {
   "In progress": "progress",
   Ready: "ready",
   Blocked: "blocked",
+  "Held by source": "held",
 };
 
 type StripProps = {

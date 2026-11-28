@@ -257,6 +257,7 @@ function PlanOverviewProgress({
       label: "blocked",
       status: "blocked",
     },
+    { count: work.sections.held.length, label: "held by source", status: "held" },
   ];
   let newest: { timestamp: string; epoch: number } | undefined;
   for (const member of view.members) {

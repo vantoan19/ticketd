@@ -36,7 +36,7 @@ export function PlanOverviewSections({
   files: ReadonlyMap<string, PlanTicketFiles>;
   onOpenFiles: (group: PlanTicketFiles) => void;
 }) {
-  const { inReview, inProgress, ready, blocked, done, notCounted } =
+  const { inReview, inProgress, ready, blocked, held, done, notCounted } =
     work.sections;
   const subtickets = new Map<string, number>();
   for (const { ticket } of Object.values(work.sections).flat()) {
@@ -48,6 +48,7 @@ export function PlanOverviewSections({
     { label: "In progress", items: inProgress },
     { label: "Ready", items: ready },
     { label: "Blocked", items: blocked, folded: blocked.length > 3 },
+    { label: "Held by source", items: held },
     { label: "Done", items: done, folded: true, extra: notCounted },
   ];
   const rows = (items: readonly WorkItem[]) => (
@@ -223,7 +224,11 @@ function PlanOverviewRow({
   const name = [
     `${ticket.reference} ${ticket.title}`,
     blocker
-      ? `Blocked by ${waitsOn.map(({ reference, title }) => `${reference} ${title}`).join(", ")}`
+      ? `Blocked by ${waitsOn
+          .map(({ reference, title, trashed }) =>
+            `${reference} ${title}${trashed ? " (in Trash)" : ""}`,
+          )
+          .join(", ")}`
       : group === "Not counted"
         ? ticket.status
         : group,
