@@ -190,7 +190,8 @@ opens the graph to understand dependency chains.
 - **Plan view.** Opening a Plan starts on its Overview, which shows its purpose,
   progress and linked Documents. The progress strip opens member tickets beside
   the Overview and groups them by status above 60 counted tickets. Work appears
-  under Needs you, In progress, Ready, Blocked and Done. Reviews and active work
+  under Needs you, In progress, Ready, Blocked, Held by source and Done. Tickets
+  held by their source still count toward progress. Reviews and active work
   show the first sentence of their latest update. A paperclip opens attached
   files. Ready favors tickets that unblock more Plan work and offers Start in
   Chat while Chats are on. Blocked
