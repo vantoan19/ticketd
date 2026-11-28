@@ -3,7 +3,7 @@ import {
   describeFailure,
   type FailureDescription,
 } from "@/lib/api/describe-failure";
-import { plansClient, type View } from "@/lib/api/plans";
+import { plansClient, type Plan, type View } from "@/lib/api/plans";
 import { useWorkspaceChange } from "@/lib/workspace-change";
 import {
   useTicketChanged,
@@ -187,4 +187,18 @@ export function usePlanAction({ apply }: Pick<PlanViewState, "apply">) {
     },
     [apply, statusLine],
   );
+}
+
+/** Archive immediately, with the same Undo and Retry wherever it is triggered. */
+export function useArchivePlan(plan: Plan, state: PlanViewState) {
+  const act = usePlanAction(state);
+  return () =>
+    void act(
+      () => plansClient.change(plan.id, null, true),
+      `archive ${plan.name}`,
+      {
+        message: `Archived ${plan.name}`,
+        undo: () => state.apply(() => plansClient.change(plan.id, null, false)),
+      },
+    );
 }
