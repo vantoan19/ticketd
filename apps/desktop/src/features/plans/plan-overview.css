@@ -20,7 +20,7 @@
   margin-inline: auto;
   padding: 36px 32px 40px;
 }
-.plan-overview-column > .plan-empty-state {
+.plan-overview-column > [data-slot="empty-state"] {
   padding-top: 0;
 }
 .plan-overview-head,
