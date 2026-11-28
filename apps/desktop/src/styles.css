@@ -2074,20 +2074,15 @@ html[data-window-bar] {
   font-weight: 600;
   letter-spacing: -0.3px;
 }
-.ui-button-jump {
-  width: 100%;
-  height: 32px;
-  margin: 2px 0 14px;
-  padding: 0 6px 0 10px;
-  justify-content: flex-start;
-  overflow: hidden;
-  white-space: nowrap;
-  border-radius: var(--radius-card);
-  color: var(--disabled-foreground);
-  background: var(--surface);
-  box-shadow: var(--shadow-border-base);
-  font-size: var(--text-caption);
-  line-height: var(--text-caption-line);
+.sidebar-jump {
+  margin-bottom: 6px;
+}
+.sidebar-jump button:focus-visible {
+  outline: 2px solid var(--ring);
+}
+.sidebar-jump kbd {
+  flex: none;
+  margin-inline-start: auto;
 }
 /* What the rail drops fades with a slight blur: out first, in once the width
    has arrived. The elements stay in the row and the narrowing clips them. The
@@ -2098,24 +2093,19 @@ html[data-window-bar] {
 .sidebar-heading,
 .sidebar-count:not(:has([data-slot="status-dot"])),
 .sidebar-count > :not([data-slot="status-dot"]),
-.ui-button-jump > span,
-.ui-button-jump kbd {
+.sidebar-jump kbd {
   transition:
     opacity var(--dur-enter) var(--ease-out),
     filter var(--dur-enter) var(--ease-out);
 }
-.sidebar[data-collapsed] :is(.sidebar-label, .sidebar-wordmark),
-.sidebar[data-collapsed] .ui-button-jump > span,
-.sidebar[data-collapsed] .ui-button-jump kbd {
+.sidebar[data-collapsed]
+  :is(.sidebar-label, .sidebar-wordmark, .sidebar-jump kbd) {
   opacity: 0;
   filter: blur(var(--motion-blur-out));
   pointer-events: none;
   transition:
     opacity var(--dur-exit) var(--ease-in),
     filter var(--dur-exit) var(--ease-in);
-}
-.ui-button-jump kbd {
-  margin-left: auto;
 }
 /* Expanding: the width first, then these fade back in. They stay hidden, at
    once, until the sidebar is nearly open; the width itself is the clock, so a
@@ -2131,8 +2121,7 @@ html[data-window-bar] {
       .sidebar-heading,
       .sidebar-count:not(:has([data-slot="status-dot"])),
       .sidebar-count > :not([data-slot="status-dot"]),
-      .ui-button-jump > span,
-      .ui-button-jump kbd
+      .sidebar-jump kbd
     ) {
     opacity: 0;
     filter: blur(var(--motion-blur-out));
