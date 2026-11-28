@@ -8708,7 +8708,7 @@ test("Linked shows a blocking subticket once and the scrolled title reuses its h
   fireEvent.click(
     await screen.findByRole("button", { name: /A long outcome/ }),
   );
-  expect(await screen.findByRole("heading", { name: "Linked 1" })).toBeTruthy();
+  expect(await screen.findByRole("heading", { name: "Linked" })).toBeTruthy();
   expect(
     screen.getAllByRole("button", { name: "The shared prerequisite" }),
   ).toHaveLength(1);

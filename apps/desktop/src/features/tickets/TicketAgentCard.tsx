@@ -186,16 +186,14 @@ function AgentRequest({
   open: React.ReactNode;
 }) {
   const snapshot = useAgentChat(state.target.chatId);
-  const request = snapshot?.items
-    .filter((item): item is PendingRequest => item.kind === "request")
-    .reverse()
-    .find(
-      (item) =>
-        item.state === "pending" &&
-        item.request === state.request &&
-        (!state.agent ||
-          (item.owner ?? null) === (state.agent.sub_agent ?? null)),
-    );
+  const request = snapshot?.items.find(
+    (item): item is PendingRequest =>
+      item.kind === "request" &&
+      item.state === "pending" &&
+      item.request === state.request &&
+      (!state.agent ||
+        (item.owner ?? null) === (state.agent.sub_agent ?? null)),
+  );
   const asker =
     state.agent ??
     snapshot?.chat.sub_agents.find((agent) => agent.id === request?.owner) ??

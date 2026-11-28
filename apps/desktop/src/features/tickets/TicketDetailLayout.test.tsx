@@ -145,7 +145,7 @@ test("all property chips stay above the description and linked context stays bel
     within(bar).getByRole("button", { name: "Status: In progress" }),
   ).toBeTruthy();
   expect(within(bar).queryByRole("button", { name: /^Project/ })).toBeNull();
-  const linked = await screen.findByRole("heading", { name: "Linked 1" });
+  const linked = await screen.findByRole("heading", { name: "Linked" });
   expect(bar.contains(linked)).toBe(false);
   expect(
     screen.getByText("A description to read.").compareDocumentPosition(linked) &
@@ -167,7 +167,7 @@ test("the local reading column runs title, description, then Linked without a du
     },
   ];
   renderDetails();
-  const subtickets = await screen.findByRole("heading", { name: "Linked 1" });
+  const subtickets = await screen.findByRole("heading", { name: "Linked" });
   const title = screen.getByRole("heading", { name: ticket.title, level: 1 });
   expect(screen.queryByText(/^Updated/)).toBeNull();
   const description = screen.getByText("Description");
