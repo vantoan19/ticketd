@@ -6,6 +6,7 @@ import {
   AlertTitle,
 } from "@/components/ui/alert";
 import { Button } from "@/components/ui/button";
+import { useStatusLine } from "@/components/ui/use-status-line";
 import {
   Popover,
   PopoverContent,
@@ -13,15 +14,12 @@ import {
 } from "@/components/ui/popover";
 import { TicketPropertyChoices } from "@/features/tickets/TicketCommandPicker";
 import { client, type Ticket } from "@/lib/api/client";
+import { describeFailure } from "@/lib/api/describe-failure";
 import type { Plan, View } from "@/lib/api/plans";
 import { plural } from "@/lib/format";
 import { planAssignmentChoices } from "./plan-assignment";
 import { planWrapUp } from "./plan-work-model";
-import {
-  useArchivePlan,
-  usePlanAction,
-  type PlanViewState,
-} from "./usePlanView";
+import { useArchivePlan, type PlanViewState } from "./usePlanView";
 
 export function PlanOverviewWrapUp({
   view,
@@ -87,25 +85,59 @@ function MoveRemainingTickets({
   subject: string;
 }) {
   const [open, setOpen] = useState(false);
-  const act = usePlanAction(state);
+  const statusLine = useStatusLine();
 
   function move(destination: string) {
     setOpen(false);
     if (destination === current.id || state.pending) return;
 
     const name = plans.find((plan) => plan.id === destination)?.name;
-    const moveTickets = batchMove(
-      references,
-      destination || null,
-      state.reload,
-    );
-    const restoreTickets = batchMove(references, current.id, state.reload);
-    void act(moveTickets, `move ${subject}`, {
-      message: name
-        ? `Moved ${subject} to ${name}`
-        : `Removed ${subject} from ${current.name}`,
-      undo: () => state.apply(restoreTickets),
-    });
+    const moveTickets = batchMove(references, destination || null);
+
+    async function finishMove() {
+      await state.apply(moveTickets.write);
+      const confirmed = moveTickets.confirmed;
+      const restore = confirmed.length
+        ? batchMove(
+            confirmed.map((ticket) => ticket.reference),
+            current.id,
+          )
+        : null;
+      const undo = restore
+        ? async () => {
+            await state.apply(restore.write);
+            const problem = restore.failure();
+            if (problem) throw problem.reason;
+          }
+        : undefined;
+      const problem = moveTickets.failure();
+      if (!problem) {
+        statusLine.show({
+          message: name
+            ? `Moved ${subject} to ${name}`
+            : `Removed ${subject} from ${current.name}`,
+          ...(undo && { undo }),
+        });
+        return;
+      }
+
+      const failure = describeFailure(problem.reason, `move ${subject}`);
+      const retry = failure.action === "retry";
+      statusLine.show({
+        tone: "error",
+        message: confirmed.length
+          ? `Confirmed ${confirmed.length} of ${references.length} tickets moved. Couldn't confirm the rest.`
+          : `${failure.title}. ${failure.sentence}`,
+        details: failure.details,
+        ...(retry && { action: { label: "Retry", run: finishMove } }),
+        ...(undo &&
+          (retry
+            ? { secondaryAction: { label: "Undo", run: undo } }
+            : { undo })),
+      });
+    }
+
+    void finishMove();
   }
 
   return (
@@ -134,11 +166,7 @@ function MoveRemainingTickets({
 
 // The core accepts at most 100 edits per batch. Retry skips acknowledged
 // batches and reuses the ID when a write's reply may have been lost.
-function batchMove(
-  references: string[],
-  planId: string | null,
-  reload: () => void,
-) {
+function batchMove(references: string[], planId: string | null) {
   const pending: { references: string[]; requestId: string }[] = [];
   const batchSize = 100;
   for (let start = 0; start < references.length; start += batchSize) {
@@ -147,23 +175,31 @@ function batchMove(
       requestId: crypto.randomUUID(),
     });
   }
-  return async () => {
-    const moved: Ticket[] = [];
-    try {
-      for (let batch = pending[0]; batch; batch = pending[0]) {
-        moved.push(
-          ...(await client.bulkChange(
-            batch.references,
-            { plan_id: planId },
-            batch.requestId,
-          )),
-        );
-        pending.shift();
+  const confirmed: Ticket[] = [];
+  let problem: { reason: unknown } | null = null;
+
+  return {
+    confirmed,
+    failure: () => problem,
+    async write() {
+      const from = confirmed.length;
+      problem = null;
+      try {
+        for (let batch = pending[0]; batch; batch = pending[0]) {
+          confirmed.push(
+            ...(await client.bulkChange(
+              batch.references,
+              { plan_id: planId },
+              batch.requestId,
+            )),
+          );
+          pending.shift();
+        }
+      } catch (reason) {
+        problem = { reason };
       }
-      return moved;
-    } catch (reason) {
-      reload();
-      throw reason;
-    }
+      // Report acknowledged writes even while the remaining batch awaits Retry.
+      return confirmed.slice(from);
+    },
   };
 }
