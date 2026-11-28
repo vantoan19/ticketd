@@ -10,6 +10,7 @@ import userEvent from "@testing-library/user-event";
 import { afterEach, expect, test, vi } from "vitest";
 import { SettingsView } from "@/features/settings/SettingsView";
 import { SourceActivityContext } from "@/features/tickets/source-activity";
+import { invoke } from "@tauri-apps/api/core";
 import { sourcesClient } from "@/lib/api/sources";
 import {
   getGithubIntegration,
@@ -204,4 +205,41 @@ test("Remove asks before stopping the selected repository and explains what its 
   expect(
     screen.getByRole("button", { name: "northwind/payments-api" }),
   ).toBeTruthy();
+});
+
+test("adding the first Enterprise repository checks its full site and offers cancellable sign-in", async () => {
+  vi.mocked(invoke).mockResolvedValue({
+    host: "github.example.test:8443",
+    state: "not_signed_in",
+    login: null,
+    message: null,
+  });
+  vi.mocked(signInGithub).mockImplementation(async (_host, onCode) => {
+    onCode("ABCD-EFGH");
+    return new Promise(() => {});
+  });
+  open(connected);
+  await userEvent.click(
+    await screen.findByRole("button", { name: "Add a repository" }),
+  );
+  const dialog = within(
+    screen.getByRole("dialog", { name: "Add a repository" }),
+  );
+  const host = dialog.getByRole("textbox", { name: "GitHub host" });
+  await userEvent.clear(host);
+  await userEvent.type(host, "github.example.test:8443");
+  await userEvent.click(dialog.getByRole("button", { name: "Check sign-in" }));
+  expect(invoke).toHaveBeenCalledWith("get_github_host_readiness", {
+    host: "github.example.test:8443",
+  });
+  await userEvent.click(await dialog.findByRole("button", { name: "Sign in" }));
+  expect(signInGithub).toHaveBeenCalledWith(
+    "github.example.test:8443",
+    expect.any(Function),
+  );
+  expect(dialog.getByText("ABCD-EFGH")).toBeTruthy();
+  await userEvent.click(dialog.getByRole("button", { name: "Cancel sign-in" }));
+  expect(invoke).toHaveBeenCalledWith("cancel_github_sign_in", {
+    host: "github.example.test:8443",
+  });
 });

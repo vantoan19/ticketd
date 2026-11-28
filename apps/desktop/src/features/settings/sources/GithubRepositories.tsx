@@ -179,6 +179,7 @@ export function GithubRepositories({
       {(adding || addingForProject) && (
         <GithubRepositoryEditor
           knownRepositories={repositories}
+          knownHosts={hosts}
           {...(projectSetup && { initialRepository: projectSetup.repository })}
           onCancel={() => {
             setAdding(false);

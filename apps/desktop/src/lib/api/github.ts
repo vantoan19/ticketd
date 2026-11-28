@@ -48,6 +48,12 @@ export async function getGithubIntegration() {
   );
 }
 
+export async function getGithubHostReadiness(host: string) {
+  return hostSchema.parse(
+    await structured(invoke("get_github_host_readiness", { host })),
+  );
+}
+
 export async function previewGithubRepository(rule: GithubRepositoryRule) {
   return previewSchema.parse(
     await structured(invoke("preview_github_repository", { rule })),

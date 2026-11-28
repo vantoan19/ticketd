@@ -37,6 +37,17 @@ pub(crate) async fn get_github_integration(
 }
 
 #[tauri::command]
+pub(crate) async fn get_github_host_readiness(
+    sources: State<'_, SourceRegistry>,
+    host: String,
+) -> Result<GithubHost, SourceFailure> {
+    source_task(sources, move |registry| {
+        Ok(open_workspace()?.github_host_readiness(&registry.engine()?, &host)?)
+    })
+    .await
+}
+
+#[tauri::command]
 pub(crate) async fn preview_github_repository(
     sources: State<'_, SourceRegistry>,
     rule: GithubRepositoryRule,

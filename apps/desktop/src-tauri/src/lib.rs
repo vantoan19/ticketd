@@ -2623,6 +2623,7 @@ pub fn run() -> Result<(), tauri::Error> {
             create_source_repository_project,
             refresh_sources,
             github_commands::get_github_integration,
+            github_commands::get_github_host_readiness,
             github_commands::preview_github_repository,
             github_commands::save_github_repository,
             github_commands::remove_github_repository,

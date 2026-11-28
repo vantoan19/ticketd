@@ -4,13 +4,17 @@ import { Button } from "@/components/ui/button";
 import { DialogShell } from "@/components/ui/dialog-shell";
 import { Field, FieldGroup, FieldLabel } from "@/components/ui/field";
 import { Input } from "@/components/ui/input";
+import { SettingsList } from "@/features/settings/layout/SettingsList";
+import { GithubSignInRow } from "@/features/settings/sources/GithubSignInRow";
 import { SchemaForm } from "@/features/settings/sources/SchemaForm";
 import type { Draft } from "@/features/settings/sources/config-values";
 import { SourcePreview } from "@/features/settings/sources/SourcePreview";
 import { failureText } from "@/lib/api/describe-failure";
 import {
+  getGithubHostReadiness,
   previewGithubRepository,
   saveGithubRepository,
+  type GithubHost,
   type GithubRepository,
 } from "@/lib/api/github";
 import {
@@ -58,6 +62,7 @@ export function GithubRepositoryEditor({
   repository,
   initialRepository,
   knownRepositories,
+  knownHosts = [],
   onCancel,
   onSaved,
   onSavingChange,
@@ -66,6 +71,7 @@ export function GithubRepositoryEditor({
   repository?: GithubRepository;
   initialRepository?: string;
   knownRepositories: readonly GithubRepository[];
+  knownHosts?: readonly GithubHost[];
   onCancel: () => void;
   onSaved: () => void;
   onSavingChange?: (saving: boolean) => void;
@@ -84,32 +90,53 @@ export function GithubRepositoryEditor({
   const [working, setWorking] = useState<"preview" | "save" | null>(null);
   const [review, setReview] = useState<DiscoveryPreview | null>(null);
   const [failure, setFailure] = useState("");
-  const site = host.trim().toLowerCase();
+  const [checkedHost, setCheckedHost] = useState<GithubHost | null>(null);
+  const [checking, setChecking] = useState(false);
+  const site = githubSite(host);
+  const readiness =
+    checkedHost?.host === site
+      ? checkedHost
+      : knownHosts.find(({ host }) => host === site);
+  const signInRequired = !repository && readiness?.state !== "connected";
   const names = Array.isArray(draft.repositories) ? draft.repositories : [];
   const assignee =
     typeof draft.assignee === "string" ? draft.assignee.trim() || null : null;
   const labels = Array.isArray(draft.labels) ? draft.labels : [];
   const name = names[0];
-  const rule = { repository: `${site}/${name ?? ""}`, assignee, labels };
+  const rule = { repository: `${site ?? ""}/${name ?? ""}`, assignee, labels };
   const alreadyAdded =
     !repository &&
     knownRepositories.some(
       (entry) =>
         entry.repository.toLowerCase() === rule.repository.toLowerCase(),
     );
-  const invalidHost = !/^[a-z0-9]+(?:[.-][a-z0-9]+)*$/.test(site);
-  const blockedReason = invalidHost
+  const blockedReason = !site
     ? "Enter a GitHub host, such as github.com."
-    : !name
-      ? "Choose a repository to preview."
-      : alreadyAdded
-        ? "This repository is already on the list."
-        : null;
+    : signInRequired
+      ? "Check sign-in for this GitHub host."
+      : !name
+        ? "Choose a repository to preview."
+        : alreadyAdded
+          ? "This repository is already on the list."
+          : null;
 
   function update(key: string, value: string | string[]) {
     setDraft((current) => ({ ...current, [key]: value }));
     setReview(null);
     setFailure("");
+  }
+
+  async function checkHost() {
+    if (!site || checking) return;
+    setChecking(true);
+    setFailure("");
+    try {
+      setCheckedHost(await getGithubHostReadiness(site));
+    } catch (reason) {
+      setFailure(failureText(reason, "check GitHub sign-in"));
+    } finally {
+      setChecking(false);
+    }
   }
 
   async function preview() {
@@ -153,25 +180,53 @@ export function GithubRepositoryEditor({
               id={hostId}
               autoComplete="off"
               spellCheck={false}
-              disabled={working !== null}
+              disabled={working !== null || checking}
               value={host}
               onChange={(event) => {
                 setHost(event.target.value);
+                setCheckedHost(null);
                 update("repositories", []);
               }}
             />
           </Field>
         </FieldGroup>
       )}
+      {!repository &&
+        site &&
+        signInRequired &&
+        (readiness ? (
+          <SettingsList>
+            <GithubSignInRow
+              key={site}
+              host={readiness}
+              onChanged={(verified) => {
+                if (verified) setCheckedHost(verified);
+              }}
+              onCheck={() => void checkHost()}
+              cancelLabel="Cancel sign-in"
+            />
+          </SettingsList>
+        ) : (
+          <Button
+            type="button"
+            variant="outline"
+            size="sm"
+            disabled={checking}
+            onClick={() => void checkHost()}
+          >
+            {checking ? "Checking sign-in…" : "Check sign-in"}
+          </Button>
+        ))}
       <SchemaForm
         key={repository ? undefined : site}
         fields={identity ? filterFields : addFields}
         draft={draft}
         errors={{}}
-        disabled={working !== null}
+        disabled={working !== null || signInRequired}
         targetField="repositories"
         loadOptions={async (field, query) => {
-          if (invalidHost || (field === "labels" && !name)) return [];
+          if (!site || signInRequired || (field === "labels" && !name))
+            return [];
           const choices = await sourcesClient.options("github", field, query, {
             github_site: site,
             repositories: names,
@@ -269,4 +324,25 @@ export function GithubRepositoryEditor({
       </div>
     </>
   );
+}
+
+/** Match Core's host syntax, including an explicit HTTPS port. */
+function githubSite(input: string): string | null {
+  const site = input.trim().toLowerCase();
+  const match = /^(\[[0-9a-f:.]+\]|[^:/?#@\s\\]+)(?::([0-9]+))?$/.exec(site);
+  if (!match || (match[2] !== undefined && Number(match[2]) === 0)) return null;
+  try {
+    const url = new URL(`https://${site}`);
+    if (
+      !url.hostname.startsWith("[") &&
+      !url.hostname
+        .replace(/\.$/, "")
+        .split(".")
+        .every((label) => /^[a-z0-9](?:[a-z0-9-]*[a-z0-9])?$/.test(label))
+    )
+      return null;
+    return url.host;
+  } catch {
+    return null;
+  }
 }
