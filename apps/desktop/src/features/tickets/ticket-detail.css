@@ -16,10 +16,99 @@
      restyles a container's whole subtree each time it resizes. */
   contain: inline-size layout style;
 }
-/* The same document stays in place when it opens full width. */
-.ticket-detail[data-expanded] .detail-document {
-  max-width: 760px;
+.detail-content[data-rail] {
+  grid-template-columns: 680px 248px;
+  justify-content: center;
+  gap: 32px;
+  padding-inline: 32px;
+}
+.detail-content[data-rail] .detail-document {
   padding-top: 40px;
+  padding-inline: 0;
+}
+.ticket-detail-rail {
+  position: sticky;
+  top: 48px;
+  align-self: start;
+  display: grid;
+  gap: 24px;
+  min-width: 0;
+  max-height: calc(100dvh - 128px);
+  margin-top: 48px;
+  padding: 2px;
+  overflow: auto;
+  scrollbar-width: thin;
+}
+.ticket-rail-properties {
+  display: grid;
+  gap: 2px;
+}
+.ticket-rail-property {
+  display: grid;
+  grid-template-columns: 80px minmax(0, 1fr);
+  align-items: start;
+  min-width: 0;
+}
+.ticket-rail-label {
+  display: flex;
+  align-items: center;
+  min-height: 28px;
+}
+.ticket-rail-property .rail-row {
+  min-height: 28px;
+  width: 100%;
+  margin: 0;
+  padding-inline: 4px;
+  text-align: start;
+  white-space: nowrap;
+}
+.ticket-rail-properties > [data-slot="button"] {
+  justify-self: start;
+  padding-inline: 4px;
+}
+.ticket-rail-property:has(> .linked-work-disclosure) > * {
+  grid-row: 1;
+}
+.ticket-rail-property > .ticket-rail-label {
+  grid-column: 1;
+}
+.ticket-rail-property > .linked-work-disclosure {
+  grid-column: 1 / -1;
+}
+.ticket-rail-property > .linked-work-disclosure .ui-disclosure-trigger {
+  width: calc(100% - 80px);
+  margin-inline-start: 80px;
+}
+.ticket-detail-rail .reference-row[data-density="rail"] {
+  margin-inline: 0;
+  padding-inline-start: 0;
+}
+.ticket-outline ul {
+  display: grid;
+  margin: 6px 0 0;
+  padding-inline-start: 0;
+  list-style-type: none;
+}
+.ticket-outline li[data-subsection] .ui-button {
+  padding-inline-start: 24px;
+}
+.ticket-outline .ui-button {
+  display: flex;
+  width: 100%;
+  justify-content: start;
+  height: auto;
+  min-height: 28px;
+  padding: 4px 12px;
+  text-align: start;
+  white-space: normal;
+  overflow-wrap: anywhere;
+}
+.ticket-blocker-row {
+  display: flex;
+  align-items: center;
+}
+.ticket-blocker-row .rail-row {
+  min-width: 0;
 }
 .ticket-follow-slot {
   display: inline-flex;

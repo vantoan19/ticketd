@@ -28,6 +28,8 @@ type InboxTarget = { reference: string; id: string; key: number };
 
 /** Hidden pages kept besides the selected one; any page holding a draft is kept too. */
 const RECENT_PAGES = 3;
+// The 680px column, 32px gap, 248px rail, and two 32px gutters.
+const TICKET_RAIL_MIN_WIDTH = 1024;
 
 /** Two ways to arrive at a note (the Inbox, a backlink); the later one wins. */
 function newest(
@@ -113,6 +115,8 @@ export function TicketDetails({
     setBoundary(node);
   }, []);
   const narrowHeader = useNarrowPane(pane, 560);
+  const scroller = useRef<HTMLDivElement>(null);
+  const narrow = useNarrowPane(scroller, TICKET_RAIL_MIN_WIDTH, true);
   const [scrolledReference, setScrolledReference] = useState<string | null>(
     null,
   );
@@ -187,6 +191,7 @@ export function TicketDetails({
                 {...(onAdjacent && { onAdjacent })}
               />
               <div
+                ref={scroller}
                 className="detail-scroll"
                 onScroll={(event) => {
                   const scroller = event.currentTarget;
@@ -231,6 +236,7 @@ export function TicketDetails({
                     reference={reference}
                     active={reference === selected}
                     expanded={expanded}
+                    rail={expanded && !narrow}
                     hidden={hidden || reference !== selected}
                     swap={swap.swapped && reference === selected}
                     leaving={reference === swap.leaving}
@@ -269,6 +275,7 @@ const OpenedPage = memo(function OpenedPage({
   reference,
   active,
   expanded,
+  rail,
   hidden,
   swap,
   leaving,
@@ -283,6 +290,7 @@ const OpenedPage = memo(function OpenedPage({
   reference: string;
   active: boolean;
   expanded: boolean;
+  rail: boolean;
   hidden: boolean;
   swap: boolean;
   leaving: boolean;
@@ -301,6 +309,7 @@ const OpenedPage = memo(function OpenedPage({
       <TicketPage
         active={active}
         expanded={expanded}
+        rail={rail}
         swap={swap}
         leaving={leaving}
         projects={projects}
