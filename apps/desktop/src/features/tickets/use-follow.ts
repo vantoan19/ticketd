@@ -69,10 +69,10 @@ export function useFollow(
       setPending(target, false);
       return;
     }
+    setChangeFailure(target, null);
     try {
       await changed(undefined, [followingFill(target, next)]);
     } finally {
-      setChangeFailure(target, null);
       setPending(target, false);
     }
   }

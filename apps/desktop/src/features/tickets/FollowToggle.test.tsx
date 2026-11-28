@@ -370,16 +370,17 @@ test.each([
   { result: "clears its own status line", replaced: false },
   { result: "keeps a newer outcome visible", replaced: true },
 ])("a successful direct Follow retry $result", async ({ replaced }) => {
-  let following = false;
+  const refresh = deferred<boolean>();
+  let reads = 0;
   let writes = 0;
   bridge.invoke.mockImplementation(
     async (command: string, args?: { reference?: string }) => {
       if (command === "show_ticket") return ticket(args!.reference!);
-      if (command === "is_following") return following;
+      if (command === "is_following")
+        return ++reads === 1 ? false : refresh.promise;
       if (command === "set_following") {
         writes += 1;
         if (writes === 1) throw new Error("disk I/O error");
-        following = true;
         return null;
       }
       throw new Error(`Unexpected ${command}`);
@@ -404,9 +405,11 @@ test.each([
   await waitFor(() =>
     expect(toggle().getAttribute("aria-pressed")).toBe("true"),
   );
+  await waitFor(() => expect(reads).toBe(2));
   await waitFor(() => expect(screen.queryByRole("alert")).toBeNull());
   if (replaced)
     expect(screen.getByRole("status").textContent).toContain(
       "Copied ticket link",
     );
+  await act(async () => refresh.resolve(true));
 });
