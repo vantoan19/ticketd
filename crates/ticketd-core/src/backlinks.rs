@@ -1,8 +1,10 @@
+use std::collections::HashMap;
+
 use pulldown_cmark::{Event, Parser, Tag, TagEnd};
 use rusqlite::Connection;
 use serde::Serialize;
 
-use crate::{Error, Workspace, relationships};
+use crate::{Error, Status, Workspace, relationships};
 
 #[derive(Debug, Serialize)]
 pub struct Backlink {
@@ -17,6 +19,30 @@ pub struct Backlink {
     /// `body.chars().skip(mention_start).take(mention_end - mention_start)` is the
     /// span. The span is the reference itself when its source has no escapes or
     /// entities; otherwise it is the whole run of text the reference was decoded from.
+    pub mention_start: usize,
+    pub mention_end: usize,
+}
+
+#[derive(Debug, Serialize)]
+pub struct TicketMentions {
+    pub items: Vec<MentioningTicket>,
+    pub total: usize,
+}
+
+#[derive(Debug, Serialize)]
+pub struct MentioningTicket {
+    pub reference: String,
+    pub title: String,
+    pub status: Status,
+    pub mentioned_at: String,
+    pub passages: Vec<MentionPassage>,
+}
+
+#[derive(Debug, Serialize)]
+pub struct MentionPassage {
+    pub activity_id: Option<String>,
+    pub reported_at: Option<String>,
+    pub passage: String,
     pub mention_start: usize,
     pub mention_end: usize,
 }
@@ -107,6 +133,48 @@ impl Workspace {
             Ok(links)
         })
     }
+
+    /// Return mentions grouped by source ticket, ordered by each ticket's latest mention.
+    pub fn ticket_mentions(
+        &self,
+        reference: &str,
+        limit: u32,
+        offset: u32,
+    ) -> Result<TicketMentions, Error> {
+        crate::read_scope::run(&self.connection, |tx| {
+            relationships::id(tx, reference)?;
+            let mut items: Vec<MentioningTicket> = Vec::new();
+            let mut seen = HashMap::new();
+            let limit = limit.clamp(1, 100) as usize;
+            let offset = offset as usize;
+            scan(
+                tx,
+                reference,
+                "ORDER BY 8 DESC, 6 DESC, 5 DESC",
+                |row, source| {
+                    let next = seen.len();
+                    let index = *seen.entry(source.reference.clone()).or_insert(next);
+                    if let Some(index) = index.checked_sub(offset).filter(|index| *index < limit) {
+                        if index == items.len() {
+                            items.push(MentioningTicket {
+                                reference: source.reference.clone(),
+                                title: source.title.chars().take(256).collect(),
+                                status: row.get::<_, String>(8)?.parse()?,
+                                mentioned_at: row.get(7)?,
+                                passages: Vec::new(),
+                            });
+                        }
+                        items[index].passages.extend(source.passages(reference));
+                    }
+                    Ok(true)
+                },
+            )?;
+            Ok(TicketMentions {
+                items,
+                total: seen.len(),
+            })
+        })
+    }
 }
 
 pub(crate) fn query(
@@ -115,68 +183,116 @@ pub(crate) fn query(
     limit: u32,
     offset: u32,
 ) -> Result<Vec<Backlink>, Error> {
-    let pattern = format!("%{reference}%");
-    let mut statement = tx.prepare("SELECT t.reference,t.title,NULL,t.body,0,t.number,NULL FROM tickets t WHERE t.trashed=0 AND (t.body LIKE ?1 OR instr(t.body,'&')>0 OR instr(t.body,char(92))>0) UNION ALL SELECT t.reference,t.title,n.id,n.brief,n.number,t.number,n.reported_at FROM activities n JOIN tickets t ON t.id=n.ticket_id WHERE t.trashed=0 AND (n.brief LIKE ?1 OR instr(n.brief,'&')>0 OR instr(n.brief,char(92))>0) ORDER BY 6,5")?;
-    let mut rows = statement.query([pattern])?;
     let mut links = Vec::new();
-    let mut seen = 0u32;
-    let limit = limit.clamp(1, 100);
-    while let Some(row) = rows.next()? {
-        let source_reference: String = row.get(0)?;
-        let title: String = row.get(1)?;
-        let activity_id: Option<String> = row.get(2)?;
-        let content: String = row.get(3)?;
-        let reported_at: Option<String> = row.get(6)?;
-        if reference == source_reference {
-            continue;
-        }
-        let mut last_line = None;
-        for (text, range) in text_runs(&content) {
-            if !contains_reference(&text, reference) {
-                continue;
+    let mut seen = 0;
+    let limit = limit.clamp(1, 100) as usize;
+    scan(tx, reference, "ORDER BY 6, 5", |_, source| {
+        for passage in source.passages(reference) {
+            if seen >= offset {
+                links.push(Backlink {
+                    source_reference: source.reference.clone(),
+                    source_title: source.title.chars().take(256).collect(),
+                    activity_id: passage.activity_id,
+                    reported_at: passage.reported_at,
+                    mention_start: passage.mention_start,
+                    mention_end: passage.mention_end,
+                    passage: passage.passage,
+                });
+                if links.len() == limit {
+                    return Ok(false);
+                }
             }
+            seen += 1;
+        }
+        Ok(true)
+    })?;
+    Ok(links)
+}
+
+struct MentionSource {
+    reference: String,
+    title: String,
+    activity_id: Option<String>,
+    content: String,
+    reported_at: Option<String>,
+    runs: Vec<std::ops::Range<usize>>,
+}
+
+impl MentionSource {
+    fn passages<'a>(&'a self, reference: &'a str) -> impl Iterator<Item = MentionPassage> + 'a {
+        let mut last_line = None;
+        self.runs.iter().filter_map(move |range| {
+            let content = &self.content;
             let start = content[..range.start].rfind('\n').map_or(0, |i| i + 1);
             if last_line == Some(start) {
-                continue;
+                return None;
             }
             last_line = Some(start);
             let end = content[range.end..]
                 .find('\n')
                 .map_or(content.len(), |i| range.end + i);
-            if seen >= offset {
-                let mention = mention_span(&content, &range, reference);
-                links.push(Backlink {
-                    source_reference: source_reference.clone(),
-                    source_title: title.chars().take(256).collect(),
-                    activity_id: activity_id.clone(),
-                    reported_at: reported_at.clone(),
-                    mention_start: char_offset(&content, mention.start),
-                    mention_end: char_offset(&content, mention.end),
-                    passage: {
-                        let line = &content[start..end];
-                        let reference_offset = line.find(reference).unwrap_or(range.start - start);
-                        let before = line[..reference_offset].chars().count();
-                        line.chars()
-                            .skip(before.saturating_sub(256))
-                            .take(512)
-                            .collect()
-                    },
-                });
-                if links.len() == limit as usize {
-                    break;
-                }
-            }
-            seen = seen.saturating_add(1);
+            let mention = mention_span(content, range, reference);
+            let line = &content[start..end];
+            let reference_offset = line.find(reference).unwrap_or(range.start - start);
+            let before = line[..reference_offset].chars().count();
+            Some(MentionPassage {
+                activity_id: self.activity_id.clone(),
+                reported_at: self.reported_at.clone(),
+                mention_start: char_offset(content, mention.start),
+                mention_end: char_offset(content, mention.end),
+                passage: line
+                    .chars()
+                    .skip(before.saturating_sub(256))
+                    .take(512)
+                    .collect(),
+            })
+        })
+    }
+}
+
+fn scan(
+    tx: &Connection,
+    reference: &str,
+    order: &str,
+    mut visit: impl FnMut(&rusqlite::Row<'_>, MentionSource) -> Result<bool, Error>,
+) -> Result<(), Error> {
+    let pattern = format!("%{reference}%");
+    let mut statement = tx.prepare(&format!(
+        "SELECT t.reference,t.title,NULL,t.body,0,t.number,NULL,t.updated_at,t.status
+         FROM tickets t WHERE t.trashed=0 AND (t.body LIKE ?1 OR instr(t.body,'&')>0 OR instr(t.body,char(92))>0)
+         UNION ALL SELECT t.reference,t.title,n.id,n.brief,n.number,t.number,n.reported_at,n.reported_at,t.status
+         FROM activities n JOIN tickets t ON t.id=n.ticket_id
+         WHERE t.trashed=0 AND (n.brief LIKE ?1 OR instr(n.brief,'&')>0 OR instr(n.brief,char(92))>0)
+         {order}"
+    ))?;
+    let mut rows = statement.query([pattern])?;
+    while let Some(row) = rows.next()? {
+        let source_reference: String = row.get(0)?;
+        if reference == source_reference {
+            continue;
         }
-        if links.len() == limit as usize {
+        let content: String = row.get(3)?;
+        let runs: Vec<_> = text_runs(&content)
+            .into_iter()
+            .filter_map(|(text, range)| contains_reference(&text, reference).then_some(range))
+            .collect();
+        if runs.is_empty() {
+            continue;
+        }
+        let found = MentionSource {
+            reference: source_reference,
+            title: row.get(1)?,
+            activity_id: row.get(2)?,
+            content,
+            reported_at: row.get(6)?,
+            runs,
+        };
+        if !visit(row, found)? {
             break;
         }
     }
-    drop(rows);
-    drop(statement);
-    Ok(links)
+    Ok(())
 }
-
 #[cfg(test)]
 mod tests {
     use super::char_offset;

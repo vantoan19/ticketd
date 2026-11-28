@@ -12,7 +12,9 @@ import { invoke } from "@tauri-apps/api/core";
 import { useState } from "react";
 import { TicketFiles, type FileAddRequest } from "./TicketFiles";
 import type { Ticket } from "@/lib/api/client";
-import { Backlinks } from "@/features/tickets/Backlinks";
+import { LinkedWork } from "@/features/tickets/LinkedWork";
+import { useLinkedWork } from "@/features/tickets/useLinkedWork";
+import { bridgeDefault } from "@/test/bridge-defaults";
 import { TestOpenTicket } from "@/features/tickets/open-ticket/testing";
 import {
   StatusLineContext,
@@ -204,20 +206,23 @@ test("returning to the window does not read the files again", async () => {
   expect(reads()).toBe(before);
 });
 
+function TicketLinks() {
+  const work = useLinkedWork();
+  return <LinkedWork work={work} select={() => {}} onMention={() => {}} />;
+}
+
 test("Files and Backlinks read the Ticket's links to Documents once", async () => {
   vi.mocked(invoke).mockImplementation((command) =>
     Promise.resolve(
       command === "document_context_links"
         ? [[link("d1", "Linked", true)], []]
-        : command === "ticket_attachments" || command === "ticket_backlinks"
-          ? []
-          : null,
+        : bridgeDefault(command),
     ),
   );
   render(
     <TestOpenTicket ticket={ticket}>
       <TicketDocuments />
-      <Backlinks select={() => {}} />
+      <TicketLinks />
     </TestOpenTicket>,
   );
   await screen.findByRole("button", { name: "Linked" });

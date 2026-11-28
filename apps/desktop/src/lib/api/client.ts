@@ -867,20 +867,28 @@ export const client = {
   },
   async backlinks(reference: string, offset: number) {
     return z
-      .array(
-        z.object({
-          source_reference: z.string(),
-          source_title: z.string(),
-          activity_id: z.string().nullable(),
-          reported_at: z.string().nullable(),
-          passage: z.string(),
-          mention_start: z.number().int().nonnegative(),
-          mention_end: z.number().int().nonnegative(),
-        }),
-      )
-      .parse(
-        await invoke("ticket_backlinks", { reference, limit: 20, offset }),
-      );
+      .object({
+        total: z.number().int().nonnegative(),
+        items: z.array(
+          z.object({
+            reference: z.string(),
+            title: z.string(),
+            status: z.string(),
+            mentioned_at: z.string(),
+            passages: z
+              .array(
+                z.object({
+                  activity_id: z.string().nullable(),
+                  passage: z.string(),
+                  mention_start: z.number().int().nonnegative(),
+                  mention_end: z.number().int().nonnegative(),
+                }),
+              )
+              .min(1),
+          }),
+        ),
+      })
+      .parse(await invoke("ticket_backlinks", { reference, limit: 3, offset }));
   },
   async activityFeed(reference: string, offset: number) {
     return z

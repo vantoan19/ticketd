@@ -3,12 +3,16 @@ import { Button } from "@/components/ui/button";
 import { useLayoutEffect, useRef, useState } from "react";
 import { DropdownMenuItem } from "@/components/ui/dropdown-menu";
 import { Evidence } from "@/features/tickets/Evidence";
-import { Backlinks, type MentionTarget } from "@/features/tickets/Backlinks";
+import type { MentionTarget } from "@/features/tickets/Backlinks";
 import { RailPlacement } from "@/features/tickets/rail-placement";
 import { TicketClosingLine, TicketParentLine } from "./TicketPageLines";
 import { TicketContextLine, TicketBlockersPopover } from "./TicketContextLine";
 import { TicketAgentStrip } from "./TicketAgent";
-import { LinkedWork, LinkedWorkDialogs } from "@/features/tickets/LinkedWork";
+import {
+  LinkedWork,
+  LinkedWorkDialogs,
+  type LinkedWorkHandle,
+} from "@/features/tickets/LinkedWork";
 import {
   TicketFiles,
   type FileAddRequest,
@@ -49,7 +53,6 @@ export function TicketPage({
   projects,
   plans,
   select,
-  onOpenGraph,
   noteTarget,
   mention,
   onMention,
@@ -65,7 +68,6 @@ export function TicketPage({
   projects: Project[];
   plans: Plan[];
   select: (reference: string | null) => void;
-  onOpenGraph: () => void;
   noteTarget: NoteTarget | null;
   /** The description mention being followed, once the ticket has been fetched. */
   mention: (MentionTarget & { key: number }) | null;
@@ -105,6 +107,7 @@ export function TicketPage({
   // The source owns the title and description, so they are read, never edited.
   const contentLocked = Boolean(source?.content_locked);
   const linked = useRef<HTMLDivElement>(null);
+  const linkedWork = useRef<LinkedWorkHandle>(null);
   const parentRow = work.rows.find((row) => row.kind === "parent");
   const parent = work.current?.links ? parentRow : ticket.parent;
   const files = active && (
@@ -118,9 +121,12 @@ export function TicketPage({
     />
   );
   const relationships = active && (
-    <LinkedWork work={work} select={select} onOpenGraph={onOpenGraph} document>
-      <Backlinks select={onMention} />
-    </LinkedWork>
+    <LinkedWork
+      ref={linkedWork}
+      work={work}
+      select={select}
+      onMention={onMention}
+    />
   );
   const runs = active && <TicketRunsSection runs={ticketRuns.runs} />;
   const blockerCount = orderBlockers(work).filter(
@@ -157,9 +163,10 @@ export function TicketPage({
             </DropdownMenuItem>
           </>
         }
-        onOpenSubtickets={() =>
-          linked.current?.scrollIntoView({ block: "start" })
-        }
+        onOpenSubtickets={() => {
+          linkedWork.current?.openSubtickets();
+          linked.current?.scrollIntoView({ block: "start" });
+        }}
       />
       {ticket.status !== "Done" && (
         <TicketAgentStrip

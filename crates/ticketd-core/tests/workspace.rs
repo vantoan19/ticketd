@@ -1883,6 +1883,49 @@ fn backlinks_follow_markdown_content_and_note_changes() {
 }
 
 #[test]
+fn ticket_mentions_page_newest_tickets_and_keep_distinct_passages() {
+    let dir = tempfile::tempdir().unwrap();
+    let mut workspace = Workspace::open(dir.path().join("workspace.sqlite3")).unwrap();
+    let target = workspace.create_ticket("Target").unwrap();
+    let older = workspace.create_ticket("Older source").unwrap();
+    let newer = workspace.create_ticket("Newer source").unwrap();
+    for (source, status) in [(&older, Status::Todo), (&newer, Status::InReview)] {
+        workspace
+            .change_ticket(
+                &source.reference,
+                TicketPatch {
+                    body: Some(format!("See {} in the description.", target.reference)),
+                    status: Some(status),
+                    ..Default::default()
+                },
+            )
+            .unwrap();
+    }
+    let note = workspace
+        .add_activity(
+            &newer.reference,
+            &format!("Update another mention of {}", target.reference),
+            None,
+        )
+        .unwrap();
+
+    let first = workspace.ticket_mentions(&target.reference, 1, 0).unwrap();
+    assert_eq!(first.total, 2);
+    assert_eq!(first.items.len(), 1);
+    let newest = &first.items[0];
+    assert_eq!(newest.reference, newer.reference);
+    assert_eq!(newest.status, Status::InReview);
+    assert_eq!(newest.mentioned_at, note.reported_at);
+    assert_eq!(newest.passages.len(), 2);
+
+    let second = workspace.ticket_mentions(&target.reference, 1, 1).unwrap();
+    assert_eq!(second.total, 2);
+    assert_eq!(second.items.len(), 1);
+    assert_eq!(second.items[0].reference, older.reference);
+    assert_eq!(second.items[0].passages.len(), 1);
+}
+
+#[test]
 fn backlinks_ignore_fenced_code_and_reference_prefixes() {
     let dir = tempfile::tempdir().unwrap();
     let mut workspace = Workspace::open(dir.path().join("workspace.sqlite3")).unwrap();

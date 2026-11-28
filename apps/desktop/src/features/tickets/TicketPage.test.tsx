@@ -71,7 +71,6 @@ test("a change made by the CLI appears in a section of the open page", async () 
           projects={[]}
           plans={[]}
           select={vi.fn()}
-          onOpenGraph={vi.fn()}
           noteTarget={null}
           mention={null}
           onMention={vi.fn()}
@@ -125,7 +124,6 @@ test("Evidence previews the newest three and names the records behind the fold",
         projects={[]}
         plans={[]}
         select={vi.fn()}
-        onOpenGraph={vi.fn()}
         noteTarget={null}
         mention={null}
         onMention={vi.fn()}
@@ -172,7 +170,6 @@ test("saving a property reports the write once", async () => {
         projects={[{ id: "p", name: "Project", path: "/p", paths: [] }]}
         plans={[]}
         select={vi.fn()}
-        onOpenGraph={vi.fn()}
         noteTarget={null}
         mention={null}
         onMention={vi.fn()}

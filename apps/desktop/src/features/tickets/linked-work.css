@@ -89,7 +89,7 @@
   margin-block: -6px;
 }
 
-/* Relationships: a small heading per kind, with its own "+". */
+/* Duplicate relationship labels and Linked disclosure rows. */
 .linked-work-group {
   display: flex;
   align-items: center;
@@ -98,9 +98,6 @@
 }
 .linked-work-group:first-child {
   margin-top: 0;
-}
-.linked-work-group > :last-child:not(:first-child) {
-  margin: -4px -8px -4px auto;
 }
 .linked-work-external {
   min-width: 0;
@@ -156,40 +153,6 @@
   text-overflow: ellipsis;
 }
 
-.linked-work-document > section {
-  display: grid;
-  grid-template-columns: 96px minmax(0, 1fr);
-  column-gap: 12px;
-  align-items: start;
-}
-.linked-work-document .linked-work-group {
-  min-height: 34px;
-  margin: 0;
-}
-.linked-work-document .linked-work-group > :last-child:not(:first-child) {
-  margin: 0 0 0 auto;
-}
-.linked-work-document .reference-row {
-  min-height: 34px;
-}
-:where(:is(.ticket-detail, .chat-pane)[data-width~="max-460"])
-  .linked-work-document
-  > section {
-  grid-template-columns: minmax(0, 1fr);
-}
-
-.linked-work-subtickets > .source-caption,
-.linked-work-subtickets > .reference-rows {
-  grid-column: 2;
-}
-:where(:is(.ticket-detail, .chat-pane)[data-width~="max-460"])
-  :is(
-    .linked-work-subtickets > .source-caption,
-    .linked-work-subtickets > .reference-rows
-  ) {
-  grid-column: 1;
-}
-
 .linked-work-confirm [data-slot="popover-header"],
 .linked-work-confirm [data-slot="popover-description"] {
   width: 100%;
@@ -200,4 +163,43 @@
   align-items: center;
   gap: 8px;
   height: 36px;
+}
+
+.linked-work-progress {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.linked-work-progress [data-slot="progress"] {
+  width: 64px;
+}
+
+:where(.linked-work-disclosure, .linked-work-fold)
+  > [data-slot="disclosure"]
+  > .ui-disclosure-trigger {
+  width: 100%;
+  gap: 8px;
+}
+
+.linked-work-disclosure
+  > [data-slot="disclosure"]
+  > .ui-disclosure-trigger
+  > [data-slot="count"] {
+  margin-inline-start: auto;
+}
+
+.linked-work-disclosure
+  > [data-slot="disclosure"]
+  > .ui-disclosure-trigger
+  .linked-work-note {
+  margin-inline-start: 4px;
+}
+
+.linked-work-disclosure
+  > [data-slot="disclosure"]
+  > .ui-expand
+  > .ui-expand-body
+  > .ui-disclosure-body {
+  padding-inline-start: 20px;
 }
