@@ -1,4 +1,14 @@
+import type { GithubIntegration } from "@/lib/api/github";
+
 const emptyPage = { items: [], next_offset: null };
+const idleGithub: GithubIntegration = {
+  id: "github",
+  hosts: [
+    { host: "github.com", state: "not_signed_in", login: null, message: null },
+  ],
+  repositories: [],
+  migration_notices: [],
+};
 
 /**
  * Quiet answers for the read commands every screen issues in the background,
@@ -103,6 +113,8 @@ export function bridgeDefault(
         recovery: null,
         first_sync: null,
       };
+    case "get_github_integration":
+      return idleGithub;
     case "source_health":
       return { refreshing: false, sources: [] };
     case "preview_publication":

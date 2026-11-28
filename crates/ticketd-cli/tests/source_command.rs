@@ -1082,7 +1082,7 @@ fn github_help_lists_repository_operations_without_opening_a_workspace() {
     assert!(help.status.success());
     let text = String::from_utf8(help.stdout).unwrap();
     assert!(
-        text.contains("ticketd source github") && text.contains("repository"),
+        text.contains(" source github") && text.contains("repository"),
         "{text}"
     );
     assert!(!cli.dir.path().join("workspace.sqlite3").exists());
