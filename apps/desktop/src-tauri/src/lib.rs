@@ -968,12 +968,17 @@ fn send_back(
     reference: String,
     brief: String,
     request_id: String,
+    expected_status_history_number: Option<i64>,
 ) -> Result<Ticket, BridgeFailure> {
     match open_workspace()
         .and_then(|mut workspace| {
             workspace.write(
                 Some(&request_id),
-                WriteRequest::SendBack { reference, brief },
+                WriteRequest::SendBack {
+                    reference,
+                    brief,
+                    expected_status_history_number,
+                },
             )
         })
         .map_err(BridgeFailure::from)?

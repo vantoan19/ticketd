@@ -553,7 +553,8 @@ pub struct TicketPatch {
     /// decision can never overwrite a different status set elsewhere.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub expected_status: Option<Status>,
-    /// The status change an Undo applies to, checked in the same transaction.
+    /// The status change a decision or Undo applies to, checked in the same
+    /// transaction. Zero expects a ticket with no recorded status change.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub expected_status_history_number: Option<i64>,
     pub status: Option<Status>,

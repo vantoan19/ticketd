@@ -300,8 +300,9 @@ fn published_write_examples_support_retries_guards_and_atomic_dependencies() {
             }
             "send_back" => {
                 let reference = ticket["reference"].as_str().unwrap();
-                data(dir.path(), &["change", reference, "--status", "In review"]);
+                let review = data(dir.path(), &["change", reference, "--status", "In review"]);
                 request["reference"] = ticket["reference"].clone();
+                request["expected_status_history_number"] = review["status_history_number"].clone();
                 let result = write_request(dir.path(), &request, "example-send-back");
                 assert_eq!(result["value"]["ticket"]["status"], "In progress");
                 assert_eq!(result["value"]["activity"]["brief"], request["brief"]);

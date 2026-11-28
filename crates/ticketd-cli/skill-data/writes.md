@@ -108,15 +108,18 @@ in `write` as above for replay protection.
 
 ## Return a ticket in review
 
-Send back moves an In review ticket to In progress and posts one local update in the same write. Use `ticketd write - --request-id REVIEW_DECISION_ID` with:
+Send back moves an In review ticket to In progress and posts one local update in the same write. Read the ticket first, then use `ticketd write - --request-id REVIEW_DECISION_ID` with the status history number you read:
 
 ```json
 {
   "operation": "send_back",
   "reference": "TICKET_REFERENCE",
-  "brief": "What needs to change"
+  "brief": "What needs to change",
+  "expected_status_history_number": 42
 }
 ```
+
+Replace 42 with the ticket's `status_history_number`. Use 0 if the ticket has no recorded status change. The guard rejects a decision once the status has changed, even if the ticket returns to In review.
 
 To undo it, use a new `--request-id` and send:
 

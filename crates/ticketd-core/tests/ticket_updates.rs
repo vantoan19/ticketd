@@ -351,6 +351,7 @@ fn send_back_moves_the_review_and_posts_the_persons_update_together() {
     let send = |brief: &str| WriteRequest::SendBack {
         reference: reference.into(),
         brief: brief.into(),
+        expected_status_history_number: None,
     };
     assert!(matches!(
         workspace.write(Some("return"), send("Handle a narrow window.")),
@@ -432,6 +433,59 @@ fn send_back_moves_the_review_and_posts_the_persons_update_together() {
 }
 
 #[test]
+fn send_back_applies_to_the_review_that_the_reviewer_loaded() {
+    use ticketd_core::{Error, Status, WriteRequest, WriteResult};
+
+    let dir = tempfile::tempdir().unwrap();
+    let mut workspace = Workspace::open(dir.path().join("reviews.sqlite3")).unwrap();
+    let ticket = workspace.create_ticket("Review the rail").unwrap();
+    let reference = ticket.reference.as_str();
+    let change = |workspace: &mut Workspace, status| {
+        workspace
+            .change_ticket(
+                reference,
+                TicketPatch {
+                    status: Some(status),
+                    ..Default::default()
+                },
+            )
+            .unwrap()
+    };
+    let send_back = |number| -> WriteRequest {
+        serde_json::from_value(serde_json::json!({
+            "operation": "send_back",
+            "reference": reference,
+            "brief": "Handle a narrow window.",
+            "expected_status_history_number": number
+        }))
+        .unwrap()
+    };
+    let first = change(&mut workspace, Status::InReview);
+    change(&mut workspace, Status::InProgress);
+    let second = change(&mut workspace, Status::InReview);
+
+    assert!(matches!(
+        workspace.write(Some("stale-review"), send_back(first.status_history_number)),
+        Err(Error::TicketChanged(_))
+    ));
+    assert!(workspace.activities(reference, 10, 0).unwrap().is_empty());
+    assert_eq!(workspace.show_ticket(reference).unwrap(), second);
+
+    let request = second.status_history_number;
+    let sent = workspace.write(Some("send"), send_back(request)).unwrap();
+    assert!(
+        matches!(&sent, WriteResult::SendBack(outcome) if outcome.ticket.status == Status::InProgress)
+    );
+    let new_review = change(&mut workspace, Status::InReview);
+    assert_eq!(
+        workspace.write(Some("send"), send_back(request)).unwrap(),
+        sent
+    );
+    assert_eq!(workspace.show_ticket(reference).unwrap(), new_review);
+    assert_eq!(workspace.activities(reference, 10, 0).unwrap().len(), 1);
+}
+
+#[test]
 fn undo_send_back_preserves_a_later_status_change_and_an_edited_update() {
     use ticketd_core::{Error, Status, WriteRequest};
 
@@ -458,6 +512,7 @@ fn undo_send_back_preserves_a_later_status_change_and_an_edited_update() {
                 WriteRequest::SendBack {
                     reference: reference.into(),
                     brief: "Handle a narrow window.".into(),
+                    expected_status_history_number: None,
                 },
             )
             .unwrap();

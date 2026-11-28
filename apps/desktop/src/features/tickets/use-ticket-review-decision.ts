@@ -1,5 +1,6 @@
 import { useContext, useRef, useState } from "react";
 import { useStatusLine } from "@/components/ui/use-status-line";
+import { BridgeFailure } from "@/lib/api/bridge-failure";
 import { client, type Ticket } from "@/lib/api/client";
 import { describeFailure } from "@/lib/api/describe-failure";
 import {
@@ -24,7 +25,9 @@ type NextReview =
 
 type ReviewDecision = (
   { kind: "done" } | { kind: "sent back"; brief: string; agent: string }
-) & { nextReview: NextReview };
+) & { nextReview: NextReview; statusHistoryNumber: number | undefined };
+
+type SendBackDraft = TicketUpdateDraft & { reviewNumber: number };
 
 async function nextReviewAfter(
   reference: string,
@@ -55,6 +58,7 @@ export function useTicketReviewDecision(
 ) {
   const { record: ticket, opening, changed, retry } = useOpenTicket();
   const { id, reference } = ticket;
+  const reviewNumber = ticket.status_history_number ?? 0;
   const agent = useContext(AgentContext);
   const agentShowing =
     agent?.reference === reference && agent.openedWithCard && agent.state;
@@ -65,23 +69,27 @@ export function useTicketReviewDecision(
   const recovery = useDraftRecovery();
   const recoveryReady = useContext(DraftRecoveryReadyContext);
   const [decision, setDecision] = useState<ReviewDecision | null>(null);
-  const [draft, setDraft] = useState<TicketUpdateDraft | null>(null);
+  const [draft, setDraft] = useState<SendBackDraft | null>(null);
   const [pending, setPending] = useState(false);
   const moving = useRef(false);
   const canSend = reviewVisible && !blocked && !opening && recoveryReady;
   const canMove =
     reviewVisible && !externalSource(ticket) && !blocked && !opening && !draft;
   if (!active && decision) setDecision(null);
-  if ((!active || !reviewVisible) && draft) setDraft(null);
+  if (
+    draft &&
+    (!active || !reviewVisible || draft.reviewNumber !== reviewNumber)
+  )
+    setDraft(null);
 
   function openSendBack() {
     if (!canSend || moving.current) return;
-    setDraft(
-      readTicketUpdateDraft(recovery, id, "send-back") ?? {
-        brief: "",
-        requestId: null,
-      },
-    );
+    const saved = readTicketUpdateDraft(recovery, id, "send-back");
+    setDraft({
+      brief: saved?.brief ?? "",
+      requestId: saved?.reviewNumber === reviewNumber ? saved.requestId : null,
+      reviewNumber,
+    });
   }
 
   function updateDraft(brief: string) {
@@ -89,6 +97,7 @@ export function useTicketReviewDecision(
     const nextDraft = {
       brief,
       requestId: brief.trim() === draft?.brief.trim() ? draft.requestId : null,
+      reviewNumber,
     };
     setDraft(nextDraft);
     void keepTicketUpdateDraft(
@@ -103,7 +112,7 @@ export function useTicketReviewDecision(
     if (!canSend || moving.current || !draft?.brief.trim()) return;
     void startDecision({
       brief: draft.brief,
-      requestId: draft.requestId ?? crypto.randomUUID(),
+      requestId: draft.requestId,
       agent,
     });
   }
@@ -115,12 +124,13 @@ export function useTicketReviewDecision(
 
   function startDecision(send?: {
     brief: string;
-    requestId: string;
+    requestId: string | null;
     agent: string;
   }) {
     const request = send?.requestId ?? crypto.randomUUID();
     const undoRequest = crypto.randomUUID();
     let queueRead: Promise<NextReview> | undefined;
+    let submitted = Boolean(send?.requestId);
 
     async function decide() {
       if (moving.current) return;
@@ -128,7 +138,7 @@ export function useTicketReviewDecision(
       setPending(true);
       try {
         if (send) {
-          const draft = { brief: send.brief, requestId: request };
+          const draft = { brief: send.brief, requestId: request, reviewNumber };
           setDraft((current) =>
             current?.brief === send.brief ? draft : current,
           );
@@ -142,33 +152,62 @@ export function useTicketReviewDecision(
         queueRead ??= nextReviewAfter(reference, readReviewQueue);
         const nextReview = await queueRead;
         if (nextReview.kind === "unavailable") queueRead = undefined;
-        const updated = send
-          ? await client.sendBack(reference, send.brief.trim(), request)
+        const mayReplay = submitted;
+        submitted = true;
+        let updated = send
+          ? await client.sendBack(
+              reference,
+              send.brief.trim(),
+              request,
+              reviewNumber,
+            )
           : await client.changeTicket(
               reference,
-              { status: "Done", expected_status: "In review" },
+              {
+                status: "Done",
+                expected_status: "In review",
+                expected_status_history_number: reviewNumber,
+              },
               request,
             );
+        if (mayReplay) {
+          // An identical retry can return an earlier receipt after the ticket
+          // moves on. Confirm that receipt before showing it as the outcome.
+          const current = await client.showTicket(reference);
+          if (
+            current.trashed ||
+            current.id !== updated.id ||
+            current.status !== updated.status ||
+            current.status_history_number !== updated.status_history_number
+          )
+            throw new BridgeFailure("conflict", "The ticket has moved on.");
+          updated = current;
+        }
         if (send) {
           const saved = readTicketUpdateDraft(recovery, id, "send-back");
-          if (saved?.requestId === request && saved.brief === send.brief) {
+          if (
+            saved?.requestId === request &&
+            saved.reviewNumber === reviewNumber &&
+            saved.brief === send.brief
+          ) {
             void keepTicketUpdateDraft(recovery, id, "send-back", null).catch(
               () => {},
             );
             setDraft(null);
           }
         }
+        const completionNumber = updated.status_history_number;
+        const receipt = { nextReview, statusHistoryNumber: completionNumber };
         setDecision(
           send
             ? {
                 kind: "sent back",
-                nextReview,
                 brief: send.brief.trim(),
                 agent: send.agent,
+                ...receipt,
               }
-            : { kind: "done", nextReview },
+            : { kind: "done", ...receipt },
         );
-        const completionNumber = updated.status_history_number;
         const undo = send
           ? () => client.undoSendBack(reference, request, undoRequest)
           : completionNumber === undefined
@@ -206,7 +245,9 @@ export function useTicketReviewDecision(
           tone: "error",
           message: `${failure.title}. ${failure.sentence}`,
           details: failure.details,
-          action: { label: "Retry", run: retryDecision },
+          ...(failure.action === "retry" && {
+            action: { label: "Retry", run: retryDecision },
+          }),
         });
       } finally {
         moving.current = false;
@@ -217,10 +258,10 @@ export function useTicketReviewDecision(
     function retryDecision() {
       if (!send) return decide();
       const saved = readTicketUpdateDraft(recovery, id, "send-back");
-      if (!saved?.brief.trim()) {
+      if (saved?.reviewNumber !== reviewNumber || !saved.brief.trim()) {
         line.show({
           tone: "error",
-          message: "Enter what needs to change before sending back.",
+          message: "Open Send back to review the saved note before sending.",
         });
         return;
       }
@@ -231,7 +272,7 @@ export function useTicketReviewDecision(
         return decide();
       return startDecision({
         brief: saved.brief,
-        requestId: saved.requestId ?? crypto.randomUUID(),
+        requestId: saved.requestId,
         agent: send.agent,
       });
     }
@@ -241,7 +282,10 @@ export function useTicketReviewDecision(
 
   return {
     reviewVisible,
-    decision,
+    decision:
+      decision?.statusHistoryNumber === ticket.status_history_number
+        ? decision
+        : null,
     draft,
     pending,
     canMove,

@@ -1135,9 +1135,19 @@ export const client = {
       }),
     );
   },
-  async sendBack(reference: string, brief: string, requestId: string) {
+  async sendBack(
+    reference: string,
+    brief: string,
+    requestId: string,
+    expectedStatusHistoryNumber: number,
+  ) {
     return ticketSchema.parse(
-      await invoke("send_back", { reference, brief, requestId }),
+      await invoke("send_back", {
+        reference,
+        brief,
+        requestId,
+        expectedStatusHistoryNumber,
+      }),
     );
   },
   async undoSendBack(
@@ -1159,7 +1169,7 @@ export const client = {
       expected_body?: string;
       /** The status a decision applies to, checked in the same write. */
       expected_status?: string;
-      /** The exact status change this Undo reverses. */
+      /** The status change this decision applies to. Zero expects no history. */
       expected_status_history_number?: number;
       project_id?: string | null;
       status?: string;

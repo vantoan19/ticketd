@@ -95,9 +95,20 @@ beforeEach(() => {
     if (command === "change_ticket") {
       if (writeFailure) throw { code: writeFailure, message: "Cannot write." };
       const patch = (
-        args as { patch: { status: string; expected_status: string } }
+        args as {
+          patch: {
+            status: string;
+            expected_status: string;
+            expected_status_history_number?: number;
+          };
+        }
       ).patch;
-      if (ticket.status !== patch.expected_status)
+      if (
+        ticket.status !== patch.expected_status ||
+        (patch.expected_status_history_number !== undefined &&
+          patch.expected_status_history_number !==
+            (ticket.status_history_number ?? 0))
+      )
         throw { code: "conflict", message: "This ticket has changed." };
       ticket = {
         ...ticket,
@@ -108,15 +119,26 @@ beforeEach(() => {
     }
     if (command === "send_back") {
       if (writeFailure) throw { code: writeFailure, message: "Cannot write." };
-      if (ticket.status !== "In review")
+      const { brief, expectedStatusHistoryNumber } = args as {
+        brief: string;
+        expectedStatusHistoryNumber?: number;
+      };
+      if (
+        ticket.status !== "In review" ||
+        (expectedStatusHistoryNumber !== undefined &&
+          expectedStatusHistoryNumber !== (ticket.status_history_number ?? 0))
+      )
         throw { code: "conflict", message: "This ticket has changed." };
-      const { brief } = args as { brief: string };
       latest = {
         ...update(brief),
         activity_id: "send-back",
         editing_agent: null,
       };
-      ticket = { ...ticket, status: "In progress" };
+      ticket = {
+        ...ticket,
+        status: "In progress",
+        status_history_number: (ticket.status_history_number ?? 0) + 1,
+      };
       return ticket;
     }
     if (command === "undo_send_back") {
@@ -205,7 +227,11 @@ test("a review decision uses the current status, stays on the ticket and offers 
   expect(select).not.toHaveBeenCalled();
   expect(bridge.invoke).toHaveBeenCalledWith("change_ticket", {
     reference: "T-KQ1",
-    patch: { expected_status: "In review", status: "Done" },
+    patch: {
+      expected_status: "In review",
+      expected_status_history_number: 7,
+      status: "Done",
+    },
     requestId: expect.any(String),
   });
   fireEvent.click(screen.getByRole("button", { name: "Undo" }));
@@ -606,6 +632,7 @@ test("Send back keeps its draft after Escape and reopening, then sends and offer
   expect(send?.[1]).toEqual({
     reference: "T-KQ1",
     brief: "Handle a narrow window.",
+    expectedStatusHistoryNumber: 7,
     requestId: expect.any(String),
   });
   fireEvent.click(screen.getByRole("button", { name: "Undo" }));
@@ -704,6 +731,75 @@ test("Send back refreshes a ticket that left review without posting its draft", 
   const latest = await screen.findByRole("region", { name: "Latest update" });
   expect(within(latest).getByText("Implemented the rail.")).toBeTruthy();
   expect(screen.queryByRole("region", { name: "Sent back" })).toBeNull();
+});
+
+test.each(["Move to Done", "Send back"])(
+  "%s does not decide a newer review the person did not see",
+  async (action) => {
+    open();
+    const button = await screen.findByRole("button", { name: action });
+    if (action === "Send back") {
+      fireEvent.click(button);
+      fireEvent.change(
+        screen.getByRole("textbox", { name: "What needs to change?" }),
+        { target: { value: "A change requested in the earlier review." } },
+      );
+    }
+    ticket = { ...ticket, title: "A new review", status_history_number: 10 };
+    fireEvent.click(screen.getByRole("button", { name: action }));
+
+    expect(await screen.findByText(/It changed elsewhere/)).toBeTruthy();
+    expect(ticket.status).toBe("In review");
+    expect(screen.getByRole("heading", { name: "A new review" })).toBeTruthy();
+    expect(screen.queryByRole("button", { name: "Retry" })).toBeNull();
+  },
+);
+
+test("a saved Send back note can be submitted in a new review with a new request", async () => {
+  ticket = { ...review, status_history_number: 10 };
+  const brief = "Please verify keyboard focus.";
+  localStorage.setItem(
+    "ticketd:send-back:review",
+    JSON.stringify({ brief, requestId: "first-review", reviewNumber: 7 }),
+  );
+  open();
+  fireEvent.click(await screen.findByRole("button", { name: "Send back" }));
+  expect(
+    screen.getByRole<HTMLTextAreaElement>("textbox", {
+      name: "What needs to change?",
+    }).value,
+  ).toBe(brief);
+  fireEvent.click(screen.getByRole("button", { name: "Send back" }));
+  await screen.findByRole("region", { name: "Sent back" });
+  const write = bridge.invoke.mock.calls.find(
+    ([command]) => command === "send_back",
+  );
+  expect(write?.[1]).toMatchObject({ brief, expectedStatusHistoryNumber: 10 });
+  expect(write?.[1].requestId).not.toBe("first-review");
+});
+
+test("Retry does not show an older Send back as a decision in the current review", async () => {
+  const invoke = bridge.invoke.getMockImplementation()!;
+  let outcome: Ticket | undefined;
+  bridge.invoke.mockImplementation(async (command: string, args?: object) => {
+    if (command !== "send_back") return invoke(command, args);
+    if (outcome) return outcome;
+    outcome = await invoke(command, args);
+    ticket = { ...review, status_history_number: 10 };
+    throw { code: "failed", message: "Reply interrupted after commit." };
+  });
+  open();
+  fireEvent.click(await screen.findByRole("button", { name: "Send back" }));
+  fireEvent.change(
+    screen.getByRole("textbox", { name: "What needs to change?" }),
+    { target: { value: "Feedback for the previous review." } },
+  );
+  fireEvent.click(screen.getByRole("button", { name: "Send back" }));
+  fireEvent.click(await screen.findByRole("button", { name: "Retry" }));
+  expect(await screen.findByText(/It changed elsewhere/)).toBeTruthy();
+  expect(screen.queryByText("Sent T-KQ1 back to In progress")).toBeNull();
+  expect(screen.queryByRole("region", { name: "Sent back" })).toBeNull();
+  expect(ticket.status).toBe("In review");
 });
 
 test.each(["add menu", "blockers popover"])(

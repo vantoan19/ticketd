@@ -229,7 +229,7 @@ pub(crate) fn edit(
     }
     if let Some(expected) = patch.expected_status_history_number
         && patch.status.is_some()
-        && last_status_change(scope, &ticket.id)? != Some(expected)
+        && last_status_change(scope, &ticket.id)?.unwrap_or(0) != expected
     {
         return Err(Error::TicketChanged(reference.to_owned()));
     }
@@ -387,6 +387,7 @@ pub(crate) fn send_back(
     connection: &Connection,
     reference: &str,
     brief: &str,
+    expected_status_history_number: Option<i64>,
 ) -> Result<SendBackOutcome, Error> {
     write_scope::run(connection, |scope| {
         edit(
@@ -394,6 +395,7 @@ pub(crate) fn send_back(
             reference,
             &TicketPatch {
                 expected_status: Some(Status::InReview),
+                expected_status_history_number,
                 status: Some(Status::InProgress),
                 ..Default::default()
             },

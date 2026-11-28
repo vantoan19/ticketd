@@ -4,6 +4,7 @@ import type { DraftRecovery } from "@/lib/draft-recovery-context";
 const draftSchema = z.object({
   brief: z.string(),
   requestId: z.string().nullable(),
+  reviewNumber: z.number().int().nonnegative().optional(),
 });
 export type TicketUpdateDraft = z.infer<typeof draftSchema>;
 

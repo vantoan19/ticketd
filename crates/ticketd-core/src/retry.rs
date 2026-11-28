@@ -132,6 +132,8 @@ pub enum WriteRequest {
     SendBack {
         reference: String,
         brief: String,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        expected_status_history_number: Option<i64>,
     },
     UndoSendBack {
         reference: String,
@@ -618,9 +620,16 @@ impl Workspace {
             WriteRequest::TicketChange { reference, change } => {
                 WriteResult::Ticket(self.apply_ticket_change(&reference, change)?)
             }
-            WriteRequest::SendBack { reference, brief } => WriteResult::SendBack(
-                crate::ticket_change::send_back(&self.connection, &reference, &brief)?,
-            ),
+            WriteRequest::SendBack {
+                reference,
+                brief,
+                expected_status_history_number,
+            } => WriteResult::SendBack(crate::ticket_change::send_back(
+                &self.connection,
+                &reference,
+                &brief,
+                expected_status_history_number,
+            )?),
             WriteRequest::UndoSendBack {
                 reference,
                 send_request_id,

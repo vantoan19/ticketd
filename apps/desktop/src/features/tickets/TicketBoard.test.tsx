@@ -668,6 +668,7 @@ test("Send back from the board peek posts the reason and keeps the decision in v
   expect(bridge.invoke).toHaveBeenCalledWith("send_back", {
     reference: "T-KQ2",
     brief: reason,
+    expectedStatusHistoryNumber: 0,
     requestId: expect.any(String),
   });
   const decision = within(screen.getByRole("region", { name: "Sent back" }));
