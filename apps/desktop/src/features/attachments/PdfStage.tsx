@@ -29,6 +29,7 @@ import {
 import { extensionLabel } from "./file-words";
 import { PreviewLoading, PreviewState } from "./PreviewState";
 import { ViewBar, ViewBarGroup } from "./ViewBar";
+import { hasPanOverflow, useDragPan } from "./use-drag-pan";
 
 type Loaded =
   | { key: string; document: PdfDocument }
@@ -138,6 +139,8 @@ function PdfPages({
   const { pages } = document;
   const columnRef = useRef<HTMLDivElement>(null);
   const [width, setWidth] = useState(0);
+  const [pannable, setPannable] = useState(false);
+  const { dragging, startPan } = useDragPan(scrollerRef);
   const [zoom, setZoom] = useState<number | "fit">("fit");
   const [page, setPage] = useState(1);
   const [draft, setDraft] = useState<string | null>(null);
@@ -151,15 +154,20 @@ function PdfPages({
   // the jump left it the page asked for is the page shown, and Next does not skip it.
   const jumped = useRef<{ index: number; top: number } | null>(null);
 
-  // The stage's width, for Fit.
+  // Fit follows the stage's width. Dragging is available when the page column overflows.
   useEffect(() => {
     const stage = scrollerRef.current;
-    if (!stage) return;
-    const measure = () => setWidth(stage.clientWidth);
+    const column = columnRef.current;
+    if (!stage || !column) return;
+    const measure = () => {
+      setWidth(stage.clientWidth);
+      setPannable(hasPanOverflow(stage));
+    };
     measure();
     if (typeof ResizeObserver === "undefined") return;
     const observer = new ResizeObserver(measure);
     observer.observe(stage);
+    observer.observe(column);
     return () => observer.disconnect();
   }, [scrollerRef]);
 
@@ -281,7 +289,13 @@ function PdfPages({
 
   return (
     <>
-      <div ref={columnRef} className="attachment-pdf">
+      <div
+        ref={columnRef}
+        className="attachment-pdf"
+        data-pannable={pannable ? "" : undefined}
+        data-dragging={dragging ? "" : undefined}
+        onPointerDown={startPan}
+      >
         {pages.map((size, index) => (
           <PdfPage
             key={index}
