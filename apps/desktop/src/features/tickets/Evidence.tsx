@@ -255,6 +255,7 @@ export function Evidence({
       hidden={empty && folded && !error}
     >
       <SectionHeader
+        level={2}
         title="Evidence"
         count={items.length || undefined}
         actions={

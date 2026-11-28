@@ -114,26 +114,16 @@ test("a wide pane keeps the same wrapping property bar", async () => {
   ).toBeNull();
 });
 
-test("a narrow pane folds the rail into chips that open the same editors", async () => {
+test("a narrow pane shows only present properties and adds a project through the plus menu", async () => {
   renderDetails();
   resizePane(500);
   const bar = await screen.findByRole("group", { name: "Ticket properties" });
   expect(screen.queryByRole("complementary")).toBeNull();
-  // Rail order, each chip named by its property and value. No source is set
-  // up, so there is no Source chip and nothing says "Local".
-  await screen.findByRole("button", { name: "Follow" });
   expect(
-    [...bar.querySelectorAll("button, [role=combobox]")].map(
-      (chip) => chip.getAttribute("aria-label") ?? chip.textContent,
-    ),
-  ).toEqual([
-    "Status: In progress",
-    "Project: No project",
-    "Plan: No Plan",
-    "Tags: release",
-    "Manage reminder",
-    "Add ticket property",
-  ]);
+    within(bar)
+      .getAllByRole("button")
+      .map((chip) => chip.getAttribute("aria-label")),
+  ).toEqual(["Status: In progress", "Tags: release", "Add ticket property"]);
   expect(bar.textContent).not.toContain("Local");
   // Follow is an icon toggle: its name stays "Follow" and aria-pressed says
   // whether it is on.
@@ -142,10 +132,26 @@ test("a narrow pane folds the rail into chips that open the same editors", async
   fireEvent.click(follow);
   await waitFor(() => expect(follow.getAttribute("aria-pressed")).toBe("true"));
 
-  // The Project chip opens the rail's picker, and choosing saves.
-  fireEvent.click(
-    within(bar).getByRole("button", { name: "Project: No project" }),
+  fireEvent.keyDown(
+    within(bar).getByRole("button", { name: "Add ticket property" }),
+    { key: "Enter" },
   );
+  const menu = await screen.findByRole("menu");
+  expect(within(menu).queryByRole("menuitem", { name: "Tags" })).toBeNull();
+  expect(
+    within(menu)
+      .getAllByRole("menuitem")
+      .map((item) => item.textContent),
+  ).toEqual([
+    "Project",
+    "PlanL",
+    "ReminderH",
+    "Blocked by…B",
+    "Parent…",
+    "Subticket…",
+    "Link a ticket…",
+  ]);
+  fireEvent.click(within(menu).getByRole("menuitem", { name: "Project" }));
   fireEvent.click(await screen.findByRole("option", { name: "Web portal" }));
   await waitFor(() =>
     expect(changes).toEqual([expect.objectContaining({ reference: "T-KQ1" })]),
@@ -212,7 +218,7 @@ test("narrow, an agent update keeps its reserved strip after the property contro
   )!;
   expect(latest.textContent).toMatch(/^codex · .*Drafted a fix/);
   // On its own line after the last chip, not between Status and the others.
-  const last = within(bar).getByRole("button", { name: "Manage reminder" });
+  const last = within(bar).getByRole("button", { name: "Add ticket property" });
   expect(
     last.compareDocumentPosition(latest) & Node.DOCUMENT_POSITION_FOLLOWING,
   ).toBeTruthy();
