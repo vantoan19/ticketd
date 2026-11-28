@@ -230,14 +230,13 @@ test("About's Support cards are found by what they are for", () => {
   expect(star?.section).toBe("about");
 });
 
-test("Buy me a coffee is a result only while its card shows", () => {
+test("Settings search finds Buy me a coffee by purpose or provider when configured", () => {
   expect(supportEntries(null)).toEqual([]);
-  const [coffee] = supportEntries("https://buymeacoffee.com/example");
-  expect(coffee?.title).toBe("Buy me a coffee");
-  expect(coffee?.section).toBe("about");
-  expect(
-    searchSettings("donate", supportEntries("https://x.example")).map(
-      (entry) => entry.title,
-    ),
-  ).toEqual(["Buy me a coffee"]);
+  const entries = supportEntries();
+  for (const query of ["donate", "Ko-fi", "kofi"]) {
+    expect(searchSettings(query, entries)[0]).toMatchObject({
+      title: "Buy me a coffee",
+      section: "about",
+    });
+  }
 });

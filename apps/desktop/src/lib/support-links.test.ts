@@ -1,11 +1,7 @@
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import { expect, test } from "vitest";
-import {
-  BUY_ME_A_COFFEE_NAME,
-  BUY_ME_A_COFFEE_URL,
-  REPOSITORY_URL,
-} from "@/lib/support-links";
+import { BUY_ME_A_COFFEE_URL, REPOSITORY_URL } from "@/lib/support-links";
 
 const desktop = join(__dirname, "..", "..");
 const read = (...path: string[]) =>
@@ -24,16 +20,9 @@ function funding(key: string): string | null {
         .trim();
 }
 
-test("the funding file and the app give the same Buy me a coffee name", () => {
-  expect(funding("buy_me_a_coffee") ?? "").toBe(BUY_ME_A_COFFEE_NAME);
-});
-
-test("the page address is built from that one name, or missing without it", () => {
-  expect(BUY_ME_A_COFFEE_URL).toBe(
-    BUY_ME_A_COFFEE_NAME
-      ? `https://buymeacoffee.com/${BUY_ME_A_COFFEE_NAME}`
-      : null,
-  );
+test("GitHub funding and the app point to the same Ko-fi profile", () => {
+  const name = funding("ko_fi");
+  expect(BUY_ME_A_COFFEE_URL).toBe(name ? `https://ko-fi.com/${name}` : null);
 });
 
 test("the packaged app is allowed to open both support links", () => {
@@ -47,15 +36,9 @@ test("the packaged app is allowed to open both support links", () => {
       typeof permission === "object" &&
       permission.identifier === "opener:allow-open-url",
   );
-  const patterns = (typeof opener === "object" ? opener.allow : [])!.map(
-    ({ url }) =>
-      new RegExp(
-        `^${url.replace(/[.+?^${}()|[\]\\]/g, "\\$&").replace(/\*/g, ".*")}$`,
-      ),
-  );
-  const allowed = (url: string) => patterns.some((p) => p.test(url));
-  expect(allowed(REPOSITORY_URL)).toBe(true);
-  expect(
-    allowed(BUY_ME_A_COFFEE_URL ?? "https://buymeacoffee.com/example"),
-  ).toBe(true);
+  const allowed = typeof opener === "object" ? opener.allow : undefined;
+  expect(allowed).toContainEqual({ url: REPOSITORY_URL });
+  if (BUY_ME_A_COFFEE_URL) {
+    expect(allowed).toContainEqual({ url: BUY_ME_A_COFFEE_URL });
+  }
 });

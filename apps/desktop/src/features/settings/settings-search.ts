@@ -322,7 +322,7 @@ export function supportEntries(
         {
           title: "Buy me a coffee",
           description: "Helps one maintainer keep ticketd going.",
-          keywords: "support sponsor donate tip",
+          keywords: "support sponsor donate tip ko-fi kofi",
           section: "about",
         },
       ]
