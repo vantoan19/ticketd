@@ -11,9 +11,13 @@ import { afterEach, beforeEach, expect, test, vi } from "vitest";
 import { bridgeDefault, unknownCommands } from "@/test/bridge-defaults";
 import { TestOpenTicket } from "./open-ticket/testing";
 import { StatusLineRegion } from "@/components/ui/status-line";
+import { ChatClientContext } from "@/features/chats/client";
+import { chatState, createMockChatClient } from "@/features/chats/mock-client";
 import { isMacPlatform } from "@/lib/platform";
 import type { Evidence, Ticket } from "@/lib/api/client";
 import { TicketPage } from "./TicketPage";
+import { AgentContext } from "./ticket-agent-context";
+import type { TicketAgentState } from "./ticket-agent-state";
 import { applyTokens, instantTokens, rootTokens } from "@/test/motion-tokens";
 
 const bridge = vi.hoisted(() => ({ invoke: vi.fn() }));
@@ -40,6 +44,8 @@ let ticket: Ticket;
 let latest: ReturnType<typeof update> | null;
 let evidence: { items: Evidence[]; total: number; proof: Evidence[] };
 let writeFailure: string | null;
+let reportFailure: string | null;
+let candidates: Ticket[];
 function update(text: string): {
   activity_id: string;
   brief: { text: string; truncated: boolean };
@@ -71,9 +77,21 @@ beforeEach(() => {
   latest = update("Implemented the rail.");
   evidence = { items: [], total: 0, proof: [] };
   writeFailure = null;
+  reportFailure = null;
+  candidates = [];
   bridge.invoke.mockImplementation(async (command: string, args?: object) => {
-    if (command === "show_ticket") return ticket;
-    if (command === "latest_update") return latest;
+    if (command === "show_ticket")
+      return (
+        candidates.find(
+          ({ reference }) =>
+            reference === (args as { reference: string }).reference,
+        ) ?? ticket
+      );
+    if (command === "latest_update") {
+      if (reportFailure)
+        throw { code: reportFailure, message: "Cannot read report." };
+      return latest;
+    }
     if (command === "ticket_evidence_page") return evidence;
     if (command === "contextual_relationships" && ticket.prerequisites.length) {
       const base = bridgeDefault(command) as {
@@ -173,6 +191,9 @@ afterEach(() => {
 });
 
 function open(select = vi.fn(), reviewQueue = [ticket]) {
+  candidates = reviewQueue.filter(
+    ({ reference }) => reference !== ticket.reference,
+  );
   return render(ticketView(select, reviewQueue));
 }
 
@@ -180,24 +201,50 @@ function ticketView(
   select: (reference: string | null) => void,
   reviewQueue: Ticket[],
   readReviewQueue = async () => reviewQueue,
+  agentState: TicketAgentState | null = null,
 ) {
   return (
     <StatusLineRegion>
       <TestOpenTicket ticket={ticket}>
-        <TicketPage
-          active
-          readReviewQueue={readReviewQueue}
-          projects={[]}
-          plans={[]}
-          select={select}
-          noteTarget={null}
-          mention={null}
-          onMention={vi.fn()}
-        />
+        <AgentContext.Provider
+          value={
+            agentState && {
+              reference: ticket.reference,
+              openedWithCard: true,
+              ready: true,
+              state: agentState,
+              update: null,
+            }
+          }
+        >
+          <TicketPage
+            active
+            readReviewQueue={readReviewQueue}
+            projects={[]}
+            plans={[]}
+            select={select}
+            noteTarget={null}
+            mention={null}
+            onMention={vi.fn()}
+          />
+        </AgentContext.Provider>
       </TestOpenTicket>
     </StatusLineRegion>
   );
 }
+
+test("a report read failure offers Retry without claiming there is no report", async () => {
+  reportFailure = "failed";
+  open();
+  const card = within(
+    await screen.findByRole("region", { name: "Ready for review" }),
+  );
+  expect(await card.findByText("Couldn't load the latest update")).toBeTruthy();
+  expect(card.queryByText("No report yet")).toBeNull();
+  reportFailure = null;
+  fireEvent.click(card.getByRole("button", { name: "Retry" }));
+  expect(await card.findByText("Implemented the rail.")).toBeTruthy();
+});
 
 test("a reviewer reads the latest report and jumps to the acceptance checklist", async () => {
   open();
@@ -439,7 +486,82 @@ test("a successful decision suggests the next In review ticket, wrapping at the 
   expect(document.activeElement).toBe(next);
   expect(select).not.toHaveBeenCalled();
   fireEvent.click(next);
-  expect(select).toHaveBeenCalledWith("T-KQ2");
+  await waitFor(() => expect(select).toHaveBeenCalledWith("T-KQ2"));
+});
+
+test("Next to review checks the suggested ticket again before opening it", async () => {
+  const select = vi.fn();
+  open(select, [review, { ...review, reference: "T-KQ2" }]);
+  fireEvent.click(await screen.findByRole("button", { name: "Move to Done" }));
+  const next = await screen.findByRole("link", { name: "Next to review" });
+  candidates = [{ ...review, reference: "T-KQ2", status: "Done" }];
+  next.focus();
+  fireEvent.click(next);
+  const stale = await screen.findByText("T-KQ2 is no longer in review");
+  expect(document.activeElement).toBe(stale);
+  expect(select).not.toHaveBeenCalled();
+  expect(screen.queryByRole("link", { name: "Next to review" })).toBeNull();
+});
+
+test("a pending review decision preserves focus moved to another control", async () => {
+  let finish!: () => void;
+  const write = new Promise<void>((resolve) => (finish = resolve));
+  const invoke = bridge.invoke.getMockImplementation()!;
+  bridge.invoke.mockImplementation(async (command: string, args?: object) => {
+    if (command === "change_ticket") await write;
+    return invoke(command, args);
+  });
+  open();
+  const move = await screen.findByRole("button", { name: "Move to Done" });
+  move.focus();
+  fireEvent.click(move);
+  await waitFor(() => expect(move.getAttribute("aria-busy")).toBe("true"));
+  const title = screen.getByRole("textbox", { name: "Title" });
+  title.focus();
+  finish();
+  expect(await screen.findByText("Nothing else in review")).toBeTruthy();
+  expect(document.activeElement).toBe(title);
+});
+
+test("decision focus hands off after a request that hid the result clears", async () => {
+  let finish!: () => void;
+  const write = new Promise<void>((resolve) => (finish = resolve));
+  const invoke = bridge.invoke.getMockImplementation()!;
+  bridge.invoke.mockImplementation(async (command: string, args?: object) => {
+    if (command === "change_ticket") await write;
+    return invoke(command, args);
+  });
+  const queue = [review, { ...review, reference: "T-KQ2" }];
+  const select = vi.fn();
+  const chat = createMockChatClient({
+    chats: [{ chat: chatState({ id: "question", title: "Review question" }) }],
+  });
+  const page = (request?: TicketAgentState) => (
+    <ChatClientContext value={chat}>
+      {ticketView(select, queue, undefined, request)}
+    </ChatClientContext>
+  );
+  const view = render(page());
+  const move = await screen.findByRole("button", { name: "Move to Done" });
+  move.focus();
+  fireEvent.click(move);
+  await waitFor(() => expect(move.getAttribute("aria-busy")).toBe("true"));
+  view.rerender(
+    page({
+      kind: "request",
+      request: "question",
+      target: { chatId: "question", retention: "active" },
+    }),
+  );
+  finish();
+  await screen.findByText("Moved T-KQ1 to Done");
+  expect(
+    screen.getByRole("region", { name: "Request from an agent" }),
+  ).toBeTruthy();
+  expect(screen.queryByRole("link", { name: "Next to review" })).toBeNull();
+  view.rerender(page());
+  const next = await screen.findByRole("link", { name: "Next to review" });
+  expect(document.activeElement).toBe(next);
 });
 
 test("a failed queue read leaves the review decision available and reports the failure", async () => {
@@ -474,7 +596,7 @@ test("the shortcut skips a text field and a decision picks the later review befo
     shortcut,
   );
   fireEvent.click(await screen.findByRole("link", { name: "Next to review" }));
-  expect(select).toHaveBeenCalledWith("T-KQ3");
+  await waitFor(() => expect(select).toHaveBeenCalledWith("T-KQ3"));
 });
 
 test("a rejected write keeps the report and Retry repeats the same decision", async () => {

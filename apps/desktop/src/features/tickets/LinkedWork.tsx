@@ -3,6 +3,7 @@ import {
   useEffect,
   useId,
   useImperativeHandle,
+  useLayoutEffect,
   useState,
   type ReactNode,
   type Ref,
@@ -137,7 +138,16 @@ function BlockingSubticketActions({
   );
 }
 
-export type LinkedWorkHandle = { openSubtickets(): void };
+export type LinkedWorkRowFocus = {
+  kind: string;
+  reference: string;
+  action: boolean;
+};
+
+export type LinkedWorkHandle = {
+  openSubtickets(): void;
+  restoreRowFocus(focus: LinkedWorkRowFocus, page: HTMLElement): void;
+};
 
 export function LinkedWork({
   work,
@@ -255,13 +265,46 @@ export function LinkedWork({
     [blockingOpen, setBlockingOpen],
     [relatedOpen, setRelatedOpen],
   ] as const;
-  useImperativeHandle(
-    ref,
-    () => ({
-      openSubtickets: () => setSubticketsOpen(true),
-    }),
-    [setSubticketsOpen],
-  );
+  const [focusRestore, setFocusRestore] = useState<{
+    focus: LinkedWorkRowFocus;
+    page: HTMLElement;
+  } | null>(null);
+  useImperativeHandle(ref, () => ({
+    openSubtickets: () => setSubticketsOpen(true),
+    restoreRowFocus(focus, page) {
+      if (focus.kind === "parent") setParentOpen(true, false);
+      const group = groups.findIndex(({ rows }) =>
+        rows.some(
+          ({ kind, reference }) =>
+            kind === focus.kind && reference === focus.reference,
+        ),
+      );
+      disclosures[group]?.[1](true, false);
+      setFocusRestore({ focus, page });
+    },
+  }));
+  useLayoutEffect(() => {
+    if (!focusRestore || document.activeElement !== document.body) return;
+    const { focus, page } = focusRestore;
+    const row = [...page.querySelectorAll<HTMLElement>(".reference-row")].find(
+      ({ dataset }) =>
+        dataset.kind === focus.kind && dataset.reference === focus.reference,
+    );
+    const action =
+      focus.action &&
+      row?.querySelector<HTMLElement>(
+        ".reference-row-action button:not(:disabled)",
+      );
+    const target =
+      action || row?.querySelector<HTMLElement>(".reference-row-title");
+    if (target && !target.closest("[hidden], [inert]")) target.focus();
+    else if (focus.kind === "parent")
+      page
+        .querySelector<HTMLElement>(".ticket-parent-line [role=link]")
+        ?.focus();
+    else if (focus.kind === "blocked_by")
+      page.querySelector<HTMLElement>("[data-linked-work-blockers]")?.focus();
+  }, [focusRestore]);
 
   const { loadingMore, moreFailure, showMore } = work;
   const needsPage =
@@ -358,6 +401,7 @@ export function LinkedWork({
         open={subticketsOpen}
         onOpenChange={setSubticketsOpen}
         renderRow={renderRow}
+        focusRestore={focusRestore?.focus}
         note={
           isGitHubOwned
             ? "Subtickets stay local; publishing never includes them."
@@ -417,6 +461,7 @@ export function LinkedWork({
           open={parentOpen}
           onOpenChange={setParentOpen}
           renderRow={renderRow}
+          focusRestore={focusRestore?.focus}
         />
       )}
       {groups.map((group, index) => {
@@ -435,6 +480,7 @@ export function LinkedWork({
             open={open}
             onOpenChange={setOpen}
             renderRow={renderRow}
+            focusRestore={focusRestore?.focus}
             note={
               group.kind === "subticket" && isGitHubOwned
                 ? "Subtickets stay local; publishing never includes them."
@@ -525,6 +571,7 @@ function RelationshipGroup({
   onOpenChange,
   renderRow,
   note,
+  focusRestore,
 }: {
   kind: string;
   label: string;
@@ -538,6 +585,7 @@ function RelationshipGroup({
   onOpenChange: (open: boolean) => void;
   renderRow: (row: LinkRow) => ReactNode;
   note?: string | undefined;
+  focusRestore?: LinkedWorkRowFocus | undefined;
 }) {
   const active = (row: LinkRow) => kind === "parent" || isOpen(row);
   const openRows = rows.filter(active).sort((a, b) => {
@@ -590,18 +638,21 @@ function RelationshipGroup({
           count={Math.max(0, openCount - openLimit)}
           rows={openRows.slice(openLimit)}
           renderRow={renderRow}
+          focusRestore={focusRestore}
         />
         <RelationshipFold
           label="done"
           count={doneCount}
           rows={doneRows}
           renderRow={renderRow}
+          focusRestore={focusRestore}
         />
         <RelationshipFold
           label="finished"
           count={otherFinished.length}
           rows={otherFinished}
           renderRow={renderRow}
+          focusRestore={focusRestore}
         />
       </Disclosure>
     </div>
@@ -613,20 +664,28 @@ function RelationshipFold({
   count,
   rows,
   renderRow,
+  focusRestore,
 }: {
   label: string;
   count: number;
   rows: LinkRow[];
   renderRow: (row: LinkRow) => ReactNode;
+  focusRestore: LinkedWorkRowFocus | undefined;
 }) {
   if (count === 0) return null;
   const preview = rows.slice(0, 2).map((row) => row.reference);
   const name = [`${count} ${label}`, preview.join(", ")]
     .filter(Boolean)
     .join(": ");
+  const restoreOpen = rows.some(
+    ({ kind, reference }) =>
+      kind === focusRestore?.kind && reference === focusRestore.reference,
+  );
   return (
     <div className="linked-work-fold">
       <Disclosure
+        key={String(restoreOpen)}
+        defaultOpen={restoreOpen}
         label={`${name}${preview.length > 0 && count > preview.length ? ` +${count - preview.length}` : ""}`}
       >
         <ul className="reference-rows">

@@ -367,6 +367,7 @@ export function TicketContextLine({
         select={select}
         trigger={
           <RailRow
+            data-linked-work-blockers=""
             icon={
               unresolved.length > 0 ? <StatusDot tone="blocked" /> : undefined
             }
