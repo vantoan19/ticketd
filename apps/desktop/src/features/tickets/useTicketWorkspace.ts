@@ -22,7 +22,7 @@ import {
   type SourceEntry,
   type SourceHealth,
 } from "@/lib/api/sources";
-import { statusCountKey, type TicketStatus } from "@/lib/statuses";
+import { statusCountKey, ticketStatuses } from "@/lib/statuses";
 import { loadPreferences, usePreferences } from "@/lib/preferences";
 import {
   describeFailure,
@@ -67,7 +67,7 @@ export type TicketWorkspace = ReturnType<typeof useTicketWorkspace>;
 export type TicketListPosition = {
   index: number;
   total: number;
-  statusGroup?: { index: number; total: number; status: TicketStatus };
+  statusGroup?: { index: number; total: number; status: string };
 };
 function markReady(
   mention: FollowedMention | null,
@@ -568,6 +568,11 @@ export function useTicketWorkspace(
   let position: TicketListPosition | null = null;
   if (selectedStatus) {
     const group = tickets.filter(({ status }) => status === selectedStatus);
+    const knownStatus = ticketStatuses.find(
+      (status) => status === selectedStatus,
+    );
+    const groupCount =
+      counts && knownStatus ? counts[statusCountKey[knownStatus]] : 0;
     position = {
       index: selectedIndex + 1,
       total,
@@ -576,10 +581,7 @@ export function useTicketWorkspace(
         index: group.findIndex(({ reference }) => reference === selected) + 1,
         // Counts include later pages. A just-saved status can move the row
         // before those counts refresh, so the loaded group is the minimum.
-        total: Math.max(
-          group.length,
-          counts?.[statusCountKey[selectedStatus]] ?? 0,
-        ),
+        total: Math.max(group.length, groupCount),
       },
     };
   }
