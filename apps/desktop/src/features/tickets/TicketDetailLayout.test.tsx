@@ -57,7 +57,7 @@ let blocking: object[] = [];
 let related: object[] = [];
 let mentions: object[] = [];
 let history: object[] = [];
-let evidence: object[] = [];
+let evidenceProof: object[] = [];
 let current: Ticket;
 const select = vi.fn();
 beforeEach(() => {
@@ -70,7 +70,7 @@ beforeEach(() => {
   related = [];
   mentions = [];
   history = [];
-  evidence = [];
+  evidenceProof = [];
   select.mockReset();
   bridge.invoke.mockImplementation(async (command: string, args?: object) => {
     // A reported change reads the open Ticket again.
@@ -79,7 +79,11 @@ beforeEach(() => {
     if (command === "ticket_backlinks")
       return { items: mentions, total: mentions.length };
     if (command === "ticket_evidence_page")
-      return { items: evidence, total: evidence.length };
+      return {
+        items: [],
+        total: evidenceProof.length ? 31 : 0,
+        proof: evidenceProof,
+      };
     if (command === "search_tickets")
       return [{ ...ticket, reference: "T-KQ9", title: "New prerequisite" }];
     if (command === "add_dependency") return current;
@@ -738,7 +742,7 @@ test.each([false, true])(
       },
     ];
     if (withPR)
-      evidence = [
+      evidenceProof = [
         {
           id: "pr",
           kind: "pull_request",
@@ -763,6 +767,13 @@ test.each([false, true])(
     expect(reference?.getAttribute("href") ?? null).toBe(
       withPR ? "https://github.com/ticketd/ticketd/pull/618" : null,
     );
+    expect(
+      bridge.invoke.mock.calls.filter(
+        ([command]) => command === "ticket_evidence_page",
+      ),
+    ).toEqual([
+      ["ticket_evidence_page", { reference: ticket.reference, offset: 0 }],
+    ]);
     expect(
       screen.queryByRole("region", { name: "Agents on this ticket" }),
     ).toBeNull();
