@@ -151,6 +151,10 @@ beforeEach(() => {
           created_at: "2026-11-28T01:00:00Z",
           trashed: false,
         };
+      case "document_context_links":
+        return [[], []];
+      case "current_work_documents":
+        return { groups: [], finished: 0, unlinked: 0, trashed: 0 };
       case "search_tickets":
         return tickets
           .filter((item) =>
@@ -953,12 +957,9 @@ test("a long purpose expands and the spec opens with a route back to its Plan", 
       name: "Spec: Release specification",
     }),
   );
-  const back = await screen.findByRole("button", { name: "Back to Launch" });
-  await waitFor(() =>
-    expect(bridge.invoke).toHaveBeenCalledWith("document_row", { id: "spec" }),
-  );
+  await screen.findByRole("heading", { name: "Release specification" });
   expect(screen.queryByRole("button", { name: "Open Plan Launch" })).toBeNull();
-  fireEvent.click(back);
+  fireEvent.click(screen.getByRole("button", { name: "Back to Launch" }));
   const overview = await screen.findByRole("region", { name: "Launch" });
   expect(
     within(overview).getByRole("button", { name: "Show less" }),
