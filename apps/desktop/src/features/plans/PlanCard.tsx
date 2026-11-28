@@ -23,7 +23,7 @@ import { Time } from "@/components/ui/time";
 import { Tooltip } from "@/components/ui/tooltip";
 import { PlanRing, PlanSplitBar } from "./PlanProgress";
 import { flowPlanMembers } from "./plan-members";
-import { flowOrder } from "./flow-order";
+import { planNextUp } from "./plan-work-model";
 
 /** Counts never come from the member query: show_plan owns full-Plan progress. */
 export function PlanCard({
@@ -67,25 +67,7 @@ export function PlanCard({
     view &&
     Object.values(view.counts).reduce((sum, count) => sum + count, 0) ===
       members.length;
-  const next =
-    complete &&
-    flowOrder(members).find(
-      (member) =>
-        member.status === "Todo" &&
-        member.availability === "Ready" &&
-        !member.source?.unavailable,
-    );
-  const ready = complete
-    ? members.filter(
-        (member) => member.status === "Todo" && member.availability === "Ready",
-      ).length
-    : undefined;
-  const blocked = complete
-    ? members.filter(
-        (member) =>
-          member.status === "Todo" && member.availability === "Blocked",
-      ).length
-    : undefined;
+  const { next, ready, blocked } = complete ? planNextUp(members) : {};
   const projectIds = new Set(
     (complete ? members : []).flatMap((member) =>
       member.project_id ? [member.project_id] : [],
