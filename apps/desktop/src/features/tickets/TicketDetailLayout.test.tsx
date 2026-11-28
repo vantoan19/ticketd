@@ -284,6 +284,44 @@ test("wide ticket relationships open from their rail rows and return to Linked b
   ).toBeTruthy();
 });
 
+test("Linked work keeps the focused row and action as it moves between panes", async () => {
+  related = [
+    {
+      reference: "T-KQ2",
+      title: { text: "Active related ticket" },
+      status: "In progress",
+      trashed: false,
+      unresolved: true,
+    },
+    {
+      reference: "T-KQ3",
+      title: { text: "Finished related ticket" },
+      status: "Done",
+      trashed: false,
+      unresolved: false,
+    },
+  ];
+  renderDetails(ticket, true);
+  const column = within(await screen.findByRole("region", { name: "Linked" }));
+  fireEvent.click(await column.findByRole("button", { name: /1 done/ }));
+  const action = { name: "Remove T-KQ3 from Related to" };
+  column.getByRole("button", action).focus();
+
+  resizePane(1100);
+  const rail = within(
+    screen.getByRole("complementary", { name: "Ticket details" }),
+  );
+  expect(document.activeElement).toBe(rail.getByRole("button", action));
+
+  resizePane(900);
+  expect(document.activeElement).toBe(screen.getByRole("button", action));
+
+  const title = screen.getByRole("textbox", { name: "Title" });
+  title.focus();
+  resizePane(1100);
+  expect(document.activeElement).toBe(title);
+});
+
 test("the full-width outline starts at three headings and can jump into a folded section", async () => {
   const twoHeadings = renderDetails(
     { ...ticket, body: "## Goal\n\n## Plan" },

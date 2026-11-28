@@ -59,6 +59,7 @@ export function ReferenceRow({
       })}
       data-density={density}
       data-kind={kind}
+      data-reference={reference}
       data-action={action ? "" : undefined}
     >
       <span

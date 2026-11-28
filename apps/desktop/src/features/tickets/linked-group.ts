@@ -18,8 +18,9 @@ export function useLinkedGroup(
     return undefined;
   });
   const setOpen = useCallback(
-    (open: boolean) => {
+    (open: boolean, persist = true) => {
       setChoice(open);
+      if (!persist) return;
       try {
         localStorage.setItem(key, open ? "open" : "closed");
       } catch {

@@ -1,6 +1,7 @@
 import { Alert, AlertActions, AlertDescription } from "@/components/ui/alert";
 import { Button } from "@/components/ui/button";
 import {
+  useCallback,
   useEffect,
   useLayoutEffect,
   useRef,
@@ -17,6 +18,7 @@ import {
   LinkedWork,
   LinkedWorkDialogs,
   type LinkedWorkHandle,
+  type LinkedWorkRowFocus,
 } from "@/features/tickets/LinkedWork";
 import {
   TicketFiles,
@@ -42,7 +44,7 @@ import { TicketEditor } from "@/features/tickets/TicketEditor";
 import { useTicketTrash } from "@/features/tickets/use-ticket-trash";
 import type { Project } from "@/lib/api/client";
 import { useOpenTicket } from "./open-ticket";
-import { TicketDecisionCard } from "./TicketDecisionCard";
+import { TicketDecisionCard, type DecisionFocus } from "./TicketDecisionCard";
 import {
   useTicketReviewDecision,
   type ReviewQueue,
@@ -152,6 +154,39 @@ export function TicketPage({
   const contentLocked = Boolean(source?.content_locked);
   const linked = useRef<HTMLDivElement>(null);
   const linkedWork = useRef<LinkedWorkHandle>(null);
+  const linkedFocus = useRef<LinkedWorkRowFocus | null>(null);
+  const watchLinkedLayout = useCallback((node: HTMLElement | null) => {
+    if (!node) return;
+    return () => {
+      const focused = document.activeElement;
+      const row = focused?.closest<HTMLElement>(".reference-row");
+      const { kind, reference } = row?.dataset ?? {};
+      if (node.contains(focused) && kind && reference) {
+        linkedFocus.current = {
+          kind,
+          reference,
+          action: Boolean(focused?.closest(".reference-row-action")),
+        };
+      }
+    };
+  }, []);
+  const watchLinkedColumn = useCallback(
+    (node: HTMLDivElement | null) => {
+      linked.current = node;
+      const capture = watchLinkedLayout(node);
+      return () => {
+        capture?.();
+        linked.current = null;
+      };
+    },
+    [watchLinkedLayout],
+  );
+  useLayoutEffect(() => {
+    const focus = linkedFocus.current;
+    linkedFocus.current = null;
+    if (focus && active && !leaving && page.current)
+      linkedWork.current?.restoreRowFocus(focus, page.current);
+  }, [active, leaving, rail]);
   const parentRow = work.rows.find((row) => row.kind === "parent");
   const parent = work.current?.links ? parentRow : ticket.parent;
   const files = active && (
@@ -210,12 +245,27 @@ export function TicketPage({
     active && !leaving,
     readReviewQueue,
   );
+  // Expanding the peek remounts the card even when its decision is pending.
+  const decisionFocusRef = useRef<DecisionFocus | null>(null);
+  useLayoutEffect(() => {
+    if (!active || leaving) return;
+    const follow = (event: FocusEvent) => {
+      const origin = decisionFocusRef.current;
+      if (origin && event.target !== origin.element) origin.moved = true;
+    };
+    document.addEventListener("focusin", follow);
+    return () => {
+      document.removeEventListener("focusin", follow);
+      decisionFocusRef.current = null;
+    };
+  }, [active, leaving]);
   const decisionCard = (
     <TicketDecisionCard
       active={active && !leaving}
       seenTime={seenTime}
       onRepresentedUpdate={setRepresentedUpdate}
       reviewDecision={reviewDecision}
+      decisionFocusRef={decisionFocusRef}
       blockerCount={blockerCount}
       blockers={
         blockerCount > 0 ? (
@@ -373,7 +423,7 @@ export function TicketPage({
         )}
         {!rail && (
           <RailPlacement value="column">
-            <div ref={linked} className="detail-connected">
+            <div ref={watchLinkedColumn} className="detail-connected">
               {active && (
                 <LinkedWork
                   ref={linkedWork}
@@ -432,7 +482,11 @@ export function TicketPage({
         />
       </div>
       {rail && (
-        <aside className="ticket-detail-rail" aria-label="Ticket details">
+        <aside
+          ref={watchLinkedLayout}
+          className="ticket-detail-rail"
+          aria-label="Ticket details"
+        >
           {active ? (
             <LinkedWork
               ref={linkedWork}

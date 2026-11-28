@@ -5,7 +5,9 @@ import {
   useLayoutEffect,
   useMemo,
   useRef,
+  useState,
   type ReactNode,
+  type RefObject,
 } from "react";
 import { ArrowRight } from "lucide-react";
 import { Kbd } from "@/components/ui/kbd";
@@ -15,6 +17,11 @@ import {
   shortcutLabel,
 } from "@/lib/shortcuts";
 import type { LatestUpdate } from "@/lib/api/progress";
+import { client } from "@/lib/api/client";
+import {
+  describeFailure,
+  type FailureDescription,
+} from "@/lib/api/describe-failure";
 import { editingBlockedReason, useWorkspaceState } from "@/lib/workspace-state";
 import { externalSource } from "./ticket-source";
 import { TicketReviewProof } from "./TicketReviewProof";
@@ -26,6 +33,7 @@ import { SourceLink } from "./SourceLink";
 import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
 import { Clamp } from "@/components/ui/disclosure";
+import { FailureState } from "@/components/ui/failure-alert";
 import { Time } from "@/components/ui/time";
 import { HarnessMark } from "@/features/chats/HarnessMark";
 import { useEditingHarness } from "@/features/chats/editing-harness";
@@ -43,6 +51,8 @@ import "./ticket-decision-card.css";
 
 export type { ReviewQueue } from "./use-ticket-review-decision";
 
+export type DecisionFocus = { element: Element | null; moved: boolean };
+
 export function TicketDecisionCard({
   active,
   seenTime,
@@ -55,6 +65,7 @@ export function TicketDecisionCard({
   doneFallback,
   select,
   reviewDecision,
+  decisionFocusRef,
 }: {
   active: boolean;
   seenTime: number | null;
@@ -67,6 +78,7 @@ export function TicketDecisionCard({
   doneFallback?: ReactNode;
   select: (reference: string) => void;
   reviewDecision: TicketReviewDecision;
+  decisionFocusRef: RefObject<DecisionFocus | null>;
 }) {
   const { record: ticket, opening } = useOpenTicket();
   const agent = useContext(AgentContext);
@@ -109,6 +121,25 @@ export function TicketDecisionCard({
   const nextReference =
     nextReview?.kind === "next" ? nextReview.reference : undefined;
   const writingBack = draft !== null;
+  const resultShown = decided && agentState?.kind !== "request";
+
+  function startMove() {
+    if (!canMove || pending) return;
+    decisionFocusRef.current = {
+      element: document.activeElement,
+      moved: false,
+    };
+    moveToDone();
+  }
+
+  function startSendBack() {
+    if (!canSend || pending || !draft?.brief.trim()) return;
+    decisionFocusRef.current = {
+      element: document.activeElement,
+      moved: false,
+    };
+    sendBack(reviewerAgent);
+  }
 
   const reviewKey = useEffectEvent((event: KeyboardEvent) => {
     const target = event.target;
@@ -132,7 +163,7 @@ export function TicketDecisionCard({
       return;
     if (canMove && matchesShortcut(event, "ticket-review-done")) {
       event.preventDefault();
-      moveToDone();
+      startMove();
     } else if (
       canSend &&
       !writingBack &&
@@ -150,11 +181,24 @@ export function TicketDecisionCard({
   }, [active, reviewVisible]);
   useLayoutEffect(() => {
     if (!active) return;
-    if (decided) (next.current ?? queueMessage.current)?.focus();
-    else if (writingBack) field.current?.focus();
+    if (resultShown) {
+      const origin = decisionFocusRef.current;
+      const focused = document.activeElement;
+      decisionFocusRef.current = null;
+      if (
+        origin &&
+        (focused === origin.element ||
+          (!origin.moved &&
+            focused === document.body &&
+            (!origin.element?.isConnected ||
+              origin.element.closest("[hidden], [inert]"))))
+      ) {
+        (next.current ?? queueMessage.current)?.focus();
+      }
+    } else if (writingBack) field.current?.focus();
     else if (restoreSendFocus.current) sendButton.current?.focus();
     restoreSendFocus.current = false;
-  }, [active, decided, writingBack]);
+  }, [active, decisionFocusRef, resultShown, writingBack]);
 
   const latest =
     !ticket.trashed &&
@@ -166,7 +210,7 @@ export function TicketDecisionCard({
   useLayoutEffect(() => {
     onRepresentedUpdate(representedUpdate);
   }, [onRepresentedUpdate, representedUpdate]);
-  if (decided && decision && agentState?.kind !== "request") {
+  if (resultShown && decision) {
     panel = (
       <DecisionPanel state={decision.kind === "done" ? "Done" : "Sent back"}>
         <p className="ticket-decision-title">
@@ -180,22 +224,11 @@ export function TicketDecisionCard({
           </blockquote>
         )}
         {nextReference ? (
-          <div className="ticket-decision-row">
-            <Button asChild variant="outline" size="compact">
-              <a
-                ref={next}
-                className="ticket-review-focus"
-                href={`ticketd://ticket/${nextReference}`}
-                onClick={(event) => {
-                  event.preventDefault();
-                  select(nextReference);
-                }}
-              >
-                Next to review
-                <ArrowRight aria-hidden="true" />
-              </a>
-            </Button>
-          </div>
+          <NextReviewLink
+            reference={nextReference}
+            anchor={next}
+            select={select}
+          />
         ) : (
           <p
             ref={queueMessage}
@@ -238,6 +271,8 @@ export function TicketDecisionCard({
           blockers={blockers}
           update={update}
           loading={latestUpdate.value === undefined && !latestUpdate.failure}
+          failure={latestUpdate.failure}
+          retry={latestUpdate.retry}
           newUpdate={update !== null && isNewUpdate(update, seenTime)}
         />
         {review && <TicketReviewProof onEvidence={onEvidence} />}
@@ -255,7 +290,7 @@ export function TicketDecisionCard({
             pending={pending}
             disabled={!canSend}
             onChange={updateDraft}
-            onSubmit={() => sendBack(reviewerAgent)}
+            onSubmit={startSendBack}
             onCancel={() => {
               restoreSendFocus.current = true;
               cancelSendBack();
@@ -277,7 +312,7 @@ export function TicketDecisionCard({
                 variant={blockerCount ? "outline" : "default"}
                 disabled={!canMove}
                 busy={pending}
-                onClick={moveToDone}
+                onClick={startMove}
                 aria-keyshortcuts={ariaKeyShortcuts("ticket-review-done")}
               >
                 Move to Done
@@ -313,6 +348,88 @@ export function TicketDecisionCard({
   );
 }
 
+function NextReviewLink({
+  reference,
+  anchor,
+  select,
+}: {
+  reference: string;
+  anchor: RefObject<HTMLAnchorElement | null>;
+  select: (reference: string) => void;
+}) {
+  const checking = useRef(false);
+  const [busy, setBusy] = useState(false);
+  const [failure, setFailure] = useState<FailureDescription | null>(null);
+  const [leftReview, setLeftReview] = useState(false);
+  const focusMessage = useRef(false);
+  const message = useRef<HTMLParagraphElement>(null);
+  useLayoutEffect(() => {
+    if (leftReview && focusMessage.current) message.current?.focus();
+  }, [leftReview]);
+
+  async function openNext() {
+    const link = anchor.current;
+    if (checking.current || !link) return;
+    checking.current = true;
+    setBusy(true);
+    try {
+      const candidate = await client.showTicket(reference);
+      if (!link.isConnected || link.closest("[hidden], [inert]")) return;
+      if (candidate.status === "In review" && !candidate.trashed) {
+        select(reference);
+      } else {
+        focusMessage.current = document.activeElement === link;
+        setLeftReview(true);
+      }
+    } catch (reason) {
+      setFailure(describeFailure(reason, `check ${reference} for review`));
+    } finally {
+      checking.current = false;
+      setBusy(false);
+    }
+  }
+
+  if (leftReview) {
+    return (
+      <p
+        ref={message}
+        tabIndex={-1}
+        role="status"
+        className="ticket-decision-byline ticket-review-focus"
+      >
+        {reference} is no longer in review
+      </p>
+    );
+  }
+  return (
+    <>
+      <div className="ticket-decision-row">
+        <Button asChild variant="outline" size="compact" busy={busy}>
+          <a
+            ref={anchor}
+            className="ticket-review-focus"
+            href={`ticketd://ticket/${reference}`}
+            onClick={(event) => {
+              event.preventDefault();
+              void openNext();
+            }}
+          >
+            Next to review
+            <ArrowRight aria-hidden="true" />
+          </a>
+        </Button>
+      </div>
+      {failure && (
+        <FailureState
+          size="inline"
+          failure={failure}
+          onRetry={() => void openNext()}
+        />
+      )}
+    </>
+  );
+}
+
 export function DecisionPanel({
   state,
   stateKey = state,
@@ -344,6 +461,8 @@ function TicketReport({
   select,
   update,
   loading,
+  failure,
+  retry,
   newUpdate,
 }: {
   review: boolean;
@@ -352,6 +471,8 @@ function TicketReport({
   select: (reference: string) => void;
   update: LatestUpdate | null;
   loading: boolean;
+  failure: FailureDescription | null;
+  retry: () => void;
   newUpdate: boolean;
 }) {
   const { record: ticket } = useOpenTicket();
@@ -369,6 +490,9 @@ function TicketReport({
   return (
     <>
       <h3 className="ticket-decision-title">{state}</h3>
+      {failure && (
+        <FailureState size="inline" failure={failure} onRetry={retry} />
+      )}
       {update ? (
         <>
           <div className="ticket-decision-byline">
@@ -392,13 +516,15 @@ function TicketReport({
           </div>
         </>
       ) : (
-        <p className="ticket-decision-byline">
-          {loading
-            ? "Loading update…"
-            : review
-              ? "No report yet"
-              : "No update yet"}
-        </p>
+        !failure && (
+          <p className="ticket-decision-byline">
+            {loading
+              ? "Loading update…"
+              : review
+                ? "No report yet"
+                : "No update yet"}
+          </p>
+        )
       )}
       {review && ((acceptance?.total ?? 0) > 0 || blockers) && (
         <div className="ticket-decision-row">
