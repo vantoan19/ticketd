@@ -2036,13 +2036,7 @@ impl Workspace {
             let integrated = super::github_integration::is_integration_target(&started.source);
             if integrated {
                 let ticket = subject(transaction, &started.reference)?;
-                let host = started
-                    .source
-                    .saved
-                    .config
-                    .get(super::github::SITE_CONFIG)
-                    .and_then(serde_json::Value::as_str)
-                    .ok_or(Error::InvalidProjectRemote)?;
+                let host = started.source.github_site();
                 let destination = format!("{host}/{}", started.request.destination);
                 let current = publication_target(
                     transaction,
@@ -2520,7 +2514,7 @@ impl Workspace {
             },
         ];
         Ok(PublicationReview {
-            connection_id: source.map(|source| source.saved.id),
+            connection_id: source.filter(|source| !super::github_integration::is_integration_target(source)).map(|source| source.saved.id),
             provider_name: name,
             known,
             unknown,

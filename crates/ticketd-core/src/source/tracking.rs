@@ -331,6 +331,22 @@ pub struct RefreshReport {
     pub refreshed_at: String,
 }
 
+impl RefreshReport {
+    pub(super) fn for_client(mut self) -> Self {
+        for failure in &mut self.failures {
+            if failure
+                .connection_id
+                .as_deref()
+                .and_then(super::github_integration::repository_job)
+                .is_some()
+            {
+                failure.connection_id = None;
+            }
+        }
+        self
+    }
+}
+
 pub(crate) fn migrate(connection: &Connection) -> Result<(), Error> {
     connection.execute_batch(
         "CREATE TABLE external_identities (\
@@ -1490,7 +1506,7 @@ impl Workspace {
         selected: Option<&[String]>,
     ) -> Result<RefreshReport, Error> {
         self.refresh_selected_with_clock(engine, options, selected, &|| options.now.clone())
-            .map(|run| run.report)
+            .map(|run| run.report.for_client())
     }
 
     pub(super) fn refresh_selected_with_clock(

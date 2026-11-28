@@ -1798,6 +1798,16 @@ async fn save_source(
     connection: Option<String>,
     sources: tauri::State<'_, SourceRegistry>,
 ) -> Result<ticketd_core::source::SaveOutcome, SourceFailure> {
+    if provider == ticketd_core::source::GITHUB_INTEGRATION {
+        return Err(
+            ticketd_core::source::SourceError::InvalidConfiguration(vec![
+                ticketd_core::source::FieldIssue::for_form(
+                    "Save repositories on the GitHub integration page.",
+                ),
+            ])
+            .into(),
+        );
+    }
     source_task(sources, move |registry| {
         let mut workspace = open_workspace()?;
         let engine = registry.engine()?;
@@ -1816,6 +1826,16 @@ async fn add_source_connection(
     config: ticketd_core::source::ConfigValues,
     sources: tauri::State<'_, SourceRegistry>,
 ) -> Result<ticketd_core::source::SaveOutcome, SourceFailure> {
+    if provider == ticketd_core::source::GITHUB_INTEGRATION {
+        return Err(
+            ticketd_core::source::SourceError::InvalidConfiguration(vec![
+                ticketd_core::source::FieldIssue::for_form(
+                    "Save repositories on the GitHub integration page.",
+                ),
+            ])
+            .into(),
+        );
+    }
     source_task(sources, move |registry| {
         Ok(open_workspace()?.add_source_connection(
             &registry.engine()?,

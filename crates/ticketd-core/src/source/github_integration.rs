@@ -274,6 +274,16 @@ pub async fn sign_in_github(
 
 fn normalized_rule(mut rule: GithubRepositoryRule) -> Result<GithubRepositoryRule, Error> {
     rule.repository = normalize_repository(&rule.repository).ok_or(Error::InvalidProjectRemote)?;
+    rule.assignee = rule
+        .assignee
+        .map(|assignee| assignee.trim().to_owned())
+        .filter(|assignee| !assignee.is_empty());
+    rule.labels = rule
+        .labels
+        .into_iter()
+        .map(|label| label.trim().to_owned())
+        .filter(|label| !label.is_empty())
+        .collect();
     Ok(rule)
 }
 
@@ -367,7 +377,9 @@ fn host_readiness(engine: &Engine, host: &str) -> GithubHost {
                 SourceError::Unavailable(message) if message == github::GH_NOT_INSTALLED => {
                     GithubReadiness::NotInstalled
                 }
-                SourceError::Unauthenticated(_) => GithubReadiness::NotSignedIn,
+                SourceError::Unauthenticated(_) | SourceError::SignIn { .. } => {
+                    GithubReadiness::NotSignedIn
+                }
                 _ => GithubReadiness::Unavailable,
             };
             (state, None, Some(error.to_string()))
@@ -823,7 +835,8 @@ pub(super) fn refresh_jobs(connection: &Connection) -> Result<Vec<ConfiguredSour
         };
         let (_, login) = repository_route(connection, &rule.repository)?;
         let (host, _) = repository_parts(&rule.repository)?;
-        let config = rule_configuration(&rule, login.as_deref())?;
+        let mut config = rule_configuration(&rule, login.as_deref())?;
+        config.remove(github::SITE_CONFIG);
         let saved_revision: String = row.get(3)?;
         let revision = serde_json::to_string(&(saved_revision, &login))?;
         jobs.push(ConfiguredSource {
@@ -848,6 +861,7 @@ pub(super) fn refresh_jobs(connection: &Connection) -> Result<Vec<ConfiguredSour
             credentials: super::credentials::References::new(),
             permitted_env: Default::default(),
             account_key: String::new(),
+            github_integration: true,
         });
     }
     Ok(jobs)
@@ -878,8 +892,7 @@ impl Workspace {
 }
 
 pub(super) fn is_integration_target(source: &ConfiguredSource) -> bool {
-    source.saved.provider == GITHUB_INTEGRATION
-        && source.saved.config.contains_key(github::SITE_CONFIG)
+    source.github_integration
 }
 
 pub(super) fn workflow_target(
@@ -922,6 +935,7 @@ fn workflow_source(
     revision: String,
 ) -> ConfiguredSource {
     let mut config = host_configuration(host, login.as_deref());
+    config.remove(github::SITE_CONFIG);
     config.insert(super::REPOSITORIES.into(), json!(destinations));
     ConfiguredSource {
         derived: github::legacy_derived_configuration(GITHUB_INTEGRATION, host, &config)
@@ -945,6 +959,7 @@ fn workflow_source(
         credentials: super::credentials::References::new(),
         permitted_env: Default::default(),
         account_key,
+        github_integration: true,
     }
 }
 

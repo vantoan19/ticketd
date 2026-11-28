@@ -438,6 +438,7 @@ impl Workspace {
             .collect::<Result<Vec<_>, _>>()?;
         rows.retain(|status| {
             status.connection_id.is_some()
+                || status.provider == super::GITHUB_INTEGRATION
                 || status.tracked_tickets > 0
                 || !sources
                     .iter()

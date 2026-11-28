@@ -1336,17 +1336,35 @@ struct ConfiguredSource {
     credentials: credentials::References,
     permitted_env: std::collections::HashSet<String>,
     account_key: String,
+    github_integration: bool,
 }
 
 impl ConfiguredSource {
     fn bind(&self, engine: &Engine) -> Engine {
+        let config = if self.github_integration {
+            let mut config = self.saved.config.clone();
+            config.insert(
+                github::SITE_CONFIG.into(),
+                serde_json::Value::String(self.github_site().into()),
+            );
+            Cow::Owned(config)
+        } else {
+            Cow::Borrowed(&self.saved.config)
+        };
         engine.for_connection_with_secret_refs(
             &self.saved.provider,
             &self.saved.id,
-            &self.saved.config,
+            &config,
             &self.credentials,
             Some(&self.permitted_env),
         )
+    }
+    fn github_site(&self) -> &str {
+        if self.site.is_empty() {
+            "github.com"
+        } else {
+            &self.site
+        }
     }
     fn verify_effective_site(&self, engine: &Engine) -> Result<(), SourceError> {
         if engine
@@ -1531,6 +1549,7 @@ fn configured_row(
         credentials,
         permitted_env,
         account_key: row.get(9)?,
+        github_integration: false,
     })
 }
 
