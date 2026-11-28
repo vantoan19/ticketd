@@ -253,10 +253,11 @@ function PlanIndexRows({
     ...pinnedOrder.filter((id) => current.has(id)),
     ...arrived.map((plan) => plan.id),
   ];
-  const failed = plans
-    .map((plan) => observations.get(plan.id))
-    .filter((row) => row !== undefined && row.failure !== null);
-  const retryable = failed.filter((row) => row.failure?.action === "retry");
+  const failed = plans.flatMap((plan) => {
+    const row = observations.get(plan.id);
+    return row?.failure ? [{ failure: row.failure, retry: row.retry }] : [];
+  });
+  const retryable = failed.filter((row) => row.failure.action === "retry");
   const failure = (retryable[0] ?? failed[0])?.failure;
 
   return (

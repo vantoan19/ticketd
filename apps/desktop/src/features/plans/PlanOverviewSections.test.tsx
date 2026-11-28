@@ -1,5 +1,6 @@
 // @vitest-environment jsdom
 import {
+  act,
   cleanup,
   fireEvent,
   render,
@@ -430,6 +431,30 @@ test("shows time in each current status and puts longer waiting reviews first af
   expect(done.getByRole("time").getAttribute("datetime")).toBe(
     "2026-11-24T12:00:00Z",
   );
+});
+
+test("Plan progress movement age advances without reloading the Plan", async () => {
+  vi.useFakeTimers({ toFake: ["setInterval", "clearInterval"] });
+  const now = vi
+    .spyOn(Date, "now")
+    .mockReturnValue(Date.parse("2026-11-28T02:00:00Z"));
+  try {
+    const { overview } = await openPlan([
+      member(41, "Prepare notes", "Todo", "Ready"),
+    ]);
+    await within(overview).findByText("1h ago");
+    const overviewReads = () =>
+      invoke.mock.calls.filter(
+        ([name, args]) => name === "show_plan" && args?.limit === undefined,
+      );
+    const reads = overviewReads();
+    now.mockReturnValue(Date.parse("2026-11-28T03:00:00Z"));
+    await act(async () => vi.advanceTimersByTimeAsync(60_000));
+    expect(within(overview).getByText("2h ago")).toBeTruthy();
+    expect(overviewReads()).toEqual(reads);
+  } finally {
+    vi.useRealTimers();
+  }
 });
 
 test("opens the pull request from the number in its URL", async () => {
