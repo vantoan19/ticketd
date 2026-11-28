@@ -98,7 +98,7 @@ test("counts distinct open dependents through shared paths and cycles", () => {
   });
 });
 
-test("reports unresolved visible blockers with their Plan membership", () => {
+test("reports unresolved blockers with their Plan membership and Trash state", () => {
   const blocked = ticket("T-PN1", { availability: "Blocked" });
   blocked.prerequisites = [
     {
@@ -137,11 +137,12 @@ test("reports unresolved visible blockers with their Plan membership", () => {
 
   expect(
     model.sections.blocked[0]?.waitsOn.map(
-      ({ reference, title, status, insidePlan }) => ({
+      ({ reference, title, status, insidePlan, trashed }) => ({
         reference,
         title,
         status,
         insidePlan,
+        trashed,
       }),
     ),
   ).toEqual([
@@ -150,12 +151,21 @@ test("reports unresolved visible blockers with their Plan membership", () => {
       title: "Canceled work",
       status: "Canceled",
       insidePlan: true,
+      trashed: false,
     },
     {
       reference: "T-OUT3",
       title: "Other Plan",
       status: "In review",
       insidePlan: false,
+      trashed: false,
+    },
+    {
+      reference: "T-PN4",
+      title: "Work in Trash",
+      status: "Todo",
+      insidePlan: false,
+      trashed: true,
     },
   ]);
 });
