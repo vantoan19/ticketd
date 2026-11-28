@@ -122,7 +122,8 @@
 .detail-document .editor-body {
   margin-top: 24px;
 }
-.detail-document .ticket-agent-slot ~ .editor-body {
+.detail-document .ticket-agent-slot ~ .editor-body,
+.detail-document .ticket-decision-card ~ .editor-body {
   margin-top: 32px;
 }
 .list-position {

@@ -6,14 +6,14 @@ import { Evidence } from "@/features/tickets/Evidence";
 import { Backlinks, type MentionTarget } from "@/features/tickets/Backlinks";
 import { RailPlacement } from "@/features/tickets/rail-placement";
 import { TicketClosingLine, TicketParentLine } from "./TicketPageLines";
-import { TicketContextLine } from "./TicketContextLine";
+import { TicketContextLine, TicketBlockersPopover } from "./TicketContextLine";
 import { TicketAgentStrip } from "./TicketAgent";
 import { LinkedWork, LinkedWorkDialogs } from "@/features/tickets/LinkedWork";
 import {
   TicketFiles,
   type FileAddRequest,
 } from "@/features/tickets/TicketFiles";
-import { useLinkedWork } from "@/features/tickets/useLinkedWork";
+import { useLinkedWork, orderBlockers } from "@/features/tickets/useLinkedWork";
 import { Activity } from "@/features/tickets/Activity";
 import { SourceConversation } from "@/features/tickets/SourceConversation";
 import { MarkdownDocument } from "@/features/markdown/MarkdownDocument";
@@ -31,6 +31,9 @@ import { TicketEditor } from "@/features/tickets/TicketEditor";
 import { useTicketTrash } from "@/features/tickets/use-ticket-trash";
 import type { Project } from "@/lib/api/client";
 import { useOpenTicket } from "./open-ticket";
+import { TicketDecisionCard, type ReviewQueue } from "./TicketDecisionCard";
+import { revealInDetail } from "./detail-scroll";
+import { plural } from "@/lib/format";
 import { useWorkspaceChange } from "@/lib/workspace-change";
 import type { Plan } from "@/lib/api/plans";
 
@@ -42,6 +45,7 @@ export function TicketPage({
   expanded = false,
   swap = false,
   leaving = false,
+  readReviewQueue,
   projects,
   plans,
   select,
@@ -57,6 +61,7 @@ export function TicketPage({
   swap?: boolean;
   /** Not the open ticket any more, kept on screen for one exit while it fades out. */
   leaving?: boolean;
+  readReviewQueue?: (() => Promise<ReviewQueue>) | undefined;
   projects: Project[];
   plans: Plan[];
   select: (reference: string | null) => void;
@@ -76,6 +81,7 @@ export function TicketPage({
   const work = useLinkedWork();
   const trash = useTicketTrash(changed);
   const [evidenceRequest, setEvidenceRequest] = useState(0);
+  const [showEvidenceRequest, setShowEvidenceRequest] = useState(0);
   const [fileAddRequest, setFileAddRequest] = useState<FileAddRequest | null>(
     null,
   );
@@ -117,6 +123,9 @@ export function TicketPage({
     </LinkedWork>
   );
   const runs = active && <TicketRunsSection runs={ticketRuns.runs} />;
+  const blockerCount = orderBlockers(work).filter(
+    (row) => row.unresolved,
+  ).length;
   const context = (
     <>
       <TicketContextLine
@@ -152,14 +161,42 @@ export function TicketPage({
           linked.current?.scrollIntoView({ block: "start" })
         }
       />
-      {ticket.status === "Done" ? (
-        <TicketClosingLine />
-      ) : (
+      {ticket.status !== "Done" && (
         <TicketAgentStrip
           reference={ticket.reference}
           onOpenUpdate={(id) => setUpdateTarget({ id, key: Date.now() })}
         />
       )}
+      <TicketDecisionCard
+        active={active && !leaving}
+        readReviewQueue={readReviewQueue}
+        blockerCount={blockerCount}
+        blockers={
+          blockerCount > 0 ? (
+            <TicketBlockersPopover
+              work={work}
+              select={select}
+              trigger={
+                <Button variant="attention" size="compact">
+                  {plural(blockerCount, "blocker")} still open
+                </Button>
+              }
+            />
+          ) : null
+        }
+        doneFallback={<TicketClosingLine />}
+        onEvidence={() => setShowEvidenceRequest((count) => count + 1)}
+        select={select}
+        onAcceptance={(offset) => {
+          const heading = page.current?.querySelector<HTMLElement>(
+            `.description-document [data-heading-offset="${offset}"]`,
+          );
+          if (!heading) return;
+          heading.tabIndex = -1;
+          heading.focus({ preventScroll: true });
+          revealInDetail(heading);
+        }}
+      />
     </>
   );
   return (
@@ -270,6 +307,7 @@ export function TicketPage({
             trashed={ticket.trashed}
             folded
             addRequest={evidenceRequest}
+            showRequest={showEvidenceRequest}
             addTrigger={addTrigger}
           />
         )}

@@ -739,7 +739,7 @@ function AppContent() {
         view === "tickets" &&
         workspace.selected === reference
       ) {
-        openTicketUpdate();
+        requestTicketUpdate(reference, undefined, true);
         return true;
       }
       return false;

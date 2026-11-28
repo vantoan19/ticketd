@@ -571,6 +571,23 @@ export function useTicketWorkspace(
       setPages((value) => value + 1);
     }
   }
+  // A decision needs the queue before the write can remove its row from the
+  // results. Read beyond the loaded page only when the review count requires it.
+  async function readReviewQueue() {
+    if (trash || (filterArgs.status && filterArgs.status !== "In review"))
+      return [];
+    const column = board.columns.find(({ status }) => status === "In review");
+    const loaded =
+      layout === "board"
+        ? (column?.tickets ?? [])
+        : tickets.filter(({ status }) => status === "In review");
+    const reviewCount = layout === "board" ? column?.total : counts?.in_review;
+    if (reviewCount == null || loaded.length >= reviewCount) return loaded;
+    return readPages(
+      { ...filterArgs, status: "In review" },
+      Math.ceil(reviewCount / PAGE_SIZE),
+    );
+  }
   /** Every reference the current search and filters match, across pages. */
   async function matchingReferences(): Promise<string[]> {
     const found = await readPages(
@@ -689,6 +706,7 @@ export function useTicketWorkspace(
     grouped: !trash && !query,
     position,
     openAdjacent,
+    readReviewQueue,
     selected,
     mention,
     clearMention,
