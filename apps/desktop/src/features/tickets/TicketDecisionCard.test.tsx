@@ -38,7 +38,14 @@ let ticket: Ticket;
 let latest: ReturnType<typeof update> | null;
 let evidence: { items: Evidence[]; total: number; proof: Evidence[] };
 let writeFailure: string | null;
-function update(text: string) {
+function update(text: string): {
+  activity_id: string;
+  brief: { text: string; truncated: boolean };
+  reported_at: string;
+  updated_at: string;
+  editing_agent: string | null;
+  supporting_document_id: null;
+} {
   return {
     activity_id: "report",
     brief: { text, truncated: false },
@@ -49,6 +56,15 @@ function update(text: string) {
   };
 }
 beforeEach(() => {
+  localStorage.clear();
+  vi.stubGlobal(
+    "ResizeObserver",
+    class {
+      observe() {}
+      unobserve() {}
+      disconnect() {}
+    },
+  );
   ticket = review;
   latest = update("Implemented the rail.");
   evidence = { items: [], total: 0, proof: [] };
@@ -84,6 +100,24 @@ beforeEach(() => {
       ticket = { ...ticket, status: patch.status };
       return ticket;
     }
+    if (command === "send_back") {
+      if (writeFailure) throw { code: writeFailure, message: "Cannot write." };
+      if (ticket.status !== "In review")
+        throw { code: "conflict", message: "This ticket has changed." };
+      const { brief } = args as { brief: string };
+      latest = {
+        ...update(brief),
+        activity_id: "send-back",
+        editing_agent: null,
+      };
+      ticket = { ...ticket, status: "In progress" };
+      return ticket;
+    }
+    if (command === "undo_send_back") {
+      latest = update("Implemented the rail.");
+      ticket = { ...ticket, status: "In review" };
+      return ticket;
+    }
     if (command === "add_activity_with_details") {
       const { brief } = args as { brief: string };
       latest = update(brief);
@@ -104,6 +138,7 @@ beforeEach(() => {
 });
 afterEach(() => {
   cleanup();
+  vi.unstubAllGlobals();
   bridge.invoke.mockReset();
   expect(unknownCommands.splice(0)).toEqual([]);
 });
@@ -416,25 +451,16 @@ test("a GitHub-owned review opens at its source", async () => {
       duplicate_target: null,
     },
   };
-  vi.stubGlobal(
-    "ResizeObserver",
-    class {
-      observe() {}
-      disconnect() {}
-    },
+  open();
+  const card = within(
+    await screen.findByRole("region", { name: "Ready for review" }),
   );
-  try {
-    open();
-    const card = within(
-      await screen.findByRole("region", { name: "Ready for review" }),
-    );
-    expect(
-      card.getByRole("link", { name: "Open on GitHub" }).getAttribute("href"),
-    ).toBe(url);
-    expect(card.queryByRole("button", { name: "Move to Done" })).toBeNull();
-  } finally {
-    vi.unstubAllGlobals();
-  }
+  expect(
+    card.getByRole("link", { name: "Open on GitHub" }).getAttribute("href"),
+  ).toBe(url);
+  expect(card.queryByRole("button", { name: "Move to Done" })).toBeNull();
+  fireEvent.click(card.getByRole("button", { name: "Send back" }));
+  expect(await card.findByText("Not posted to GitHub")).toBeTruthy();
 });
 
 test("the review names open blockers and opens the same list as the context line", async () => {
@@ -472,3 +498,146 @@ test("the review names open blockers and opens the same list as the context line
   );
   expect(select).toHaveBeenCalledWith("T-KQ2");
 });
+
+test("Send back keeps its draft after Escape and reopening, then sends and offers Undo", async () => {
+  const select = vi.fn();
+  const queued = [ticket, { ...review, reference: "T-KQ2" }];
+  const view = open(select, queued);
+  const report = await screen.findByRole("heading", {
+    name: "Ready for review",
+  });
+  fireEvent.keyDown(report, { key: "b" });
+  const field = await screen.findByRole("textbox", {
+    name: "What needs to change?",
+  });
+  expect(document.activeElement).toBe(field);
+  expect(field.getAttribute("placeholder")).toBe(
+    "What needs to change? codex reads this next.",
+  );
+  expect(screen.getByText("Moves the ticket to In progress")).toBeTruthy();
+  fireEvent.change(field, { target: { value: "Handle a narrow window." } });
+  fireEvent.keyDown(field, { key: "Escape" });
+  const sendBack = screen.getByRole("button", { name: "Send back" });
+  expect(document.activeElement).toBe(sendBack);
+  expect(
+    screen.queryByRole("textbox", { name: "What needs to change?" }),
+  ).toBeNull();
+  view.unmount();
+  open(select, queued);
+  fireEvent.click(await screen.findByRole("button", { name: "Send back" }));
+  const reopened = await screen.findByRole<HTMLTextAreaElement>("textbox", {
+    name: "What needs to change?",
+  });
+  expect(reopened.value).toBe("Handle a narrow window.");
+  fireEvent.keyDown(reopened, {
+    key: "Enter",
+    [isMacPlatform() ? "metaKey" : "ctrlKey"]: true,
+  });
+  const sent = await screen.findByRole("region", { name: "Sent back" });
+  expect(within(sent).getByText("Sent back · waiting for codex")).toBeTruthy();
+  expect(within(sent).getByText("Handle a narrow window.")).toBeTruthy();
+  expect(document.activeElement).toBe(
+    within(sent).getByRole("link", { name: "Next to review" }),
+  );
+  expect(select).not.toHaveBeenCalled();
+  expect(screen.getByText("Sent T-KQ1 back to In progress")).toBeTruthy();
+  const send = bridge.invoke.mock.calls.find(
+    ([command]) => command === "send_back",
+  );
+  expect(send?.[1]).toEqual({
+    reference: "T-KQ1",
+    brief: "Handle a narrow window.",
+    requestId: expect.any(String),
+  });
+  fireEvent.click(screen.getByRole("button", { name: "Undo" }));
+  expect(
+    await screen.findByRole("region", { name: "Ready for review" }),
+  ).toBeTruthy();
+  expect(bridge.invoke).toHaveBeenCalledWith("undo_send_back", {
+    reference: "T-KQ1",
+    sendRequestId: send?.[1].requestId,
+    requestId: expect.any(String),
+  });
+});
+
+test("a failed Send back keeps the draft and Retry repeats the same write", async () => {
+  writeFailure = "failed";
+  open();
+  fireEvent.click(await screen.findByRole("button", { name: "Send back" }));
+  const field = await screen.findByRole<HTMLTextAreaElement>("textbox", {
+    name: "What needs to change?",
+  });
+  fireEvent.change(field, { target: { value: "Add one more example." } });
+  fireEvent.click(screen.getByRole("button", { name: "Send back" }));
+  const retry = await screen.findByRole("button", { name: "Retry" });
+  expect(field.value).toBe("Add one more example.");
+  writeFailure = null;
+  fireEvent.click(retry);
+  await screen.findByRole("region", { name: "Sent back" });
+  const writes = bridge.invoke.mock.calls.filter(
+    ([command]) => command === "send_back",
+  );
+  expect(writes).toHaveLength(2);
+  expect(writes[0]).toEqual(writes[1]);
+});
+
+test("Send back refreshes a ticket that left review without posting its draft", async () => {
+  open();
+  fireEvent.click(await screen.findByRole("button", { name: "Send back" }));
+  const field = await screen.findByRole("textbox", {
+    name: "What needs to change?",
+  });
+  fireEvent.change(field, { target: { value: "Use a shorter title." } });
+  ticket = { ...ticket, status: "In progress" };
+  fireEvent.click(screen.getByRole("button", { name: "Send back" }));
+  const latest = await screen.findByRole("region", { name: "Latest update" });
+  expect(within(latest).getByText("Implemented the rail.")).toBeTruthy();
+  expect(screen.queryByRole("region", { name: "Sent back" })).toBeNull();
+});
+
+test.each(["add menu", "blockers popover"])(
+  "B opens the blocker picker inside the %s on a ticket in review",
+  async (surface) => {
+    ticket = {
+      ...review,
+      prerequisites: [
+        {
+          reference: "T-KQ2",
+          title: "Waiting for artwork",
+          status: "Todo",
+          trashed: false,
+          unresolved: true,
+        },
+      ],
+    };
+    open();
+    await screen.findByRole("button", { name: "Send back" });
+    if (surface === "add menu") {
+      fireEvent.keyDown(
+        screen.getByRole("button", { name: "Add ticket property" }),
+        { key: "Enter" },
+      );
+      fireEvent.keyDown(
+        await screen.findByRole("menuitem", { name: "Blocked by…" }),
+        { key: "b" },
+      );
+    } else {
+      fireEvent.click(
+        await screen.findByRole("button", { name: "1 blocker still open" }),
+      );
+      const blockers = within(
+        await screen.findByRole("dialog", { name: "Blockers" }),
+      );
+      fireEvent.keyDown(
+        blockers.getByRole("button", { name: "Add a blocker" }),
+        { key: "b" },
+      );
+    }
+    expect(
+      await screen.findByRole("dialog", { name: "Link a ticket" }),
+    ).toBeTruthy();
+    expect(
+      screen.queryByRole("textbox", { name: "What needs to change?" }),
+    ).toBeNull();
+  },
+);

@@ -17,11 +17,22 @@ import {
   shortcutLabel,
 } from "@/lib/shortcuts";
 import { client, type Ticket } from "@/lib/api/client";
+import type { LatestUpdate } from "@/lib/api/progress";
 import { describeFailure } from "@/lib/api/describe-failure";
 import { editingBlockedReason, useWorkspaceState } from "@/lib/workspace-state";
 import { externalSource } from "./ticket-source";
 import { TicketReviewProof } from "./TicketReviewProof";
 import { TicketReply } from "./TicketReply";
+import { TicketSendBackForm } from "./TicketSendBackForm";
+import {
+  DraftRecoveryReadyContext,
+  useDraftRecovery,
+} from "@/lib/draft-recovery-context";
+import {
+  keepSendBackDraft,
+  readSendBackDraft,
+  type SendBackDraft,
+} from "./send-back-draft";
 import { SourceLink } from "./SourceLink";
 import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
@@ -37,6 +48,10 @@ import { AgentContext } from "./ticket-agent-context";
 import "./ticket-decision-card.css";
 
 export type ReviewQueue = readonly Pick<Ticket, "reference" | "status">[];
+
+type ReviewDecision = (
+  { kind: "done" } | { kind: "sent back"; brief: string; agent: string }
+) & { next: string | undefined };
 
 export function TicketDecisionCard({
   active,
@@ -61,25 +76,73 @@ export function TicketDecisionCard({
   const agent = useContext(AgentContext);
   const line = useStatusLine();
   const blocked = editingBlockedReason(useWorkspaceState()) !== null;
-  const [decision, setDecision] = useState<{ next: string | undefined } | null>(
-    null,
-  );
+  const recovery = useDraftRecovery();
+  const recoveryReady = useContext(DraftRecoveryReadyContext);
+  const latestUpdate = useOpenTicket("latestUpdate");
+  const reviewerAgent =
+    (latestUpdate.value === undefined
+      ? ticket.progress_summary
+      : latestUpdate.value
+    )?.editing_agent ?? "the agent";
+  const [decision, setDecision] = useState<ReviewDecision | null>(null);
+  const [draft, setDraft] = useState<SendBackDraft | null>(null);
   const [pending, setPending] = useState(false);
   const moving = useRef(false);
   const card = useRef<HTMLElement>(null);
+  const sendButton = useRef<HTMLButtonElement>(null);
+  const field = useRef<HTMLTextAreaElement>(null);
+  const restoreSendFocus = useRef(false);
   const next = useRef<HTMLAnchorElement>(null);
   const nothing = useRef<HTMLParagraphElement>(null);
   const reference = ticket.reference;
   const owner = externalSource(ticket);
   const review = !ticket.trashed && ticket.status === "In review";
-  const done = !ticket.trashed && ticket.status === "Done" && decision !== null;
+  const decided =
+    !ticket.trashed &&
+    ((ticket.status === "Done" && decision?.kind === "done") ||
+      (ticket.status === "In progress" && decision?.kind === "sent back"));
   const nextReference = decision?.next;
+  const writingBack = draft !== null;
+  const canSend = review && !blocked && !opening && recoveryReady;
+  const canMove = review && !owner && !blocked && !opening && !writingBack;
   if (!active && decision) setDecision(null);
-  const canMove = review && !owner && !blocked && !opening;
+  if ((!active || !review) && writingBack) setDraft(null);
+
+  function openSendBack() {
+    if (!canSend || moving.current) return;
+    setDraft(
+      readSendBackDraft(recovery, ticket.id) ?? { brief: "", requestId: null },
+    );
+  }
+
+  function updateDraft(brief: string) {
+    const nextDraft = {
+      brief,
+      requestId: brief.trim() === draft?.brief.trim() ? draft.requestId : null,
+    };
+    setDraft(nextDraft);
+    void keepSendBackDraft(recovery, ticket.id, brief ? nextDraft : null).catch(
+      () => {},
+    );
+  }
+
+  function sendBack() {
+    if (!canSend || moving.current || !draft?.brief.trim()) return;
+    const intent = {
+      brief: draft.brief,
+      requestId: draft.requestId ?? crypto.randomUUID(),
+    };
+    setDraft(intent);
+    startDecision(intent);
+  }
 
   function moveToDone() {
     if (!canMove || moving.current) return;
-    const request = crypto.randomUUID();
+    startDecision();
+  }
+
+  function startDecision(send?: { brief: string; requestId: string }) {
+    const request = send?.requestId ?? crypto.randomUUID();
     const undoRequest = crypto.randomUUID();
     let next: Promise<string | undefined> | undefined;
     async function decide() {
@@ -87,6 +150,14 @@ export function TicketDecisionCard({
       moving.current = true;
       setPending(true);
       try {
+        if (send) {
+          // A lost reply can be retried from the same saved draft with the same ID.
+          const saved = readSendBackDraft(recovery, ticket.id);
+          if (!saved || saved.brief === send.brief) {
+            await recovery.flush();
+            await keepSendBackDraft(recovery, ticket.id, send);
+          }
+        }
         // Keep this queue through a retry, since the write may have landed
         // before its reply was lost and removed the ticket from the results.
         next ??= readReviewQueue?.()
@@ -107,20 +178,40 @@ export function TicketDecisionCard({
             return undefined;
           });
         const nextReference = await next;
-        const updated = await client.changeTicket(
-          reference,
-          { status: "Done", expected_status: "In review" },
-          request,
-        );
-        setDecision({ next: nextReference });
-        line.show({
-          message: `Moved ${reference} to Done`,
-          undo: async () => {
-            const restored = await client.changeTicket(
+        const updated = send
+          ? await client.sendBack(reference, send.brief.trim(), request)
+          : await client.changeTicket(
               reference,
-              { status: "In review", expected_status: "Done" },
-              undoRequest,
+              { status: "Done", expected_status: "In review" },
+              request,
             );
+        if (send) {
+          if (readSendBackDraft(recovery, ticket.id)?.requestId === request)
+            void keepSendBackDraft(recovery, ticket.id, null).catch(() => {});
+          setDraft(null);
+        }
+        setDecision(
+          send
+            ? {
+                kind: "sent back",
+                next: nextReference,
+                brief: send.brief.trim(),
+                agent: reviewerAgent,
+              }
+            : { kind: "done", next: nextReference },
+        );
+        line.show({
+          message: send
+            ? `Sent ${reference} back to In progress`
+            : `Moved ${reference} to Done`,
+          undo: async () => {
+            const restored = send
+              ? await client.undoSendBack(reference, request, undoRequest)
+              : await client.changeTicket(
+                  reference,
+                  { status: "In review", expected_status: "Done" },
+                  undoRequest,
+                );
             setDecision(null);
             await changed(restored);
           },
@@ -129,15 +220,15 @@ export function TicketDecisionCard({
       } catch (reason) {
         const failure = describeFailure(
           reason,
-          "move " + reference + " to Done",
+          send ? `send ${reference} back` : `move ${reference} to Done`,
         );
+        if (failure.code === "conflict") await retry();
         line.show({
           tone: "error",
           message: `${failure.title}. ${failure.sentence}`,
           details: failure.details,
           action: { label: "Retry", run: decide },
         });
-        if (failure.code === "conflict") await retry();
       } finally {
         moving.current = false;
         setPending(false);
@@ -146,14 +237,13 @@ export function TicketDecisionCard({
     void decide();
   }
 
-  const moveOnKey = useEffectEvent((event: KeyboardEvent) => {
+  const reviewKey = useEffectEvent((event: KeyboardEvent) => {
     const target = event.target;
     const pane = card.current?.closest(".ticket-detail, .detail-content");
     if (
       event.defaultPrevented ||
       event.isComposing ||
       event.repeat ||
-      !matchesShortcut(event, "ticket-review-done") ||
       !(target instanceof Element) ||
       !pane?.contains(target) ||
       pane.closest("[hidden], [inert]") ||
@@ -165,23 +255,45 @@ export function TicketDecisionCard({
       )
     )
       return;
-    event.preventDefault();
-    moveToDone();
+    if (canMove && matchesShortcut(event, "ticket-review-done")) {
+      event.preventDefault();
+      moveToDone();
+    } else if (
+      canSend &&
+      !writingBack &&
+      matchesShortcut(event, "ticket-review-send-back")
+    ) {
+      event.preventDefault();
+      openSendBack();
+    }
   });
   useEffect(() => {
-    if (!active || !canMove) return;
-    const press = (event: KeyboardEvent) => moveOnKey(event);
+    if (!active || !review) return;
+    const press = (event: KeyboardEvent) => reviewKey(event);
     window.addEventListener("keydown", press);
     return () => window.removeEventListener("keydown", press);
-  }, [active, canMove]);
+  }, [active, review]);
   useLayoutEffect(() => {
-    if (active && done) (next.current ?? nothing.current)?.focus();
-  }, [active, done]);
+    if (!active) return;
+    if (decided) (next.current ?? nothing.current)?.focus();
+    else if (writingBack) field.current?.focus();
+    else if (restoreSendFocus.current) sendButton.current?.focus();
+    restoreSendFocus.current = false;
+  }, [active, decided, writingBack]);
 
-  if (done) {
+  if (decided && decision) {
     return (
-      <DecisionPanel state="Done">
-        <p className="ticket-decision-title">Done · just now · by you</p>
+      <DecisionPanel state={decision.kind === "done" ? "Done" : "Sent back"}>
+        <p className="ticket-decision-title">
+          {decision.kind === "done"
+            ? "Done · just now · by you"
+            : `Sent back · waiting for ${decision.agent}`}
+        </p>
+        {decision.kind === "sent back" && (
+          <blockquote className="ticket-decision-report whitespace-pre-wrap">
+            {decision.brief}
+          </blockquote>
+        )}
         {nextReference ? (
           <div className="ticket-decision-row">
             <Button asChild variant="outline" size="compact">
@@ -224,10 +336,27 @@ export function TicketDecisionCard({
         onAcceptance={onAcceptance}
         select={select}
         blockers={blockers}
+        latest={latestUpdate}
       />
       {review && <TicketReviewProof onEvidence={onEvidence} />}
       {latest && <TicketReply active={active} disabled={opening || blocked} />}
-      {review && (
+      {review && draft && (
+        <TicketSendBackForm
+          field={field}
+          brief={draft.brief}
+          agent={reviewerAgent}
+          sourceName={owner?.provider_name}
+          pending={pending}
+          disabled={!canSend}
+          onChange={updateDraft}
+          onSubmit={sendBack}
+          onCancel={() => {
+            restoreSendFocus.current = true;
+            setDraft(null);
+          }}
+        />
+      )}
+      {review && !draft && (
         <div className="ticket-decision-row">
           {owner ? (
             <Button asChild variant="outline" size="compact">
@@ -251,6 +380,20 @@ export function TicketDecisionCard({
               </Kbd>
             </Button>
           )}
+          <Button
+            ref={sendButton}
+            type="button"
+            variant="outline"
+            size="compact"
+            disabled={!canSend || pending}
+            onClick={openSendBack}
+            aria-keyshortcuts={ariaKeyShortcuts("ticket-review-send-back")}
+          >
+            Send back
+            <Kbd aria-hidden="true">
+              {shortcutLabel("ticket-review-send-back")}
+            </Kbd>
+          </Button>
         </div>
       )}
     </DecisionPanel>
@@ -284,14 +427,15 @@ function TicketReport({
   review,
   onAcceptance,
   select,
+  latest,
 }: {
   review: boolean;
   blockers: ReactNode;
   onAcceptance: (offset: number) => void;
   select: (reference: string) => void;
+  latest: { value: LatestUpdate | null | undefined; failure: unknown };
 }) {
   const { record: ticket } = useOpenTicket();
-  const latest = useOpenTicket("latestUpdate");
   const update =
     latest.value === undefined ? ticket.progress_summary : latest.value;
   const full = useOpenTicket(

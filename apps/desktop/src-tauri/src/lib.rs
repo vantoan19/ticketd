@@ -939,6 +939,49 @@ fn change_ticket(
 }
 
 #[tauri::command(async)]
+fn send_back(
+    reference: String,
+    brief: String,
+    request_id: String,
+) -> Result<Ticket, BridgeFailure> {
+    match open_workspace()
+        .and_then(|mut workspace| {
+            workspace.write(
+                Some(&request_id),
+                WriteRequest::SendBack { reference, brief },
+            )
+        })
+        .map_err(BridgeFailure::from)?
+    {
+        WriteResult::SendBack(sent) => Ok(sent.ticket),
+        _ => Err("Unexpected Send back result".into()),
+    }
+}
+
+#[tauri::command(async)]
+fn undo_send_back(
+    reference: String,
+    send_request_id: String,
+    request_id: String,
+) -> Result<Ticket, BridgeFailure> {
+    match open_workspace()
+        .and_then(|mut workspace| {
+            workspace.write(
+                Some(&request_id),
+                WriteRequest::UndoSendBack {
+                    reference,
+                    send_request_id,
+                },
+            )
+        })
+        .map_err(BridgeFailure::from)?
+    {
+        WriteResult::Ticket(ticket) => Ok(ticket),
+        _ => Err("Unexpected Undo result".into()),
+    }
+}
+
+#[tauri::command(async)]
 fn ticket_history(reference: String) -> Result<Vec<serde_json::Value>, BridgeFailure> {
     open_workspace()
         .and_then(|workspace| ticket_credit::credited_history(&workspace, &reference))
@@ -2663,6 +2706,8 @@ pub fn run() -> Result<(), tauri::Error> {
             set_trashed,
             create_ticket,
             change_ticket,
+            send_back,
+            undo_send_back,
             bulk_status,
             bulk_change,
             ticket_history,

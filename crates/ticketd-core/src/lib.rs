@@ -1031,7 +1031,7 @@ fn ticket_from_row(row: &rusqlite::Row<'_>) -> rusqlite::Result<Ticket> {
 mod batch;
 pub use batch::BatchOperation;
 mod ticket_change;
-pub use ticket_change::TicketChange;
+pub use ticket_change::{SendBackOutcome, TicketChange};
 
 /// Where the default workspace lives, without creating anything.
 fn default_path_unchecked() -> Result<std::path::PathBuf, Error> {

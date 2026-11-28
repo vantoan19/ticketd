@@ -23,7 +23,8 @@
   min-height: 28px;
 }
 
-.ticket-reply {
+.ticket-reply,
+.ticket-review-form {
   display: grid;
   gap: 8px;
 }
