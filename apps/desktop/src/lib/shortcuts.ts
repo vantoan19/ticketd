@@ -308,6 +308,14 @@ export const SHORTCUTS = [
     label: "Copy reference",
   },
   {
+    id: "ticket-agent-chat",
+    keys: [["O"]],
+    scope: "Ticket",
+    label: "Open the agent’s Chat",
+    note: "While the open ticket shows an agent.",
+    needs: "chat",
+  },
+  {
     id: "ticket-review-done",
     keys: [["Mod", "Enter"]],
     scope: "Ticket",

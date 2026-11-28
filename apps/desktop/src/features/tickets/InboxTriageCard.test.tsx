@@ -55,10 +55,10 @@ function card(selected: Entry, record: Ticket): ReactNode {
     <TestReads primed={{ ticket: record }}>
       <AgentContext
         value={{
-          reserved: false,
+          reference: record.reference,
+          openedWithCard: false,
           ready: true,
-          chat: undefined,
-          agents: [],
+          state: null,
           update: null,
         }}
       >

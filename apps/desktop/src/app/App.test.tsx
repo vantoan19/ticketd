@@ -6891,7 +6891,7 @@ test.each([
   [false, "2"],
   [true, "3"],
 ] as const)(
-  "ticket agent strip and Inbox follow approval answer (focused: %s, choice: %s)",
+  "ticket agent card and Inbox follow approval answer (focused: %s, choice: %s)",
   async (focused, choice) => {
     const user = userEvent.setup();
     const { notificationClient } = await import("@/lib/api/notifications");
@@ -6908,6 +6908,7 @@ test.each([
         enabled: true,
         chats: [
           {
+            updated_at: new Date().toISOString(),
             chat: chatState({
               id: "strip-chat",
               title: "Strip Chat",
@@ -6940,13 +6941,13 @@ test.each([
       fireEvent.click(
         await screen.findByRole("button", { name: /Focused Ticket/ }),
       );
-      const strip = await screen.findByRole("status", { name: "Ticket agent" });
-      expect(within(strip).getByText(/is working on this/)).toBeTruthy();
+      const card = await screen.findByRole("region", {
+        name: "Agents on this ticket",
+      });
+      expect(within(card).getByText(/is working on this/)).toBeTruthy();
       expect(
         await screen.findByRole("button", { name: "Chats, 1 working" }),
       ).toBeTruthy();
-      expect(strip.closest(".ticket-agent-slot")).toBeTruthy();
-      const slot = strip.closest(".ticket-agent-slot");
       act(() =>
         client.push("strip-chat", {
           kind: "steps",
@@ -6963,17 +6964,17 @@ test.each([
         }),
       );
       expect(
-        await within(strip).findByText(/Running npm test -- board/),
+        await within(card).findByText(/Running npm test -- board/),
       ).toBeTruthy();
-      expect(
-        strip.querySelector('[aria-hidden="true"].text-muted-foreground'),
-      ).toBeTruthy();
-      expect(strip.getAttribute("aria-live")).toBe("polite");
-      expect(strip.getAttribute("aria-atomic")).toBe("true");
+      expect(within(card).getByRole("status").getAttribute("aria-live")).toBe(
+        "polite",
+      );
       act(() => client.patch("strip-chat", { activity: "idle" }));
-      await within(strip).findByRole("button", { name: "Open Chat" });
-      expect(within(strip).queryByText(/is working on this/)).toBeNull();
-      expect(strip.closest(".ticket-agent-slot")).toBe(slot);
+      await vi.waitFor(() =>
+        expect(
+          screen.queryByRole("region", { name: "Agents on this ticket" }),
+        ).toBeNull(),
+      );
       act(() =>
         client.push("strip-chat", {
           kind: "request",
@@ -6991,13 +6992,12 @@ test.each([
           free_text: false,
         }),
       );
-      await within(strip).findByRole("button", {
-        name: "Review request",
+      const approval = await screen.findByRole("region", {
+        name: "Request from an agent",
       });
       expect(
-        await within(strip).findByText(/wants to run npm test -- board/),
+        await within(approval).findByText("npm test -- board"),
       ).toBeTruthy();
-      expect(strip.closest(".ticket-agent-slot")).toBe(slot);
       expect(
         await screen.findByRole("button", { name: "Chats, 1 waiting" }),
       ).toBeTruthy();
@@ -7016,7 +7016,9 @@ test.each([
         await screen.findByRole("button", { name: /Focused Ticket/ }),
       );
       fireEvent.click(
-        await screen.findByRole("button", { name: "Review request" }),
+        within(
+          await screen.findByRole("region", { name: "Request from an agent" }),
+        ).getByRole("button", { name: "Open Chat" }),
       );
       expect(
         await screen.findByRole("heading", { name: "Strip Chat" }),
@@ -7069,8 +7071,8 @@ test.each([
       fireEvent.click(
         await screen.findByRole("button", { name: /Focused Ticket/ }),
       );
-      const resumed = await screen.findByRole("status", {
-        name: "Ticket agent",
+      const resumed = await screen.findByRole("region", {
+        name: "Agents on this ticket",
       });
       expect(within(resumed).getByText(/is working on this/)).toBeTruthy();
       expect(
@@ -7093,7 +7095,12 @@ test.each([false, true])(
     const tickets = paletteTickets();
     const client = createMockChatClient({
       enabled: true,
-      chats: [{ chat: chatState({ id: "late", title: "Late Chat" }) }],
+      chats: [
+        {
+          updated_at: new Date().toISOString(),
+          chat: chatState({ id: "late", title: "Late Chat" }),
+        },
+      ],
     });
     bridge.invoke.mockImplementation((command: string, args: unknown) =>
       command === "find_tickets"
@@ -7113,10 +7120,12 @@ test.each([false, true])(
     await screen.findByRole("group", { name: "Ticket properties" });
     await vi.waitFor(() =>
       expect(
-        document.querySelector(".detail-scroll[data-agent-loading]"),
+        screen.queryByRole("status", { name: "Loading ticket agent context" }),
       ).toBeNull(),
     );
-    expect(screen.queryByRole("status", { name: "Ticket agent" })).toBeNull();
+    expect(
+      screen.queryByRole("region", { name: "Agents on this ticket" }),
+    ).toBeNull();
     const copy = screen.getByRole("button", { name: "Copy reference" });
     act(() => copy.focus());
     act(() =>
@@ -7139,7 +7148,9 @@ test.each([false, true])(
     await vi.waitFor(() =>
       expect(within(header as HTMLElement).getByText("Working")).toBeTruthy(),
     );
-    expect(screen.queryByRole("status", { name: "Ticket agent" })).toBeNull();
+    expect(
+      screen.queryByRole("region", { name: "Agents on this ticket" }),
+    ).toBeNull();
     expect(document.activeElement).toBe(copy);
     act(() =>
       client.push("late", {
@@ -7163,7 +7174,9 @@ test.each([false, true])(
     expect(
       within(header as HTMLElement).getByText("Approval needed"),
     ).toBeTruthy();
-    expect(screen.queryByRole("status", { name: "Ticket agent" })).toBeNull();
+    expect(
+      screen.queryByRole("region", { name: "Agents on this ticket" }),
+    ).toBeNull();
     expect(document.activeElement).toBe(copy);
     await act(async () => {
       await client.answer("late", "late-approval", { option_id: "allow" });
@@ -7216,16 +7229,17 @@ test.each([false, true])(
     fireEvent.click(screen.getByRole("button", { name: /Close ticket/ }));
     fireEvent.click(screen.getByRole("button", { name: /Focused Ticket/ }));
     expect(
-      await screen.findByRole("status", { name: "Ticket agent" }),
+      await screen.findByRole("region", { name: "Agents on this ticket" }),
     ).toBeTruthy();
   },
 );
 
-test("ticket agent idle update preserves unseen Chat and opens its Activity", async () => {
+test("reading a ticket’s latest update preserves the unseen state of its idle Chat", async () => {
   const { ChatClientContext } = await import("@/features/chats/client");
   const { createMockChatClient, chatState } =
     await import("@/features/chats/mock-client");
   const tickets = paletteTickets();
+  tickets[1] = { ...tickets[1]!, status: "In progress" };
   const client = createMockChatClient({
     enabled: true,
     chats: [
@@ -7273,19 +7287,16 @@ test("ticket agent idle update preserves unseen Chat and opens its Activity", as
   fireEvent.click(
     await screen.findByRole("button", { name: /Focused Ticket/ }),
   );
-  const strip = await screen.findByRole("status", { name: "Ticket agent" });
-  expect(within(strip).getByText(/Kept the placeholder stable/)).toBeTruthy();
+  const card = await screen.findByRole("region", { name: "Latest update" });
+  expect(
+    await within(card).findByText("Kept the placeholder stable"),
+  ).toBeTruthy();
   expect(open).not.toHaveBeenCalled();
   expect((await client.listChats("active"))[0]?.status.unseen).toBe(true);
-  expect(strip.querySelector(".harness-mark")).toBeTruthy();
-  fireEvent.click(within(strip).getByRole("button", { name: "Open Chat" }));
-  expect(
-    await screen.findByRole("heading", { name: "Finished Chat" }),
-  ).toBeTruthy();
 });
 
 test.each([null, "codex"])(
-  "ticket agent reserves an update slot only for agent attribution (%s)",
+  "a Todo ticket does not show an idle update card (attribution: %s)",
   async (editing_agent) => {
     const tickets = paletteTickets();
     bridge.invoke.mockImplementation((command: string, args: unknown) =>
@@ -7314,12 +7325,10 @@ test.each([null, "codex"])(
     await screen.findByRole("group", { name: "Ticket properties" });
     await vi.waitFor(() =>
       expect(
-        document.querySelector(".detail-scroll[data-agent-loading]"),
+        screen.queryByRole("status", { name: "Loading ticket agent context" }),
       ).toBeNull(),
     );
-    expect(
-      Boolean(screen.queryByRole("status", { name: "Ticket agent" })),
-    ).toBe(Boolean(editing_agent));
+    expect(screen.queryByRole("region", { name: "Latest update" })).toBeNull();
   },
 );
 

@@ -7,7 +7,6 @@ import { Backlinks, type MentionTarget } from "@/features/tickets/Backlinks";
 import { RailPlacement } from "@/features/tickets/rail-placement";
 import { TicketClosingLine, TicketParentLine } from "./TicketPageLines";
 import { TicketContextLine, TicketBlockersPopover } from "./TicketContextLine";
-import { TicketAgentStrip } from "./TicketAgent";
 import { LinkedWork, LinkedWorkDialogs } from "@/features/tickets/LinkedWork";
 import {
   TicketFiles,
@@ -161,12 +160,6 @@ export function TicketPage({
           linked.current?.scrollIntoView({ block: "start" })
         }
       />
-      {ticket.status !== "Done" && (
-        <TicketAgentStrip
-          reference={ticket.reference}
-          onOpenUpdate={(id) => setUpdateTarget({ id, key: Date.now() })}
-        />
-      )}
       <TicketDecisionCard
         active={active && !leaving}
         readReviewQueue={readReviewQueue}
@@ -185,6 +178,7 @@ export function TicketPage({
           ) : null
         }
         doneFallback={<TicketClosingLine />}
+        onOpenUpdate={(id) => setUpdateTarget({ id, key: Date.now() })}
         onEvidence={() => setShowEvidenceRequest((count) => count + 1)}
         select={select}
         onAcceptance={(offset) => {

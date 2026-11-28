@@ -1,6 +1,6 @@
 /** The nearest ancestor that actually scrolls: the document column, the rail,
  * or the whole detail when the rail sits below the document. */
-function scrollParent(target: HTMLElement): HTMLElement | null {
+export function scrollParent(target: HTMLElement): HTMLElement | null {
   for (let node = target.parentElement; node; node = node.parentElement) {
     const overflow = getComputedStyle(node).overflowY;
     if (overflow === "auto" || overflow === "scroll") return node;

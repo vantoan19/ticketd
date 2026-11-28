@@ -237,10 +237,12 @@ test("the header shows the list position with Previous and Next", async () => {
 test("a Todo ticket does not reserve a latest update", async () => {
   renderDetails();
   await screen.findByRole("group", { name: "Ticket properties" });
-  expect(screen.queryByRole("status", { name: "Ticket agent" })).toBeNull();
+  expect(
+    screen.queryByRole("region", { name: "Agents on this ticket" }),
+  ).toBeNull();
 });
 
-test("Latest update jumps to its note and tags appear as separate chips", async () => {
+test("Latest update shows its report and tags appear as separate chips", async () => {
   const note = {
     id: "latest",
     ticket_id: "ticket",
@@ -272,10 +274,10 @@ test("Latest update jumps to its note and tags appear as separate chips", async 
       editing_agent: "agent",
     },
   });
-  fireEvent.click(await screen.findByRole("button", { name: /^Go to update/ }));
-  expect(
-    (await screen.findByLabelText("Selected update")).textContent,
-  ).toContain("Reported progress");
+  const update = within(
+    await screen.findByRole("region", { name: "Latest update" }),
+  );
+  expect(await update.findByText("Reported progress")).toBeTruthy();
   const rail = screen.getByRole("group", { name: "Ticket properties" });
   // Each tag is its own chip, not one joined string.
   expect(within(rail).getByText("frontend")).toBeTruthy();
@@ -563,7 +565,9 @@ test.each([false, true])(
     expect(reference?.getAttribute("href") ?? null).toBe(
       withPR ? "https://github.com/ticketd/ticketd/pull/618" : null,
     );
-    expect(screen.queryByRole("status", { name: "Ticket agent" })).toBeNull();
+    expect(
+      screen.queryByRole("region", { name: "Agents on this ticket" }),
+    ).toBeNull();
   },
 );
 

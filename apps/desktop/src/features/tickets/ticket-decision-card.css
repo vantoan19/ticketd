@@ -27,3 +27,46 @@
   display: grid;
   gap: 8px;
 }
+
+.ticket-decision-content {
+  transition: height var(--spring-smooth-t) var(--spring-smooth);
+  min-width: 0;
+}
+
+.ticket-decision-measure {
+  position: relative;
+}
+
+.ticket-decision-layer,
+.ticket-agent-content {
+  display: grid;
+  min-width: 0;
+  gap: 8px;
+}
+
+.ticket-decision-layer[data-leaving] {
+  position: absolute;
+  inset: 0 0 auto;
+  pointer-events: none;
+}
+
+.ticket-decision-line {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.ticket-agent-command {
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+
+.ticket-agent-last-report {
+  flex-wrap: nowrap;
+}
+
+.ticket-agent-last-report > span:first-child {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
