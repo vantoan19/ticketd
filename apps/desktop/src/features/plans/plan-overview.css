@@ -20,6 +20,9 @@
   margin-inline: auto;
   padding: 36px 32px 40px;
 }
+.plan-overview-column > .plan-empty-state {
+  padding-top: 0;
+}
 .plan-overview-head,
 .plan-overview-progress,
 .plan-overview-loading {

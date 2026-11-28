@@ -22,6 +22,7 @@ import {
 } from "@/components/ui/resizable";
 import { cn } from "cn";
 import { setPreference, usePreferences } from "@/lib/preferences";
+import { PlanEmptyState } from "@/features/plans/PlanEmptyState";
 import { PlanFlow } from "@/features/plans/PlanFlow";
 import { PlanHeader, type PlanMode } from "@/features/plans/PlanHeader";
 import { PlanOverview } from "@/features/plans/PlanOverview";
@@ -365,18 +366,26 @@ export function TicketWorkspaceView({
             }
           />
         )}
-        {dependenciesOpen && !inboxMode && (
-          <PlanFlow
-            key={`flow:${scopedPlan.id}`}
-            id={scopedPlan.id}
-            revision={workspace.revision}
-            onOpen={(reference) => {
-              setPlanView("tickets");
-              setSelected(reference);
-              setNarrowDetail(true);
-            }}
-          />
-        )}
+        {dependenciesOpen &&
+          (planState.view?.members.length === 0 ? (
+            <section aria-label="Plan Flow" className="overflow-auto">
+              <PlanEmptyState
+                view={planState.view}
+                onAdd={() => planState.setAdding(true)}
+              />
+            </section>
+          ) : (
+            <PlanFlow
+              key={`flow:${scopedPlan.id}`}
+              id={scopedPlan.id}
+              revision={workspace.revision}
+              onOpen={(reference) => {
+                setPlanView("tickets");
+                setSelected(reference);
+                setNarrowDetail(true);
+              }}
+            />
+          ))}
         <ResizablePanelGroup
           orientation="horizontal"
           resizeTargetMinimumSize={{ fine: 8, coarse: 44 }}

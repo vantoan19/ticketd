@@ -36,6 +36,7 @@ import {
   usePlanAction,
   type PlanViewState,
 } from "@/features/plans/usePlanView";
+import { PlanEmptyState } from "@/features/plans/PlanEmptyState";
 import { plansClient } from "@/lib/api/plans";
 import { allowRemoval } from "@/lib/removal-guard";
 import { BulkControls } from "@/features/tickets/BulkControls";
@@ -521,9 +522,14 @@ function TicketListBody({
                 key="board"
                 workspace={workspace}
                 empty={
-                  !loading && !queryError && tickets.length === 0
-                    ? emptyView
-                    : null
+                  planState.view?.members.length === 0 ? (
+                    <PlanEmptyState
+                      view={planState.view}
+                      onAdd={() => planState.setAdding(true)}
+                    />
+                  ) : !loading && !queryError && tickets.length === 0 ? (
+                    emptyView
+                  ) : null
                 }
                 onOpen={onOpen}
                 {...(!addDisabled &&

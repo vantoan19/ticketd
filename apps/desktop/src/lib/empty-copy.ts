@@ -72,6 +72,12 @@ const COPY = {
     sentence: "Add existing tickets or create one.",
     action: "Add to Plan…",
   },
+  "plan-start": {
+    title: "No tickets yet",
+    sentence:
+      "Let an agent break the spec into tickets, or add tickets you already have.",
+    action: "Add tickets",
+  },
   "plan-archived": {
     title: "No tickets in this Plan",
     sentence: "Reactivate the Plan to add tickets.",

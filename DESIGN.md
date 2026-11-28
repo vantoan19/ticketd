@@ -651,6 +651,16 @@ the space below the shared pane header for tickets.
   In progress, Ready and Blocked, and the last change at the right. Canceled
   and Duplicate are excluded. Loading keeps the head and shows skeletons for
   the count, strip and three rows. A failed read shows Retry below the head.
+- **Empty Plan:** Overview, Board and Flow share the centered block
+  EmptyState with a Layers icon and “No tickets yet” above “Let an agent break
+  the spec into tickets, or add tickets you already have.” The Overview
+  places it below the head with the standard section gap and omits progress.
+  On Board and Flow it takes the place of the columns below the header.
+  Small outline actions read Plan it with an agent (while Chat is enabled)
+  and Add tickets, in that order. The first opens New Chat with an editable
+  draft naming the Plan and mentioning its spec Document when available.
+  Send links the mentioned Document. Add tickets opens the standard Plan
+  picker. An empty archived Plan prompts the person to reactivate it.
 - **Overview progress strip:** one segment per counted ticket, ordered Done
   (oldest first), In review, In progress, Ready and Blocked, with open work
   ordered by how many tickets it unblocks. Each 8px segment sits in a 24px

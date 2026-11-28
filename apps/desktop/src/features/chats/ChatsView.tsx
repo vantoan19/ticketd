@@ -25,7 +25,7 @@ import { Button } from "@/components/ui/button";
 import { Reference } from "@/components/ui/reference";
 import { TicketNavigation } from "@/features/tickets/navigation";
 import type { Project } from "@/lib/api/client";
-import type { TicketStart } from "@/features/chats/ticket-chat";
+import type { ChatStart } from "@/features/chats/ticket-chat";
 import { FailureAlert, FailureState } from "@/components/ui/failure-alert";
 import type { ChatFailureNotice } from "@/features/chats/failure";
 import { Count } from "@/components/ui/count";
@@ -264,7 +264,7 @@ type Open =
       /** Asked from outside: the sub-agent view to open in it (none: the Chat itself); `n` rises with each ask. */
       target?: ViewTarget;
     }
-  | { kind: "new"; start?: TicketStart; n?: number }
+  | { kind: "new"; start?: ChatStart; n?: number }
   | null;
 
 /** "← T-KQ12 /": back to the ticket the Chat was opened from. */
@@ -322,7 +322,7 @@ export function ChatsView({
       target: { agent: null, n: -openRequest.n },
     });
   }
-  // A Chat asked for from a ticket: opened with a crumb back, or New Chat about it.
+  // Requests from other views open a Chat or bring its draft to New Chat.
   const [seenChat, setSeenChat] = useState(0);
   if (chatRequest && seenChat !== chatRequest.n) {
     setSeenChat(chatRequest.n);
@@ -561,10 +561,11 @@ export function ChatsView({
         {...paneProps}
         resting={!open}
         focusRequest={newFocus}
-        {...(open?.start && {
-          start: open.start,
-          crumb: <TicketCrumb reference={open.start.ticket.reference} />,
-        })}
+        {...(open?.start && { start: open.start })}
+        {...(open?.start &&
+          "ticket" in open.start && {
+            crumb: <TicketCrumb reference={open.start.ticket.reference} />,
+          })}
         onCreated={(id) => {
           setScope("active");
           show({ kind: "chat", id });

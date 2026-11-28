@@ -4,12 +4,18 @@ import type { Token } from "@/features/chats/composer-mentions";
 export type TicketRecord = Extract<LinkedRecord, { kind: "ticket" }>;
 
 /** What "Chat about this ticket" starts from: the ticket, and its Project's folder if any. */
-export type TicketStart = { ticket: TicketRecord; folder: string | null };
+type TicketStart = { ticket: TicketRecord; folder: string | null };
+type PlanStart = {
+  planName: string;
+  spec: Extract<LinkedRecord, { kind: "document" }> | null;
+  folder: null;
+};
+export type ChatStart = TicketStart | PlanStart;
 
 /**
  * A request, from outside the Chats screen, to show a Chat there: an existing
- * one opened from a ticket (which its crumb returns to), or New Chat about a
- * ticket. `n` rises with each request.
+ * one opened from a ticket (which its crumb returns to), or New Chat with a
+ * draft. `n` rises with each request.
  */
 export type ChatRequest =
   | {
@@ -21,7 +27,7 @@ export type ChatRequest =
       /** A sub-agent of that Chat whose view opens inside it (its Back returns to the Chat). */
       subAgent?: string;
     }
-  | { kind: "new"; start?: TicketStart };
+  | { kind: "new"; start?: ChatStart };
 
 /**
  * How a Chat started from a ticket begins: "Work on T-12: <title>". The Chat's
@@ -32,7 +38,7 @@ export type ChatRequest =
 export const WORK_ON_LEAD = "Work on ";
 
 /** The unsent prompt New Chat opens with: the ticket as a mention, then its title. */
-export function ticketPrompt(ticket: TicketRecord): {
+function ticketPrompt(ticket: TicketRecord): {
   text: string;
   tokens: Token[];
 } {
@@ -45,6 +51,39 @@ export function ticketPrompt(ticket: TicketRecord): {
         end: WORK_ON_LEAD.length + ticket.reference.length,
         text: ticket.reference,
         record: ticket,
+      },
+    ],
+  };
+}
+
+/** Draft text and any record mentions offered by the originating view. */
+export function chatStartPrompt(start: ChatStart): {
+  label: string;
+  text: string;
+  tokens: Token[];
+} {
+  if ("ticket" in start)
+    return { label: start.ticket.reference, ...ticketPrompt(start.ticket) };
+
+  const { planName, spec } = start;
+  if (!spec)
+    return {
+      label: planName,
+      text: `Break the Plan ${planName} into tickets`,
+      tokens: [],
+    };
+
+  const lead = "Break ";
+  return {
+    label: planName,
+    text: `${lead}${spec.title} into tickets in the Plan ${planName}`,
+    tokens: [
+      {
+        kind: "record",
+        start: lead.length,
+        end: lead.length + spec.title.length,
+        text: spec.title,
+        record: spec,
       },
     ],
   };
