@@ -49,10 +49,6 @@
 .editor-body .markdown-editor[data-chrome="floating"] {
   margin: -4px -12px -12px;
 }
-.ticket-detail[data-expanded] .editor-body {
-  --text-editor: var(--text-reading);
-  --text-editor-line: var(--text-reading-line);
-}
 .ticket-detail[data-expanded]
   .editor-body
   .markdown-editor[data-chrome="floating"] {
@@ -103,6 +99,7 @@
 .description-add {
   display: flex;
   align-items: center;
+  gap: 8px;
   width: calc(100% + 24px);
   height: 40px;
   margin: -4px -12px 0;

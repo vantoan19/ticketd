@@ -4957,7 +4957,7 @@ test("a read-only workspace disables description editing from the button and E",
   render(<App />);
   fireEvent.click(await screen.findByRole("button", { name: /Open Ticket/ }));
   const edit = await screen.findByRole("button", {
-    name: "Add a description…",
+    name: "Add a description",
   });
   act(() => reportWorkspaceFailure("workspace_read_only", "Read only"));
   expect(edit.hasAttribute("disabled")).toBe(true);

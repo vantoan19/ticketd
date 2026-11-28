@@ -700,5 +700,12 @@ test("a long source description opens its named fold without making the field ed
   expect(fold.getAttribute("aria-expanded")).toBe("true");
   expect(screen.getByRole("heading", { name: "Scope" })).toBeTruthy();
   expect(screen.queryByRole("textbox")).toBeNull();
+  fireEvent.click(screen.getByText("Verify"));
+  expect(screen.getByRole("img", { name: "Not done" })).toBeTruthy();
+  expect(screen.queryByRole("checkbox")).toBeNull();
+  expect(bridge.invoke).not.toHaveBeenCalledWith(
+    "change_ticket",
+    expect.anything(),
+  );
   fireEvent.click(fold);
 });
