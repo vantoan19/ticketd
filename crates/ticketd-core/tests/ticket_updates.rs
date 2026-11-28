@@ -497,3 +497,80 @@ fn undo_send_back_preserves_a_later_status_change_and_an_edited_update() {
         assert_eq!(workspace.ticket_history(reference).unwrap(), history);
     }
 }
+
+#[test]
+fn undo_done_applies_to_the_completion_that_offered_it() {
+    use ticketd_core::{Error, Status, WriteRequest, WriteResult};
+
+    let dir = tempfile::tempdir().unwrap();
+    let mut workspace = Workspace::open(dir.path().join("reviews.sqlite3")).unwrap();
+    let ticket = workspace.create_ticket("Review a change").unwrap();
+    let reference = ticket.reference.as_str();
+    let review = || TicketPatch {
+        status: Some(Status::InReview),
+        ..Default::default()
+    };
+    let complete = || WriteRequest::ChangeTicket {
+        reference: reference.into(),
+        patch: TicketPatch {
+            expected_status: Some(Status::InReview),
+            status: Some(Status::Done),
+            ..Default::default()
+        },
+    };
+    let undo = |number| WriteRequest::ChangeTicket {
+        reference: reference.into(),
+        patch: TicketPatch {
+            expected_status: Some(Status::Done),
+            expected_status_history_number: Some(number),
+            status: Some(Status::InReview),
+            ..Default::default()
+        },
+    };
+
+    workspace.change_ticket(reference, review()).unwrap();
+    let first = workspace.write(Some("complete-first"), complete()).unwrap();
+    let WriteResult::Ticket(first_ticket) = &first else {
+        panic!("completion returns a ticket");
+    };
+    let first_number = first_ticket.status_history_number.unwrap();
+    workspace.change_ticket(reference, review()).unwrap();
+    let WriteResult::Ticket(second_ticket) = workspace
+        .write(Some("complete-second"), complete())
+        .unwrap()
+    else {
+        panic!("completion returns a ticket");
+    };
+    let second_number = second_ticket.status_history_number.unwrap();
+    assert_ne!(first_number, second_number);
+    assert_eq!(
+        workspace.write(Some("complete-first"), complete()).unwrap(),
+        first
+    );
+    assert!(matches!(
+        workspace.write(Some("undo-first"), undo(first_number)),
+        Err(Error::TicketChanged(_))
+    ));
+    assert_eq!(
+        workspace.show_ticket(reference).unwrap().status,
+        Status::Done
+    );
+
+    workspace
+        .change_ticket(
+            reference,
+            TicketPatch {
+                title: Some("Title edited after completion".into()),
+                ..Default::default()
+            },
+        )
+        .unwrap();
+    let WriteResult::Ticket(restored) = workspace
+        .write(Some("undo-second"), undo(second_number))
+        .unwrap()
+    else {
+        panic!("Undo returns a ticket");
+    };
+    assert_eq!(restored.status, Status::InReview);
+    assert_eq!(restored.title, "Title edited after completion");
+}

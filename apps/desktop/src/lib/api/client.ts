@@ -99,6 +99,7 @@ const ticketSchema = lazySchema(() =>
     reference: z.string(),
     title: z.string(),
     status: z.string(),
+    status_history_number: z.number().int().positive().optional(),
     body: z.string(),
     updated_at: z.string().nullish(),
     progress_summary: latestUpdateSchema.nullable().optional(),
@@ -1158,6 +1159,8 @@ export const client = {
       expected_body?: string;
       /** The status a decision applies to, checked in the same write. */
       expected_status?: string;
+      /** The exact status change this Undo reverses. */
+      expected_status_history_number?: number;
       project_id?: string | null;
       status?: string;
     },

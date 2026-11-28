@@ -227,6 +227,12 @@ pub(crate) fn edit(
     {
         return Err(Error::TicketChanged(reference.to_owned()));
     }
+    if let Some(expected) = patch.expected_status_history_number
+        && patch.status.is_some()
+        && last_status_change(scope, &ticket.id)? != Some(expected)
+    {
+        return Err(Error::TicketChanged(reference.to_owned()));
+    }
     source::guard_change(
         scope,
         &ticket,

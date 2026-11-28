@@ -502,6 +502,9 @@ pub struct Ticket {
     pub reference: String,
     pub title: String,
     pub status: Status,
+    /// Device-local identity of the latest status change.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub status_history_number: Option<i64>,
     pub body: String,
     /// Last content or organization change; unknown for legacy tickets with no dated records.
     #[serde(default)]
@@ -550,6 +553,9 @@ pub struct TicketPatch {
     /// decision can never overwrite a different status set elsewhere.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub expected_status: Option<Status>,
+    /// The status change an Undo applies to, checked in the same transaction.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub expected_status_history_number: Option<i64>,
     pub status: Option<Status>,
     pub editing_agent: Option<String>,
     #[serde(
@@ -1035,6 +1041,7 @@ fn ticket_from_row(row: &rusqlite::Row<'_>) -> rusqlite::Result<Ticket> {
                 Box::new(error),
             )
         })?,
+        status_history_number: None,
         body: row.get(4)?,
         updated_at: None,
         latest_update: None,
