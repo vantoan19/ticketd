@@ -884,19 +884,9 @@ impl Supervisor {
     /// runtime it was meant for is going away, and the next one must not open with the
     /// mode they left.
     fn keep_unanswered_permission(&mut self) {
-        let unanswered = self.runtime.as_ref().and_then(|runtime| {
-            runtime
-                .setting_changes
-                .iter()
-                .rfind(|change| {
-                    change.setting == SettingKey::Permission
-                        && matches!(
-                            change.state,
-                            SettingChangeState::Held | SettingChangeState::Sent
-                        )
-                })
-                .map(|change| change.value.clone())
-        });
+        let unanswered = self
+            .pending_setting(SettingKey::Permission)
+            .map(|change| change.value.clone());
         if let Some(value) = unanswered {
             // Kept for the next session whether or not it could be saved.
             let _ = self.record_permission(&value);
@@ -913,6 +903,21 @@ impl Supervisor {
                 .iter()
                 .any(|change| change.state == SettingChangeState::Sent)
         })
+    }
+
+    /// The latest change for this setting that the harness has yet to answer.
+    fn pending_setting(&self, setting: SettingKey) -> Option<&LiveSettingChange> {
+        self.runtime
+            .as_ref()?
+            .setting_changes
+            .iter()
+            .rfind(|change| {
+                change.setting == setting
+                    && matches!(
+                        change.state,
+                        SettingChangeState::Held | SettingChangeState::Sent
+                    )
+            })
     }
 
     // ------------------------------------------------------------------
@@ -1363,15 +1368,7 @@ impl Supervisor {
             && self.steering().is_some()
             && !(has_images && self.images_refused(true));
         if !attachments.is_empty() {
-            let model_changing = self.runtime.as_ref().is_some_and(|runtime| {
-                runtime.setting_changes.iter().any(|change| {
-                    change.setting == SettingKey::Model
-                        && matches!(
-                            change.state,
-                            SettingChangeState::Held | SettingChangeState::Sent
-                        )
-                })
-            });
+            let model_changing = self.pending_setting(SettingKey::Model).is_some();
             let mut refusal = self.attachment_refusal(attachments);
             if refusal.is_none()
                 && has_images
@@ -2838,6 +2835,10 @@ impl Supervisor {
     // ------------------------------------------------------------------
 
     fn steering(&self) -> Option<crate::SteeringBehavior> {
+        // Steering retains the running turn's permissions. A pending change needs a new turn.
+        if self.pending_setting(SettingKey::Permission).is_some() {
+            return None;
+        }
         self.runtime
             .as_ref()
             .and_then(|runtime| runtime.capabilities.steering.behavior().copied())
@@ -2888,10 +2889,11 @@ impl Supervisor {
             return;
         }
         if !idle
-            && self
-                .direct
-                .iter()
-                .all(|(input, intent)| self.waits_for_new_turn(input, *intent))
+            && (self.pending_setting(SettingKey::Permission).is_some()
+                || self
+                    .direct
+                    .iter()
+                    .all(|(input, intent)| self.waits_for_new_turn(input, *intent)))
         {
             // During a turn only steering input can go out, so the workspace is not
             // read for every event of a streaming turn.
