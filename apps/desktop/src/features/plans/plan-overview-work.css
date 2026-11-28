@@ -1,0 +1,119 @@
+@import "../../components/ui/surface-roles/plans-overview-work.css";
+
+.plan-overview-work-heading {
+  position: relative;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.plan-overview-work-heading [data-slot="status-dot"],
+.plan-overview-row-status {
+  position: absolute;
+}
+
+.plan-overview-work-heading [data-slot="status-dot"] {
+  inset-inline-start: -17px;
+}
+
+.plan-overview-not-counted h3 {
+  margin: 8px 0 0;
+}
+
+.plan-overview-work-rows {
+  margin: 0;
+  padding: 0;
+}
+
+.plan-overview-work-row {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto auto;
+  align-items: start;
+  position: relative;
+  min-height: 36px;
+}
+
+.plan-overview-row-open {
+  grid-column: 1;
+  display: grid;
+  grid-template-columns: 62px minmax(0, 1fr) auto;
+  align-items: start;
+  align-content: center;
+  min-height: 36px;
+  min-width: 0;
+}
+
+.plan-overview-row-open > span {
+  min-width: 0;
+}
+
+.plan-overview-row-status {
+  inset-block-start: 11px;
+  inset-inline-start: -20px;
+}
+
+.plan-overview-row-title {
+  grid-column: 2;
+}
+
+.plan-overview-row-meta {
+  grid-column: 3;
+  margin-inline-start: 8px;
+}
+
+.plan-overview-work-row[data-note] .plan-overview-row-open {
+  gap: 2px 0;
+  padding-block: 8px;
+}
+
+.plan-overview-row-note {
+  grid-column: 2 / -1;
+}
+
+[data-overview-action] {
+  grid-column: 2;
+  margin: 4px 0 4px 4px;
+}
+
+[data-overview-files] {
+  grid-column: 2;
+  margin-block: 6px;
+}
+
+.plan-overview-row-time {
+  grid-column: 3;
+  padding: 8px 0 0 12px;
+}
+
+:where([data-width~="max-600"]) .plan-overview-work-row {
+  grid-template-columns: minmax(0, 1fr) auto;
+}
+
+:where([data-width~="max-600"]) .plan-overview-row-open {
+  grid-template-columns: 62px minmax(0, 1fr);
+}
+
+:where([data-width~="max-600"])
+  :is(.plan-overview-row-meta, .plan-overview-row-note) {
+  grid-column: 2;
+  margin: 0;
+}
+
+:where([data-width~="max-600"]) [data-overview-action] {
+  grid-row: 2;
+  grid-column: 1;
+  justify-self: start;
+  margin: 0 0 4px 62px;
+}
+
+:where([data-width~="max-600"]) [data-overview-files] {
+  grid-row: 2;
+  grid-column: 1;
+  justify-self: start;
+  margin: 0 0 4px 62px;
+}
+
+:where([data-width~="max-600"]) .plan-overview-row-time {
+  grid-column: 2;
+  grid-row: 1;
+}

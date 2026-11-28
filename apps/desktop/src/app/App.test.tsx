@@ -5005,10 +5005,12 @@ test.each(["All tickets", "Plan"])(
       return bridgeDefault(command, args);
     });
     render(<App />);
-    if (view === "Plan")
+    if (view === "Plan") {
       fireEvent.click(
         await screen.findByRole("button", { name: /^Narrow Plan/ }),
       );
+      fireEvent.click(await screen.findByRole("radio", { name: "List" }));
+    }
     const row = await screen.findByRole("button", { name: /Narrow list row/ });
     expect(row.closest("li")?.getAttribute("data-variant")).toBe("ledger");
     expect(within(row).getByText("T-KQ1")).toBeTruthy();
@@ -5257,6 +5259,7 @@ test.each(["project", "Plan"])(
     fireEvent.click(
       await screen.findByRole("button", { name: /^Sticky Plan/ }),
     );
+    fireEvent.click(await screen.findByRole("radio", { name: "List" }));
     const row = await screen.findByRole("button", { name: /First/ });
     fireEvent.click(row);
     await screen.findByRole("textbox", { name: "Title" });
@@ -5298,7 +5301,7 @@ test("checked rows keep their live-update positions through idle until selection
   expect(screen.getByRole("heading", { name: "Done" })).toBeTruthy();
 });
 
-test("Plans cards join full counts, Flow-ordered Ready work, newest update and spec", async () => {
+test("Plans rows show counts, status words and the latest member change", async () => {
   const tickets = [
     bulkTicket(2, {
       title: "Ready second",
@@ -5395,78 +5398,60 @@ test("Plans cards join full counts, Flow-ordered Ready work, newest update and s
   );
   render(<App />);
   fireEvent.click(await screen.findByRole("button", { name: "Plans" }));
-  const cards = await screen.findByRole("list", { name: "Active Plans" });
-  expect(await within(cards).findByText("4 of 10 done")).toBeTruthy();
-  expect(within(cards).getByText("1 canceled, not counted")).toBeTruthy();
-  expect(within(cards).getByText("2 duplicates, not counted")).toBeTruthy();
+  const rows = await screen.findByRole("list", { name: "Active Plans" });
+  expect(within(rows).getByText("4 of 10")).toBeTruthy();
   expect(
-    await within(cards).findByRole("button", { name: /T-KQ9 Ready first/ }),
+    within(rows).getByText("1 in review · 2 in progress · 2 ready · 1 blocked"),
   ).toBeTruthy();
-  expect(within(cards).queryByText("Ready second")).toBeNull();
-  expect(within(cards).getByText("Desktop app")).toBeTruthy();
-  expect(
-    within(cards).getByText("2 ready, 1 blocked", { exact: false }),
-  ).toBeTruthy();
-  expect(within(cards).getByText("Launch specification")).toBeTruthy();
-  expect(cards.querySelector("time")?.getAttribute("datetime")).toBe(
+  expect(within(rows).queryByText("Desktop app")).toBeNull();
+  expect(within(rows).queryByText("Ship together")).toBeNull();
+  expect(within(rows).queryByText("Launch specification")).toBeNull();
+  expect(rows.querySelector("time")?.getAttribute("datetime")).toBe(
     "2026-02-01T00:00:00Z",
   );
   fireEvent.click(
-    within(cards).getByRole("button", { name: /T-KQ9 Ready first/ }),
+    within(rows).getByRole("button", { name: "Open Plan Launch cards" }),
   );
-  expect(await screen.findByRole("heading", { name: "T-KQ9" })).toBeTruthy();
+  expect(
+    await screen.findByRole("heading", { name: "Launch cards" }),
+  ).toBeTruthy();
 });
 
-test("a long Next up title keeps its ticket, Plan and spec separately keyboard reachable", async () => {
-  const title = "A very long next ticket title ".repeat(15).trim();
-  const ticket = bulkTicket(15, { title, availability: "Ready" });
-  const plan = {
-    id: "P-next",
-    name: "Next release",
-    archived: false,
-    spec_document_id: "next-spec",
-  };
+test("the sidebar names a Plan's review count and completion alongside its scope", async () => {
+  const review = { id: "P-review", name: "Review now", archived: false };
+  const working = { id: "P-working", name: "Working now", archived: false };
   bridge.invoke.mockImplementation(
     (command: string, args: Record<string, unknown>) => {
-      if (command === "list_plans") return [plan];
-      if (command === "show_plan")
+      if (command === "list_plans") return [review, working];
+      if (command === "show_plan") {
+        const plan = args.id === review.id ? review : working;
         return {
           plan,
-          counts: counted({ todo: 1 }),
-          members: [ticket],
-          documents: [
-            { id: "next-spec", heading: "Next specification", trashed: false },
-          ],
+          counts: counted({
+            done: 2,
+            in_review: plan === review ? 1 : 0,
+            in_progress: plan === working ? 1 : 0,
+          }),
+          members: [],
         };
-      if (command === "find_tickets") return [ticket];
-      if (command === "show_ticket") return ticket;
+      }
       return bridgeDefault(command, args);
     },
   );
   render(<App />);
-  const user = userEvent.setup();
-  await user.click(await screen.findByRole("button", { name: "Plans" }));
-  const cards = await screen.findByRole("list", { name: "Active Plans" });
-  const openPlan = within(cards).getByRole("button", {
-    name: "Open Plan Next release",
-  });
-  const next = await within(cards).findByRole("button", {
-    name: `T-KQ15 ${title}`,
-  });
-  openPlan.focus();
-  await user.tab();
-  expect(document.activeElement).toBe(next);
-  expect(within(cards).getByText("Ready", { exact: true })).toBeTruthy();
-  await user.tab();
-  expect(document.activeElement).toBe(
-    within(cards).getByRole("button", { name: "Next specification" }),
-  );
-  await user.tab({ shift: true });
-  await user.keyboard("{Enter}");
-  expect(await screen.findByRole("heading", { name: "T-KQ15" })).toBeTruthy();
-  expect(screen.getByDisplayValue(title)).toBe(
-    screen.getByRole("textbox", { name: "Title" }),
-  );
+  const scopes = await screen.findByRole("navigation", { name: "Plan scopes" });
+  expect(
+    await within(scopes).findByRole("button", {
+      name: review.name,
+      description: "1 in review · 2/3 completed",
+    }),
+  ).toBeTruthy();
+  expect(
+    within(scopes).getByRole("button", {
+      name: working.name,
+      description: "2/3 completed",
+    }),
+  ).toBeTruthy();
 });
 
 test("New Plan is reachable from the palette and its registered page key", async () => {
@@ -5485,7 +5470,7 @@ test("New Plan is reachable from the palette and its registered page key", async
   expect(await screen.findByRole("dialog", { name: "New Plan" })).toBeTruthy();
 });
 
-test("Plans with no Ready work keep canceled-only progress explicit without inventing a time", async () => {
+test("a canceled-only Plan can be archived and has no invented time", async () => {
   bridge.invoke.mockImplementation(
     (command: string, args: Record<string, unknown>) => {
       if (command === "list_plans")
@@ -5522,9 +5507,8 @@ test("Plans with no Ready work keep canceled-only progress explicit without inve
   render(<App />);
   fireEvent.click(await screen.findByRole("button", { name: "Plans" }));
   const cards = await screen.findByRole("list", { name: "Active Plans" });
-  expect(await within(cards).findByText("0 of 0 done")).toBeTruthy();
-  expect(await within(cards).findByText("No Ready tickets")).toBeTruthy();
-  expect(within(cards).getByText("2 canceled, not counted")).toBeTruthy();
+  expect(within(cards).getByText("0 of 0")).toBeTruthy();
+  expect(within(cards).getByText("All done · ready to archive")).toBeTruthy();
   expect(cards.querySelector("time")).toBeNull();
   fireEvent.click(
     within(cards).getByRole("button", { name: "Open Plan Stopped work" }),
@@ -5534,7 +5518,7 @@ test("Plans with no Ready work keep canceled-only progress explicit without inve
   ).toBeTruthy();
 });
 
-test("Plan page keeps its view switch in the header and summarizes all members", async () => {
+test("Plan keeps its view switch in the header and summarizes all members on Overview", async () => {
   const plan = {
     id: "P-page",
     name: "Board polish",
@@ -5578,15 +5562,10 @@ test("Plan page keeps its view switch in the header and summarizes all members",
   render(<App />);
   fireEvent.click(await screen.findByRole("button", { name: /^Board polish/ }));
   expect(await screen.findByText("1 of 6 done")).toBeTruthy();
-  const summary = screen.getByRole("group", { name: "Plan context" });
-  expect(
-    within(summary).getByText("2 in progress · 3 to do, 2 ready"),
-  ).toBeTruthy();
-  expect(
-    within(summary).getByRole("img", {
-      name: "Board polish, 1 of 6 done, 2 moving",
-    }),
-  ).toBeTruthy();
+  const overview = screen.getByRole("region", { name: "Board polish" });
+  expect(within(overview).getByText("2 in progress")).toBeTruthy();
+  expect(within(overview).getByText("2 ready")).toBeTruthy();
+  expect(within(overview).queryByText("0 blocked")).toBeNull();
   const switcher = screen.getByRole("radiogroup", { name: "Plan view" });
   const header = switcher.closest("header");
   expect(
@@ -5598,9 +5577,10 @@ test("Plan page keeps its view switch in the header and summarizes all members",
       switcher,
     );
     expect(switcher.closest("header")).toBe(header);
+    expect(screen.queryByText("1 of 6 done")).toBeNull();
   }
   const row = screen.getByRole("button", { name: /First/ });
-  expect(row.closest("li")?.textContent).toContain("Desktop app");
+  expect(row.closest("li")?.textContent).not.toContain("Desktop app");
   expect(row.closest("li")?.textContent).not.toContain("Board polish");
 });
 
@@ -6277,13 +6257,13 @@ test("Plan Flow uses all members, selects only incident edges, opens tickets and
   fireEvent.click(await screen.findByRole("button", { name: /^Flow example/ }));
   fireEvent.click(screen.getByRole("radio", { name: "Flow" }));
   const flow = await screen.findByRole("region", { name: "Plan Flow" });
-  const now = within(flow).getByRole("region", { name: "Now" });
+  const now = within(flow).getByRole("region", { name: "Can start" });
   expect(
     (await within(now).findAllByRole("button")).map((button) =>
       button.getAttribute("aria-label"),
     ),
   ).toEqual(["T-KQ15 Drop indicator", "T-KQ14 Draggable ghost"]);
-  const next = within(flow).getByRole("region", { name: "Next" });
+  const next = within(flow).getByRole("region", { name: "After one step" });
   const selected = within(next).getByRole("button", {
     name: /T-KQ1 Stable columns/,
   });
@@ -6373,8 +6353,9 @@ test("Flow refuses to invent lanes when a Plan exceeds its bounded member window
   render(<App />);
   fireEvent.click(await screen.findByRole("button", { name: "Plans" }));
   const cards = await screen.findByRole("list", { name: "Active Plans" });
-  await within(cards).findByText("Couldn't load next ticket");
-  expect(within(cards).queryByText("No Ready tickets")).toBeNull();
+  expect(within(cards).getByText("0 of 501")).toBeTruthy();
+  expect(within(cards).getByText("501 ready")).toBeTruthy();
+  expect(within(cards).queryByText("Ready to wrap up")).toBeNull();
   fireEvent.click(
     within(cards).getByRole("button", { name: "Open Plan Bounded flow" }),
   );
@@ -6471,16 +6452,14 @@ test("Flow loads members beyond the first page before deriving blocking depth", 
   fireEvent.click(screen.getByRole("radio", { name: "Flow" }));
   const flow = await screen.findByRole("region", { name: "Plan Flow" });
   expect(
-    await within(within(flow).getByRole("region", { name: "Now" })).findByRole(
-      "button",
-      { name: "T-KQ52 Flow member 52" },
-    ),
+    await within(
+      within(flow).getByRole("region", { name: "Can start" }),
+    ).findByRole("button", { name: "T-KQ52 Flow member 52" }),
   ).toBeTruthy();
   expect(
-    within(within(flow).getByRole("region", { name: "Next" })).getByRole(
-      "button",
-      { name: "T-KQ1 Flow member 1" },
-    ),
+    within(
+      within(flow).getByRole("region", { name: "After one step" }),
+    ).getByRole("button", { name: "T-KQ1 Flow member 1" }),
   ).toBeTruthy();
   expect(within(flow).getByText("Waits on T-KQ52")).toBeTruthy();
 });
@@ -7426,6 +7405,11 @@ test("palette opens a named active Plan through the workspace navigation", async
     }),
   );
   expect(screen.queryByRole("dialog", { name: "Go anywhere" })).toBeNull();
+  expect(
+    screen
+      .getByRole("radio", { name: "Overview" })
+      .getAttribute("aria-checked"),
+  ).toBe("true");
 });
 
 test.each(["All tickets", "Plan"])(
@@ -11280,7 +11264,7 @@ test.each([
   },
 );
 
-test("Plans initial read stays unknown, retries its own failure and preserves known cards", async () => {
+test("Plans initial read stays unknown, retries its own failure and recovers its rows", async () => {
   let rejectRead: ((reason: unknown) => void) | undefined;
   const pending = new Promise((_, reject) => {
     rejectRead = reject;
@@ -11304,7 +11288,9 @@ test("Plans initial read stays unknown, retries its own failure and preserves kn
   );
   fireEvent.click(await screen.findByRole("option", { name: /^Plans/ }));
   expect(screen.queryByText("No Plans yet")).toBeNull();
-  expect(screen.getByRole("status", { name: "Loading Plans" })).toBeTruthy();
+  expect(
+    await screen.findByRole("status", { name: "Loading Plans" }),
+  ).toBeTruthy();
   await act(async () => rejectRead?.(new Error("Plans unavailable")));
   const retry = await screen.findByRole("button", { name: "Retry" });
   expect(screen.queryByText("No Plans yet")).toBeNull();
@@ -11651,7 +11637,10 @@ test("Plan Add tickets returns focus to its opener after keyboard dismissal", as
   });
   render(<App />);
   await user.click(await screen.findByRole("button", { name: /^Focus Plan/ }));
-  const add = await screen.findByRole("button", { name: "Add tickets" });
+  const switcher = await screen.findByRole("radiogroup", { name: "Plan view" });
+  const add = within(switcher.closest("header")!).getByRole("button", {
+    name: "Add tickets",
+  });
   await user.click(add);
   await screen.findByRole("dialog", { name: "Add tickets to Focus Plan" });
   await user.keyboard("{Escape}");
@@ -11848,7 +11837,12 @@ test("Plan multi-add is one retryable atomic request and Undo resumes only unfin
   });
   render(<App />);
   await user.click(await screen.findByRole("button", { name: /^Atomic Plan/ }));
-  await user.click(await screen.findByRole("button", { name: "Add tickets" }));
+  const switcher = await screen.findByRole("radiogroup", { name: "Plan view" });
+  await user.click(
+    within(switcher.closest("header")!).getByRole("button", {
+      name: "Add tickets",
+    }),
+  );
   const dialog = await screen.findByRole("dialog", {
     name: "Add tickets to Atomic Plan",
   });
@@ -14256,9 +14250,9 @@ test.each(["Plan", "Workspace"])(
           reads++;
           return {
             plan,
-            members: [],
+            members: args.includeMembers === false ? [] : members,
             documents: [],
-            counts: counted({ todo: 260 }),
+            counts: counted({ todo: members.length }),
           };
         }
         if (command === "workspace_graph") {
@@ -14982,7 +14976,7 @@ test("scrolling Inbox group headings preserves the focused triage entry and keyb
 });
 
 test.each(["unavailable", "mixed", "none"])(
-  "Plan Next up distinguishes %s Ready work without contradicting Core counts",
+  "Plan rows describe %s Ready work using Core availability",
   async (state) => {
     const plan = {
       id: "source-next-plan",
@@ -15020,31 +15014,10 @@ test.each(["unavailable", "mixed", "none"])(
     });
     fireEvent.click(screen.getByRole("button", { name: "Plans" }));
     const cards = await screen.findByRole("list", { name: "Active Plans" });
-    await within(cards).findByText(`0 of ${members.length} done`);
-    if (state === "unavailable") {
-      expect(
-        await within(cards).findByText("Ready work has unavailable sources"),
-      ).toBeTruthy();
-      expect(within(cards).getByText(/1 ready, 0 blocked/)).toBeTruthy();
-      expect(within(cards).queryByText("No Ready tickets")).toBeNull();
-    } else if (state === "mixed") {
-      expect(
-        await within(cards).findByRole("button", {
-          name: "T-KQ2 Available Ready work",
-        }),
-      ).toBeTruthy();
-      expect(within(cards).getByText(/2 ready, 0 blocked/)).toBeTruthy();
-      expect(
-        within(cards).queryByText("Ready work has unavailable sources"),
-      ).toBeNull();
-    } else {
-      expect(await within(cards).findByText("No Ready tickets")).toBeTruthy();
-      expect(within(cards).getByText(/0 ready, 1 blocked/)).toBeTruthy();
-    }
-    expect(
-      within(cards).queryByRole("button", {
-        name: "T-KQ3 Unavailable Ready work",
-      }),
-    ).toBeNull();
+    expect(within(cards).getByText(`0 of ${members.length}`)).toBeTruthy();
+    const stateLabel =
+      state === "none" ? "1 blocked" : `${members.length} ready`;
+    expect(within(cards).getByText(stateLabel)).toBeTruthy();
+    expect(within(cards).queryByText("Ready to wrap up")).toBeNull();
   },
 );

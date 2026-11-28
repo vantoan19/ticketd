@@ -1,5 +1,6 @@
 // @vitest-environment jsdom
 import {
+  act,
   cleanup,
   fireEvent,
   render,
@@ -7,9 +8,18 @@ import {
   waitFor,
   within,
 } from "@testing-library/react";
+import userEvent from "@testing-library/user-event";
 import { afterEach, beforeEach, expect, test, vi } from "vitest";
+import { StrictMode } from "react";
+import { loadPreferences, setPreference } from "@/lib/preferences";
 import { App } from "@/app/App";
+import { ChatClientContext } from "@/features/chats/client";
+import {
+  createHostChatClient,
+  tauriBridge,
+} from "@/features/chats/host-client";
 import { bridgeDefault } from "@/test/bridge-defaults";
+import type { Ticket } from "@/lib/api/client";
 
 class ResizeObserverStub {
   observe() {}
@@ -39,10 +49,17 @@ vi.mock("@tauri-apps/api/core", () => ({
   },
 }));
 
-type Fake = { id: string; reference: string; status: string; plan: string };
+type Fake = {
+  id: string;
+  reference: string;
+  status: string;
+  plan: string;
+  status_since?: string;
+} & Partial<Pick<Ticket, "availability" | "prerequisites" | "updated_at">>;
 let plans: { id: string; name: string; archived: boolean; purpose: string }[] =
   [];
 let tickets: Fake[] = [];
+let documents: { id: string; heading: string; trashed: boolean }[] = [];
 const calls: [string, unknown][] = [];
 
 const ticket = (item: Fake) => ({
@@ -55,13 +72,15 @@ const ticket = (item: Fake) => ({
   tags: [] as string[],
   project_id: null,
   plan_id: item.plan || null,
-  availability: null,
-  prerequisites: [],
+  availability: item.availability ?? null,
+  prerequisites: item.prerequisites ?? [],
+  updated_at: item.updated_at,
   parent: null,
   children: [],
 });
 
 beforeEach(() => {
+  localStorage.clear();
   plans = [{ id: "e1", name: "Launch", archived: false, purpose: "" }];
   tickets = [
     { id: "1", reference: "T-KQ1", status: "Todo", plan: "e1" },
@@ -69,10 +88,24 @@ beforeEach(() => {
     { id: "3", reference: "T-KQ3", status: "Todo", plan: "" },
   ];
   calls.length = 0;
+  documents = [];
   bridge.invoke.mockImplementation(async (command: string, args: never) => {
     const input = args as Record<string, never> | undefined;
     calls.push([command, input]);
     switch (command) {
+      case "chat_set_enabled":
+      case "chat_set_notify":
+        return null;
+      case "chat_overview":
+        return { needs_you: 0, unread: 0, app_icon: 0, working: 0 };
+      case "chat_harnesses":
+        return [
+          { id: "claude", name: "Claude", status: "ready", usable: true },
+        ];
+      case "chat_harness_options":
+        return { harness_id: "claude", models: [] };
+      case "chat_create":
+        return { chat_id: "chat-1" };
       case "list_plans":
         return plans;
       case "show_plan": {
@@ -80,8 +113,17 @@ beforeEach(() => {
         const count = (status: string) =>
           members.filter((item) => item.status === status).length;
         return {
-          plan: plans.find((item) => item.id === input?.id),
+          plan: {
+            ...plans.find((item) => item.id === input?.id),
+            spec_document_id: documents[0]?.id ?? null,
+          },
+          documents,
           members: members.map(ticket),
+          status_since: Object.fromEntries(
+            members.flatMap((item) =>
+              item.status_since ? [[item.reference, item.status_since]] : [],
+            ),
+          ),
           counts: {
             todo: count("Todo"),
             in_progress: count("In progress"),
@@ -92,6 +134,27 @@ beforeEach(() => {
           },
         };
       }
+      case "show_ticket": {
+        const member = tickets.find(
+          (item) => item.reference === input?.reference,
+        );
+        return member ? ticket(member) : null;
+      }
+      case "open_document":
+      case "show_document":
+        return {
+          id: "spec",
+          title: "Release specification",
+          body: "Release checklist",
+          heading: "Release specification",
+          updated_at: "2026-11-28T01:00:00Z",
+          created_at: "2026-11-28T01:00:00Z",
+          trashed: false,
+        };
+      case "document_context_links":
+        return [[], []];
+      case "current_work_documents":
+        return { groups: [], finished: 0, unlinked: 0, trashed: 0 };
       case "search_tickets":
         return tickets
           .filter((item) =>
@@ -164,11 +227,131 @@ async function chooseAction(name: string) {
 async function openLaunch() {
   render(<App />);
   fireEvent.click(await screen.findByRole("button", { name: "Launch" }));
-  const heading = await screen.findByRole("heading", { name: "Launch" });
-  await screen.findByRole("img", { name: /Launch, .* done/ });
-  return heading;
+  const overview = await screen.findByRole("region", { name: "Launch" });
+  await within(overview).findByText(/^[0-9]+ of [0-9]+ done$/);
+  return within(overview).getByRole("heading", { name: "Launch" });
 }
-const context = () => screen.getByRole("group", { name: "Plan context" });
+const context = () => screen.getByRole("region", { name: "Launch" });
+
+test("an empty Plan offers Add tickets from Overview, Board and Flow", async () => {
+  tickets = tickets.filter((item) => item.plan !== "e1");
+  render(<App />);
+  fireEvent.click(await screen.findByRole("button", { name: "Launch" }));
+
+  const noTickets = "No tickets yet";
+  const description =
+    "Let an agent break the spec into tickets, or add tickets you already have.";
+  const overview = await screen.findByRole("region", { name: "Launch" });
+  expect(await within(overview).findByText(noTickets)).toBeTruthy();
+  expect(within(overview).getByText(description)).toBeTruthy();
+  expect(
+    within(overview).queryByRole("group", { name: "Plan progress" }),
+  ).toBeNull();
+  expect(
+    within(overview).queryByRole("toolbar", { name: "Plan progress" }),
+  ).toBeNull();
+  expect(
+    screen.queryByRole("button", { name: "Plan it with an agent" }),
+  ).toBeNull();
+
+  fireEvent.click(screen.getByRole("radio", { name: "Board" }));
+  expect(await screen.findByText(noTickets)).toBeTruthy();
+  expect(screen.getByText(description)).toBeTruthy();
+  expect(screen.queryByRole("region", { name: / column$/ })).toBeNull();
+
+  fireEvent.click(screen.getByRole("radio", { name: "Flow" }));
+  const flow = await screen.findByRole("region", { name: "Plan Flow" });
+  expect(await within(flow).findByText(noTickets)).toBeTruthy();
+  expect(within(flow).getByText(description)).toBeTruthy();
+  expect(within(flow).queryByRole("region", { name: "Can start" })).toBeNull();
+  expect(
+    within(flow).queryByRole("region", { name: "After one step" }),
+  ).toBeNull();
+
+  fireEvent.click(screen.getByRole("radio", { name: "Overview" }));
+  const emptyOverview = await screen.findByRole("region", { name: "Launch" });
+  fireEvent.click(
+    await within(emptyOverview).findByRole("button", { name: "Add tickets" }),
+  );
+  const dialog = await screen.findByRole("dialog", {
+    name: "Add tickets to Launch",
+  });
+  fireEvent.change(
+    within(dialog).getByLabelText("Search tickets by title or reference"),
+    { target: { value: "T-KQ3" } },
+  );
+  fireEvent.click(await within(dialog).findByRole("option", { name: /T-KQ3/ }));
+  fireEvent.click(within(dialog).getByRole("button", { name: "Add tickets" }));
+
+  await within(emptyOverview).findByText("0 of 1 done");
+  expect(within(emptyOverview).queryByText(noTickets)).toBeNull();
+});
+
+test.each([
+  {
+    view: "Board",
+    spec: { id: "spec", heading: "Release specification", trashed: false },
+    prompt: "Break Release specification into tickets in the Plan Launch",
+  },
+  {
+    view: "Overview",
+    spec: null,
+    prompt: "Break the Plan Launch into tickets",
+  },
+])(
+  "$view starts an editable Plan draft and waits for Send",
+  async ({ view, spec, prompt }) => {
+    tickets = [];
+    if (spec) documents = [spec];
+    setPreference("chat", true);
+    setPreference("notifyChats", false);
+    const chat = createHostChatClient({
+      ...tauriBridge(),
+      listen: async () => () => {},
+      channel: () => undefined,
+    });
+    render(
+      <ChatClientContext value={chat}>
+        <App />
+      </ChatClientContext>,
+    );
+    fireEvent.click(await screen.findByRole("button", { name: "Launch" }));
+    if (view === "Board")
+      fireEvent.click(screen.getByRole("radio", { name: "Board" }));
+    fireEvent.click(
+      await screen.findByRole("button", { name: "Plan it with an agent" }),
+    );
+
+    const newChat = await screen.findByRole("region", { name: "New Chat" });
+    const draft = within(newChat).getByRole<HTMLTextAreaElement>("textbox", {
+      name: "Describe a task or ask a question",
+    });
+    expect(draft.value).toBe(prompt);
+    expect(calls.some(([command]) => command === "chat_create")).toBe(false);
+
+    const message = `${prompt}. Start with verification.`;
+    fireEvent.change(draft, { target: { value: message } });
+    expect(draft.value).toBe(message);
+    const send = within(newChat).getByRole<HTMLButtonElement>("button", {
+      name: /^Send/,
+    });
+    await waitFor(() => expect(send.disabled).toBe(false));
+    expect(calls.some(([command]) => command === "chat_create")).toBe(false);
+    fireEvent.click(send);
+
+    await waitFor(() =>
+      expect(calls).toContainEqual([
+        "chat_create",
+        {
+          input: expect.objectContaining({
+            message,
+            links: spec ? [{ kind: "document", id: "spec" }] : [],
+          }),
+        },
+      ]),
+    );
+  },
+);
 
 test("the header counts the Plan's tickets and its progress, and Remove from Plan offers Undo", async () => {
   tickets.push({
@@ -177,13 +360,9 @@ test("the header counts the Plan's tickets and its progress, and Remove from Pla
     status: "Duplicate",
     plan: "e1",
   });
-  const heading = await openLaunch();
-  // The count sits beside the name; per-status counts live in the groups.
-  expect(heading.parentElement!.textContent).toContain("3");
+  await openLaunch();
   expect(within(context()).getByText("1 of 2 done")).toBeTruthy();
-  expect(
-    screen.getByRole("img", { name: "Launch, 1 of 2 done, 0 moving" }),
-  ).toBeTruthy();
+  fireEvent.click(screen.getByRole("radio", { name: "List" }));
   // An active Plan shows no state chip (plans PL-05).
   expect(screen.queryByText("Active Plan")).toBeNull();
 
@@ -193,7 +372,6 @@ test("the header counts the Plan's tickets and its progress, and Remove from Pla
   await waitFor(() =>
     expect(screen.queryByRole("button", { name: /^T-KQ1/ })).toBeNull(),
   );
-  await waitFor(() => expect(screen.getByText("1 of 1 done")).toBeTruthy());
   expect(calls).toContainEqual([
     "set_plan",
     { reference: "T-KQ1", plan: null },
@@ -218,13 +396,232 @@ test("progress leaves out Canceled and Duplicate tickets", async () => {
   expect(await screen.findByText("1 of 1 done")).toBeTruthy();
 });
 
+test("the progress strip names counted tickets in progress order", async () => {
+  const blocked = {
+    availability: "Blocked",
+    prerequisites: [
+      {
+        reference: "T-KQ8",
+        title: "Review the release",
+        status: "In review",
+        trashed: false,
+        unresolved: true,
+      },
+    ],
+  };
+  const members = [
+    { id: "1", status: "Todo", availability: "Ready" },
+    { id: "2", status: "Done", status_since: "2026-11-28T03:00:00Z" },
+    { id: "3", status: "Todo", ...blocked },
+    { id: "4", status: "Canceled" },
+    { id: "5", status: "Done", status_since: "2026-11-28T02:00:00Z" },
+    { id: "6", status: "In progress" },
+    { id: "7", status: "In review" },
+    { id: "8", status: "In review" },
+    { id: "9", status: "Duplicate" },
+  ];
+  tickets = members.map((item) => ({
+    ...item,
+    reference: `T-KQ${item.id}`,
+    plan: "e1",
+  }));
+  await openLaunch();
+  const strip = within(context()).getByRole("toolbar", {
+    name: "Plan progress",
+  });
+  const segments = within(strip).getAllByRole("button");
+  const ordered = [
+    "T-KQ5 Title of T-KQ5 · Done",
+    "T-KQ2 Title of T-KQ2 · Done",
+    "T-KQ8 Title of T-KQ8 · In review",
+    "T-KQ7 Title of T-KQ7 · In review",
+    "T-KQ6 Title of T-KQ6 · In progress",
+    "T-KQ1 Title of T-KQ1 · Ready",
+    "T-KQ3 Title of T-KQ3 · Blocked",
+  ];
+  expect(segments).toEqual(
+    ordered.map((name) => within(strip).getByRole("button", { name })),
+  );
+});
+
+test("a source-held Todo still appears in work and progress", async () => {
+  tickets[0]!.availability = null;
+  await openLaunch();
+
+  const overview = within(context());
+  expect(overview.getByText("1 of 2 done")).toBeTruthy();
+  expect(overview.getByText("1 held by source")).toBeTruthy();
+  const held = within(overview.getByRole("region", { name: "Held by source" }));
+  expect(
+    held.getByRole("button", {
+      name: "T-KQ1 Title of T-KQ1, Held by source",
+    }),
+  ).toBeTruthy();
+  const strip = within(
+    overview.getByRole("toolbar", { name: "Plan progress" }),
+  );
+  expect(
+    strip.getByRole("button", {
+      name: "T-KQ1 Title of T-KQ1 · Held by source",
+    }),
+  ).toBeTruthy();
+  expect(overview.queryByRole("region", { name: "Ready" })).toBeNull();
+  expect(
+    overview.queryByRole("region", { name: "Ready to wrap up" }),
+  ).toBeNull();
+});
+
+test("a blocked row names every unresolved blocker, including one in Trash", async () => {
+  tickets[0]!.availability = "Blocked";
+  tickets[0]!.prerequisites = [
+    outsideBlocker,
+    {
+      ...outsideBlocker,
+      reference: "T-KQ4",
+      title: "Trashed blocker",
+      trashed: true,
+    },
+    {
+      ...outsideBlocker,
+      reference: "T-KQ5",
+      status: "Done",
+      unresolved: false,
+    },
+  ];
+  await openLaunch();
+
+  const overview = within(context());
+  const row = overview.getByRole("button", {
+    name: "T-KQ1 Title of T-KQ1, Blocked by T-KQ3 Outside blocker, T-KQ4 Trashed blocker (in Trash)",
+  });
+  expect(within(row).getByText("after T-KQ3 +1")).toBeTruthy();
+  expect(
+    overview.queryByRole("region", { name: "Ready to wrap up" }),
+  ).toBeNull();
+});
+
+test("the progress strip has one Tab stop and opens the focused ticket beside it", async () => {
+  tickets = [
+    { id: "1", reference: "T-KQ1", status: "Done", plan: "e1" },
+    { id: "2", reference: "T-KQ2", status: "In review", plan: "e1" },
+    {
+      id: "3",
+      reference: "T-KQ3",
+      status: "Todo",
+      availability: "Ready",
+      plan: "e1",
+    },
+  ];
+  const user = userEvent.setup();
+  await openLaunch();
+  const strip = within(context()).getByRole("toolbar", {
+    name: "Plan progress",
+  });
+  const done = within(strip).getByRole("button", { name: /T-KQ1.*Done/ });
+  const review = within(strip).getByRole("button", {
+    name: /T-KQ2.*In review/,
+  });
+  const ready = within(strip).getByRole("button", { name: /T-KQ3.*Ready/ });
+  const purpose = within(context()).getByRole("button", {
+    name: "Add purpose",
+  });
+
+  act(() => purpose.focus());
+  await user.tab();
+  expect(document.activeElement).toBe(done);
+  await user.tab();
+  expect(strip.contains(document.activeElement)).toBe(false);
+
+  await user.tab({ shift: true });
+  expect(document.activeElement).toBe(done);
+  await user.keyboard("{ArrowRight}");
+  expect(document.activeElement).toBe(review);
+  expect((await screen.findByRole("tooltip")).textContent).toBe(
+    "T-KQ2 Title of T-KQ2 · In review",
+  );
+  await user.keyboard("{End}");
+  expect(document.activeElement).toBe(ready);
+  await user.keyboard("{ArrowLeft}");
+  expect(document.activeElement).toBe(review);
+  await user.keyboard("{Home}");
+  expect(document.activeElement).toBe(done);
+  await user.keyboard("{End}");
+  await user.tab({ shift: true });
+  expect(document.activeElement).toBe(purpose);
+  await user.tab();
+  expect(document.activeElement).toBe(done);
+  await user.keyboard("{ArrowRight}{Enter}");
+
+  const detail = screen.getByRole("region", { name: "T-KQ2" });
+  expect(await within(detail).findByText("Title of T-KQ2")).toBeTruthy();
+  expect(calls).toContainEqual(["show_ticket", { reference: "T-KQ2" }]);
+  expect(review.getAttribute("aria-current")).toBe("true");
+  expect(done.hasAttribute("aria-current")).toBe(false);
+
+  await user.click(
+    screen.getByRole("button", { name: "Close ticket details" }),
+  );
+  const reviewRow = within(context()).getByRole("button", {
+    name: "T-KQ2 Title of T-KQ2, In review",
+  });
+  expect(document.activeElement).toBe(reviewRow);
+  expect(review.hasAttribute("aria-current")).toBe(false);
+  await user.click(done);
+  expect(calls).toContainEqual(["show_ticket", { reference: "T-KQ1" }]);
+  expect(done.getAttribute("aria-current")).toBe("true");
+});
+
+test("above 60 tickets the progress strip shows counted status runs", async () => {
+  tickets = Array.from({ length: 54 }, (_unused, index) => ({
+    id: `done-${index}`,
+    reference: `T-KQ${index + 10}`,
+    status: "Done",
+    plan: "e1",
+  }));
+  tickets.push(
+    { id: "1", reference: "T-KQ1", status: "In review", plan: "e1" },
+    { id: "2", reference: "T-KQ2", status: "In review", plan: "e1" },
+    { id: "3", reference: "T-KQ3", status: "In review", plan: "e1" },
+    { id: "4", reference: "T-KQ4", status: "In review", plan: "e1" },
+    {
+      id: "5",
+      reference: "T-KQ5",
+      status: "Todo",
+      availability: "Ready",
+      plan: "e1",
+    },
+    {
+      id: "6",
+      reference: "T-KQ6",
+      status: "Todo",
+      availability: "Ready",
+      plan: "e1",
+    },
+    {
+      id: "7",
+      reference: "T-KQ7",
+      status: "Todo",
+      availability: "Blocked",
+      plan: "e1",
+    },
+  );
+  await openLaunch();
+  const strip = within(context()).getByRole("group", { name: "Plan progress" });
+  expect(within(strip).getAllByRole("img")).toEqual(
+    ["54 done", "4 in review", "2 ready", "1 blocked"].map((name) =>
+      within(strip).getByRole("img", { name }),
+    ),
+  );
+  expect(within(strip).queryByRole("button")).toBeNull();
+});
+
 test("an empty name says so in the context line and changes nothing", async () => {
   await openLaunch();
   await chooseAction("Rename");
   const field = screen.getByRole("textbox", { name: "Plan name" });
   fireEvent.change(field, { target: { value: "   " } });
   fireEvent.keyDown(field, { key: "Enter" });
-  const error = await within(context()).findByRole("alert");
+  const error = await screen.findByRole("alert");
   expect(error.textContent).toBe("A Plan needs a name.");
   expect(calls.some(([command]) => command === "change_plan")).toBe(false);
   expect((field as HTMLInputElement).value).toBe("   ");
@@ -440,10 +837,11 @@ test("renaming focuses the title, shows its hint in the context line, and F2 sta
   await chooseAction("Rename");
   const field = screen.getByRole("textbox", { name: "Plan name" });
   await waitFor(() => expect(document.activeElement).toBe(field));
-  expect(within(context()).getByText("Enter saves · Esc cancels")).toBeTruthy();
+  expect(screen.getByText("Enter saves · Esc cancels")).toBeTruthy();
   fireEvent.keyDown(field, { key: "Escape" });
   expect(screen.queryByRole("textbox", { name: "Plan name" })).toBeNull();
   // F2 in the ticket list is about the ticket, not the Plan.
+  fireEvent.click(screen.getByRole("radio", { name: "List" }));
   const list = screen.getByRole("region", { name: "Launch" });
   fireEvent.keyDown(within(list).getByText("Title of T-KQ1"), { key: "F2" });
   expect(screen.queryByRole("textbox", { name: "Plan name" })).toBeNull();
@@ -455,8 +853,646 @@ test("renaming focuses the title, shows its hint in the context line, and F2 sta
 
 test("an empty Plan detail teaches the keys and hides its toolbar band", async () => {
   await openLaunch();
+  fireEvent.click(screen.getByRole("radio", { name: "List" }));
   const hint = screen.getByText("Enter").closest("p")!;
   expect(hint.textContent).toBe("↑↓ move Enter open");
   const detail = screen.getByRole("region", { name: "Ticket details" });
   expect(detail.hasAttribute("data-empty")).toBe(true);
+});
+
+test("every visit to a Plan starts on Overview and its ticket views have no summary", async () => {
+  plans[0]!.purpose = "Prepare the release";
+  render(<App />);
+  const launch = () =>
+    within(screen.getByRole("navigation", { name: "Plan scopes" })).getByRole(
+      "button",
+      { name: "Launch" },
+    );
+  fireEvent.click(await screen.findByRole("button", { name: "Launch" }));
+  const switchView = (name: string) =>
+    fireEvent.click(screen.getByRole("radio", { name }));
+  expect(
+    screen
+      .getByRole("radio", { name: "Overview" })
+      .getAttribute("aria-checked"),
+  ).toBe("true");
+  const overview = await screen.findByRole("region", { name: "Launch" });
+  expect(within(overview).getByText("Prepare the release")).toBeTruthy();
+  expect(await within(overview).findByText("1 of 2 done")).toBeTruthy();
+  for (const name of ["List", "Board", "Flow"]) {
+    switchView(name);
+    expect(screen.queryByText("Prepare the release")).toBeNull();
+    expect(screen.queryByText("1 of 2 done")).toBeNull();
+  }
+  fireEvent.click(launch());
+  expect(
+    screen
+      .getByRole("radio", { name: "Overview" })
+      .getAttribute("aria-checked"),
+  ).toBe("true");
+  expect(screen.getByText("Prepare the release")).toBeTruthy();
+});
+
+test("keeps the Overview head while the Plan loads and retries in the pane", async () => {
+  const respond = bridge.invoke.getMockImplementation()!;
+  let finish: (() => void) | undefined;
+  let first = true;
+  bridge.invoke.mockImplementation(async (command: string, args: never) => {
+    const input = args as Record<string, unknown> | undefined;
+    if (
+      command === "show_plan" &&
+      !input?.limit &&
+      input?.includeMembers !== false &&
+      first
+    ) {
+      first = false;
+      await new Promise<void>((resolve) => {
+        finish = resolve;
+      });
+      throw new Error("The workspace is busy");
+    }
+    return respond(command, args);
+  });
+
+  render(<App />);
+  fireEvent.click(await screen.findByRole("button", { name: "Launch" }));
+  const overview = screen.getByRole("region", { name: "Launch" });
+  expect(
+    within(overview).getByRole("heading", { name: "Launch" }),
+  ).toBeTruthy();
+  expect(
+    within(overview).getByRole("status", { name: "Loading Plan" }),
+  ).toBeTruthy();
+  await waitFor(() => expect(finish).toBeDefined());
+  finish?.();
+  fireEvent.click(
+    await within(overview).findByRole("button", { name: "Retry" }),
+  );
+  expect(await within(overview).findByText("1 of 2 done")).toBeTruthy();
+});
+
+test("a failed Overview refresh retains work and Retry reads the Plan again", async () => {
+  tickets[0]!.availability = "Ready";
+  const respond = bridge.invoke.getMockImplementation()!;
+  let fail = false;
+  bridge.invoke.mockImplementation(async (command: string, args: never) => {
+    const input = args as Record<string, unknown> | undefined;
+    if (command === "show_plan" && !input?.limit && fail)
+      throw new Error("The workspace is busy");
+    return respond(command, args);
+  });
+
+  await openLaunch();
+  const overview = within(context());
+  const ready = overview.getByRole("region", { name: "Ready" });
+
+  fail = true;
+  fireEvent.click(overview.getByRole("button", { name: "Add purpose" }));
+  const purpose = overview.getByRole("textbox", { name: "Purpose" });
+  fireEvent.change(purpose, { target: { value: "Ship the release" } });
+  fireEvent.keyDown(purpose, { key: "Enter" });
+  const retry = await overview.findByRole("button", { name: "Retry" });
+  expect(overview.getByRole("region", { name: "Ready" })).toBe(ready);
+  expect(overview.getByText("1 of 2 done")).toBeTruthy();
+
+  fail = false;
+  fireEvent.click(retry);
+  await waitFor(() =>
+    expect(overview.queryByRole("button", { name: "Retry" })).toBeNull(),
+  );
+  expect(overview.getByText("Ship the release")).toBeTruthy();
+});
+
+test("a long purpose expands and the spec opens with a route back to its Plan", async () => {
+  plans[0]!.purpose = "Make the launch safe and easy to verify. ".repeat(4);
+  documents = [
+    { id: "spec", heading: "Release specification", trashed: false },
+  ];
+  const respond = bridge.invoke.getMockImplementation()!;
+  bridge.invoke.mockImplementation((command, args) =>
+    command === "document_row"
+      ? {
+          id: "spec",
+          heading: "Release specification",
+          plans: [{ id: "e1", name: "Launch", archived: false, spec: true }],
+          tickets: [],
+          tags: [],
+        }
+      : respond(command, args),
+  );
+  setPreference("openDocuments", "expanded");
+  await openLaunch();
+  const more = within(context()).getByRole("button", { name: "Show more" });
+  expect(more.getAttribute("aria-expanded")).toBe("false");
+  fireEvent.click(more);
+  const less = within(context()).getByRole("button", { name: "Show less" });
+  expect(less.getAttribute("aria-expanded")).toBe("true");
+  fireEvent.click(
+    within(context()).getByRole("button", {
+      name: "Spec: Release specification",
+    }),
+  );
+  await screen.findByRole("heading", { name: "Release specification" });
+  expect(screen.queryByRole("button", { name: "Open Plan Launch" })).toBeNull();
+  fireEvent.click(screen.getByRole("button", { name: "Back to Launch" }));
+  const overview = await screen.findByRole("region", { name: "Launch" });
+  expect(
+    within(overview).getByRole("button", { name: "Show less" }),
+  ).toBeTruthy();
+});
+
+test("a first visit records a last look only after leaving the Plan", async () => {
+  render(
+    <StrictMode>
+      <App />
+    </StrictMode>,
+  );
+  fireEvent.click(await screen.findByRole("button", { name: "Launch" }));
+  await within(context()).findByText("1 of 2 done");
+  expect(loadPreferences().planLastLook.e1).toBeUndefined();
+  expect(
+    screen.queryByRole("region", { name: "Since you last looked" }),
+  ).toBeNull();
+  expect(calls.some(([name]) => name === "plan_activity")).toBe(false);
+
+  fireEvent.click(screen.getByRole("radio", { name: "List" }));
+  fireEvent.click(screen.getByRole("radio", { name: "Overview" }));
+  await within(context()).findByText("1 of 2 done");
+  expect(loadPreferences().planLastLook.e1).toBeUndefined();
+  const beforeLeaving = Date.now();
+  fireEvent.click(screen.getByRole("button", { name: "Plans" }));
+  await screen.findByRole("heading", { name: "Plans" });
+  expect(
+    Date.parse(loadPreferences().planLastLook.e1 ?? ""),
+  ).toBeGreaterThanOrEqual(beforeLeaving);
+});
+
+test("the Overview shows new changes, opens their ticket, and clears on return", async () => {
+  const lastLook = "2026-02-01T00:00:00.000Z";
+  setPreference("planLastLook", { e1: lastLook });
+  const timestamp = "2026-02-02T00:00:00.000Z";
+  tickets.push(
+    ...[4, 5, 6, 7, 8].map((id) => ({
+      id: String(id),
+      reference: `T-KQ${id}`,
+      status: "Todo",
+      plan: "e1",
+    })),
+  );
+  const base = { timestamp, editing_agent: "agent" };
+  const changes = [
+    {
+      ...base,
+      reference: "T-KQ1",
+      title: "Release work",
+      kind: "update",
+      brief: "**Verified the release.** Another sentence.",
+    },
+    {
+      ...base,
+      reference: "T-KQ2",
+      title: "Release build",
+      kind: "status",
+      from: "In review",
+      to: "Done",
+    },
+    ...[4, 5, 6, 7].map((id) => ({
+      ...base,
+      reference: `T-KQ${id}`,
+      title: `Member ${id}`,
+      kind: "joined",
+    })),
+  ];
+  const feed = [...changes.slice(0, 5), { ...changes[5], timestamp: lastLook }];
+  const answer = bridge.invoke.getMockImplementation()!;
+  bridge.invoke.mockImplementation(async (command: string, args: never) =>
+    command === "plan_activity"
+      ? feed.slice(0, (args as { limit: number }).limit)
+      : answer(command, args),
+  );
+
+  await openLaunch();
+  const updates = await screen.findByRole("region", {
+    name: "Since you last looked",
+  });
+  expect(within(updates).getAllByRole("button")).toHaveLength(5);
+  expect(
+    within(updates).getByRole("button", { name: /Release build.*Done/ }),
+  ).toBeTruthy();
+  expect(
+    within(updates).getByRole("button", { name: /Joined · Member 4/ }),
+  ).toBeTruthy();
+  expect(within(updates).queryByText("Joined · Member 7")).toBeNull();
+  expect(within(updates).queryByText("Another sentence.")).toBeNull();
+
+  const update = within(updates).getByRole("button", {
+    name: /Verified the release\./,
+  });
+  fireEvent.click(update);
+  const close = await screen.findByRole("button", {
+    name: "Close ticket details",
+  });
+  expect(bridge.invoke).toHaveBeenCalledWith("show_ticket", {
+    reference: "T-KQ1",
+  });
+  expect(loadPreferences().planLastLook.e1).toBe(lastLook);
+  expect(
+    screen.getByRole("region", { name: "Since you last looked" }),
+  ).toBeTruthy();
+
+  const row = within(context()).getByRole("button", {
+    name: "T-KQ1 Title of T-KQ1, Held by source",
+  });
+  fireEvent.click(close);
+  await waitFor(() => expect(document.activeElement).toBe(row));
+  fireEvent.click(screen.getByRole("button", { name: "Plans" }));
+  await screen.findByRole("heading", { name: "Plans" });
+  fireEvent.click(await screen.findByRole("button", { name: "Launch" }));
+  await within(context()).findByText("1 of 7 done");
+  expect(
+    screen.queryByRole("region", { name: "Since you last looked" }),
+  ).toBeNull();
+  expect(bridge.invoke).toHaveBeenCalledWith("plan_activity", {
+    id: "e1",
+    limit: 5,
+  });
+});
+
+test("the Overview excludes changes at the last look and hides the feed after archive", async () => {
+  const lastLook = "2026-02-01T00:00:00.000Z";
+  setPreference("planLastLook", { e1: lastLook });
+  const answer = bridge.invoke.getMockImplementation()!;
+  bridge.invoke.mockImplementation(async (command: string, args: never) =>
+    command === "plan_activity"
+      ? [
+          {
+            reference: "T-KQ1",
+            title: "New member",
+            timestamp: "2026-02-02T00:00:00.000Z",
+            editing_agent: null,
+            kind: "joined",
+          },
+          {
+            reference: "T-KQ2",
+            title: "Previously seen",
+            timestamp: lastLook,
+            editing_agent: null,
+            kind: "joined",
+          },
+        ]
+      : answer(command, args),
+  );
+  await openLaunch();
+  const updates = await screen.findByRole("region", {
+    name: "Since you last looked",
+  });
+  expect(
+    within(updates).getByRole("button", { name: /Joined · New member/ }),
+  ).toBeTruthy();
+  expect(
+    within(updates).queryByRole("button", { name: /Joined · Previously seen/ }),
+  ).toBeNull();
+  await chooseAction("Archive Plan");
+  await screen.findByRole("button", { name: "Reactivate" });
+  expect(
+    screen.queryByRole("region", { name: "Since you last looked" }),
+  ).toBeNull();
+});
+
+test("a completed Plan offers to wrap up and archive", async () => {
+  tickets = [{ id: "1", reference: "T-KQ1", status: "Done", plan: "e1" }];
+  await openLaunch();
+
+  const panel = within(context()).getByRole("region", {
+    name: "Ready to wrap up",
+  });
+  expect(within(panel).getByText("Every ticket is done.")).toBeTruthy();
+  expect(within(panel).queryByRole("button", { name: /^Move/ })).toBeNull();
+  expect(
+    within(panel).getByRole("button", { name: "Archive Plan" }),
+  ).toBeTruthy();
+});
+
+const outsideBlocker = {
+  reference: "T-KQ3",
+  title: "Outside blocker",
+  status: "Todo",
+  trashed: false,
+  unresolved: true,
+};
+
+test("wrap-up opens the Plan picker and moves only tickets left blocked outside the Plan", async () => {
+  plans.push(
+    { id: "e2", name: "Follow-up", archived: false, purpose: "" },
+    { id: "e3", name: "Earlier work", archived: true, purpose: "" },
+  );
+  tickets = [
+    {
+      id: "1",
+      reference: "T-KQ1",
+      status: "Todo",
+      plan: "e1",
+      availability: "Blocked",
+      prerequisites: [outsideBlocker],
+    },
+    { id: "2", reference: "T-KQ2", status: "Done", plan: "e1" },
+    { id: "3", reference: "T-KQ3", status: "Todo", plan: "e2" },
+    {
+      id: "4",
+      reference: "T-KQ4",
+      status: "Todo",
+      plan: "e1",
+      availability: "Blocked",
+      prerequisites: [outsideBlocker],
+    },
+  ];
+  await openLaunch();
+
+  const panel = within(context()).getByRole("region", {
+    name: "Ready to wrap up",
+  });
+  expect(
+    within(panel).getByText("2 tickets are left, blocked by other Plans."),
+  ).toBeTruthy();
+  fireEvent.click(
+    within(panel).getByRole("button", { name: "Move 2 tickets…" }),
+  );
+  const choices = await screen.findByRole("dialog", { name: "Plan choices" });
+  expect(within(choices).getByPlaceholderText("Search plan…")).toBeTruthy();
+  expect(within(choices).queryByText("Earlier work")).toBeNull();
+  fireEvent.click(within(choices).getByRole("option", { name: "Follow-up" }));
+
+  expect(await screen.findByText("Moved 2 tickets to Follow-up")).toBeTruthy();
+  expect(bridge.invoke).toHaveBeenCalledWith("bulk_change", {
+    references: ["T-KQ1", "T-KQ4"],
+    change: { plan_id: "e2" },
+    requestId: expect.any(String),
+  });
+  expect(within(panel).getByText("Every ticket is done.")).toBeTruthy();
+
+  fireEvent.click(screen.getByRole("button", { name: "Undo" }));
+  expect(
+    await within(panel).findByText(
+      "2 tickets are left, blocked by other Plans.",
+    ),
+  ).toBeTruthy();
+});
+
+test.each(["Retry", "Undo"] as const)(
+  "partial wrap-up reports confirmed moves and offers %s",
+  async (recovery) => {
+    plans.push({ id: "e2", name: "Follow-up", archived: false, purpose: "" });
+    const blocked = Array.from({ length: 101 }, (_, index): Fake => ({
+      id: `blocked-${index}`,
+      reference: `T-WR${index + 100}`,
+      status: "Todo",
+      plan: "e1",
+      availability: "Blocked",
+      prerequisites: [outsideBlocker],
+    }));
+    tickets = [
+      ...blocked,
+      { id: "done", reference: "T-KQ2", status: "Done", plan: "e1" },
+    ];
+
+    type Batch = {
+      references: string[];
+      change: { plan_id: string };
+      requestId: string;
+    };
+    const batches: Batch[] = [];
+    const answer = bridge.invoke.getMockImplementation()!;
+    let failed = false;
+    let lostReply: unknown;
+    bridge.invoke.mockImplementation(async (command: string, args: never) => {
+      if (command !== "bulk_change") return answer(command, args);
+      const batch = args as Batch;
+      batches.push(batch);
+      if (batch.change.plan_id === "e2" && batch.references.length === 1) {
+        if (!failed) {
+          failed = true;
+          // Exercise recovery both when the move stopped and when the reply
+          // was lost after Core committed.
+          if (recovery === "Retry") lostReply = await answer(command, args);
+          throw new Error("The last batch could not be confirmed");
+        }
+        return lostReply;
+      }
+      return answer(command, args);
+    });
+
+    await openLaunch();
+    const panel = within(context()).getByRole("region", {
+      name: "Ready to wrap up",
+    });
+    fireEvent.click(
+      within(panel).getByRole("button", { name: "Move 101 tickets…" }),
+    );
+    const choices = await screen.findByRole("dialog", { name: "Plan choices" });
+    fireEvent.click(within(choices).getByRole("option", { name: "Follow-up" }));
+
+    const partial = await screen.findByText(
+      "Confirmed 100 of 101 tickets moved. Couldn't confirm the rest.",
+    );
+    const notice = within(partial.closest('[role="alert"]')! as HTMLElement);
+    expect(notice.getByRole("button", { name: "Retry" })).toBeTruthy();
+    expect(notice.getByRole("button", { name: "Undo" })).toBeTruthy();
+    const [confirmed, unconfirmed] = batches;
+    expect(confirmed?.references).toHaveLength(100);
+    expect(unconfirmed?.references).toHaveLength(1);
+
+    fireEvent.click(notice.getByRole("button", { name: recovery }));
+    if (recovery === "Retry") {
+      await screen.findByText("Moved 101 tickets to Follow-up");
+      expect(batches[2]).toEqual(unconfirmed);
+      expect(batches).toHaveLength(3);
+      fireEvent.click(screen.getByRole("button", { name: "Undo" }));
+    }
+    await within(panel).findByText(
+      "101 tickets are left, blocked by other Plans.",
+    );
+    const restores = batches.filter((batch) => batch.change.plan_id === "e1");
+    expect(restores.flatMap((batch) => batch.references)).toEqual(
+      recovery === "Retry"
+        ? [...confirmed!.references, ...unconfirmed!.references]
+        : confirmed!.references,
+    );
+    expect(new Set(restores.map((batch) => batch.requestId)).size).toBe(
+      restores.length,
+    );
+  },
+);
+
+test("wrap-up names a single ticket left blocked outside the Plan", async () => {
+  tickets[0]!.availability = "Blocked";
+  tickets[0]!.prerequisites = [outsideBlocker];
+  await openLaunch();
+
+  const panel = within(context()).getByRole("region", {
+    name: "Ready to wrap up",
+  });
+  expect(
+    within(panel).getByText("Only T-KQ1 is left, blocked by another Plan."),
+  ).toBeTruthy();
+  expect(
+    within(panel).getByRole("button", { name: "Move T-KQ1…" }),
+  ).toBeTruthy();
+});
+
+test.each([
+  {
+    remaining: "In review",
+    status: "In review",
+    availability: "Blocked",
+    blocker: outsideBlocker,
+  },
+  {
+    remaining: "In progress",
+    status: "In progress",
+    availability: "Blocked",
+    blocker: outsideBlocker,
+  },
+  { remaining: "Ready", status: "Todo", availability: "Ready" },
+  {
+    remaining: "blocked inside the Plan",
+    status: "Todo",
+    availability: "Blocked",
+    blocker: { ...outsideBlocker, reference: "T-KQ2", status: "Canceled" },
+  },
+])(
+  "wrap-up stays hidden while a ticket is $remaining",
+  async ({ status, availability, blocker }) => {
+    tickets[0]!.status = status;
+    tickets[0]!.availability = availability;
+    if (blocker) tickets[0]!.prerequisites = [blocker];
+    if (blocker?.reference === "T-KQ2") tickets[1]!.status = "Canceled";
+    await openLaunch();
+
+    expect(
+      within(context()).queryByRole("region", { name: "Ready to wrap up" }),
+    ).toBeNull();
+  },
+);
+
+test("an empty Plan has no wrap-up panel", async () => {
+  tickets = [];
+  render(<App />);
+  fireEvent.click(await screen.findByRole("button", { name: "Launch" }));
+  const overview = await screen.findByRole("region", { name: "Launch" });
+  await waitFor(() =>
+    expect(
+      within(overview).queryByRole("status", { name: "Loading Plan" }),
+    ).toBeNull(),
+  );
+  expect(
+    within(overview).queryByRole("region", { name: "Ready to wrap up" }),
+  ).toBeNull();
+});
+
+test("wrap-up archives immediately and Undo brings the panel back", async () => {
+  tickets = [{ id: "1", reference: "T-KQ1", status: "Done", plan: "e1" }];
+  await openLaunch();
+
+  const panel = within(context()).getByRole("region", {
+    name: "Ready to wrap up",
+  });
+  fireEvent.click(within(panel).getByRole("button", { name: "Archive Plan" }));
+  expect(await screen.findByText("Archived Launch")).toBeTruthy();
+  expect(screen.getByRole("button", { name: "Reactivate" })).toBeTruthy();
+  expect(
+    within(context()).queryByRole("region", { name: "Ready to wrap up" }),
+  ).toBeNull();
+  expect(bridge.invoke).toHaveBeenCalledWith("change_plan", {
+    id: "e1",
+    name: null,
+    archived: true,
+  });
+
+  fireEvent.click(screen.getByRole("button", { name: "Undo" }));
+  expect(
+    await within(context()).findByRole("region", { name: "Ready to wrap up" }),
+  ).toBeTruthy();
+  expect(bridge.invoke).toHaveBeenCalledWith("change_plan", {
+    id: "e1",
+    name: null,
+    archived: false,
+  });
+});
+
+test("wrap-up puts a failed archive and its Retry on the status line", async () => {
+  tickets = [{ id: "1", reference: "T-KQ1", status: "Done", plan: "e1" }];
+  const answer = bridge.invoke.getMockImplementation()!;
+  let blocked = true;
+  bridge.invoke.mockImplementation(async (command: string, args: never) => {
+    if (command === "change_plan" && blocked)
+      throw new Error("The workspace is locked");
+    return answer(command, args);
+  });
+  await openLaunch();
+
+  const panel = within(context()).getByRole("region", {
+    name: "Ready to wrap up",
+  });
+  fireEvent.click(within(panel).getByRole("button", { name: "Archive Plan" }));
+  const failure = await screen.findByRole("alert");
+  expect(failure.textContent).toContain("Couldn't archive Launch.");
+  expect(
+    within(panel).getByRole("button", { name: "Archive Plan" }),
+  ).toBeTruthy();
+
+  blocked = false;
+  fireEvent.click(within(failure).getByRole("button", { name: "Retry" }));
+  expect(await screen.findByText("Archived Launch")).toBeTruthy();
+  expect(screen.getByRole("button", { name: "Undo" })).toBeTruthy();
+});
+
+test("retrying a large wrap-up move resumes with the batch that failed", async () => {
+  plans.push({ id: "e2", name: "Follow-up", archived: false, purpose: "" });
+  const references = Array.from({ length: 101 }, (_, index) => `T-B${index}`);
+  tickets = [
+    { id: "2", reference: "T-KQ2", status: "Done", plan: "e1" },
+    { id: "3", reference: "T-KQ3", status: "Todo", plan: "e2" },
+    ...references.map((reference) => ({
+      id: reference,
+      reference,
+      plan: "e1",
+      status: "Todo",
+      availability: "Blocked",
+      prerequisites: [outsideBlocker],
+    })),
+  ];
+  const answer = bridge.invoke.getMockImplementation()!;
+  const moves: { references: string[]; requestId: string }[] = [];
+  bridge.invoke.mockImplementation(async (command: string, args: never) => {
+    if (command === "bulk_change") {
+      moves.push(args);
+      if (moves.length === 2) throw new Error("The workspace is locked");
+    }
+    return answer(command, args);
+  });
+  await openLaunch();
+
+  fireEvent.click(
+    within(context()).getByRole("button", { name: "Move 101 tickets…" }),
+  );
+  const choices = await screen.findByRole("dialog", { name: "Plan choices" });
+  fireEvent.click(within(choices).getByRole("option", { name: "Follow-up" }));
+  const failure = await screen.findByRole("alert");
+  expect(failure.textContent).toContain(
+    "Confirmed 100 of 101 tickets moved. Couldn't confirm the rest.",
+  );
+  expect(
+    await within(context()).findByRole("button", { name: "Move T-B100…" }),
+  ).toBeTruthy();
+
+  fireEvent.click(within(failure).getByRole("button", { name: "Retry" }));
+  expect(
+    await screen.findByText("Moved 101 tickets to Follow-up"),
+  ).toBeTruthy();
+  expect(moves.map((move) => move.references)).toEqual([
+    references.slice(0, 100),
+    ["T-B100"],
+    ["T-B100"],
+  ]);
+  expect(moves[2]?.requestId).toBe(moves[1]?.requestId);
 });

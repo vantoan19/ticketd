@@ -280,7 +280,7 @@ function AppContent() {
     setSeenChatOpen(chat.openRequest.n);
     setViewState("chats");
   }
-  // A Chat asked for from a ticket shows the Chats screen; it opens the Chat itself.
+  // A Chat requested from another view brings the person to the Chats screen.
   const [seenChatRequest, setSeenChatRequest] = useState(0);
   if (chat.chatRequest && chat.chatRequest.n !== seenChatRequest) {
     setSeenChatRequest(chat.chatRequest.n);
@@ -514,13 +514,11 @@ function AppContent() {
     id: string;
     key: number;
   } | null>(null);
-  const [documentReturn, setDocumentReturn] = useState<typeof view | null>(
-    null,
-  );
-  // What a reader opened from a ticket returns to, named for its Back button.
-  const [documentReturnLabel, setDocumentReturnLabel] = useState<string | null>(
-    null,
-  );
+  const [documentReturn, setDocumentReturn] = useState<{
+    view: View;
+    label: string | null;
+    preferReturnCrumb: boolean;
+  } | null>(null);
   const [creating, setCreating] = useState(false);
   // The status a group's Add action asked for; the sidebar's New ticket has none.
   const [createStatus, setCreateStatus] = useState<string | undefined>();
@@ -984,13 +982,16 @@ function AppContent() {
               <DocumentNavigation.Provider
                 value={(id, backLabel) => {
                   if (view !== "documents") {
-                    setDocumentReturn(view);
-                    setDocumentReturnLabel(
-                      backLabel ??
+                    setDocumentReturn({
+                      view,
+                      label:
+                        backLabel ??
                         (view === "tickets" && workspace.selected
                           ? `Back to ${workspace.selected}`
                           : null),
-                    );
+                      // The Plan's links name their actual return destination.
+                      preferReturnCrumb: view === "tickets" && !!backLabel,
+                    });
                   }
                   setDocumentTarget({ id, key: Date.now() });
                   setView("documents");
@@ -1560,11 +1561,6 @@ function AppContent() {
                                           known={workspace.plansKnown}
                                           failure={workspace.plansFailure}
                                           retry={workspace.refreshPlans}
-                                          projects={projects}
-                                          onTicket={(reference) => {
-                                            setSelected(reference);
-                                            setView("tickets");
-                                          }}
                                           archived={view === "archived-plans"}
                                           onOpen={(id) =>
                                             scope("all", "all", id)
@@ -1594,9 +1590,12 @@ function AppContent() {
                                           listRequest={documentListRequest}
                                           target={documentTarget}
                                           backLabel={
-                                            (documentReturn &&
-                                              documentReturnLabel) ||
+                                            documentReturn?.label ??
                                             "Back to Documents"
+                                          }
+                                          preferReturnCrumb={
+                                            documentReturn?.preferReturnCrumb ??
+                                            false
                                           }
                                           capture={capture}
                                           onCapture={() => openCapture()}
@@ -1618,7 +1617,7 @@ function AppContent() {
                                           }}
                                           onDocumentClose={() => {
                                             if (documentReturn) {
-                                              setView(documentReturn);
+                                              setView(documentReturn.view);
                                               setDocumentReturn(null);
                                             }
                                           }}

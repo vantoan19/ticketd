@@ -41,19 +41,6 @@ it("a long sidebar name ellipsizes and never takes the count's room", () => {
   expect(label).toMatch(/text-overflow: ellipsis;/);
 });
 
-it("the Plan summary reserves its two rows and truncates the purpose", () => {
-  const plan = readFileSync(
-    join(__dirname, "..", "features/plans/plan.css"),
-    "utf8",
-  );
-  const context = /\n[.]plan-context [{]([^}]*)[}]/.exec(plan)?.[1] ?? "";
-  expect(context).toMatch(/height: 96px;/);
-  expect(context).not.toMatch(/flex-wrap: wrap/);
-  expect(plan).toMatch(/[.]plan-purpose-text [{][^}]*text-overflow: ellipsis;/);
-  expect(plan).toMatch(/[.]plan-progress [{][^}]*flex: none;/);
-  expect(rule(".ticket-scroll")).toMatch(/overflow-x: hidden;/);
-});
-
 it("the split switches on the content panel's settled width, not the window's", () => {
   const read = (path: string) =>
     readFileSync(join(__dirname, "..", path), "utf8");

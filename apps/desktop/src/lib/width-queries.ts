@@ -22,6 +22,7 @@
 /** Every element measured here. Keep in step with the stylesheets' `data-width` rules. */
 export const WIDTH_PANES = [
   ".plan-workspace",
+  ".plan-overview",
   ".ticket-list",
   ".ticket-detail",
   ".chat-pane",

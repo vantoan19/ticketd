@@ -54,7 +54,7 @@ import {
   quotedMessage,
   useQuotes,
 } from "@/features/chats/quotes";
-import { ticketPrompt, type TicketStart } from "@/features/chats/ticket-chat";
+import { chatStartPrompt, type ChatStart } from "@/features/chats/ticket-chat";
 import { LinkPicker, RecordChip } from "@/features/chats/LinkPicker";
 import { suggestionFill } from "@/features/chats/suggestion-fill";
 import { Suggestions } from "@/features/chats/Suggestions";
@@ -114,18 +114,18 @@ export function NewChat({
   onReturn: () => void;
   onClose: () => void;
   onCreated: (id: string) => void;
-  /** "Chat about this ticket": the ticket linked, its Project's folder, an unsent prompt. */
-  start?: TicketStart;
+  /** An unsent prompt from a ticket or Plan. */
+  start?: ChatStart;
   /** Back to the ticket New Chat was opened from. */
   crumb?: ReactNode;
 }) {
   const client = useChatClient();
   const draft = draftOf(client, NEW_CHAT);
   // A prefill nobody edited is replaced; a draft someone typed is kept, with
-  // the ticket's prompt one click away.
+  // the offered prompt one click away.
   const [prompt] = useState(() => {
     if (!start) return null;
-    const next = ticketPrompt(start.ticket);
+    const next = chatStartPrompt(start);
     const kept = !draft.canPrefill();
     if (!kept) draft.setText(next.text, next.tokens, true);
     return { ...next, kept };
@@ -148,7 +148,7 @@ export function NewChat({
     start ? start.folder : (pendingCreate?.request.folder ?? null),
   );
   const [links, setLinks] = useState<LinkedRecord[]>(() =>
-    start ? [start.ticket] : (pendingCreate?.links ?? []),
+    start && "ticket" in start ? [start.ticket] : (pendingCreate?.links ?? []),
   );
   const [failure, setFailure] = useState<ChatFailureNotice | null>(null);
   const [probe, setProbe] = useState(0);
@@ -682,7 +682,7 @@ export function NewChat({
             </div>
           </div>
           <div>
-            {prompt?.kept && start && (
+            {prompt?.kept && (
               <p className="chat-fine">
                 Draft kept ·{" "}
                 <Button
@@ -695,7 +695,7 @@ export function NewChat({
                     }
                   }}
                 >
-                  Use {start.ticket.reference} prompt
+                  Use {prompt.label} prompt
                 </Button>
               </p>
             )}

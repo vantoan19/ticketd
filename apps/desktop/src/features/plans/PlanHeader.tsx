@@ -25,7 +25,6 @@ import {
   DropdownMenuShortcut,
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
-import { FailureState } from "@/components/ui/failure-alert";
 import { IconButton } from "@/components/ui/icon-button";
 import { Input } from "@/components/ui/input";
 import { PaneHeader, PaneHeaderButton } from "@/components/ui/list-header";
@@ -34,46 +33,43 @@ import {
   PopoverAnchor,
   PopoverContent,
 } from "@/components/ui/popover";
-import { Skeleton } from "@/components/ui/skeleton";
 import { SegmentedControl } from "@/components/ui/segmented-control";
-import { Tooltip } from "@/components/ui/tooltip";
 import { ContextGraphNavigation } from "@/features/documents/navigation";
 import { noun } from "@/lib/format";
 import { PLAN_NAME_MAX_LENGTH } from "@/lib/limits";
 import { plansClient, type Plan } from "@/lib/api/plans";
 import { AddTicketsDialog } from "./AddTicketsDialog";
-import { PlanDocuments } from "./PlanDocuments";
-import { PlanRing, PlanSplitBar } from "./PlanProgress";
-import { usePlanAction, type PlanViewState } from "./usePlanView";
+import { PlanDocumentPicker } from "./PlanDocuments";
+import { PlanRing } from "./PlanProgress";
+import {
+  useArchivePlan,
+  usePlanAction,
+  type PlanViewState,
+} from "./usePlanView";
 import "./plan.css";
 
-type Mode = "list" | "board" | "dependencies";
+export type PlanMode = "overview" | "list" | "board" | "dependencies";
 
-/**
- * A Plan's header across both panes (DESIGN.md section 10): one responsive pane
- * header (ring, name and count, List/Board/Flow, "Add tickets", "…")
- * and a reserved summary (purpose, split progress and spec). Both keep their
- * height in every state: renaming, editing the
- * purpose, archived, failed. Outcomes and failures go to the status line;
- * archiving acts at once with Undo.
- */
+/** The controls shared by all four Plan views. */
 export function PlanHeader({
   plan,
   plans,
   state,
   mode,
   onModeChange,
+  onShowTicketView,
   controls,
 }: {
   plan: Plan;
   plans: Plan[];
   state: PlanViewState;
-  mode: Mode;
-  onModeChange: (mode: Mode) => void;
+  mode: PlanMode;
+  onModeChange: (mode: PlanMode) => void;
+  onShowTicketView: () => void;
   /** Filter and Display controls, reached through More. */
   controls?: ReactNode;
 }) {
-  const { view, loadError, reload, pending, adding, setAdding } = state;
+  const { view, pending, adding, setAdding } = state;
   const act = usePlanAction(state);
   const openGraph = useContext(ContextGraphNavigation);
   const [renaming, setRenaming] = useState(false);
@@ -83,6 +79,7 @@ export function PlanHeader({
   const [optionsOpen, setOptionsOpen] = useState(false);
   // The list's own copy is current after a change; the loaded view adds counts.
   const current = view?.plan.id === plan.id ? view.plan : plan;
+  const archive = useArchivePlan(current, state);
 
   const header = useRef<HTMLDivElement>(null);
   const nameInput = useRef<HTMLInputElement>(null);
@@ -148,15 +145,6 @@ export function PlanHeader({
       endRename();
     }
   }
-  const archive = () =>
-    void act(
-      () => plansClient.change(plan.id, null, true),
-      `archive ${current.name}`,
-      {
-        message: `Archived ${current.name}`,
-        undo: () => state.apply(() => plansClient.change(plan.id, null, false)),
-      },
-    );
   const reactivate = () =>
     void act(
       () => plansClient.change(plan.id, null, false),
@@ -169,17 +157,13 @@ export function PlanHeader({
   const total = view
     ? Object.values(view.counts).reduce((sum, n) => sum + n, 0)
     : null;
-  const done = view?.counts.done ?? 0;
-  const counted = view
-    ? (total ?? 0) - view.counts.canceled - view.counts.duplicate
-    : 0;
-
   const viewSwitch = (
     <SegmentedControl
       aria-label="Plan view"
       value={mode}
       onValueChange={onModeChange}
       options={[
+        { value: "overview", label: "Overview" },
         { value: "list", label: "List" },
         { value: "board", label: "Board" },
         { value: "dependencies", label: "Flow" },
@@ -192,6 +176,7 @@ export function PlanHeader({
         variant="responsive"
         title={current.name}
         titleId="tickets-heading"
+        titleLevel={mode === "overview" ? null : 1}
         icon={
           view ? (
             <PlanRing name={current.name} counts={view.counts} decorative />
@@ -295,7 +280,7 @@ export function PlanHeader({
                       <DropdownMenuShortcut>F2</DropdownMenuShortcut>
                     </DropdownMenuItem>
                     <DropdownMenuItem
-                      disabled={pending}
+                      disabled={pending || !view}
                       onSelect={() => {
                         afterMenu.current = "link";
                         setLinking(true);
@@ -312,6 +297,7 @@ export function PlanHeader({
                       <DropdownMenuItem
                         onSelect={() => {
                           afterMenu.current = "options";
+                          onShowTicketView();
                           setOptionsOpen(true);
                         }}
                       >
@@ -341,84 +327,25 @@ export function PlanHeader({
       >
         {current.archived && <Badge size="sm">Archived</Badge>}
       </PaneHeader>
-      <div
-        className="plan-context ui-plan-summary"
-        aria-label="Plan context"
-        role="group"
-        aria-busy={!view && !loadError}
-      >
-        <PlanPurpose
-          key={plan.id}
-          purpose={current.purpose}
-          readOnly={current.archived || renaming}
-          pending={pending}
-          save={(purpose) =>
-            act(
-              () => plansClient.setPurpose(plan.id, purpose),
-              "save the purpose",
-            )
-          }
+      {renaming && (
+        <span
+          id="plan-context-note"
+          className="plan-context-note"
+          data-invalid={nameError ? "" : undefined}
+          role={nameError ? "alert" : undefined}
+        >
+          {nameError || "Enter saves · Esc cancels"}
+        </span>
+      )}
+      {view && (
+        <PlanDocumentPicker
+          view={view}
+          state={state}
+          linking={linking}
+          onLinkingChange={setLinking}
+          anchor={actionsButton}
         />
-        <div className="plan-summary-row">
-          {renaming ? (
-            <span
-              id="plan-context-note"
-              className="plan-context-note"
-              data-invalid={nameError ? "" : undefined}
-              role={nameError ? "alert" : undefined}
-            >
-              {nameError || "Enter saves · Esc cancels"}
-            </span>
-          ) : loadError ? (
-            <FailureState size="inline" failure={loadError} onRetry={reload} />
-          ) : view ? (
-            <>
-              <PlanSplitBar
-                variant="summary"
-                className="plan-summary-bar"
-                name={current.name}
-                counts={view.counts}
-              />
-              <span className="plan-progress ui-plan-progress">
-                {done} of {counted} done
-              </span>
-              <span className="plan-summary-legend">
-                {[
-                  view.counts.in_review
-                    ? `${view.counts.in_review} in review`
-                    : null,
-                  view.counts.in_progress
-                    ? `${view.counts.in_progress} in progress`
-                    : null,
-                  `${view.counts.todo} to do, ${view.members.filter((member) => member.availability === "Ready").length} ready`,
-                  view.counts.canceled
-                    ? `${view.counts.canceled} canceled, not counted`
-                    : null,
-                  view.counts.duplicate
-                    ? `${view.counts.duplicate} duplicates, not counted`
-                    : null,
-                ]
-                  .filter(Boolean)
-                  .join(" · ")}
-              </span>
-              <PlanDocuments
-                view={view}
-                state={state}
-                linking={linking}
-                onLinkingChange={setLinking}
-                returnFocus={actionsButton}
-              />
-            </>
-          ) : (
-            <div
-              className="plan-summary-loading"
-              aria-label="Loading Plan progress"
-            >
-              <Skeleton className="h-2 w-full" />
-            </div>
-          )}
-        </div>
-      </div>
+      )}
       <AddTicketsDialog
         plan={current}
         plans={plans}
@@ -427,95 +354,5 @@ export function PlanHeader({
         state={state}
       />
     </div>
-  );
-}
-
-/**
- * The purpose, edited in place in the context line: click (or Enter) turns it
- * into a one-line field of the same height; Enter or leaving the field saves,
- * Escape keeps the saved text. An empty purpose reads "Add purpose".
- */
-function PlanPurpose({
-  purpose,
-  readOnly,
-  pending,
-  save,
-}: {
-  purpose: string;
-  readOnly: boolean;
-  pending: boolean;
-  save: (purpose: string) => Promise<boolean>;
-}) {
-  const [draft, setDraft] = useState<string | null>(null);
-  const button = useRef<HTMLButtonElement>(null);
-  const saving = useRef(false);
-  if (readOnly)
-    return (
-      <Tooltip content={purpose} overflowOnly>
-        <span className="plan-purpose ui-plan-purpose" tabIndex={0}>
-          {purpose || "No purpose"}
-        </span>
-      </Tooltip>
-    );
-  async function commit() {
-    // Enter then the blur it causes must save once.
-    if (draft === null || saving.current) return;
-    if (draft.trim() === purpose.trim()) return close();
-    saving.current = true;
-    const saved = await save(draft.trim());
-    saving.current = false;
-    if (saved) close();
-  }
-  function close() {
-    setDraft(null);
-    window.setTimeout(() => button.current?.focus());
-  }
-  if (draft !== null)
-    return (
-      <span className="plan-purpose-field ui-plan-purpose">
-        <Input
-          variant="inline"
-          className="h-6"
-          aria-label="Purpose"
-          placeholder="e.g. Make the board feel stable and fast"
-          autoFocus
-          value={draft}
-          readOnly={pending}
-          onChange={(event) => setDraft(event.target.value)}
-          onBlur={() => void commit()}
-          onKeyDown={(event) => {
-            if (event.key === "Enter") {
-              event.preventDefault();
-              void commit();
-            } else if (event.key === "Escape") {
-              event.stopPropagation();
-              close();
-            }
-          }}
-        />
-      </span>
-    );
-  return (
-    <Tooltip
-      content={purpose ? "Edit purpose" : "The outcome this Plan pursues"}
-    >
-      <button
-        ref={button}
-        type="button"
-        className="plan-purpose ui-plan-purpose"
-        data-empty={purpose ? undefined : ""}
-        onClick={() => setDraft(purpose)}
-      >
-        {purpose ? (
-          <>
-            <span className="sr-only">Edit purpose: </span>
-            <span className="plan-purpose-text">{purpose}</span>
-          </>
-        ) : (
-          "Add purpose"
-        )}
-        <Pencil aria-hidden="true" />
-      </button>
-    </Tooltip>
   );
 }

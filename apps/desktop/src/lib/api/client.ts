@@ -90,7 +90,7 @@ const ticketSourceSchema = lazySchema(() =>
   }),
 );
 export type TicketSource = z.infer<typeof ticketSourceSchema>;
-const ticketSchema = lazySchema(() =>
+export const ticketSchema = lazySchema(() =>
   z.object({
     id: z.string(),
     /** Core's device-local insertion order; absent in older saved outcomes. */

@@ -18,6 +18,7 @@ export function TicketDetailPane({
   onReturn,
   onSelect,
   context = "list",
+  overview,
   leaving = false,
 }: {
   workspace: TicketWorkspace;
@@ -29,6 +30,11 @@ export function TicketDetailPane({
   leaving?: boolean;
   /** Opened from the Inbox: no list position, no "outside the results". */
   context?: "list" | "inbox";
+  overview?: {
+    position: TicketWorkspace["position"];
+    onAdjacent: (direction: 1 | -1) => void;
+    loaded: boolean;
+  };
   expanded: boolean;
   inboxTarget: { reference: string; id: string; key: number } | null;
   onExpand: () => void;
@@ -55,9 +61,11 @@ export function TicketDetailPane({
       position:
         context === "inbox"
           ? (triage?.position ?? null)
-          : workspace.layout === "board"
-            ? null
-            : workspace.position,
+          : overview
+            ? overview.position
+            : workspace.layout === "board"
+              ? null
+              : workspace.position,
     },
     leaving,
   );
@@ -76,9 +84,11 @@ export function TicketDetailPane({
         outsideResults={Boolean(
           context === "list" &&
           selected &&
-          !resultLoading &&
-          !queryError &&
-          !resultTickets.some((ticket) => ticket.reference === selected),
+          (overview
+            ? overview.loaded && !position
+            : !resultLoading &&
+              !queryError &&
+              !resultTickets.some((ticket) => ticket.reference === selected)),
         )}
         expanded={expanded}
         onExpand={onExpand}
@@ -98,7 +108,7 @@ export function TicketDetailPane({
         onAdjacent={
           context === "inbox"
             ? (triage?.adjacent ?? openAdjacent)
-            : openAdjacent
+            : (overview?.onAdjacent ?? openAdjacent)
         }
         returnLabel={context === "inbox" ? "Inbox" : workspace.scopeName}
       />

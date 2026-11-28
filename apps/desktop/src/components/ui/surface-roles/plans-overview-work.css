@@ -1,0 +1,60 @@
+.plan-overview-work-rows {
+  list-style: none;
+}
+
+.plan-overview-row-open {
+  text-align: start;
+  font-size: var(--text-ui);
+  line-height: var(--text-ui-line);
+}
+
+.plan-overview-work-row:is(:hover, :focus-within) {
+  background-color: var(--hover);
+}
+
+.plan-overview-work-row[data-selected] {
+  background-color: var(--accent);
+}
+
+.plan-overview-row-title,
+.plan-overview-row-note {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.plan-overview-row-reference,
+.plan-overview-row-meta,
+.plan-overview-row-note,
+.plan-overview-row-time,
+.plan-overview-not-counted h3 {
+  color: var(--muted-foreground);
+  font-size: var(--text-meta);
+  line-height: var(--text-meta-line);
+}
+
+.plan-overview-row-reference {
+  font-family: var(--font-mono);
+}
+
+.plan-overview-row-time {
+  text-align: end;
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+
+@media (hover: hover) and (pointer: fine) {
+  .plan-overview-work-row:not(:hover, :focus-within) [data-overview-action] {
+    opacity: 0;
+    pointer-events: none;
+  }
+}
+
+:where([data-width~="max-600"])
+  :is(.plan-overview-row-title, .plan-overview-row-note) {
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+  white-space: normal;
+  overflow-wrap: anywhere;
+}

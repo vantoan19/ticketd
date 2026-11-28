@@ -6,12 +6,13 @@ import { afterEach, beforeEach, expect, test, vi } from "vitest";
 import { MotionProvider } from "@/components/ui/motion";
 import { StatusLineRegion } from "@/components/ui/status-line";
 import { TooltipProvider } from "@/components/ui/tooltip";
+import { TestReads } from "@/lib/workspace-reads/testing";
 import { applyTokens, rootTokens } from "@/test/motion-tokens";
 import { PlanFlow } from "./PlanFlow";
 import { PlanList } from "./PlanList";
 
 // Opening Plans and a Plan's Flow (DESIGN.md section 12): the header, then each
-// card fades up from a soft blur in turn (CSS, enter.css, so these tests check
+// row fades up from a soft blur in turn (CSS, enter.css, so these tests check
 // the markers it plays from); the Flow's lanes arrive left to right and its
 // lines draw once both ends are in place. Timing comes from the tokens, so
 // these tests apply the real ones.
@@ -69,15 +70,17 @@ function list() {
   return render(
     <MotionProvider>
       <TooltipProvider>
-        <StatusLineRegion>
-          <PlanList
-            plans={plans}
-            archived={false}
-            onOpen={() => {}}
-            onArchivedChange={() => {}}
-            refresh={async () => {}}
-          />
-        </StatusLineRegion>
+        <TestReads>
+          <StatusLineRegion>
+            <PlanList
+              plans={plans}
+              archived={false}
+              onOpen={() => {}}
+              onArchivedChange={() => {}}
+              refresh={async () => {}}
+            />
+          </StatusLineRegion>
+        </TestReads>
       </TooltipProvider>
     </MotionProvider>,
   );
@@ -90,34 +93,23 @@ const steps = (root: HTMLElement) => [
   ...root.querySelectorAll<HTMLElement>("[data-enter]"),
 ];
 
-test("Plans arrange their own entrance: the header, then each card, a stagger step apart", () => {
+test("Plans arrange their own entrance: the header, then each row, a stagger step apart", async () => {
   const { container } = list();
+  await screen.findByRole("list", { name: "Active Plans" });
   expect(
     container
       .querySelector('[data-slot="management-page"]')
       ?.hasAttribute("data-own-entrance"),
   ).toBe(true);
-  const [header, ...cards] = steps(container);
+  const [header, ...rows] = steps(container);
   expect(header?.querySelector('[data-slot="page-header"]')).not.toBeNull();
-  expect(cards.map((card) => card.textContent)).toEqual([
+  expect(rows.map((row) => row.textContent)).toEqual([
     expect.stringContaining("Launch"),
     expect.stringContaining("Docs"),
   ]);
   expect(
     steps(container).map((each) => each.style.getPropertyValue("--enter-step")),
   ).toEqual(["0", "1", "2"]);
-});
-
-test("each card's progress bar waits for its own card, not a flat delay", () => {
-  // The bar's delay is its card's step plus the entrance (plan-progress.css),
-  // so the bar has to sit inside the element that holds the card's step.
-  const css = readFileSync(join(__dirname, "plan-progress.css"), "utf8");
-  expect(css).toMatch(
-    /animation-delay:\s*calc\(\s*var\(--stagger\)\s*\*\s*min\(var\(--enter-step, 0\), var\(--stagger-steps\)\)\s*\+\s*var\(--dur-enter\)/,
-  );
-  const { container } = list();
-  for (const bar of container.querySelectorAll(".plan-split-bar"))
-    expect(bar.closest("[data-enter]")?.textContent).toMatch(/Launch|Docs/);
 });
 
 test("the Flow's edge-draw timing is named, not a bare multiplier", () => {
@@ -163,9 +155,9 @@ test("a Flow's lane headings and tickets arrive in turn, left to right", async (
   await screen.findByRole("button", { name: /T-A1/ });
   const arrivals = appears(container).map((each) => each.textContent);
   expect(arrivals).toEqual([
-    expect.stringContaining("Now"),
+    expect.stringContaining("Can start"),
     expect.stringContaining("T-A1"),
-    expect.stringContaining("Next"),
+    expect.stringContaining("After one step"),
     expect.stringContaining("T-B1"),
     expect.stringContaining("Later"),
     expect.stringContaining("T-C1"),

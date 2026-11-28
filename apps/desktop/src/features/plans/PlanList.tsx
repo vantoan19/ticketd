@@ -1,4 +1,11 @@
-import { useEffect, useState } from "react";
+import {
+  useCallback,
+  useEffect,
+  useLayoutEffect,
+  useMemo,
+  useState,
+  type ReactNode,
+} from "react";
 import { ArchiveRestore, Layers, Plus } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { enter } from "@/components/ui/enter";
@@ -7,7 +14,6 @@ import { EmptyState } from "@/components/ui/empty-state";
 import { ManagementPage, PageHeader } from "@/components/ui/page-header";
 import { SegmentedControl } from "@/components/ui/segmented-control";
 import { useStatusLine } from "@/components/ui/use-status-line";
-import type { Project } from "@/lib/api/client";
 import { describeFailure } from "@/lib/api/describe-failure";
 import { plansClient, type Plan } from "@/lib/api/plans";
 import { emptyCopy } from "@/lib/empty-copy";
@@ -16,9 +22,9 @@ import { Tooltip } from "@/components/ui/tooltip";
 import { NewPlanDialog } from "./NewPlanDialog";
 import { FailureAlert, FailureState } from "@/components/ui/failure-alert";
 import type { FailureDescription } from "@/lib/api/describe-failure";
-import { PlanCardSkeleton } from "./PlanCard";
-import { PlanCard } from "./PlanCard";
-import "./plan.css";
+import { PlanIndexRow, PlanIndexRowSkeleton } from "./PlanIndexRow";
+import { usePlanIndexData, type PlanIndexData } from "./plan-index-data";
+import "./plan-index.css";
 /**
  * The Plans page (DESIGN.md section 10): a management page with "New Plan"
  * in its header, Active and Archived as one segmented choice, and one row per
@@ -29,8 +35,6 @@ export function PlanList({
   known = true,
   failure = null,
   retry,
-  projects = [],
-  onTicket,
   archived,
   onOpen,
   onArchivedChange,
@@ -40,8 +44,6 @@ export function PlanList({
   known?: boolean;
   failure?: FailureDescription | null;
   retry?: () => Promise<void>;
-  projects?: Project[];
-  onTicket?: (reference: string) => void;
   archived: boolean;
   onOpen: (id: string) => void;
   /** Switches between the Active and Archived Plans. */
@@ -51,7 +53,10 @@ export function PlanList({
   const [creating, setCreating] = useState(false);
   const [pending, setPending] = useState("");
   const statusLine = useStatusLine();
-  const shown = plans.filter((item) => item.archived === archived);
+  const shown = useMemo(
+    () => plans.filter((item) => item.archived === archived),
+    [plans, archived],
+  );
   const empty = emptyCopy(archived ? "plans-archived" : "plans");
 
   useEffect(() => {
@@ -152,17 +157,7 @@ export function PlanList({
         failure ? (
           <FailureState failure={failure} onRetry={retry ?? refresh} />
         ) : (
-          <div role="status" aria-label="Loading Plans">
-            <span className="sr-only">Loading Plans…</span>
-            <ul className="plan-index-list" aria-hidden="true">
-              <li>
-                <PlanCardSkeleton />
-              </li>
-              <li>
-                <PlanCardSkeleton />
-              </li>
-            </ul>
-          </div>
+          <LoadingPlans count={2} />
         )
       ) : shown.length === 0 ? (
         // "New Plan" sits in the header beside it: no second action (P9).
@@ -172,42 +167,14 @@ export function PlanList({
           description={empty.sentence}
         />
       ) : (
-        <ul
-          className="plan-index-list"
-          aria-label={archived ? "Archived Plans" : "Active Plans"}
-        >
-          {shown.map((item, index) => (
-            <li key={item.id}>
-              <div {...enter(index + 1)}>
-                <PlanCard
-                  plan={item}
-                  projects={projects}
-                  onOpen={() => onOpen(item.id)}
-                  {...(onTicket && { onTicket })}
-                >
-                  {archived && (
-                    <span className="plan-index-action">
-                      <Tooltip
-                        content="Reactivate Plan"
-                        shortcut={shortcutLabel("list-open")}
-                      >
-                        <Button
-                          variant="outline"
-                          size="sm"
-                          disabled={pending === item.id}
-                          aria-label={`Reactivate ${item.name}`}
-                          onClick={() => void reactivate(item)}
-                        >
-                          <ArchiveRestore data-icon="inline-start" /> Reactivate
-                        </Button>
-                      </Tooltip>
-                    </span>
-                  )}
-                </PlanCard>
-              </div>
-            </li>
-          ))}
-        </ul>
+        <PlanIndexRows
+          key={archived ? "archived" : "active"}
+          plans={shown}
+          archived={archived}
+          onOpen={onOpen}
+          pending={pending}
+          reactivate={reactivate}
+        />
       )}
       <NewPlanDialog
         open={creating}
@@ -216,5 +183,181 @@ export function PlanList({
         onCreated={onOpen}
       />
     </ManagementPage>
+  );
+}
+
+function LoadingPlans({ count }: { count: number }) {
+  return (
+    <div role="status" aria-label="Loading Plans">
+      <span className="sr-only">Loading Plans…</span>
+      <ul className="plan-index-list" aria-hidden="true">
+        {Array.from({ length: count }, (_, index) => (
+          <li key={index}>
+            <PlanIndexRowSkeleton />
+          </li>
+        ))}
+      </ul>
+    </div>
+  );
+}
+
+const unknownPlanData: PlanIndexData = { counts: undefined, details: null };
+
+type RowObservation = {
+  answered: boolean;
+  review: boolean;
+  updated: number;
+  failure: FailureDescription | null;
+  retry: () => Promise<void>;
+};
+
+function PlanIndexRows({
+  plans,
+  archived,
+  onOpen,
+  pending,
+  reactivate,
+}: {
+  plans: Plan[];
+  archived: boolean;
+  onOpen: (id: string) => void;
+  pending: string;
+  reactivate: (plan: Plan) => Promise<void>;
+}) {
+  const [observations, setObservations] = useState(
+    () => new Map<string, RowObservation>(),
+  );
+  const observe = useCallback((id: string, row: RowObservation) => {
+    setObservations((previous) => new Map(previous).set(id, row));
+  }, []);
+  const [pinnedOrder, setPinnedOrder] = useState<string[]>([]);
+  const current = new Map(plans.map((plan) => [plan.id, plan] as const));
+  const pinned = new Set(pinnedOrder);
+  const arrived = plans.filter((plan) => !pinned.has(plan.id));
+  const awaitingArrivals = arrived.some(
+    (plan) => !observations.get(plan.id)?.answered,
+  );
+  if (!awaitingArrivals && arrived.length) {
+    arrived.sort((a, b) => {
+      const left = observations.get(a.id);
+      const right = observations.get(b.id);
+      return (
+        Number(right?.review ?? false) - Number(left?.review ?? false) ||
+        (right?.updated ?? 0) - (left?.updated ?? 0)
+      );
+    });
+    setPinnedOrder([...pinnedOrder, ...arrived.map((plan) => plan.id)]);
+  }
+  const loading = pinnedOrder.length === 0 && awaitingArrivals;
+  const order = [
+    ...pinnedOrder.filter((id) => current.has(id)),
+    ...arrived.map((plan) => plan.id),
+  ];
+  const failed = plans.flatMap((plan) => {
+    const row = observations.get(plan.id);
+    return row?.failure ? [{ failure: row.failure, retry: row.retry }] : [];
+  });
+  const retryable = failed.filter((row) => row.failure.action === "retry");
+  const failure = (retryable[0] ?? failed[0])?.failure;
+
+  return (
+    <>
+      {loading && <LoadingPlans count={Math.min(plans.length, 8)} />}
+      {!loading && failure && (
+        <FailureAlert
+          size="compact"
+          failure={failure}
+          onRetry={() => void Promise.all(retryable.map((row) => row.retry()))}
+        />
+      )}
+      <ul
+        className={loading ? undefined : "plan-index-list"}
+        hidden={loading}
+        role="list"
+        aria-label={archived ? "Archived Plans" : "Active Plans"}
+      >
+        {order.map((id, index) => {
+          const plan = current.get(id);
+          if (!plan) return null;
+          return (
+            <ReadPlanIndexRow
+              key={id}
+              plan={plan}
+              step={index + 1}
+              onOpen={() => onOpen(id)}
+              observe={observe}
+            >
+              {archived && (
+                <span className="plan-index-action">
+                  <Tooltip
+                    content="Reactivate Plan"
+                    shortcut={shortcutLabel("list-open")}
+                  >
+                    <Button
+                      variant="outline"
+                      size="sm"
+                      disabled={pending === id}
+                      aria-label={`Reactivate ${plan.name}`}
+                      onClick={() => void reactivate(plan)}
+                    >
+                      <ArchiveRestore data-icon="inline-start" />{" "}
+                      <span className="plan-index-action-label">
+                        Reactivate
+                      </span>
+                    </Button>
+                  </Tooltip>
+                </span>
+              )}
+            </ReadPlanIndexRow>
+          );
+        })}
+      </ul>
+    </>
+  );
+}
+
+function ReadPlanIndexRow({
+  plan,
+  step,
+  onOpen,
+  observe,
+  children,
+}: {
+  plan: Plan;
+  step: number;
+  onOpen: () => void;
+  observe: (id: string, row: RowObservation) => void;
+  children: ReactNode;
+}) {
+  const { value, failure, retry, current } = usePlanIndexData(
+    plan.id,
+    plan.archived,
+  );
+  // The page needs enough information to sort a new row and show its Retry.
+  // The row itself reads the data from the shared cache.
+  useLayoutEffect(() => {
+    observe(plan.id, {
+      answered: current || failure !== null,
+      review: (value?.counts?.in_review ?? 0) > 0,
+      updated: Date.parse(value?.details?.updated ?? "") || 0,
+      failure,
+      retry,
+    });
+  }, [current, failure, observe, plan.id, retry, value]);
+
+  return (
+    <li {...enter(step)}>
+      {value || failure ? (
+        <PlanIndexRow
+          plan={plan}
+          data={value ?? unknownPlanData}
+          onOpen={onOpen}
+        >
+          {children}
+        </PlanIndexRow>
+      ) : (
+        <PlanIndexRowSkeleton />
+      )}
+    </li>
   );
 }

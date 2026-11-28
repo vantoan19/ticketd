@@ -25,6 +25,8 @@ test("choices persist and unknown stored values fall back to defaults", () => {
     openTickets: "split",
     openDocuments: "split",
     ticketLayout: "list",
+    planListDone: {},
+    planLastLook: {},
     ticketRows: "simple",
     sidebarCollapsed: false,
     followCreated: true,

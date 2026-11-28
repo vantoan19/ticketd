@@ -7,12 +7,12 @@ import {
   screen,
   waitFor,
 } from "@testing-library/react";
-import { useState } from "react";
+import { useRef, useState } from "react";
 import { afterEach, expect, test, vi } from "vitest";
 import { StatusLineRegion } from "@/components/ui/status-line";
 import { DocumentNavigation } from "@/features/documents/navigation";
 import type { View } from "@/lib/api/plans";
-import { PlanDocuments } from "./PlanDocuments";
+import { PlanDocumentPicker, PlanDocuments } from "./PlanDocuments";
 
 class ResizeObserverStub {
   observe() {}
@@ -40,6 +40,9 @@ const plan = {
 const base: View = {
   plan,
   members: [],
+  latest_updates: {},
+  status_since: {},
+  pull_request: null,
   counts: {
     todo: 0,
     in_progress: 0,
@@ -58,30 +61,53 @@ const state = {
 };
 
 function Harness({ view, open }: { view: View; open?: () => void }) {
-  const [linking, setLinking] = useState(false);
   return (
     <DocumentNavigation.Provider value={open ?? null}>
       <StatusLineRegion>
-        <PlanDocuments
-          view={view}
-          state={state}
-          linking={linking}
-          onLinkingChange={setLinking}
-        />
+        <Picker view={view} />
+        <PlanDocuments view={view} state={state} />
       </StatusLineRegion>
     </DocumentNavigation.Provider>
   );
 }
 
-function chooseFromChip(name: string, item: string) {
-  fireEvent.pointerDown(screen.getByRole("button", { name }), {
-    button: 0,
-    ctrlKey: false,
-  });
+function Picker({
+  view,
+  openInitially = false,
+}: {
+  view: View;
+  openInitially?: boolean;
+}) {
+  const [linking, setLinking] = useState(openInitially);
+  const anchor = useRef<HTMLButtonElement>(null);
+  return (
+    <>
+      <button ref={anchor} onClick={() => setLinking(true)}>
+        Link a Document…
+      </button>
+      <PlanDocumentPicker
+        view={view}
+        state={state}
+        linking={linking}
+        onLinkingChange={setLinking}
+        anchor={anchor}
+      />
+    </>
+  );
+}
+
+function chooseDocumentAction(name: string, item: string) {
+  fireEvent.pointerDown(
+    screen.getByRole("button", { name: `Actions for ${name}` }),
+    {
+      button: 0,
+      ctrlKey: false,
+    },
+  );
   return screen.findByRole("menuitem", { name: item });
 }
 
-test("links a Document from the context line while none is linked", async () => {
+test("links a Document and offers Undo", async () => {
   bridge.invoke.mockImplementation(async (command: string) => {
     if (command === "recent_documents" || command === "search_documents")
       return [{ id: "doc", heading: "Proposal" }];
@@ -109,7 +135,7 @@ test("links a Document from the context line while none is linked", async () => 
   );
 });
 
-test("the chip's menu opens, sets the spec, and removes with Undo", async () => {
+test("a Document opens, can be set as the spec, and can be removed with Undo", async () => {
   bridge.invoke.mockResolvedValue(null);
   const open = vi.fn();
   const view = {
@@ -117,8 +143,7 @@ test("the chip's menu opens, sets the spec, and removes with Undo", async () => 
     documents: [{ id: "doc", heading: "Proposal", trashed: false }],
   };
   const rendered = render(<Harness view={view} open={open} />);
-  // A single linked Document is the chip even before it is designated.
-  fireEvent.click(await chooseFromChip("Document: Proposal", "Set as spec"));
+  fireEvent.click(await chooseDocumentAction("Proposal", "Set as spec"));
   await waitFor(() =>
     expect(bridge.invoke).toHaveBeenCalledWith(
       "set_plan_spec",
@@ -131,10 +156,10 @@ test("the chip's menu opens, sets the spec, and removes with Undo", async () => 
       open={open}
     />,
   );
-  fireEvent.click(await chooseFromChip("Spec: Proposal", "Open"));
+  fireEvent.click(screen.getByRole("button", { name: "Proposal, Spec" }));
   expect(open).toHaveBeenCalledWith("doc", "Back to Plan");
 
-  fireEvent.click(await chooseFromChip("Spec: Proposal", "Remove from Plan"));
+  fireEvent.click(await chooseDocumentAction("Proposal", "Remove from Plan"));
   expect(await screen.findByText("Removed Proposal from Plan")).toBeTruthy();
   bridge.invoke.mockClear();
   await act(async () => {
@@ -157,49 +182,54 @@ test("the picker says when every Document is already linked", async () => {
       ? [{ id: "doc", heading: "Proposal" }]
       : null,
   );
-  function Open() {
-    return (
-      <PlanDocuments
-        view={{
-          ...base,
-          documents: [{ id: "doc", heading: "Proposal", trashed: false }],
-        }}
-        state={state}
-        linking
-        onLinkingChange={() => {}}
-      />
-    );
-  }
-  render(<Open />);
+  render(
+    <Picker
+      view={{
+        ...base,
+        documents: [{ id: "doc", heading: "Proposal", trashed: false }],
+      }}
+      openInitially
+    />,
+  );
   expect(
     await screen.findByText("All Documents are already linked"),
   ).toBeTruthy();
 });
 
-test("with several Documents the first stays named and the rest sit behind +N", async () => {
-  bridge.invoke.mockResolvedValue([]);
+test("the spec shows first and Show all reveals the remaining Documents", () => {
+  const open = vi.fn();
+  const documents = Array.from({ length: 8 }, (_, index) => ({
+    id: `doc-${index}`,
+    heading: `Document ${index + 1}`,
+    trashed: false,
+  }));
   render(
     <Harness
       view={{
         ...base,
-        documents: [
-          { id: "a", heading: "First", trashed: false },
-          { id: "b", heading: "Second", trashed: false },
-        ],
+        plan: { ...plan, spec_document_id: "doc-7" },
+        documents,
       }}
+      open={open}
     />,
   );
-  expect(screen.getByRole("button", { name: "Document: First" })).toBeTruthy();
-  expect(screen.queryByRole("button", { name: /Second/ })).toBeNull();
-  // Once a Document is linked, linking another lives in the Plan's menu.
-  expect(screen.queryByRole("button", { name: "Link a Document…" })).toBeNull();
-  fireEvent.click(
-    screen.getByRole("button", { name: "1 more linked Document" }),
+  expect(screen.getAllByRole("listitem").map((row) => row.textContent)).toEqual(
+    [
+      "Document 8Spec",
+      "Document 1",
+      "Document 2",
+      "Document 3",
+      "Document 4",
+      "Document 5",
+    ],
   );
-  expect(await screen.findByRole("button", { name: "Second" })).toBeTruthy();
+  fireEvent.click(screen.getByRole("button", { name: "Show all 8" }));
+  expect(screen.getAllByRole("listitem")).toHaveLength(8);
+  fireEvent.click(screen.getByRole("button", { name: "Document 7" }));
+  expect(open).toHaveBeenCalledWith("doc-6", "Back to Plan");
 });
 
-test("an archived Plan's chip only opens the Document", () => {
+test("an archived Plan can open its Documents", () => {
   const open = vi.fn();
   render(
     <Harness
@@ -211,7 +241,7 @@ test("an archived Plan's chip only opens the Document", () => {
       open={open}
     />,
   );
-  fireEvent.click(screen.getByRole("button", { name: "Document: Proposal" }));
+  fireEvent.click(screen.getByRole("button", { name: "Proposal" }));
   expect(open).toHaveBeenCalledWith("doc", "Back to Plan");
 });
 

@@ -10,7 +10,7 @@ use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 use uuid::Uuid;
 
-use crate::{Error, Ticket, Workspace, WriteRequest, WriteResult, relationships};
+use crate::{Error, Status, Ticket, Workspace, WriteRequest, WriteResult, relationships};
 
 pub const DEFAULT_ATTACHMENT_LIMIT: u64 = 100 * 1024 * 1024;
 
@@ -96,6 +96,14 @@ pub struct Attachment {
     /// First registration, unknown for legacy records without timestamp evidence.
     #[serde(default)]
     pub added_at: Option<String>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+pub struct PlanTicketFiles {
+    pub reference: String,
+    pub title: String,
+    pub status: Status,
+    pub files: Vec<Attachment>,
 }
 
 // Kept with the synced bytes so a failed database commit never loses upload identity.
@@ -432,6 +440,52 @@ impl Workspace {
         Ok(stmt
             .query_map([ticket_id], attachment_row)?
             .collect::<Result<Vec<_>, _>>()?)
+    }
+
+    /// Direct Attachments of current, non-trashed Plan members, grouped by reference.
+    /// Each group keeps the same file order as the ticket's Files section.
+    pub fn plan_files(&self, id: &str) -> Result<Vec<PlanTicketFiles>, Error> {
+        crate::read_scope::run(&self.connection, |tx| {
+            crate::plans::get(tx, id)?;
+            let mut stmt = tx.prepare(
+                "SELECT a.id, a.display_name, a.original_filename, a.size_bytes,
+                        a.locator, a.kind, a.quarantined, a.added_at, a.purge_state,
+                        EXISTS(SELECT 1 FROM drive_upload_operations u WHERE u.attachment_id = a.id),
+                        t.reference, t.title, t.status
+                 FROM tickets t
+                 JOIN ticket_attachments ta ON ta.ticket_id = t.id
+                 JOIN attachments a ON a.id = ta.attachment_id
+                 WHERE t.plan_id = ?1 AND t.trashed = 0
+                 ORDER BY t.reference, a.rowid",
+            )?;
+            let mut rows = stmt.query([id])?;
+            let mut groups: Vec<PlanTicketFiles> = Vec::new();
+            while let Some(row) = rows.next()? {
+                let reference = row.get::<_, String>(10)?;
+                let file = attachment_row(row)?;
+                if let Some(group) = groups
+                    .last_mut()
+                    .filter(|group| group.reference == reference)
+                {
+                    group.files.push(file);
+                } else {
+                    let status = row.get::<_, String>(12)?.parse().map_err(|error| {
+                        rusqlite::Error::FromSqlConversionFailure(
+                            12,
+                            rusqlite::types::Type::Text,
+                            Box::new(error),
+                        )
+                    })?;
+                    groups.push(PlanTicketFiles {
+                        reference,
+                        title: row.get(11)?,
+                        status,
+                        files: vec![file],
+                    });
+                }
+            }
+            Ok(groups)
+        })
     }
 
     pub fn set_ticket_attachment(

@@ -1406,8 +1406,10 @@ function restoreScroll(scroll: [Element, number][]) {
 export type Browse = {
   /** In the order that place shows them. */
   files: Attachment[];
+  /** The zero-based occurrence when the same attachment appears more than once. */
+  index?: number;
   /** The file that should now be shown; the caller changes the viewer's target. */
-  onSelect: (file: Attachment) => void;
+  onSelect: (file: Attachment, index: number) => void;
 };
 
 /** Reads the neighbors' previews ahead of a step, so the next file shows at once. */
@@ -1454,6 +1456,7 @@ export function AttachmentPreview({
   notice,
   fallbackFocus,
   browse,
+  source,
 }: {
   target: PreviewTarget;
   onClose: () => void;
@@ -1462,6 +1465,8 @@ export function AttachmentPreview({
    * the target is not one of them, there is nothing to walk.
    */
   browse?: Browse;
+  /** Optional context for the current file, with an action that closes the viewer. */
+  source?: { content: ReactNode; actionLabel: string; onAction: () => void };
   onReplace?: ReferenceReplacement | undefined;
   /** Actions of the place that opened it, after a separator in "…" (Detach from ticket). */
   menuItems?: ReactNode;
@@ -1485,7 +1490,7 @@ export function AttachmentPreview({
   // It stays the opener while files are stepped through.
   const [origin] = useState(captureOrigin);
   const ids = browse?.files.map((entry) => entry.id) ?? [];
-  const at = "id" in target ? ids.indexOf(target.id) : -1;
+  const at = "id" in target ? (browse?.index ?? ids.indexOf(target.id)) : -1;
   const walking = browse !== undefined && ids.length > 1 && at >= 0;
   const [fading, setFading] = useState(false);
   const [announcement, setAnnouncement] = useState("");
@@ -1497,7 +1502,7 @@ export function AttachmentPreview({
     setAnnouncement(
       `${next.display_name}, ${fileType(next.original_filename).word}, ${at + delta + 1} of ${ids.length}`,
     );
-    browse.onSelect(next);
+    browse.onSelect(next, at + delta);
   };
   useReadAhead(
     walking ? [ids[at - 1], ids[at + 1]].filter((id) => id !== undefined) : [],
@@ -1518,7 +1523,7 @@ export function AttachmentPreview({
       (active instanceof HTMLButtonElement && active.disabled)
     )
       stage.current?.focus({ preventScroll: true });
-  }, [shownId, fading]);
+  }, [shownId, at, fading]);
   const replacementRequest = useRef<AbortController | null>(null);
   const openSettings = useContext(SettingsNavigation);
   useEffect(() => () => replacementRequest.current?.abort(), []);
@@ -1670,6 +1675,22 @@ export function AttachmentPreview({
             <div aria-live="polite" className="sr-only">
               {announcement}
             </div>
+            {source && (
+              <div className="attachment-preview-source text-sm">
+                {source.content}
+                <Button
+                  variant="ghost"
+                  size="compact"
+                  className="ms-auto"
+                  onClick={() => {
+                    source.onAction();
+                    close();
+                  }}
+                >
+                  {source.actionLabel}
+                </Button>
+              </div>
+            )}
             <div className="attachment-preview-body">
               <div className="attachment-preview-main">
                 {notice && (

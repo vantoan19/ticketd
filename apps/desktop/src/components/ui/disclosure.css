@@ -1,3 +1,20 @@
+/* Align a section label and its content at the text edge, with the chevron
+   in the leading gutter. */
+[data-slot="disclosure"][data-variant="gutter"] > .ui-disclosure-trigger {
+  position: relative;
+  min-height: 24px;
+  font-weight: 500;
+}
+
+[data-slot="disclosure"][data-variant="gutter"] > .ui-disclosure-trigger > svg {
+  position: absolute;
+  inset-inline-start: -20px;
+}
+
+[data-slot="disclosure"][data-variant="gutter"] .ui-disclosure-body {
+  padding-inline-start: 0;
+}
+
 /* Disclosure rows (DESIGN.md section 12). Opening: the rows fade in from a soft
    blur one after another, the first seven a stagger step apart and later rows
    with the seventh. Closing: they fade out with the height. These are

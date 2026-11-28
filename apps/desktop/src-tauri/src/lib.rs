@@ -1421,15 +1421,64 @@ fn show_plan(
 ) -> Result<PlanView, BridgeFailure> {
     open_workspace()
         .and_then(|w| {
-            w.show_plan_bounded(
-                &id,
-                limit.map(|value| value.min(501)),
-                offset.unwrap_or(0),
-                include_members.unwrap_or(true),
-            )
+            let offset = offset.unwrap_or(0);
+            let include_members = include_members.unwrap_or(true);
+            if limit.is_none() && offset == 0 && include_members {
+                w.show_plan_overview(&id)
+            } else {
+                w.show_plan_bounded(
+                    &id,
+                    limit.map(|value| value.min(501)),
+                    offset,
+                    include_members,
+                )
+            }
         })
         .map_err(BridgeFailure::from)
 }
+#[tauri::command(async)]
+fn plan_activity(id: String, limit: u32) -> Result<Vec<ticketd_core::PlanActivity>, BridgeFailure> {
+    open_workspace()
+        .and_then(|w| w.latest_plan_activity(&id, limit))
+        .map_err(BridgeFailure::from)
+}
+#[tauri::command(async)]
+fn plan_files(id: String) -> Result<Vec<ticketd_core::PlanTicketFiles>, BridgeFailure> {
+    open_workspace()
+        .and_then(|w| w.plan_files(&id))
+        .map_err(BridgeFailure::from)
+}
+#[tauri::command(async)]
+fn open_plan_pull_request(
+    app: tauri::AppHandle,
+    id: String,
+    url: String,
+) -> Result<(), BridgeFailure> {
+    use tauri_plugin_opener::OpenerExt;
+
+    let current = open_workspace()
+        .and_then(|workspace| workspace.plan_pull_request(&id))
+        .map_err(BridgeFailure::from)?;
+    if current.as_deref() != Some(url.as_str()) {
+        return Err(
+            "The Plan's pull request changed. Reopen the Plan to see the current link.".into(),
+        );
+    }
+    let parsed: tauri::Url = url
+        .parse()
+        .map_err(|_| BridgeFailure::from("The pull request link is invalid"))?;
+    if !matches!(parsed.scheme(), "http" | "https")
+        || !parsed.has_host()
+        || !parsed.username().is_empty()
+        || parsed.password().is_some()
+    {
+        return Err("The pull request link is invalid".into());
+    }
+    app.opener()
+        .open_url(parsed.as_str(), None::<&str>)
+        .map_err(|_| "Could not open the pull request in the browser".into())
+}
+
 #[tauri::command(async)]
 fn create_plan(name: String) -> Result<Plan, BridgeFailure> {
     open_workspace()
@@ -2611,6 +2660,9 @@ pub fn run() -> Result<(), tauri::Error> {
             export_workspace,
             list_plans,
             show_plan,
+            plan_activity,
+            plan_files,
+            open_plan_pull_request,
             set_plan_document,
             set_ticket_document,
             set_plan_spec,

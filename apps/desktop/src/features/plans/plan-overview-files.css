@@ -1,0 +1,40 @@
+.plan-overview-files-heading {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+}
+
+.plan-overview-file-groups {
+  display: grid;
+  gap: 16px;
+}
+
+.plan-overview-file-ticket {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+  position: relative;
+  min-height: 28px;
+}
+
+.plan-overview-file-ticket > svg {
+  position: absolute;
+  inset-inline-start: -20px;
+}
+
+.plan-overview-file-thumbnails {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  padding-block-start: 4px;
+}
+
+[data-overview-file-tile] {
+  width: 96px;
+  height: 72px;
+}
+
+:where([data-width~="max-600"]) .plan-overview-file-thumbnails {
+  display: none;
+}

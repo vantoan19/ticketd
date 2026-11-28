@@ -187,9 +187,26 @@ opens the graph to understand dependency chains.
   remembered locally.
 - **Ticket detail.** Description, Activities and history, links, hierarchy,
   dependencies, tags, Documents, attachments, evidence, reminder, and Chats.
-- **Plan view.** Member tickets as a List or Board, a Flow view of dependencies,
-  status counts, linked Documents, membership, and archive and reactivation.
-  Dependencies from outside the Plan appear as boundary nodes, not members.
+- **Plan view.** Opening a Plan starts on its Overview, which shows its purpose,
+  progress and linked Documents. The progress strip opens member tickets beside
+  the Overview and groups them by status above 60 counted tickets. Work appears
+  under Needs you, In progress, Ready, Blocked, Held by source and Done. Tickets
+  held by their source still count toward progress. Reviews and active work
+  show the first sentence of their latest update. A paperclip opens attached
+  files. Ready favors tickets that unblock more Plan work and offers Start in
+  Chat while Chats are on. Blocked
+  names what each ticket waits on and folds above three tickets. Done starts
+  folded and keeps Canceled and Duplicate under Not counted. Switch to List,
+  Board or the dependency Flow for other ticket views. Dependencies from outside
+  the Plan appear as boundary nodes. A Plan can be archived and reactivated.
+  List folds Done by default and remembers the choice per Plan on this computer.
+  Shared parent or project labels are hidden when every displayed row has the same one.
+- **Plans.** Two-line rows show progress, current status words, and the latest
+  member change. Plans with reviews come first, then newest changes, with the
+  order held while the page is open. An orange dot marks reviews or a Plan
+  ready to wrap up. Otherwise a blue dot marks Plans that moved since the last
+  look on this computer. The sidebar also marks Plans with reviews. Archived rows
+  show how much work is left and offer Reactivate with Undo.
 - **Editor.** Descriptions, Activities, and Documents edit in place with Markdown
   shortcuts, slash commands, checklists, fenced code, simple GFM tables, and offline
   Mermaid diagrams. Markdown stays canonical, source editing is always available, and
@@ -331,9 +348,38 @@ change`; an empty value clears it) or by a person in the reader's Edit mode. The
 
 A Plan page shows its purpose, linked Documents, progress, and tickets. Set as spec
 selects an existing Document as the Plan's principal long-form entry point without
-copying it. Creating a ticket from inside a Plan makes it a member. The Flow view
-adds and removes blockers and rejects cycles. CLI: the `plan` command group, including
-`spec`, `document`, and `context`.
+copying it. Creating a ticket from inside a Plan makes it a member. Flow shows open
+tickets in Can start, After one step, and Later. Later appears when it has tickets.
+Outside blockers are named on the tickets that wait on them. The CLI's `plan`
+command group includes `spec`, `document`, and `context`.
+
+The Plan Overview shows when a ticket entered its current status and puts
+reviews that unblock the most work first, with longer waits breaking ties.
+The head links to the newest pull request attached as evidence to one of
+the Plan's tickets, when one exists.
+
+An active Plan without tickets shows how to start on Overview, Board, and
+Flow. Add tickets opens the existing ticket picker. With Chat enabled,
+Plan it with an agent opens New Chat with an editable draft that names the
+Plan and mentions its spec Document when available. The person sends the
+message when ready.
+
+An active Plan with tickets shows Ready to wrap up on the Overview when all
+tickets are closed or the only open tickets are waiting solely on tickets
+outside the Plan. Move opens the Plan picker for the remaining tickets.
+Archive Plan acts immediately, with Undo and Retry on the status line.
+
+The Overview's Files section groups direct Attachments by member ticket. Go
+through all opens a single viewer in Overview order. Each file names the
+ticket it came from and offers Open ticket. Archived Plans show the total and
+keep Go through all available.
+
+On an active Plan's Overview, Since you last looked shows the latest change
+for up to five tickets. It includes status changes, tickets joining the Plan,
+and the first sentence of authored updates. Each entry opens its ticket.
+The last look is saved on this computer when leaving the Plan and stays fixed
+during each visit. The section appears after the first visit when there are new
+changes.
 
 ### Context graph
 

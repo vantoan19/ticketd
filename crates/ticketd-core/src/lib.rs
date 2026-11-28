@@ -52,7 +52,9 @@ pub use location::{
     workspace_health,
 };
 
+mod plan_activity;
 mod plans;
+pub use plan_activity::{PlanActivity, PlanActivityChange};
 mod retry;
 pub mod source;
 pub mod sync;
@@ -122,7 +124,7 @@ pub mod s3;
 pub use attachment_retention::{AttachmentProtection, AttachmentUsage, DraftRetention};
 pub use attachments::{
     Attachment, AttachmentKind, AttachmentOpenTarget, AttachmentPurgeState,
-    DEFAULT_ATTACHMENT_LIMIT, DISPLAY_NAME_LIMIT, MAX_BACKUP_FILE_BYTES,
+    DEFAULT_ATTACHMENT_LIMIT, DISPLAY_NAME_LIMIT, MAX_BACKUP_FILE_BYTES, PlanTicketFiles,
 };
 mod automation_advance;
 mod automation_agents;

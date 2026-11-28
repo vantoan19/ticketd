@@ -3,7 +3,7 @@ import {
   describeFailure,
   type FailureDescription,
 } from "@/lib/api/describe-failure";
-import { plansClient, type View } from "@/lib/api/plans";
+import { plansClient, type Plan, type View } from "@/lib/api/plans";
 import { useWorkspaceChange } from "@/lib/workspace-change";
 import {
   useTicketChanged,
@@ -58,11 +58,11 @@ export function usePlanView(planId: string) {
         setLoaded({ id: planId, view, error: null });
     } catch (reason: unknown) {
       if (turn === readTurn.current)
-        setLoaded({
+        setLoaded((previous) => ({
           id: planId,
-          view: null,
+          view: previous?.id === planId ? previous.view : null,
           error: describeFailure(reason, "load this Plan"),
-        });
+        }));
     }
   }, [planId]);
   // Each write report moves the shared version once, and the action reads the
@@ -187,4 +187,18 @@ export function usePlanAction({ apply }: Pick<PlanViewState, "apply">) {
     },
     [apply, statusLine],
   );
+}
+
+/** Archive immediately, with the same Undo and Retry wherever it is triggered. */
+export function useArchivePlan(plan: Plan, state: PlanViewState) {
+  const act = usePlanAction(state);
+  return () =>
+    void act(
+      () => plansClient.change(plan.id, null, true),
+      `archive ${plan.name}`,
+      {
+        message: `Archived ${plan.name}`,
+        undo: () => state.apply(() => plansClient.change(plan.id, null, false)),
+      },
+    );
 }
