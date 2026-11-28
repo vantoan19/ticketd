@@ -48,9 +48,9 @@ test("a card shrinking above the viewport in an instant keeps the document ancho
   const scrollHeight = () => otherContentHeight + cardHeight();
   const clamp = (top: number) =>
     Math.max(0, Math.min(top, scrollHeight() - viewportHeight));
-  vi.spyOn(card, "getBoundingClientRect").mockImplementation(
-    () => new DOMRect(0, cardTop - scroller.scrollTop, 0, cardHeight()),
-  );
+  Object.defineProperty(card, "getBoundingClientRect", {
+    value: () => new DOMRect(0, cardTop - scroller.scrollTop, 0, cardHeight()),
+  });
   Object.defineProperties(scroller, {
     clientHeight: { value: viewportHeight },
     scrollHeight: { get: scrollHeight },
