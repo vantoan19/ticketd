@@ -533,7 +533,7 @@ test("opens a related ticket outside the filtered list and preserves drafts when
     "value",
     "Unfinished title",
   );
-  expect(screen.getByText("Not in the current results")).toBeTruthy();
+  expect(screen.getByLabelText("Not in the current results")).toBeTruthy();
   listVisible = true;
   await act(async () => {
     await vi.advanceTimersByTimeAsync(2000);
@@ -737,7 +737,7 @@ test("changing the scope drops an open ticket that is outside it", async () => {
     await vi.advanceTimersByTimeAsync(0);
   });
   expect(screen.queryByRole("textbox", { name: "Title" })).toBeNull();
-  expect(screen.queryByText("Not in the current results")).toBeNull();
+  expect(screen.queryByLabelText("Not in the current results")).toBeNull();
 });
 
 test("new ticket dialog focuses title and restores focus on Escape", async () => {
@@ -4873,17 +4873,17 @@ test.each([
     { patch: { status: "Done" } },
   ],
   [
-    "Project: No project",
+    "Project",
     "Project",
     "Next project",
     "change_ticket",
     { patch: { project_id: "project-next" } },
   ],
-  ["Plan: No Plan", "Plan", "Next Plan", "set_plan", { plan: "plan-next" }],
-  ["Tags: No tags", "Tags", "polish", "add_tag", { tag: "polish" }],
-  ["Remind me", "Reminder", "Tomorrow", "set_reminder", {}],
+  ["Plan", "Plan", "Next Plan", "set_plan", { plan: "plan-next" }],
+  ["Tags", "Tags", "polish", "add_tag", { tag: "polish" }],
+  ["Reminder", "Reminder", "Tomorrow", "set_reminder", {}],
 ])(
-  "the %s chip opens the shared %s drill-in and mutation",
+  "the context line’s %s action opens the shared %s drill-in and mutation",
   async (chip, scope, label, command, expected) => {
     const current = bulkTicket(1, {
       reference: "T-FV1",
@@ -4916,16 +4916,15 @@ test.each([
     fireEvent.click(
       await screen.findByRole("button", { name: /Document target/ }),
     );
-    if (scope === "Reminder") {
-      expect(screen.queryByRole("button", { name: "Remind me" })).toBeNull();
+    if (scope === "Status") {
+      fireEvent.click(await screen.findByRole("button", { name: chip }));
+    } else {
       fireEvent.keyDown(
         await screen.findByRole("button", { name: "Add ticket property" }),
         { key: "ArrowDown" },
       );
-      fireEvent.click(
-        await screen.findByRole("menuitem", { name: "Reminder" }),
-      );
-    } else fireEvent.click(await screen.findByRole("button", { name: chip }));
+      fireEvent.click(await screen.findByRole("menuitem", { name: chip }));
+    }
     const choices = await screen.findByText(`${scope} of T-FV1`);
     expect(choices.closest('[data-slot="popover-content"]')).toBeTruthy();
     expect(screen.queryByRole("dialog", { name: "Go anywhere" })).toBeNull();
@@ -5056,9 +5055,11 @@ test("a property drill-in highlights its current clearing value instead of the f
   fireEvent.click(
     await screen.findByRole("button", { name: /Current project/ }),
   );
-  fireEvent.click(
-    await screen.findByRole("button", { name: "Project: No project" }),
+  fireEvent.keyDown(
+    await screen.findByRole("button", { name: "Add ticket property" }),
+    { key: "ArrowDown" },
   );
+  fireEvent.click(await screen.findByRole("menuitem", { name: "Project" }));
   const clear = await screen.findByRole("option", { name: "No project" });
   await vi.waitFor(() =>
     expect(clear.getAttribute("aria-selected")).toBe("true"),
@@ -8458,12 +8459,12 @@ test("a blocker removed and re-added through Linked is visible and can be remove
   await vi.waitFor(() =>
     expect(screen.queryByRole("button", { name: removeLabel })).toBeNull(),
   );
-  fireEvent.click(await screen.findByRole("button", { name: "Link a ticket" }));
-  const dialog = await screen.findByRole("dialog", { name: "Link a ticket" });
-  fireEvent.click(
-    within(dialog).getByRole("combobox", { name: /Relationship/ }),
+  fireEvent.keyDown(
+    await screen.findByRole("button", { name: "Add ticket property" }),
+    { key: "ArrowDown" },
   );
-  fireEvent.click(await screen.findByRole("option", { name: "is blocked by" }));
+  fireEvent.click(await screen.findByRole("menuitem", { name: "Blocked by…" }));
+  const dialog = await screen.findByRole("dialog", { name: "Link a ticket" });
   fireEvent.change(
     within(dialog).getByRole("combobox", {
       name: "Ticket",
@@ -8539,7 +8540,11 @@ test("empty Ticket evidence adds, removes, and restores through Undo", async () 
   fireEvent.click(
     await screen.findByRole("button", { name: /Evidence outcome/ }),
   );
-  fireEvent.click(await screen.findByRole("button", { name: "Evidence" }));
+  fireEvent.keyDown(
+    await screen.findByRole("button", { name: "Add ticket property" }),
+    { key: "Enter" },
+  );
+  fireEvent.click(await screen.findByRole("menuitem", { name: "Evidence…" }));
   const dialog = await screen.findByRole("dialog", { name: "Add evidence" });
   fireEvent.change(within(dialog).getByLabelText("Name"), {
     target: { value: "Review" },
@@ -8634,9 +8639,12 @@ test("empty Ticket Files adds an existing file and detaches with Undo", async ()
   );
   render(<App />);
   fireEvent.click(await screen.findByRole("button", { name: /File outcome/ }));
-  fireEvent.keyDown(await screen.findByRole("button", { name: "File" }), {
-    key: "Enter",
-  });
+  fireEvent.keyDown(
+    await screen.findByRole("button", { name: "Add ticket property" }),
+    {
+      key: "Enter",
+    },
+  );
   fireEvent.click(await screen.findByRole("menuitem", { name: "File…" }));
   fireEvent.click(await screen.findByRole("radio", { name: "Existing files" }));
   fireEvent.click(
@@ -8741,12 +8749,12 @@ test("an empty Ticket folds Activity and R opens its existing composer without l
   });
   render(<App />);
   fireEvent.click(await screen.findByRole("button", { name: /Quiet outcome/ }));
-  await screen.findByRole("button", { name: "File" });
+  await screen.findByRole("button", { name: "Add ticket property" });
   await vi.waitFor(() =>
     expect(screen.queryByRole("heading", { name: "Activity" })).toBeNull(),
   );
   expect(
-    screen.getAllByRole("group", { name: "Add to this ticket" }),
+    screen.getAllByRole("group", { name: "Ticket properties" }),
   ).toHaveLength(1);
   fireEvent.keyDown(document.body, { key: "r" });
   expect(await screen.findByRole("heading", { name: "Activity" })).toBeTruthy();
@@ -12063,7 +12071,7 @@ test("Activity R focuses the single composer and failed posting retains its requ
   });
   render(<App />);
   fireEvent.click(await screen.findByRole("button", { name: /First/ }));
-  await screen.findByRole("button", { name: "File" });
+  await screen.findByRole("button", { name: "Add ticket property" });
   fireEvent.keyDown(document.body, { key: "r" });
   const editor = await screen.findByRole("textbox", {
     name: "New update rich text",
@@ -12199,7 +12207,7 @@ test("Ticket description and update draft share one visible floating bar and fol
   });
   render(<App />);
   fireEvent.click(await screen.findByRole("button", { name: /First/ }));
-  await screen.findByRole("button", { name: "File" });
+  await screen.findByRole("button", { name: "Add ticket property" });
   fireEvent.keyDown(document.body, { key: "r" });
   const update = await screen.findByRole("textbox", {
     name: "New update rich text",
@@ -14000,8 +14008,11 @@ test("Source refresh and its persisted failure keep raw diagnostics behind Detai
     },
   });
   fireEvent.click(screen.getByRole("button", { name: /T-KQ1.*First/ }));
-  await screen.findByRole("button", { name: "Source: acme/api#98" });
-  fireEvent.click(screen.getByRole("button", { name: "Source: acme/api#98" }));
+  fireEvent.click(
+    await screen.findByRole("button", {
+      name: "Explain read-only description",
+    }),
+  );
   expect(screen.queryByText(raw)).toBeNull();
   fireEvent.click(screen.getByRole("button", { name: "Details" }));
   expect(screen.getByText(raw)).toBeTruthy();

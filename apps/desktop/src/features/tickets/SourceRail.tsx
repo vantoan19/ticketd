@@ -36,11 +36,14 @@ export function SourceRail({
   ticket,
   refresh,
   chip = false,
+  embedded = false,
 }: {
   ticket: Ticket;
   refresh: () => Promise<void>;
   /** A chip that opens the section in a popover, for a narrow pane. */
   chip?: boolean;
+  /** Only the source details, within another labeled surface. */
+  embedded?: boolean;
 }) {
   const now = useNow();
   const owner = externalSource(ticket);
@@ -213,6 +216,7 @@ export function SourceRail({
       )}
     </>
   );
+  if (embedded) return body;
   if (!chip) return <RailSection label="Source">{body}</RailSection>;
   const name = owner ? owner.display : "Local";
   return (

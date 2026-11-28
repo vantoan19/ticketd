@@ -265,8 +265,8 @@
 /* A narrow pane: Files and Relationships follow the description as sections. */
 .detail-connected {
   display: grid;
-  gap: 40px;
-  margin-top: 40px;
+  gap: 48px;
+  margin-top: 48px;
 }
 .rail-section-column {
   gap: 8px;

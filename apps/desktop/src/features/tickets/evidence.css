@@ -1,7 +1,7 @@
 @import "../../components/ui/surface-roles/tickets-evidence.css";
 
 .evidence-section {
-  margin-top: 40px;
+  margin-top: 48px;
 }
 .evidence-section [data-slot="section-header"] {
   margin-bottom: 8px;

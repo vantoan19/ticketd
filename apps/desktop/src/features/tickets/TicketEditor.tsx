@@ -124,11 +124,7 @@ type TicketEditorProps = {
   /** Keep the saved copy's geometry while a fresh read is pending. */
   readOnly?: boolean;
   onSaved: (ticket: Ticket) => void;
-  /**
-   * The ticket's stable state line. Editor controls float outside the prose.
-   */
-  stateLine?: ReactNode;
-  /** Under the state row: the folded property strip. */
+  /** The ticket context and card between the title and description. */
   children?: ReactNode;
   select?: (reference: string) => void;
   revision?: number;
@@ -149,7 +145,6 @@ function RecoveredTicketEditor({
   ticket,
   readOnly = false,
   onSaved,
-  stateLine,
   children,
   select,
   revision,
@@ -641,7 +636,7 @@ function RecoveredTicketEditor({
             : (adopted ?? "");
   return (
     <div className="ticket-editor">
-      <label className="editor-title">
+      <h1 className="editor-title" aria-label={draft.title}>
         <span className="sr-only">Title</span>
         <textarea
           ref={titleRef}
@@ -667,7 +662,7 @@ function RecoveredTicketEditor({
               event.preventDefault();
           }}
         />
-      </label>
+      </h1>
       {titleInvalid && (
         <div className="editor-title-error">
           <FieldError id={`title-error-${ticket.id}`}>
@@ -677,8 +672,7 @@ function RecoveredTicketEditor({
       )}
       {titleConflict && !bodyConflict && notice}
       {children}
-      <div className="ticket-state-row" data-floating={!stateLine || undefined}>
-        <span className="ticket-state-text">{stateLine}</span>
+      <div className="ticket-title-feedback">
         {!editingBody && state !== "failed" && (
           <span role="status" className="editor-save-state">
             {saveState}

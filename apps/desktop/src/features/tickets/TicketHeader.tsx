@@ -71,6 +71,7 @@ export function TicketHeader({
   onClose,
   onOpenGraph,
   position = null,
+  outsideResults = false,
   onAdjacent,
   projects = [],
   returnLabel = "All tickets",
@@ -83,6 +84,7 @@ export function TicketHeader({
   projects?: Project[];
   /** The selected ticket's place in the visible list, across pages. */
   position?: { index: number; total: number } | null;
+  outsideResults?: boolean;
   /** Opens the ticket before (-1) or after (1) this one in the list. */
   onAdjacent?: (direction: 1 | -1) => void;
   selected: string | null;
@@ -194,13 +196,13 @@ export function TicketHeader({
                 </IconButton>
               </span>
             )}
-            <h1
+            <h2
               id="detail-heading"
               tabIndex={-1}
               className={selected ? "detail-reference" : "sr-only"}
             >
               {selected ?? "Ticket details"}
-            </h1>
+            </h2>
             {selected && (
               <CopyButton
                 label="Copy reference"
@@ -266,11 +268,27 @@ export function TicketHeader({
                   >
                     {/* The slot is kept when the ticket has no place in the list, so
                   the icons never move between tickets. */}
-                    <span className="list-position-text">
-                      {position
-                        ? `${position.index} of ${position.total}`
-                        : "–"}
-                    </span>
+                    <Tooltip
+                      content={
+                        outsideResults
+                          ? "Not in the current results"
+                          : undefined
+                      }
+                    >
+                      <span
+                        className="list-position-text"
+                        tabIndex={outsideResults ? 0 : undefined}
+                        aria-label={
+                          outsideResults
+                            ? "Not in the current results"
+                            : undefined
+                        }
+                      >
+                        {position
+                          ? `${position.index} of ${position.total}`
+                          : "–"}
+                      </span>
+                    </Tooltip>
                     <IconButton
                       label={
                         returnLabel === "Inbox"

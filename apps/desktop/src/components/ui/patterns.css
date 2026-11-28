@@ -611,6 +611,15 @@
   white-space: nowrap;
   text-overflow: ellipsis;
 }
+.ui-record-link[data-variant="context"] {
+  color: var(--muted-foreground);
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+.ui-record-link[data-variant="context"]:hover {
+  color: var(--link-foreground);
+}
 .ui-record-link[data-gone] {
   color: var(--muted-foreground);
   text-decoration: none;

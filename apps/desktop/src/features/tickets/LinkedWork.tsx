@@ -127,6 +127,7 @@ export function LinkedWork({
   const listed = work.rows.filter(
     (row) =>
       row.kind !== "subticket" &&
+      !(document && row.kind === "parent") &&
       !(
         document &&
         row.kind === "blocked_by" &&

@@ -181,10 +181,12 @@ test("saving a property reports the write once", async () => {
   );
   await screen.findByDisplayValue("Ship the rail");
   for (let turn = 0; turn < 4; turn += 1) await act(async () => {});
-  fireEvent.click(screen.getByRole("button", { name: /Project: No project/ }));
-  const search = await screen.findByLabelText("Search projects");
-  fireEvent.change(search, { target: { value: "Project" } });
-  fireEvent.keyDown(search, { key: "Enter" });
+  fireEvent.keyDown(
+    screen.getByRole("button", { name: "Add ticket property" }),
+    { key: "Enter" },
+  );
+  fireEvent.click(await screen.findByRole("menuitem", { name: "Project" }));
+  fireEvent.click(await screen.findByRole("option", { name: "Project" }));
   await waitFor(() =>
     expect(bridge.invoke).toHaveBeenCalledWith(
       "change_ticket",

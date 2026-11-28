@@ -1,8 +1,5 @@
 /* Shared visual roles. Loaded with the owning layout to preserve lazy CSS order. */
 
-.ticket-state-row .ticket-state-line {
-  white-space: nowrap;
-}
 .editor-save-state {
   color: var(--muted-foreground);
   font-size: var(--text-caption);
