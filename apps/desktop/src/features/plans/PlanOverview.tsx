@@ -6,10 +6,12 @@ import { Input } from "@/components/ui/input";
 import { RecordLink } from "@/components/ui/record-link";
 import { Skeleton } from "@/components/ui/skeleton";
 import { StatusLineRegion } from "@/components/ui/status-line";
+import { Tooltip } from "@/components/ui/tooltip";
 import { DocumentNavigation } from "@/features/documents/navigation";
 import { plansClient, type Plan, type View } from "@/lib/api/plans";
 import { compactAgo, formatDateTime } from "@/lib/format";
 import { PlanDocuments } from "./PlanDocuments";
+import { PlanOverviewStrip } from "./PlanOverviewStrip";
 import { planWorkModel } from "./plan-work-model";
 import { usePlanAction, type PlanViewState } from "./usePlanView";
 import "./plan-overview.css";
@@ -22,6 +24,8 @@ export function PlanOverview({
   plan,
   state,
   work,
+  selected,
+  onOpen,
   paneRef,
 }: {
   plan: Plan;
@@ -74,7 +78,11 @@ export function PlanOverview({
                 {view.members.length > 0 && (
                   <div className="plan-overview-progress">
                     <PlanOverviewProgress view={view} work={work} />
-                    {/* PlanOverviewStrip */}
+                    <PlanOverviewStrip
+                      strip={work.strip}
+                      selected={selected}
+                      onOpen={onOpen}
+                    />
                   </div>
                 )}
                 {/* PlanOverviewWrapUp */}
@@ -90,6 +98,9 @@ export function PlanOverview({
                 aria-label="Loading Plan"
               >
                 <Skeleton className="h-4 w-32" />
+                <div className="plan-overview-strip" aria-hidden="true">
+                  <Skeleton className="h-2 w-full" />
+                </div>
                 <div className="plan-overview-loading-rows">
                   <Skeleton className="h-4 w-4/5" />
                   <Skeleton className="h-4 w-3/5" />
@@ -161,12 +172,11 @@ function PlanOverviewProgress({
           ),
       )}
       {newest && moved && (
-        <time
-          dateTime={newest.timestamp}
-          title={formatDateTime(newest.timestamp)}
-        >
-          {moved}
-        </time>
+        <Tooltip content={formatDateTime(newest.timestamp)}>
+          <time dateTime={newest.timestamp} tabIndex={0}>
+            {moved}
+          </time>
+        </Tooltip>
       )}
     </div>
   );

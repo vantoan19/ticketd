@@ -1,5 +1,6 @@
 // @vitest-environment jsdom
 import {
+  act,
   cleanup,
   fireEvent,
   render,
@@ -7,9 +8,11 @@ import {
   waitFor,
   within,
 } from "@testing-library/react";
+import userEvent from "@testing-library/user-event";
 import { afterEach, beforeEach, expect, test, vi } from "vitest";
 import { App } from "@/app/App";
 import { bridgeDefault } from "@/test/bridge-defaults";
+import type { Ticket } from "@/lib/api/client";
 
 class ResizeObserverStub {
   observe() {}
@@ -39,7 +42,12 @@ vi.mock("@tauri-apps/api/core", () => ({
   },
 }));
 
-type Fake = { id: string; reference: string; status: string; plan: string };
+type Fake = {
+  id: string;
+  reference: string;
+  status: string;
+  plan: string;
+} & Partial<Pick<Ticket, "availability" | "prerequisites" | "updated_at">>;
 let plans: { id: string; name: string; archived: boolean; purpose: string }[] =
   [];
 let tickets: Fake[] = [];
@@ -56,8 +64,9 @@ const ticket = (item: Fake) => ({
   tags: [] as string[],
   project_id: null,
   plan_id: item.plan || null,
-  availability: null,
-  prerequisites: [],
+  availability: item.availability ?? null,
+  prerequisites: item.prerequisites ?? [],
+  updated_at: item.updated_at,
   parent: null,
   children: [],
 });
@@ -97,6 +106,12 @@ beforeEach(() => {
             duplicate: count("Duplicate"),
           },
         };
+      }
+      case "show_ticket": {
+        const member = tickets.find(
+          (item) => item.reference === input?.reference,
+        );
+        return member && ticket(member);
       }
       case "show_document":
         return {
@@ -227,6 +242,166 @@ test("progress leaves out Canceled and Duplicate tickets", async () => {
   ];
   await openLaunch();
   expect(await screen.findByText("1 of 1 done")).toBeTruthy();
+});
+
+test("the progress strip names counted tickets in progress order", async () => {
+  const blocked = {
+    availability: "Blocked",
+    prerequisites: [
+      {
+        reference: "T-KQ8",
+        title: "Review the release",
+        status: "In review",
+        trashed: false,
+        unresolved: true,
+      },
+    ],
+  };
+  const members = [
+    { id: "1", status: "Todo", availability: "Ready" },
+    { id: "2", status: "Done", updated_at: "2026-11-28T03:00:00Z" },
+    { id: "3", status: "Todo", ...blocked },
+    { id: "4", status: "Canceled" },
+    { id: "5", status: "Done", updated_at: "2026-11-28T02:00:00Z" },
+    { id: "6", status: "In progress" },
+    { id: "7", status: "In review" },
+    { id: "8", status: "In review" },
+    { id: "9", status: "Duplicate" },
+  ];
+  tickets = members.map((item) => ({
+    ...item,
+    reference: `T-KQ${item.id}`,
+    plan: "e1",
+  }));
+  await openLaunch();
+  const strip = within(context()).getByRole("toolbar", {
+    name: "Plan progress",
+  });
+  const segments = within(strip).getAllByRole("button");
+  const ordered = [
+    "T-KQ5 Title of T-KQ5 · Done",
+    "T-KQ2 Title of T-KQ2 · Done",
+    "T-KQ8 Title of T-KQ8 · In review",
+    "T-KQ7 Title of T-KQ7 · In review",
+    "T-KQ6 Title of T-KQ6 · In progress",
+    "T-KQ1 Title of T-KQ1 · Ready",
+    "T-KQ3 Title of T-KQ3 · Blocked",
+  ];
+  expect(segments).toEqual(
+    ordered.map((name) => within(strip).getByRole("button", { name })),
+  );
+});
+
+test("the progress strip has one Tab stop and opens the focused ticket beside it", async () => {
+  tickets = [
+    { id: "1", reference: "T-KQ1", status: "Done", plan: "e1" },
+    { id: "2", reference: "T-KQ2", status: "In review", plan: "e1" },
+    {
+      id: "3",
+      reference: "T-KQ3",
+      status: "Todo",
+      availability: "Ready",
+      plan: "e1",
+    },
+  ];
+  const user = userEvent.setup();
+  await openLaunch();
+  const strip = within(context()).getByRole("toolbar", {
+    name: "Plan progress",
+  });
+  const done = within(strip).getByRole("button", { name: /T-KQ1.*Done/ });
+  const review = within(strip).getByRole("button", {
+    name: /T-KQ2.*In review/,
+  });
+  const ready = within(strip).getByRole("button", { name: /T-KQ3.*Ready/ });
+  const purpose = within(context()).getByRole("button", {
+    name: "Add purpose",
+  });
+
+  act(() => purpose.focus());
+  await user.tab();
+  expect(document.activeElement).toBe(done);
+  await user.tab();
+  expect(strip.contains(document.activeElement)).toBe(false);
+
+  await user.tab({ shift: true });
+  expect(document.activeElement).toBe(done);
+  await user.keyboard("{ArrowRight}");
+  expect(document.activeElement).toBe(review);
+  expect((await screen.findByRole("tooltip")).textContent).toBe(
+    "T-KQ2 Title of T-KQ2 · In review",
+  );
+  await user.keyboard("{End}");
+  expect(document.activeElement).toBe(ready);
+  await user.keyboard("{ArrowLeft}");
+  expect(document.activeElement).toBe(review);
+  await user.keyboard("{Home}");
+  expect(document.activeElement).toBe(done);
+  await user.keyboard("{End}");
+  await user.tab({ shift: true });
+  expect(document.activeElement).toBe(purpose);
+  await user.tab();
+  expect(document.activeElement).toBe(done);
+  await user.keyboard("{ArrowRight}{Enter}");
+
+  const detail = screen.getByRole("region", { name: "T-KQ2" });
+  expect(await within(detail).findByText("Title of T-KQ2")).toBeTruthy();
+  expect(calls).toContainEqual(["show_ticket", { reference: "T-KQ2" }]);
+  expect(review.getAttribute("aria-current")).toBe("true");
+  expect(done.hasAttribute("aria-current")).toBe(false);
+
+  await user.click(
+    screen.getByRole("button", { name: "Close ticket details" }),
+  );
+  expect(document.activeElement).toBe(review);
+  expect(review.hasAttribute("aria-current")).toBe(false);
+  await user.click(done);
+  expect(calls).toContainEqual(["show_ticket", { reference: "T-KQ1" }]);
+  expect(done.getAttribute("aria-current")).toBe("true");
+});
+
+test("above 60 tickets the progress strip shows counted status runs", async () => {
+  tickets = Array.from({ length: 54 }, (_unused, index) => ({
+    id: `done-${index}`,
+    reference: `T-KQ${index + 10}`,
+    status: "Done",
+    plan: "e1",
+  }));
+  tickets.push(
+    { id: "1", reference: "T-KQ1", status: "In review", plan: "e1" },
+    { id: "2", reference: "T-KQ2", status: "In review", plan: "e1" },
+    { id: "3", reference: "T-KQ3", status: "In review", plan: "e1" },
+    { id: "4", reference: "T-KQ4", status: "In review", plan: "e1" },
+    {
+      id: "5",
+      reference: "T-KQ5",
+      status: "Todo",
+      availability: "Ready",
+      plan: "e1",
+    },
+    {
+      id: "6",
+      reference: "T-KQ6",
+      status: "Todo",
+      availability: "Ready",
+      plan: "e1",
+    },
+    {
+      id: "7",
+      reference: "T-KQ7",
+      status: "Todo",
+      availability: "Blocked",
+      plan: "e1",
+    },
+  );
+  await openLaunch();
+  const strip = within(context()).getByRole("group", { name: "Plan progress" });
+  expect(within(strip).getAllByRole("img")).toEqual(
+    ["54 done", "4 in review", "2 ready", "1 blocked"].map((name) =>
+      within(strip).getByRole("img", { name }),
+    ),
+  );
+  expect(within(strip).queryByRole("button")).toBeNull();
 });
 
 test("an empty name says so in the context line and changes nothing", async () => {
