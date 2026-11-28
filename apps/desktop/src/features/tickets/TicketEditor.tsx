@@ -355,7 +355,11 @@ function RecoveredTicketEditor({
     : null;
   const mark =
     shown && span && mentionStillAt(rendered, shown.mention.passage, span)
-      ? { ...span, describedBy: `mention-note-${ticket.id}` }
+      ? {
+          ...span,
+          key: shown.mention.key,
+          describedBy: `mention-note-${ticket.id}`,
+        }
       : undefined;
   // Scroll to the marked passage and focus it, once per mention. React renders the
   // mark; this only reads the DOM and writes the status text it points to. When no

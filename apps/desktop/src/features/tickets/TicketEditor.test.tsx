@@ -399,6 +399,37 @@ test("a description mention is scrolled to, highlighted and focused in place, th
   ).toBe(false);
 });
 
+test("a mention opens its fold again only on a fresh follow after manual collapse", () => {
+  const line = "Blocked on T-KQ1 until Friday.";
+  const body = [
+    "Introduction. ".repeat(88),
+    "## Blockers",
+    line,
+    "Details. ".repeat(190),
+  ].join("\n\n");
+  const { ticket, view } = renderMention(body, line);
+  const fold = screen.getByRole("button", {
+    name: "1 more section: Blockers",
+  });
+  expect(fold.getAttribute("aria-expanded")).toBe("true");
+
+  fireEvent.click(fold);
+  expect(fold.getAttribute("aria-expanded")).toBe("false");
+
+  view.rerender(
+    <TicketEditor ticket={ticket} onSaved={vi.fn()} mention={at(body, line)} />,
+  );
+  expect(fold.getAttribute("aria-expanded")).toBe("false");
+  view.rerender(
+    <TicketEditor
+      ticket={ticket}
+      onSaved={vi.fn()}
+      mention={at(body, line, 0, 2)}
+    />,
+  );
+  expect(fold.getAttribute("aria-expanded")).toBe("true");
+});
+
 test("a line with a link marks its own paragraph, not an earlier mention", () => {
   renderMention(
     "Intro: T-KQ1 is the parent.\n\nBlocked on T-KQ1 with [the spec](https://example.com/spec).",

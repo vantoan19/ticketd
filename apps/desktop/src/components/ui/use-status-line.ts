@@ -31,8 +31,8 @@ export type StatusLineMessage = {
 };
 
 export type StatusLine = {
-  /** Shows a message in this pane, replacing whatever was there. */
-  show: (message: StatusLineMessage) => void;
+  /** Shows a message in this pane and returns a way to dismiss only that message. */
+  show: (message: StatusLineMessage) => (() => void) | void;
   dismiss: () => void;
 };
 

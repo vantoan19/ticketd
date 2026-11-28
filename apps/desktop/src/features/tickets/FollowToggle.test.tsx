@@ -11,6 +11,7 @@ import {
 import { afterEach, expect, test, vi } from "vitest";
 import {
   StatusLineContext,
+  useStatusLine,
   type StatusLineMessage,
 } from "@/components/ui/use-status-line";
 import { StatusLineRegion } from "@/components/ui/status-line";
@@ -351,4 +352,64 @@ test("a status line about one Ticket's failure goes when the header moves to ano
   rerender(view("T-B"));
   await waitFor(() => expect(calls("is_following", "T-B")).toHaveLength(1));
   expect(screen.queryByRole("alert")).toBeNull();
+});
+
+function OtherOutcome() {
+  const line = useStatusLine();
+  return (
+    <button
+      type="button"
+      onClick={() => line.show({ message: "Copied ticket link" })}
+    >
+      Copy ticket link
+    </button>
+  );
+}
+
+test.each([
+  { result: "clears its own status line", replaced: false },
+  { result: "keeps a newer outcome visible", replaced: true },
+])("a successful direct Follow retry $result", async ({ replaced }) => {
+  const refresh = deferred<boolean>();
+  let reads = 0;
+  let writes = 0;
+  bridge.invoke.mockImplementation(
+    async (command: string, args?: { reference?: string }) => {
+      if (command === "show_ticket") return ticket(args!.reference!);
+      if (command === "is_following")
+        return ++reads === 1 ? false : refresh.promise;
+      if (command === "set_following") {
+        writes += 1;
+        if (writes === 1) throw new Error("disk I/O error");
+        return null;
+      }
+      throw new Error(`Unexpected ${command}`);
+    },
+  );
+  render(
+    <TestReads>
+      <StatusLineRegion>
+        <FollowToggle reference="T-A" variant="strip" />
+        <OtherOutcome />
+      </StatusLineRegion>
+    </TestReads>,
+  );
+
+  await waitFor(() => expect(calls("is_following")).toHaveLength(1));
+  fireEvent.click(toggle());
+  expect((await screen.findByRole("alert")).textContent).toContain("T-A");
+  if (replaced)
+    fireEvent.click(screen.getByRole("button", { name: "Copy ticket link" }));
+  fireEvent.click(toggle());
+
+  await waitFor(() =>
+    expect(toggle().getAttribute("aria-pressed")).toBe("true"),
+  );
+  await waitFor(() => expect(reads).toBe(2));
+  await waitFor(() => expect(screen.queryByRole("alert")).toBeNull());
+  if (replaced)
+    expect(screen.getByRole("status").textContent).toContain(
+      "Copied ticket link",
+    );
+  await act(async () => refresh.resolve(true));
 });
