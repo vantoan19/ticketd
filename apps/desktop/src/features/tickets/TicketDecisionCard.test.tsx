@@ -372,3 +372,50 @@ test("the write refuses when the ticket was moved elsewhere first", async () => 
   ).toBeTruthy();
   expect(screen.queryByText("Moved T-KQ1 to Done")).toBeNull();
 });
+
+test("a GitHub-owned review opens at its source", async () => {
+  const url = "https://github.com/acme/api/issues/98";
+  ticket = {
+    ...review,
+    source: {
+      provider: "github",
+      provider_name: "GitHub",
+      place: "acme/api",
+      number: "#98",
+      status_choices: ["Todo", "In progress", "In review"],
+      id: "42",
+      locator: "acme/api#98",
+      display: "acme/api#98",
+      url,
+      origin: "imported",
+      ownership: "external",
+      state: { category: "open", name: "Open" },
+      closure_unrecognized: false,
+      last_refreshed_at: null,
+      last_attempt_at: null,
+      last_error: null,
+      content_locked: true,
+      status_locked: false,
+      duplicate_target: null,
+    },
+  };
+  vi.stubGlobal(
+    "ResizeObserver",
+    class {
+      observe() {}
+      disconnect() {}
+    },
+  );
+  try {
+    open();
+    const card = within(
+      await screen.findByRole("region", { name: "Ready for review" }),
+    );
+    expect(
+      card.getByRole("link", { name: "Open on GitHub" }).getAttribute("href"),
+    ).toBe(url);
+    expect(card.queryByRole("button", { name: "Move to Done" })).toBeNull();
+  } finally {
+    vi.unstubAllGlobals();
+  }
+});

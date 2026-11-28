@@ -207,7 +207,11 @@ impl Workspace {
             } else {
                 Vec::new()
             };
-            Ok(EvidencePage { items, total, proof })
+            Ok(EvidencePage {
+                items,
+                total,
+                proof,
+            })
         })
     }
 }
