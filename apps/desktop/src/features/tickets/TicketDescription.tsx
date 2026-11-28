@@ -22,10 +22,16 @@ import {
 import { revealInDetail } from "./detail-scroll";
 import "./description.css";
 
+type MarkdownProps = ComponentProps<typeof MarkdownDocument>;
 type Props = Pick<
-  ComponentProps<typeof MarkdownDocument>,
-  "source" | "select" | "revision" | "onChange" | "mention"
-> & { ticketId: string; peek?: boolean };
+  MarkdownProps,
+  "source" | "select" | "revision" | "onChange"
+> & {
+  ticketId: string;
+  peek?: boolean;
+  mention?:
+    (NonNullable<MarkdownProps["mention"]> & { key: number }) | undefined;
+};
 
 function foldKey(ticketId: string) {
   return `ticketd.description-folds.${ticketId}`;
@@ -100,18 +106,27 @@ export function TicketDescription({ ticketId, peek, ...markdown }: Props) {
 }
 
 type DescriptionSearch = {
+  source: string;
   query: string;
   index: number;
   matches: DescriptionMatch[];
   revealed: string[];
 };
 
-const emptySearch: DescriptionSearch = {
-  query: "",
-  index: 0,
-  matches: [],
-  revealed: [],
-};
+function descriptionSearch(
+  source: string,
+  query: string,
+  matches: DescriptionMatch[] = [],
+  index = 0,
+): DescriptionSearch {
+  return {
+    source,
+    query,
+    index,
+    matches,
+    revealed: matches.flatMap(({ fold }) => (fold === undefined ? [] : [fold])),
+  };
+}
 
 function TicketDescriptionReading({ ticketId, peek, ...markdown }: Props) {
   const { source, mention } = markdown;
@@ -127,6 +142,7 @@ function TicketDescriptionReading({ ticketId, peek, ...markdown }: Props) {
     null,
   );
   const [openedForJump, setOpenedForJump] = useState<string>();
+  const [collapsedMentionKey, setCollapsedMentionKey] = useState<number>();
   const root = useRef<HTMLDivElement>(null);
   const input = useRef<HTMLInputElement>(null);
   const priorFocus = useRef<HTMLElement | null>(null);
@@ -160,7 +176,7 @@ function TicketDescriptionReading({ ticketId, peek, ...markdown }: Props) {
         document.activeElement instanceof HTMLElement
           ? document.activeElement
           : null;
-      setSearch(emptySearch);
+      setSearch(descriptionSearch(source, ""));
     }
 
     function reveal(event: Event) {
@@ -183,7 +199,7 @@ function TicketDescriptionReading({ ticketId, peek, ...markdown }: Props) {
       window.removeEventListener("keydown", find);
       window.removeEventListener(TICKET_DESCRIPTION_REVEAL, reveal);
     };
-  }, [acceptance, folds, ticketId]);
+  }, [acceptance, folds, source, ticketId]);
 
   useLayoutEffect(() => {
     if (!focusingSearch || !input.current) return;
@@ -203,7 +219,14 @@ function TicketDescriptionReading({ ticketId, peek, ...markdown }: Props) {
     }
   }, [jump]);
 
-  const currentMatch = search?.matches[search.index];
+  useLayoutEffect(() => {
+    if (!search || search.source === source || !root.current) return;
+    const matches = findDescription(root.current, search.query);
+    setSearch(descriptionSearch(source, search.query, matches));
+  }, [search, source]);
+
+  const currentMatch =
+    search?.source === source ? search.matches[search.index] : undefined;
   useLayoutEffect(() => {
     if (!currentMatch) return;
     const { block, range } = currentMatch;
@@ -228,14 +251,7 @@ function TicketDescriptionReading({ ticketId, peek, ...markdown }: Props) {
       direction && search && matches.length
         ? (search.index + direction + matches.length) % matches.length
         : 0;
-    setSearch({
-      query,
-      index,
-      matches,
-      revealed: matches.flatMap(({ fold }) =>
-        fold === undefined ? [] : [fold],
-      ),
-    });
+    setSearch(descriptionSearch(source, query, matches, index));
   }
 
   function closeSearch() {
@@ -250,7 +266,7 @@ function TicketDescriptionReading({ ticketId, peek, ...markdown }: Props) {
     focus?.focus({ preventScroll: true });
   }
 
-  function toggle(id: string, open: boolean) {
+  function toggle(id: string, open: boolean, mentionKey: number | undefined) {
     const next = open
       ? opened.filter((entry) => entry !== id)
       : [...opened, id];
@@ -260,6 +276,7 @@ function TicketDescriptionReading({ ticketId, peek, ...markdown }: Props) {
         revealed: search.revealed.filter((entry) => entry !== id),
       });
     if (openedForJump === id) setOpenedForJump(undefined);
+    if (open && mentionKey !== undefined) setCollapsedMentionKey(mentionKey);
     setOpened(next);
     if (peek) return;
     try {
@@ -344,19 +361,21 @@ function TicketDescriptionReading({ ticketId, peek, ...markdown }: Props) {
         renderRange={(start, children) => {
           const fold = folds.find((fold) => fold.start === start);
           if (!fold) return children;
+          const mentionKey =
+            mention && mention.start < fold.end && mention.end > fold.start
+              ? mention.key
+              : undefined;
           const open =
             opened.includes(fold.id) ||
             search?.revealed.includes(fold.id) ||
             openedForJump === fold.id ||
-            Boolean(
-              mention && mention.start < fold.end && mention.end > fold.start,
-            );
+            (mentionKey !== undefined && mentionKey !== collapsedMentionKey);
           return (
             <Fold
               foldId={fold.id}
               label={fold.label}
               open={open}
-              onToggle={() => toggle(fold.id, open)}
+              onToggle={() => toggle(fold.id, open, mentionKey)}
             >
               {children}
             </Fold>

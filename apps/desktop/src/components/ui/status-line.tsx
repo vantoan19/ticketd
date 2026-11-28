@@ -95,10 +95,6 @@ export function StatusLineRegion({
   const [clear, setClear] = useState<HTMLElement | null>(null);
   const counter = useRef(0);
   const anchor = useRef<HTMLSpanElement>(null);
-  const show = useCallback((message: StatusLineMessage) => {
-    counter.current += 1;
-    setShown({ ...message, id: counter.current });
-  }, []);
   const dismiss = useCallback(() => setShown(null), []);
   // A line closes only itself: an action that posts its own outcome (Retry
   // that succeeds with "… · Undo") must not be closed by the line it replaced.
@@ -106,6 +102,14 @@ export function StatusLineRegion({
     (id: number) =>
       setShown((current) => (current?.id === id ? null : current)),
     [],
+  );
+  const show = useCallback(
+    (message: StatusLineMessage) => {
+      const id = ++counter.current;
+      setShown({ ...message, id });
+      return () => dismissLine(id);
+    },
+    [dismissLine],
   );
   const region = useMemo(
     () => ({ show, dismiss, setInset, setAbove: setClear }),

@@ -7,6 +7,7 @@ import {
   screen,
 } from "@testing-library/react";
 import { afterEach, expect, test, vi } from "vitest";
+import { TicketDescription } from "./TicketDescription";
 import { TicketDetails } from "./TicketDetails";
 import type { Ticket } from "@/lib/api/client";
 import { TestReads } from "@/lib/workspace-reads/testing";
@@ -178,6 +179,35 @@ test("find opens every matching fold and editing shows the full description", as
       "Before acceptance contains the search phrase.",
     );
     expect(screen.queryByRole("button", { name: /more section/ })).toBeNull();
+  } finally {
+    platform.mockRestore();
+  }
+});
+
+test("find keeps the query and updates its count and folds when the description changes", () => {
+  const platform = vi
+    .spyOn(window.navigator, "platform", "get")
+    .mockReturnValue("MacIntel");
+  try {
+    const { rerender } = render(
+      <TicketDescription ticketId="refresh" source={longSpec} />,
+    );
+    fireEvent.keyDown(window, { key: "f", metaKey: true });
+    const search = screen.getByRole<HTMLInputElement>("searchbox", {
+      name: "Find in description",
+    });
+    fireEvent.change(search, { target: { value: "search phrase" } });
+    expect(screen.getByRole("status").textContent).toBe("1 of 2");
+
+    rerender(
+      <TicketDescription
+        ticketId="refresh"
+        source={longSpec.replaceAll("search phrase", "updated text")}
+      />,
+    );
+    expect(search.value).toBe("search phrase");
+    expect(screen.getByRole("status").textContent).toBe("No matches");
+    expect(screen.queryByRole("heading", { name: "User Stories" })).toBeNull();
   } finally {
     platform.mockRestore();
   }

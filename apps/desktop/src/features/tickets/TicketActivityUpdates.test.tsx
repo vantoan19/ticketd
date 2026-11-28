@@ -9,7 +9,7 @@ import {
   within,
 } from "@testing-library/react";
 import { afterEach, beforeEach, expect, test, vi } from "vitest";
-import type { Ticket } from "@/lib/api/client";
+import type { ActivityFeedEntry, Ticket } from "@/lib/api/client";
 import { TestReads } from "@/lib/workspace-reads/testing";
 import { fakeChangeSignal } from "@/lib/workspace-reads/fake-signal";
 import type { ChangeSignal } from "@/lib/workspace-reads";
@@ -60,6 +60,7 @@ function update(id: string, brief: string, day: number, author: string | null) {
 
 let record: Ticket;
 let updates: ReturnType<typeof update>[];
+let automatic: Extract<ActivityFeedEntry, { type: "automatic" }>[];
 let workspace: string;
 
 beforeEach(() => {
@@ -67,12 +68,33 @@ beforeEach(() => {
   workspace = "my-workspace";
   record = ticket;
   updates = [update("old", "Previous report", 21, "codex")];
+  automatic = [];
   bridge.invoke.mockImplementation(
-    async (command: string, args?: { reference?: string }) => {
+    async (
+      command: string,
+      args?: {
+        reference?: string;
+        updatesOnly?: boolean;
+        offset?: number;
+        id?: string;
+      },
+    ) => {
       const selected = args?.reference === ticket.reference;
       if (command === "show_ticket") return selected ? record : other;
       if (command === "attachment_workspace_id") return workspace;
-      if (command === "activity_feed") return selected ? updates : [];
+      if (command === "activity_feed") {
+        if (!selected) return [];
+        const offset = args?.offset ?? 0;
+        return (args?.updatesOnly ? updates : [...automatic, ...updates]).slice(
+          offset,
+          offset + 50,
+        );
+      }
+      if (command === "get_activity")
+        return selected
+          ? (updates.find(({ activity }) => activity.id === args?.id)
+              ?.activity ?? null)
+          : null;
       if (command === "latest_update") {
         const latest = selected ? updates[0]?.activity : undefined;
         return latest
@@ -155,6 +177,40 @@ test("uses a stub only while the card shows the update", async () => {
   await screen.findByRole("region", { name: "Activity" });
   expect(await activity().findByText("Previous report")).toBeTruthy();
   expect(activity().queryByText(stub)).toBeNull();
+});
+
+test("the latest update stub can edit an update outside the loaded All page", async () => {
+  automatic = Array.from({ length: 50 }, (_, id) => ({
+    type: "automatic",
+    id,
+    event: {
+      kind: "status",
+      from_value: "Todo",
+      to_value: "In progress",
+      timestamp: at(22),
+      editing_agent: null,
+    },
+  }));
+  localStorage.setItem("ticketd:activity-view", "all");
+  render(<Detail />);
+
+  await screen.findByRole("region", { name: "Activity" });
+  expect(await activity().findByText(stub)).toBeTruthy();
+  const actions = await activity().findByRole("button", {
+    name: /Actions for update from/,
+  });
+  fireEvent.pointerDown(actions, { button: 0, ctrlKey: false });
+  expect(await screen.findByRole("menuitem", { name: "Reply" })).toBeTruthy();
+  expect(screen.getByRole("menuitem", { name: "Delete update" })).toBeTruthy();
+  fireEvent.click(screen.getByRole("menuitem", { name: "Edit update" }));
+  const editor = await activity().findByRole("form", { name: "Edit update" });
+  expect(
+    (
+      await within(editor).findByRole("textbox", {
+        name: "Edit update rich text",
+      })
+    ).textContent,
+  ).toContain("Previous report");
 });
 
 test.each(["close", "switch", "quit"] as const)(

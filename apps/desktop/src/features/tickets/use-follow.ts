@@ -1,4 +1,4 @@
-import { useEffect, useEffectEvent, useRef, useState } from "react";
+import { useEffect, useEffectEvent, useState } from "react";
 import { useStatusLine } from "@/components/ui/use-status-line";
 import {
   describeFailure,
@@ -69,10 +69,10 @@ export function useFollow(
       setPending(target, false);
       return;
     }
-    setChangeFailure(target, null);
     try {
       await changed(undefined, [followingFill(target, next)]);
     } finally {
+      setChangeFailure(target, null);
       setPending(target, false);
     }
   }
@@ -85,27 +85,14 @@ export function useFollow(
   const retryFromLine = useEffectEvent((target: string) =>
     target === reference ? retry() : Promise.resolve(),
   );
-  const shownFor = useRef<string | null>(null);
   useEffect(() => {
-    if (!reportInStatusLine || !error || !reference) {
-      shownFor.current = null;
-      return;
-    }
-    shownFor.current = reference;
-    line.show({
+    if (!reportInStatusLine || !error || !reference) return;
+    return line.show({
       tone: "error",
       message: `${error.title}. ${error.sentence}`,
       action: { label: "Retry", run: () => retryFromLine(reference) },
     });
   }, [error, reportInStatusLine, line, reference]);
-  useEffect(
-    () => () => {
-      if (shownFor.current !== reference) return;
-      shownFor.current = null;
-      line.dismiss();
-    },
-    [reference, line],
-  );
   return {
     following,
     blocked: blocked || pending,

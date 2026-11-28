@@ -321,11 +321,6 @@ function RecoveredActivity({
     (activity.value === undefined && activity.failure === null) ||
     (readHistory && all.value === undefined && all.failure === null);
   const [error, setError] = useState<FailureDescription | null>(null);
-  const loadError =
-    activity.failure ??
-    (readHistory ? all.failure : null) ??
-    note.failure ??
-    updateCount.failure;
   const [saved, setSaved] = useState<Draft>(
     () =>
       recovery.read(recoveryOwner, recoveryDraftSchema) ??
@@ -590,20 +585,17 @@ function RecoveredActivity({
       setPending(false);
     }
   }
-  async function remove(id: string) {
+  async function remove(note: AuthoredActivity) {
     if (busy.current) return;
     busy.current = true;
     setPending(true);
     setDeleteError(null);
     try {
-      const hadSupport = notes.some(
-        (note) => note.id === id && note.supporting_document_id,
-      );
-      await client.deleteActivity(reference, id);
+      await client.deleteActivity(reference, note.id);
       setConfirmDelete(null);
       // An outcome, said in the pane's status line, never inserted (DB-09).
       statusLine.show({
-        message: hadSupport
+        message: note.supporting_document_id
           ? "Deleted the update. Its details stay in Documents."
           : "Deleted the update",
       });
@@ -625,9 +617,17 @@ function RecoveredActivity({
     !notes.some((note) => note.id === targetId)
       ? [...notes, targetNote]
       : notes;
-  const sortedNotes = [...availableNotes].sort((a, b) =>
-    b.reported_at.localeCompare(a.reported_at),
+  // Editing the stub reveals its full row, even when that row is off-page.
+  const editedNote = useOpenTicket(
+    "activityNote",
+    active && edit && !availableNotes.some((note) => note.id === edit.id)
+      ? edit.id
+      : undefined,
   );
+  const sortedNotes = [
+    ...availableNotes,
+    ...(editedNote.value ? [editedNote.value] : []),
+  ].sort((a, b) => b.reported_at.localeCompare(a.reported_at));
   const latest = sortedNotes[0];
   // An explicit update link or a saved edit must still reach the full row.
   const stub =
@@ -639,13 +639,29 @@ function RecoveredActivity({
       latest.reported_at < representedUpdate.reported_at)
       ? representedUpdate
       : null;
-  const stubNote = sortedNotes.find((note) => note.id === stub?.activity_id);
+  const pagedStubNote = sortedNotes.find(
+    (note) => note.id === stub?.activity_id,
+  );
+  const representedNote = useOpenTicket(
+    "activityNote",
+    active && !trashed && activity.value !== undefined && !pagedStubNote
+      ? stub?.activity_id
+      : undefined,
+  );
+  const stubNote = pagedStubNote ?? representedNote.value;
+  const loadError =
+    activity.failure ??
+    (readHistory ? all.failure : null) ??
+    note.failure ??
+    editedNote.failure ??
+    representedNote.failure ??
+    updateCount.failure;
   const remaining = sortedNotes.filter((note) => note.id !== stub?.activity_id);
   const recentNotes = remaining.slice(0, 3);
   const totalUpdates = updateCount.value ?? notes.length;
   const earlierCount = Math.max(
     0,
-    totalUpdates - Number(Boolean(stubNote)) - recentNotes.length,
+    totalUpdates - Number(Boolean(pagedStubNote)) - recentNotes.length,
   );
   const moreEarlier =
     updates.more &&
@@ -939,7 +955,7 @@ function RecoveredActivity({
       if (open) setDeleteError(null);
       setConfirmDelete(open ? id : null);
     },
-    onDelete: (id: string) => void remove(id),
+    onDelete: (note: AuthoredActivity) => void remove(note),
     focusReplied: () => {
       if (!replied.current) return false;
       replied.current = false;
@@ -1189,6 +1205,8 @@ function RecoveredActivity({
               if (activity.failure) activity.retry();
               if (readHistory && all.failure) all.retry();
               if (note.failure) note.retry();
+              if (editedNote.failure) editedNote.retry();
+              if (representedNote.failure) representedNote.retry();
               if (updateCount.failure) updateCount.retry();
             }}
           />
@@ -1489,11 +1507,11 @@ function UpdateActions({
   onReply: (brief: string) => void;
   onEdit: (note: AuthoredActivity) => void;
   onConfirm: (id: string, open: boolean) => void;
-  onDelete: (id: string) => void;
+  onDelete: (note: AuthoredActivity) => void;
   focusReplied: () => boolean;
 }) {
   const confirm = (open: boolean) => onConfirm(note.id, open);
-  const remove = () => onDelete(note.id);
+  const remove = () => onDelete(note);
   const requested = useRef(false);
   const [retainingTrigger, setRetainingTrigger] = useState(false);
   const cancel = useRef<HTMLButtonElement>(null);
