@@ -279,7 +279,7 @@ export function PreviewHeader({
       leading={
         pane ? (
           <IconButton
-            label="Back to Attachments"
+            label="Back to Files"
             shortcut={shortcutLabel("attachments-back")}
             aria-keyshortcuts={ariaKeyShortcuts("attachments-back")}
             onClick={onClose}

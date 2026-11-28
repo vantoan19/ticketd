@@ -79,7 +79,7 @@ const STATE_NAMES: Record<AttachmentState, string> = {
 };
 
 /**
- * The Attachments library: files work like tickets, a list and a preview
+ * The Files view: files work like tickets, a list and a preview
  * (S17). The list pane has a 48px header (title, count, Search, Filters, "…",
  * Add files) and two-line rows (name; "PNG image · 2.1 KB · Used in 1 · 4h")
  * with a state word where needed and one "…" revealed on hover. The chosen
@@ -301,7 +301,7 @@ function Library({
   };
   const header = (
     <PaneHeader
-      title="Attachments"
+      title="Files"
       {...(!libraryEmpty &&
         !query &&
         state === "all" &&
@@ -375,7 +375,7 @@ function Library({
                 )}
                 {openSettings && (
                   <DropdownMenuItem onSelect={() => openSettings("files")}>
-                    Storage settings
+                    Files settings
                   </DropdownMenuItem>
                 )}
               </DropdownMenuContent>
@@ -513,7 +513,7 @@ function Library({
     >
       <section
         className="attachment-list-pane"
-        aria-label="Attachments"
+        aria-label="Files"
         onPointerEnter={() => setHovered(true)}
         onPointerLeave={() => setHovered(false)}
         onFocusCapture={() => setListFocused(true)}

@@ -262,30 +262,30 @@ afterEach(() => {
   expect(unknown).toEqual([]);
 });
 
-test("Attachments opens from the existing Context navigation without replacing ticket views", async () => {
+test("Files opens from the existing Context navigation without replacing ticket views", async () => {
   bridge.invoke.mockImplementation(bridgeDefault);
   render(<App />);
-  fireEvent.click(await screen.findByRole("button", { name: "Attachments" }));
-  expect(
-    await screen.findByRole("heading", { name: "Attachments" }),
-  ).toBeTruthy();
+  const context = await screen.findByRole("navigation", { name: "Context" });
+  fireEvent.click(within(context).getByRole("button", { name: "Files" }));
+  const files = await screen.findByRole("region", { name: "Files" });
+  expect(within(files).getByRole("heading", { name: "Files" })).toBeTruthy();
   // An empty library says so, with no search over nothing (P9).
-  expect(await screen.findByText("No attachments yet")).toBeTruthy();
+  expect(await within(files).findByText("No files yet")).toBeTruthy();
   expect(screen.queryByRole("searchbox", { name: "Search files" })).toBeNull();
   fireEvent.click(screen.getByRole("button", { name: /^All tickets/ }));
-  expect(screen.queryByRole("heading", { name: "Attachments" })).toBeNull();
+  expect(screen.queryByRole("region", { name: "Files" })).toBeNull();
 });
 
-test("Storage settings in the Attachments library opens Settings at Files", async () => {
+test("Files settings opens the upload settings", async () => {
   bridge.invoke.mockImplementation(bridgeDefault);
   render(<App />);
-  fireEvent.click(await screen.findByRole("button", { name: "Attachments" }));
+  fireEvent.click(await screen.findByRole("button", { name: "Files" }));
   fireEvent.keyDown(
     await screen.findByRole("button", { name: "More library actions" }),
     { key: "Enter" },
   );
   fireEvent.click(
-    await screen.findByRole("menuitem", { name: "Storage settings" }),
+    await screen.findByRole("menuitem", { name: "Files settings" }),
   );
   const nav = await screen.findByRole("navigation", {
     name: "Settings sections",
@@ -902,11 +902,11 @@ test("Settings' way back names the view it returns to", async () => {
   await act(async () => {
     await vi.advanceTimersByTimeAsync(0);
   });
-  fireEvent.click(screen.getByRole("button", { name: "Attachments" }));
+  fireEvent.click(screen.getByRole("button", { name: "Files" }));
   fireEvent.click(screen.getByRole("button", { name: "Settings" }));
   // Shell SH-21: it said "Back to tickets" whatever the origin.
-  fireEvent.click(screen.getByRole("button", { name: "Back to Attachments" }));
-  expect(screen.getByRole("heading", { name: "Attachments" })).toBeTruthy();
+  fireEvent.click(screen.getByRole("button", { name: "Back to Files" }));
+  expect(screen.getByRole("heading", { name: "Files" })).toBeTruthy();
 });
 
 test("C opens New ticket from anywhere, but not while typing", async () => {
@@ -916,7 +916,7 @@ test("C opens New ticket from anywhere, but not while typing", async () => {
   await act(async () => {
     await vi.advanceTimersByTimeAsync(0);
   });
-  fireEvent.click(screen.getByRole("button", { name: "Attachments" }));
+  fireEvent.click(screen.getByRole("button", { name: "Files" }));
   const search = document.createElement("input");
   document.body.append(search);
   fireEvent.keyDown(search, { key: "c" });
@@ -925,7 +925,7 @@ test("C opens New ticket from anywhere, but not while typing", async () => {
   fireEvent.keyDown(document.body, { key: "c" });
   expect(screen.getByRole("dialog", { name: "New ticket" })).toBeTruthy();
   expect(
-    screen.getByRole("heading", { name: "Attachments", hidden: true }),
+    screen.getByRole("heading", { name: "Files", hidden: true }),
   ).toBeTruthy();
 });
 
@@ -955,7 +955,7 @@ test("New ticket opens over the current view instead of switching to Tickets", a
   await act(async () => {
     await vi.advanceTimersByTimeAsync(0);
   });
-  fireEvent.click(screen.getByRole("button", { name: "Attachments" }));
+  fireEvent.click(screen.getByRole("button", { name: "Files" }));
   await act(async () => {
     await vi.advanceTimersByTimeAsync(0);
   });
@@ -963,7 +963,7 @@ test("New ticket opens over the current view instead of switching to Tickets", a
   expect(screen.getByRole("dialog", { name: "New ticket" })).toBeTruthy();
   // Behind the dialog, which hides the rest of the window from the tree.
   expect(
-    screen.getByRole("heading", { name: "Attachments", hidden: true }),
+    screen.getByRole("heading", { name: "Files", hidden: true }),
   ).toBeTruthy();
 });
 
@@ -3446,7 +3446,7 @@ test("every icon on the folded rail names itself in a tooltip", async () => {
   const unnamed = within(rail)
     .getAllByRole("button")
     .filter((button) => {
-      // Shell SH-07: Attachments had no tooltip on the folded rail.
+      // Shell SH-07: Files had no tooltip on the folded rail.
       fireEvent.keyDown(document.body, { key: "Tab" });
       act(() => button.focus());
       const shown = screen
@@ -3457,12 +3457,16 @@ test("every icon on the folded rail names itself in a tooltip", async () => {
     })
     .map((button) => button.getAttribute("aria-label") ?? button.textContent);
   expect(unnamed).toEqual([]);
+  const files = within(rail).getByRole("button", { name: "Files" });
+  fireEvent.keyDown(document.body, { key: "Tab" });
+  act(() => files.focus());
+  expect(screen.getByRole("tooltip", { name: "Files" })).toBeTruthy();
 });
 
 test("command palette opens with navigation and returns focus on Escape", async () => {
   bridge.invoke.mockImplementation(bridgeDefault);
   render(<App />);
-  const opener = await screen.findByRole("button", { name: "Attachments" });
+  const opener = await screen.findByRole("button", { name: "Files" });
   opener.focus();
   fireEvent.keyDown(opener, { key: "k", ctrlKey: true });
   const input = await screen.findByRole(
@@ -3492,6 +3496,26 @@ test("command palette opens with navigation and returns focus on Escape", async 
   await vi.waitFor(() => expect(document.activeElement).toBe(opener));
 });
 
+test("the command palette finds Files by name and by its former name", async () => {
+  bridge.invoke.mockImplementation(bridgeDefault);
+  render(<App />);
+  const context = await screen.findByRole("navigation", { name: "Context" });
+  fireEvent.keyDown(document.body, { key: "k", ctrlKey: true });
+  const input = await screen.findByRole("combobox", {
+    name: "Search tickets and destinations",
+  });
+  fireEvent.change(input, { target: { value: "files" } });
+  expect(screen.getByRole("option", { name: "Files" })).toBeTruthy();
+  fireEvent.change(input, { target: { value: "attachments" } });
+  fireEvent.click(screen.getByRole("option", { name: "Files" }));
+  expect(await screen.findByRole("region", { name: "Files" })).toBeTruthy();
+  expect(
+    within(context)
+      .getByRole("button", { name: "Files" })
+      .getAttribute("aria-current"),
+  ).toBe("page");
+});
+
 test.each([
   ["i", "Inbox"],
   ["a", "All tickets"],
@@ -3500,7 +3524,7 @@ test.each([
 ])("G then %s navigates to %s", async (key, label) => {
   bridge.invoke.mockImplementation(bridgeDefault);
   render(<App />);
-  await screen.findByRole("button", { name: "Attachments" });
+  await screen.findByRole("button", { name: "Files" });
   fireEvent.keyDown(document.body, { key: "g" });
   fireEvent.keyDown(document.body, { key });
   await vi.waitFor(() =>
@@ -3516,7 +3540,7 @@ test.each([
 test("G then C cannot create a ticket while Chat is off", async () => {
   bridge.invoke.mockImplementation(bridgeDefault);
   render(<App />);
-  await screen.findByRole("button", { name: "Attachments" });
+  await screen.findByRole("button", { name: "Files" });
   fireEvent.keyDown(document.body, { key: "g" });
   fireEvent.keyDown(document.body, { key: "c" });
   expect(screen.queryByRole("dialog")).toBeNull();
@@ -3543,7 +3567,7 @@ test.each(["fv1", "T-FV11", "Unloaded title"])(
       },
     );
     render(<App />);
-    await screen.findByRole("button", { name: "Attachments" });
+    await screen.findByRole("button", { name: "Files" });
     fireEvent.keyDown(document.body, { key: "k", ctrlKey: true });
     const input = await screen.findByRole("combobox", {
       name: "Search tickets and destinations",
@@ -3563,7 +3587,7 @@ test.each(["fv1", "T-FV11", "Unloaded title"])(
   },
 );
 
-test.each(["Inbox", "Documents", "Plans", "Settings", "Attachments"])(
+test.each(["Inbox", "Documents", "Plans", "Settings", "Files"])(
   "palette opens over %s and Enter goes to Ready",
   async (view) => {
     bridge.invoke.mockImplementation((command: string) =>
@@ -3687,7 +3711,7 @@ test.each([
   async (interruption) => {
     bridge.invoke.mockImplementation(bridgeDefault);
     render(<App />);
-    await screen.findByRole("button", { name: "Attachments" });
+    await screen.findByRole("button", { name: "Files" });
     fireEvent.keyDown(document.body, { key: "g" });
     fireEvent.keyDown(document.body, interruption);
     fireEvent.keyDown(document.body, { key: "i" });
@@ -3702,7 +3726,7 @@ test.each([
 test("a G sequence expires after one second", async () => {
   bridge.invoke.mockImplementation(bridgeDefault);
   render(<App />);
-  await screen.findByRole("button", { name: "Attachments" });
+  await screen.findByRole("button", { name: "Files" });
   vi.useFakeTimers();
   fireEvent.keyDown(document.body, { key: "g" });
   await act(async () => vi.advanceTimersByTimeAsync(1001));
@@ -7413,7 +7437,7 @@ test("palette opens a named active Plan through the workspace navigation", async
       : bridgeDefault(command, args),
   );
   render(<App />);
-  await screen.findByRole("button", { name: /Attachments/ });
+  await screen.findByRole("button", { name: "Files" });
   fireEvent.keyDown(document.body, { key: "k", ctrlKey: true });
   const input = await screen.findByRole("combobox", {
     name: "Search tickets and destinations",
@@ -8184,7 +8208,7 @@ test("New Chat exposes its complete current pick before the first message", asyn
   expect(client.created).toHaveLength(0);
 });
 
-test("Attachments folds search in its header and shares the Documents navigator keys and return focus", async () => {
+test("Files folds search in its header and shares the Documents navigator keys and return focus", async () => {
   const files = ["icon.png", "notes.txt"].map((name, index) => ({
     id: `library-${index}`,
     display_name: name,
@@ -8235,10 +8259,10 @@ test("Attachments folds search in its header and shares the Documents navigator 
     },
   );
   render(<App />);
-  fireEvent.click(await screen.findByRole("button", { name: "Attachments" }));
+  fireEvent.click(await screen.findByRole("button", { name: "Files" }));
   await screen.findByRole("button", { name: "icon.png" });
   const header = screen
-    .getByRole("heading", { name: "Attachments" })
+    .getByRole("heading", { name: "Files" })
     .closest("header")!;
   fireEvent.click(within(header).getByRole("button", { name: "Search files" }));
   const search = within(header).getByRole("searchbox", {
@@ -8266,11 +8290,19 @@ test("Attachments folds search in its header and shares the Documents navigator 
     }),
   );
   fireEvent.click(
-    within(preview).getByRole("button", { name: "Back to Attachments" }),
+    within(preview).getByRole("button", { name: "Back to Files" }),
   );
   expect(document.activeElement).toBe(second);
   fireEvent.keyDown(second, { key: "Enter" });
   const reopened = await screen.findByRole("region", { name: "notes.txt" });
+  fireEvent.keyDown(reopened, { key: "k", ctrlKey: true });
+  const palette = await screen.findByRole("combobox", {
+    name: "Search tickets and destinations",
+  });
+  fireEvent.change(palette, { target: { value: "attachments" } });
+  expect(screen.getByRole("option", { name: /Back to Files/ })).toBeTruthy();
+  fireEvent.keyDown(palette, { key: "Escape" });
+  await vi.waitFor(() => expect(screen.queryByRole("dialog")).toBeNull());
   fireEvent.keyDown(
     within(reopened).getByRole("heading", { name: "notes.txt" }),
     { key: "." },
@@ -8292,7 +8324,7 @@ test("Attachments folds search in its header and shares the Documents navigator 
 });
 
 test.each(["missing", "quarantined", "unavailable"])(
-  "Attachments keeps %s recovery and Used in navigation in the preview",
+  "Files keeps %s recovery and Used in navigation in the preview",
   async (state) => {
     let restored = false;
     let retry = false;
@@ -8360,7 +8392,7 @@ test.each(["missing", "quarantined", "unavailable"])(
       },
     );
     render(<App />);
-    fireEvent.click(await screen.findByRole("button", { name: "Attachments" }));
+    fireEvent.click(await screen.findByRole("button", { name: "Files" }));
     fireEvent.click(await screen.findByRole("button", { name: "notes.txt" }));
     const pane = await screen.findByRole("region", { name: "notes.txt" });
     const stage = pane.querySelector(".attachment-preview-stage");
@@ -11250,7 +11282,7 @@ test("an unknown Plan archive failure keeps raw diagnostics behind Details on th
 test.each([
   ["All tickets", "find_tickets"],
   ["Documents", "recent_documents"],
-  ["Attachments", "search_attachments"],
+  ["Files", "search_attachments"],
 ] as const)(
   "%s keeps its initial count unknown through failure and recovers to known empty",
   async (name, read) => {
@@ -11550,7 +11582,7 @@ test("supporting Document open failure survives an unrelated browse success and 
   ).toEqual([{ id: doc.id }, { id: doc.id }]);
 });
 
-test.each(["All tickets", "Plans", "Documents", "Attachments"] as const)(
+test.each(["All tickets", "Plans", "Documents", "Files"] as const)(
   "%s retains known content and counts when a background read fails",
   async (name) => {
     // Documents opens on Current work here, its own read.
@@ -11571,7 +11603,7 @@ test.each(["All tickets", "Plans", "Documents", "Attachments"] as const)(
       "All tickets": "find_tickets",
       Plans: "list_plans",
       Documents: "current_work_documents",
-      Attachments: "search_attachments",
+      Files: "search_attachments",
     }[name];
     bridge.invoke.mockImplementation((command: string, args) => {
       if (command === read && fail) throw new Error("Cached read unavailable");
@@ -11633,7 +11665,7 @@ test.each(["All tickets", "Plans", "Documents", "Attachments"] as const)(
           "All tickets": "Cached ticket",
           Plans: "Cached Plan",
           Documents: "Cached Document",
-          Attachments: "cached.txt",
+          Files: "cached.txt",
         }[name],
       ).length,
     ).toBeGreaterThan(0);
@@ -11961,7 +11993,7 @@ test("Document History and Attachment Cleanup return keyboard focus to their mou
   await screen.findByRole("dialog", { name: "History" });
   await user.keyboard("{Escape}");
   await vi.waitFor(() => expect(document.activeElement).toBe(actions));
-  await user.click(screen.getByRole("button", { name: "Attachments" }));
+  await user.click(screen.getByRole("button", { name: "Files" }));
   await screen.findByRole("button", { name: file.display_name });
   const more = screen.getByRole("button", { name: "More library actions" });
   more.focus();
@@ -12137,7 +12169,7 @@ test("Attachment Rename keeps the draft and identity through failure, keyboard r
     return bridgeDefault(command, args);
   });
   render(<App />);
-  await user.click(await screen.findByRole("button", { name: "Attachments" }));
+  await user.click(await screen.findByRole("button", { name: "Files" }));
   await user.click(
     await screen.findByRole("button", { name: file.display_name }),
   );
@@ -13037,7 +13069,7 @@ test("conditional History, Cleanup and Restore dialogs keep their owner through 
     finishExit(overlay);
     await vi.waitFor(() => expect(history.isConnected).toBe(false));
     await vi.waitFor(() => expect(document.activeElement).toBe(actions));
-    await user.click(screen.getByRole("button", { name: "Attachments" }));
+    await user.click(screen.getByRole("button", { name: "Files" }));
     await screen.findByRole("button", { name: file.display_name });
     const more = screen.getByRole("button", { name: "More library actions" });
     more.focus();

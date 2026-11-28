@@ -190,6 +190,9 @@ A Document created as the supporting detail of an authored Activity. Its origina
 **Attachment**:
 A workspace-scoped file identity with a display name, original filename, available metadata, and storage locator. It is distinct from a Document and Implementation evidence. A local Attachment is an immutable workspace-managed snapshot; uploading a revision creates a new identity. Reusing or detaching an Attachment changes references without replacing or deleting its bytes. Files inside linked Documents stay associated with those Documents.
 
+**Files**:
+The desktop view that lists a Workspace's Attachments.
+
 **File home**:
 The live owner a file belongs to. A direct ticket attachment takes precedence over a link in a ticket description, followed by a link in an update or its details Document (both belong to the update's ticket), then a link in a Document body. Ties go to the earliest-added reference. Owners in Trash, drafts, and Undo give a file no home. A file with no home is unused.
 

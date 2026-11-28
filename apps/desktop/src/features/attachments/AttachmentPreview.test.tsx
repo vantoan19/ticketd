@@ -78,6 +78,27 @@ test("purged Undo references retain their name with unavailable bytes and delibe
   ).toBeNull();
 });
 
+test("an unfinished purge points to Files", async () => {
+  vi.mocked(invoke).mockImplementation(async (command) =>
+    command === "attachment_workspace_id"
+      ? "workspace"
+      : {
+          attachment: { ...file, quarantined: true, purge_state: "pending" },
+          status: "unavailable",
+          media_type: null,
+          can_open: false,
+          message: null,
+          usage: { total: 0, entries: [], legacy_drafts_pending: false },
+        },
+  );
+  render(<AttachmentPreview target={{ id: file.id }} onClose={() => {}} />);
+  expect(
+    await screen.findByText(
+      "ticketd started deleting its stored copy. Finish deleting it from Files.",
+    ),
+  ).toBeTruthy();
+});
+
 test("closing pending inspection ignores its late response and media close releases playback", async () => {
   let complete: ((value: unknown) => void) | undefined;
   const pending = new Promise((resolve) => {

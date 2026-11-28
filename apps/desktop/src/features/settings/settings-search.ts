@@ -225,7 +225,7 @@ export const SETTINGS_ENTRIES: readonly SettingsEntry[] = [
   {
     title: "Lists",
     description:
-      "In ticket lists and boards, the Inbox, Attachments, Documents and the Workspace graph. A list is one stop for Tab.",
+      "In ticket lists and boards, the Inbox, Files, Documents and the Workspace graph. A list is one stop for Tab.",
     keywords:
       "keyboard shortcuts keys hotkeys arrows enter space select home end divider resize",
     section: "keyboard-shortcuts",
