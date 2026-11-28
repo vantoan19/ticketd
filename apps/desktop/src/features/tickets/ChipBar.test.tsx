@@ -81,17 +81,17 @@ const ticket: Ticket = {
   children: [],
   prerequisites: [],
 };
-function renderDetails() {
+function renderDetails(record = ticket) {
   render(
-    <TestReads primed={{ ticket: ticket }}>
+    <TestReads primed={{ ticket: record }}>
       <TicketDetails
         mention={null}
-        selected={ticket.reference}
+        selected={record.reference}
         expanded={false}
         onExpand={vi.fn()}
         onReturn={vi.fn()}
         setSelected={vi.fn()}
-        opened={[ticket.reference]}
+        opened={[record.reference]}
         onMentionReady={vi.fn()}
         onClearMention={vi.fn()}
         projects={[{ id: "p1", name: "Web portal" } as never]}
@@ -182,7 +182,7 @@ test("a hidden pane reports no width and keeps its layout", async () => {
   ).toBeNull();
 });
 
-test("narrow, an agent update keeps its reserved strip after the property controls", async () => {
+test("narrow, the update card follows the property controls", async () => {
   bridge.invoke.mockImplementation(async (command: string, args?: object) => {
     if (command === "latest_update")
       return {
@@ -197,14 +197,11 @@ test("narrow, an agent update keeps its reserved strip after the property contro
     if (command === "reminder") return null;
     return bridgeDefault(command, args as { reference?: string });
   });
-  renderDetails();
+  renderDetails({ ...ticket, status: "In progress" });
   resizePane(500);
   const bar = await screen.findByRole("group", { name: "Ticket properties" });
-  // One line: who and when, then the excerpt.
-  const latest = (await screen.findByText(/Drafted a fix/)).closest(
-    ".ticket-agent-strip",
-  )!;
-  expect(latest.textContent).toMatch(/^codex · .*Drafted a fix/);
+  const latest = await screen.findByRole("region", { name: "Latest update" });
+  expect(await within(latest).findByText("Drafted a fix")).toBeTruthy();
   // On its own line after the last chip, not between Status and the others.
   const last = within(bar).getByRole("button", { name: "Add ticket property" });
   expect(

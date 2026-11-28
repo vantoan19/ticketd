@@ -34,6 +34,9 @@ import { acceptanceSection } from "./acceptance-section";
 import { withoutBom } from "./mention-passage";
 import { useOpenTicket } from "./open-ticket";
 import { AgentContext } from "./ticket-agent-context";
+import { TicketAgentCard } from "./TicketAgentCard";
+import { agentCardName } from "./ticket-agent-state";
+import { DecisionCardContent } from "./decision-card-motion";
 import "./ticket-decision-card.css";
 
 export type ReviewQueue = readonly Pick<Ticket, "reference" | "status">[];
@@ -42,6 +45,7 @@ export function TicketDecisionCard({
   active,
   onAcceptance,
   onEvidence,
+  onOpenUpdate,
   blockerCount,
   blockers,
   doneFallback,
@@ -51,6 +55,7 @@ export function TicketDecisionCard({
   active: boolean;
   onAcceptance: (offset: number) => void;
   onEvidence: () => void;
+  onOpenUpdate: (id: string) => void;
   blockerCount: number;
   blockers: ReactNode;
   doneFallback?: ReactNode;
@@ -71,11 +76,13 @@ export function TicketDecisionCard({
   const nothing = useRef<HTMLParagraphElement>(null);
   const reference = ticket.reference;
   const owner = externalSource(ticket);
+  const agentState =
+    agent?.reference === reference && agent.openedWithCard ? agent.state : null;
   const review = !ticket.trashed && ticket.status === "In review";
   const done = !ticket.trashed && ticket.status === "Done" && decision !== null;
   const nextReference = decision?.next;
   if (!active && decision) setDecision(null);
-  const canMove = review && !owner && !blocked && !opening;
+  const canMove = review && !agentState && !owner && !blocked && !opening;
 
   function moveToDone() {
     if (!canMove || moving.current) return;
@@ -178,8 +185,10 @@ export function TicketDecisionCard({
     if (active && done) (next.current ?? nothing.current)?.focus();
   }, [active, done]);
 
+  const latest = !ticket.trashed && ticket.status === "In progress";
+  let panel: ReactNode = null;
   if (done) {
-    return (
+    panel = (
       <DecisionPanel state="Done">
         <p className="ticket-decision-title">Done · just now · by you</p>
         {nextReference ? (
@@ -205,64 +214,83 @@ export function TicketDecisionCard({
         )}
       </DecisionPanel>
     );
+  } else if (agentState) {
+    panel = (
+      <DecisionPanel
+        state={agentCardName(agentState)}
+        stateKey={agentState.kind}
+        cardRef={card}
+      >
+        <TicketAgentCard
+          state={agentState}
+          reference={reference}
+          active={active}
+          report={review ? (agent?.update ?? null) : null}
+          onOpenUpdate={onOpenUpdate}
+        />
+      </DecisionPanel>
+    );
+  } else if (review || latest) {
+    panel = (
+      <DecisionPanel
+        state={review ? "Ready for review" : "Latest update"}
+        cardRef={card}
+      >
+        <TicketReport
+          review={review}
+          onAcceptance={onAcceptance}
+          select={select}
+          blockers={blockers}
+        />
+        {review && <TicketReviewProof onEvidence={onEvidence} />}
+        {latest && (
+          <TicketReply active={active} disabled={opening || blocked} />
+        )}
+        {review && (
+          <div className="ticket-decision-row">
+            {owner ? (
+              <Button asChild variant="outline" size="compact">
+                <SourceLink url={owner.url}>
+                  Open on {owner.provider_name}
+                </SourceLink>
+              </Button>
+            ) : (
+              <Button
+                type="button"
+                size="compact"
+                variant={blockerCount ? "outline" : "default"}
+                disabled={!canMove}
+                busy={pending}
+                onClick={moveToDone}
+                aria-keyshortcuts={ariaKeyShortcuts("ticket-review-done")}
+              >
+                Move to Done
+                <Kbd aria-hidden="true">
+                  {shortcutLabel("ticket-review-done")}
+                </Kbd>
+              </Button>
+            )}
+          </div>
+        )}
+      </DecisionPanel>
+    );
   }
-  const latest =
-    !ticket.trashed &&
-    ticket.status === "In progress" &&
-    agent?.ready !== false &&
-    !agent?.agents.length &&
-    agent?.chat?.status.rank !== "working" &&
-    agent?.chat?.status.rank !== "approval";
-  if (!review && !latest) return ticket.status === "Done" ? doneFallback : null;
   return (
-    <DecisionPanel
-      state={review ? "Ready for review" : "Latest update"}
-      cardRef={card}
-    >
-      <TicketReport
-        review={review}
-        onAcceptance={onAcceptance}
-        select={select}
-        blockers={blockers}
-      />
-      {review && <TicketReviewProof onEvidence={onEvidence} />}
-      {latest && <TicketReply active={active} disabled={opening || blocked} />}
-      {review && (
-        <div className="ticket-decision-row">
-          {owner ? (
-            <Button asChild variant="outline" size="compact">
-              <SourceLink url={owner.url}>
-                Open on {owner.provider_name}
-              </SourceLink>
-            </Button>
-          ) : (
-            <Button
-              type="button"
-              size="compact"
-              variant={blockerCount ? "outline" : "default"}
-              disabled={!canMove}
-              busy={pending}
-              onClick={moveToDone}
-              aria-keyshortcuts={ariaKeyShortcuts("ticket-review-done")}
-            >
-              Move to Done
-              <Kbd aria-hidden="true">
-                {shortcutLabel("ticket-review-done")}
-              </Kbd>
-            </Button>
-          )}
-        </div>
-      )}
-    </DecisionPanel>
+    <>
+      {ticket.status === "Done" && !done && !ticket.trashed && doneFallback}
+      {panel}
+    </>
   );
 }
 
 export function DecisionPanel({
   state,
+  stateKey = state,
   cardRef,
   children,
 }: {
   state: string;
+  stateKey?: string;
   cardRef?: React.Ref<HTMLElement>;
   children: ReactNode;
 }) {
@@ -273,7 +301,7 @@ export function DecisionPanel({
         ref={cardRef}
         aria-label={state}
       >
-        {children}
+        <DecisionCardContent state={stateKey}>{children}</DecisionCardContent>
       </section>
     </Card>
   );

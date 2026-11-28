@@ -288,34 +288,6 @@
   margin-inline: -8px;
 }
 
-.ticket-agent-slot {
-  flex-basis: 100%;
-  min-height: 44px;
-  margin-top: 18px;
-}
-.ticket-agent-strip {
-  width: 100%;
-  min-height: 44px;
-}
-
-.ticket-agent-strip {
-  display: flex;
-  align-items: center;
-  gap: 10px;
-  padding: 8px 6px 8px 12px;
-}
-.ticket-agent-copy {
-  display: flex;
-  align-items: center;
-  gap: 10px;
-  min-width: 0;
-  flex: 1;
-}
-.ticket-agent-copy > span {
-  overflow: hidden;
-  text-overflow: ellipsis;
-}
-
 .ticket-command-anchor {
   display: inline-flex;
   min-width: 0;
@@ -343,6 +315,11 @@
   min-width: 0;
   overflow: hidden;
   text-overflow: ellipsis;
+}
+
+.ticket-agent-name,
+.ticket-agent-others {
+  min-height: 28px;
 }
 
 /* The agents menu: one row per agent at work: mark, model, clock, then what it does. */

@@ -1,8 +1,4 @@
 import { useEffect, useState } from "react";
-import { Loader2 } from "lucide-react";
-import { Button } from "@/components/ui/button";
-import { StatusDot } from "@/components/ui/status-dot";
-import { Tooltip } from "@/components/ui/tooltip";
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -13,6 +9,7 @@ import { HarnessMark } from "@/features/chats/HarnessMark";
 import { useChatFeature } from "@/features/chats/use-chats";
 import { duration } from "@/features/chats/model";
 import { agentName, type TicketAgent } from "@/features/chats/ticket-agents";
+import { agentTarget, openAgentChat } from "./ticket-agent-state";
 
 /** The clock of work that began at `started`, ticking each second. */
 function useElapsed(started: string) {
@@ -41,13 +38,7 @@ export function Elapsed({ started }: { started: string }) {
 const lineOf = (agent: TicketAgent) =>
   agent.sub_agent ? agent.title : (agent.doing ?? null);
 
-/**
- * The ticket's label of who is working on it (DESIGN §7), from the host's list
- * of agents. One agent is named with what it is doing and its clock, two are
- * named, and from three the first is named and the rest are "N others" in a
- * menu. Each name opens that agent: a main agent's Chat, or a sub-agent's view
- * inside its Chat. A request waiting for the person replaces the label.
- */
+/** The host's model wording and ordering, including linked sub-agents. */
 export function TicketAgentsLabel({
   agents,
   reference,
@@ -56,60 +47,30 @@ export function TicketAgentsLabel({
   reference: string;
 }) {
   const { requestChat } = useChatFeature();
-  const open = (agent: TicketAgent, view: boolean) =>
-    requestChat({
-      kind: "open",
-      chatId: agent.chat_id,
-      retention: agent.retention,
-      from: reference,
-      ...(view && agent.sub_agent && { subAgent: agent.sub_agent }),
-    });
-  const asking = agents.find((agent) => agent.approval);
-  const first = asking ?? agents[0];
+  const first = agents[0];
   if (!first) return null;
+  const line = lineOf(first);
   return (
     <>
-      <div
-        className="ticket-agent-copy ui-agent-state"
-        key={asking ? "approval" : "working"}
-      >
-        {asking?.approval ? (
-          <>
-            <StatusDot tone="attention" size={6} />
-            <span>
-              <AgentName agent={asking} onOpen={() => open(asking, true)} />{" "}
-              wants to run{" "}
-              <code className="chat-mono">{asking.approval.summary}</code>
-            </span>
-          </>
-        ) : (
-          <>
-            <HarnessMark
-              harness={first.harness_id}
-              name={first.harness_name}
-              decorative
-            />
-            <span>
-              <WorkingLine agents={agents} open={open} />
-              {agents.length === 1 && <Detail agent={first} />}
-            </span>
-            <Loader2 className="size-3 animate-spin" aria-hidden="true" />
-          </>
-        )}
+      <div className="ticket-decision-line ticket-decision-title">
+        <HarnessMark
+          harness={first.harness_id}
+          name={first.harness_name}
+          decorative
+        />
+        <span>
+          <WorkingLine
+            agents={agents}
+            open={(agent) =>
+              requestChat(openAgentChat(agentTarget(agent), reference, true))
+            }
+          />
+        </span>
       </div>
-      <Tooltip
-        content={
-          asking ? "Review the request in Chat" : "Open this ticket’s Chat"
-        }
-      >
-        <Button
-          variant={asking ? "outline" : "ghost"}
-          size="compact"
-          onClick={() => open(asking ?? first, Boolean(asking))}
-        >
-          {asking ? "Review request" : "Open Chat"}
-        </Button>
-      </Tooltip>
+      <p className="ticket-decision-byline">
+        {line}
+        <Elapsed started={first.started_at} />
+      </p>
     </>
   );
 }
@@ -137,27 +98,17 @@ function AgentName({
   );
 }
 
-function Detail({ agent }: { agent: TicketAgent }) {
-  const line = lineOf(agent);
-  return (
-    <>
-      {line && <span className="text-muted-foreground"> · {line}</span>}
-      <Elapsed started={agent.started_at} />
-    </>
-  );
-}
-
 function WorkingLine({
   agents,
   open,
 }: {
   agents: TicketAgent[];
-  open: (agent: TicketAgent, view: boolean) => void;
+  open: (agent: TicketAgent) => void;
 }) {
   const [first, second, ...rest] = agents;
   if (!first) return null;
   const name = (agent: TicketAgent) => (
-    <AgentName agent={agent} onOpen={() => open(agent, true)} />
+    <AgentName agent={agent} onOpen={() => open(agent)} />
   );
   if (!second) return <>{name(first)} is working on this ticket</>;
   if (rest.length === 0)
@@ -188,10 +139,7 @@ function WorkingLine({
         >
           <div className="ticket-agents-menu">
             {many.map((agent) => (
-              <DropdownMenuItem
-                key={agent.id}
-                onSelect={() => open(agent, true)}
-              >
+              <DropdownMenuItem key={agent.id} onSelect={() => open(agent)}>
                 <span className="ticket-agents-item">
                   <HarnessMark
                     harness={agent.harness_id}

@@ -159,6 +159,9 @@ export const chatSummarySchema = z.object({
   harness_name: z.string(),
   /** Absent while the folder is missing. */
   folder_name: z.string().nullish(),
+  /** The main agent’s reported model and whether its turn is running. */
+  model: z.string().nullish(),
+  turn_running: z.boolean().optional(),
   first_ticket: z.string().nullish(),
   project: projectRefSchema.nullish(),
   /** The linked tickets, in link order: the row's context item. */
@@ -633,6 +636,8 @@ export const transcriptItemSchema = z.discriminatedUnion("kind", [
     folded: z.boolean().nullish(),
     /** Exactly what would run, when the subject shortens it or says it as sentences. */
     command: z.string().nullish(),
+    /** An execution folder that differs from the Chat’s folder. */
+    folder: z.string().nullish(),
     /** A command that only calls ticketd, said after the title ("wants to"). */
     ticketd: z.array(ticketdCallSchema).nullish(),
   }),
