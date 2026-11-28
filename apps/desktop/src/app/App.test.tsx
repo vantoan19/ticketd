@@ -5005,10 +5005,12 @@ test.each(["All tickets", "Plan"])(
       return bridgeDefault(command, args);
     });
     render(<App />);
-    if (view === "Plan")
+    if (view === "Plan") {
       fireEvent.click(
         await screen.findByRole("button", { name: /^Narrow Plan/ }),
       );
+      fireEvent.click(await screen.findByRole("radio", { name: "List" }));
+    }
     const row = await screen.findByRole("button", { name: /Narrow list row/ });
     expect(row.closest("li")?.getAttribute("data-variant")).toBe("ledger");
     expect(within(row).getByText("T-KQ1")).toBeTruthy();
@@ -5257,6 +5259,7 @@ test.each(["project", "Plan"])(
     fireEvent.click(
       await screen.findByRole("button", { name: /^Sticky Plan/ }),
     );
+    fireEvent.click(await screen.findByRole("radio", { name: "List" }));
     const row = await screen.findByRole("button", { name: /First/ });
     fireEvent.click(row);
     await screen.findByRole("textbox", { name: "Title" });
