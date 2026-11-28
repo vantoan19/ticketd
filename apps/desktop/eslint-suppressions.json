@@ -64,7 +64,7 @@
   },
   "src/features/tickets/ReadOnlySource.tsx": {
     "shadcn/no-restyle": {
-      "count": 2
+      "count": 1
     }
   },
   "src/features/tickets/Reminder.tsx": {
