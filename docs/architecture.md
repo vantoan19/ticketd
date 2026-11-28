@@ -975,8 +975,12 @@ The code lives in `ticketd_core::source`, from the inside out:
 - **Engine** (`engine.rs`): the only caller of connectors. It validates
   configuration, walks pages with a progress guard, de-duplicates by external
   identity, bounds previews, and holds no database handle.
-- **Connectors** translate tracker data. The built-in GitHub connector uses an
-  `HttpTransport` seam with deterministic fixtures. Linear implements the
+- **Connectors** translate tracker data. The built-in GitHub connector uses a
+  `gh` process seam for repository picker results with the active github.com
+  login. Operations and configurations still being migrated use the
+  `HttpTransport` seam. Both have deterministic fixtures.
+  [ADR 0028](adr/0028-github-goes-through-the-github-cli.md) describes the move
+  to one GitHub integration through the GitHub CLI. Linear implements the
   Rust SDK's `Extension` trait and uses the same process adapter as locally
   installed or linked extensions. GitHub uses the person's own credential
   (environment token or `gh auth token`), which is never stored, exported,
