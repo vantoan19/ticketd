@@ -23,6 +23,9 @@ import { applyTokens, rootTokens } from "@/test/motion-tokens";
 import { spring } from "@/lib/motion-tokens";
 import { MotionProvider } from "@/components/ui/motion";
 import { freezeMotionClock, frames } from "@/test/motion-clock";
+import { DraftRecoveryProvider } from "@/lib/draft-recovery";
+import type { DraftRetention } from "@/lib/api/attachments";
+import { isMacPlatform } from "@/lib/platform";
 
 const bridge = vi.hoisted(() => ({ invoke: vi.fn() }));
 // Counts reads of the spring tokens; each one still reads the real tokens.
@@ -494,6 +497,114 @@ test("R opens the full ticket's update composer when the board peek has no Reply
   const draft = screen.getByRole("textbox", { name: "New update rich text" });
   await settle(50);
   expect(document.activeElement).toBe(draft);
+});
+
+test("R recovers a card reply after the ticket leaves and returns to In progress", async () => {
+  vi.spyOn(HTMLElement.prototype, "offsetWidth", "get").mockReturnValue(1000);
+  const active = ticket(2, "In progress");
+  saved = [active];
+  const fallback = bridge.invoke.getMockImplementation()!;
+  bridge.invoke.mockImplementation(async (command: string, args?: object) => {
+    if (command === "draft_retentions") return [];
+    if (command === "draft_cutover_pending") return false;
+    if (command === "retain_draft") {
+      const { draft } = args as { draft: DraftRetention };
+      return { ...draft, revision: draft.revision + 1 };
+    }
+    return fallback(command, args);
+  });
+  render(
+    <DraftRecoveryProvider>
+      <App />
+    </DraftRecoveryProvider>,
+  );
+  await settle();
+  await showBoard();
+  fireEvent.click(screen.getByRole("button", { name: "Display" }));
+  await settle();
+  fireEvent.click(
+    screen.getByRole("button", { name: /T-KQ2 In progress.*Ticket 2/ }),
+  );
+  await settle();
+
+  async function openReply() {
+    const reply = screen.getByRole("button", { name: "Reply" });
+    reply.focus();
+    fireEvent.keyDown(reply, { key: "r" });
+    await settle(50);
+    return screen.getByRole("textbox", { name: "Reply" });
+  }
+  fireEvent.change(await openReply(), {
+    target: { value: "Saved while waiting for review" },
+  });
+  saved = [{ ...active, status: "In review" }];
+  change += 1;
+  await settle(2000);
+  expect(screen.getByRole("region", { name: "Ready for review" })).toBeTruthy();
+  expect(bridge.invoke).toHaveBeenCalledWith("retain_draft", {
+    draft: expect.objectContaining({
+      payload: { brief: "Saved while waiting for review", requestId: null },
+    }),
+  });
+
+  saved = [active];
+  change += 1;
+  await settle(2000);
+  expect(await openReply()).toHaveProperty(
+    "value",
+    "Saved while waiting for review",
+  );
+});
+
+test("a pending decision and its next review survive expanding the board peek", async () => {
+  vi.spyOn(HTMLElement.prototype, "offsetWidth", "get").mockReturnValue(1000);
+  const first = ticket(2, "In review");
+  saved = [first, ticket(3, "In review")];
+  let finishWrite!: () => void;
+  const pendingWrite = new Promise<void>((resolve) => {
+    finishWrite = resolve;
+  });
+  const write = vi.fn(async () => {
+    await pendingWrite;
+    const done = { ...first, status: "Done" };
+    saved = saved.map((item) =>
+      item.reference === first.reference ? done : item,
+    );
+    return [done];
+  });
+  writeOverride = write;
+  render(<App />);
+  await settle();
+  await showBoard();
+  fireEvent.click(
+    screen.getByRole("button", { name: /T-KQ2 In review.*Ticket 2/ }),
+  );
+  await settle();
+  fireEvent.click(screen.getByRole("button", { name: "Move to Done" }));
+  await settle();
+  expect(write).toHaveBeenCalledTimes(1);
+
+  fireEvent.click(screen.getByRole("button", { name: "Open ticket" }));
+  await settle();
+  expect(screen.getByRole("textbox", { name: "Title" })).toHaveProperty(
+    "value",
+    "Ticket 2",
+  );
+  const move = screen.getByRole("button", { name: "Move to Done" });
+  expect(move.getAttribute("aria-busy")).toBe("true");
+  fireEvent.click(move);
+  fireEvent.keyDown(move, {
+    key: "Enter",
+    [isMacPlatform() ? "metaKey" : "ctrlKey"]: true,
+  });
+  await settle();
+  expect(write).toHaveBeenCalledTimes(1);
+
+  finishWrite();
+  await settle();
+  const next = screen.getByRole("link", { name: "Next to review" });
+  expect(next.getAttribute("href")).toBe("ticketd://ticket/T-KQ3");
+  expect(document.activeElement).toBe(next);
 });
 
 test("the board peek shows complete section counts even when their lists are paged", async () => {

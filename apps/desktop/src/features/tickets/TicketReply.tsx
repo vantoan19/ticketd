@@ -1,10 +1,17 @@
-import { useEffect, useLayoutEffect, useRef, useState } from "react";
+import {
+  useCallback,
+  useEffect,
+  useLayoutEffect,
+  useRef,
+  useState,
+} from "react";
 import { Button } from "@/components/ui/button";
 import { Kbd } from "@/components/ui/kbd";
 import { Textarea } from "@/components/ui/textarea";
 import { useStatusLine } from "@/components/ui/use-status-line";
 import { client } from "@/lib/api/client";
 import { describeFailure } from "@/lib/api/describe-failure";
+import { useDraftRecovery } from "@/lib/draft-recovery-context";
 import {
   ariaKeyShortcuts,
   matchesShortcut,
@@ -14,6 +21,13 @@ import { onTicketCardReply } from "./activity-composer-request";
 import { hasVisibleText } from "./brief-text";
 import { useOpenTicket } from "./open-ticket";
 import { externalSource } from "./ticket-source";
+import {
+  keepTicketUpdateDraft,
+  readTicketUpdateDraft,
+  type TicketUpdateDraft,
+} from "./ticket-update-draft";
+
+const emptyDraft: TicketUpdateDraft = { brief: "", requestId: null };
 
 export function TicketReply({
   active,
@@ -24,21 +38,26 @@ export function TicketReply({
 }) {
   const { record: ticket, changed } = useOpenTicket();
   const line = useStatusLine();
+  const recovery = useDraftRecovery();
   const [replying, setReplying] = useState(false);
-  const [draft, setDraft] = useState("");
+  const [draft, setDraft] = useState(emptyDraft);
   const [pending, setPending] = useState(false);
   const composing = useRef<HTMLTextAreaElement>(null);
   const trigger = useRef<HTMLButtonElement>(null);
   const restoreFocus = useRef(false);
   const writing = useRef(false);
-  const intent = useRef<{ brief: string; requestId: string } | null>(null);
+  const open = useCallback(() => {
+    if (!replying)
+      setDraft(
+        readTicketUpdateDraft(recovery, ticket.id, "reply") ?? emptyDraft,
+      );
+    setReplying(true);
+    composing.current?.focus();
+  }, [recovery, replying, ticket.id]);
   useEffect(() => {
     if (!active || disabled) return;
-    return onTicketCardReply(ticket.reference, () => {
-      setReplying(true);
-      composing.current?.focus();
-    });
-  }, [active, disabled, ticket.reference]);
+    return onTicketCardReply(ticket.reference, open);
+  }, [active, disabled, open, ticket.reference]);
   useLayoutEffect(() => {
     if (!active) return;
     if (replying) composing.current?.focus();
@@ -51,27 +70,59 @@ export function TicketReply({
     setReplying(false);
   }
 
+  function edit(brief: string) {
+    if (writing.current) return;
+    const next = {
+      brief,
+      requestId: brief.trim() === draft.brief.trim() ? draft.requestId : null,
+    };
+    setDraft(next);
+    void keepTicketUpdateDraft(
+      recovery,
+      ticket.id,
+      "reply",
+      brief ? next : null,
+    ).catch(() => {});
+  }
+
   function submit() {
-    if (disabled || writing.current || !hasVisibleText(draft)) return;
-    const brief = draft.trim();
-    if (intent.current?.brief !== brief)
-      intent.current = { brief, requestId: crypto.randomUUID() };
-    const { requestId } = intent.current;
+    if (disabled || writing.current || !hasVisibleText(draft.brief)) return;
+    const requestId = draft.requestId ?? crypto.randomUUID();
+    const submission = { brief: draft.brief, requestId };
+    setDraft(submission);
+    const retained = keepTicketUpdateDraft(
+      recovery,
+      ticket.id,
+      "reply",
+      submission,
+    );
+    void retained.catch(() => {});
     async function post() {
       if (writing.current) return;
       writing.current = true;
       setPending(true);
       try {
+        // Flush the queued submission, including when Retry follows a recovery failure.
+        if (recovery.active) await recovery.flush();
+        else await retained;
         await client.addActivityWithDetails(
           ticket.reference,
-          brief,
+          submission.brief.trim(),
           null,
           null,
           requestId,
         );
-        intent.current = null;
-        setDraft("");
-        close();
+        const current = readTicketUpdateDraft(recovery, ticket.id, "reply");
+        if (
+          current?.requestId === requestId &&
+          current.brief === submission.brief
+        ) {
+          void keepTicketUpdateDraft(recovery, ticket.id, "reply", null).catch(
+            () => {},
+          );
+          setDraft(emptyDraft);
+          close();
+        }
         line.show({ message: "Posted the update" });
         await changed();
       } catch (reason) {
@@ -98,7 +149,7 @@ export function TicketReply({
           type="button"
           variant="outline"
           size="compact"
-          onClick={() => setReplying(true)}
+          onClick={open}
           disabled={disabled}
           aria-keyshortcuts={ariaKeyShortcuts("ticket-update")}
         >
@@ -131,15 +182,15 @@ export function TicketReply({
         aria-label="Reply"
         placeholder="Write a reply…"
         rows={3}
-        value={draft}
+        value={draft.brief}
         readOnly={pending}
-        onChange={(event) => setDraft(event.target.value)}
+        onChange={(event) => edit(event.target.value)}
       />
       <div className="ticket-decision-row">
         <Button
           size="compact"
           type="submit"
-          disabled={disabled || !hasVisibleText(draft)}
+          disabled={disabled || !hasVisibleText(draft.brief)}
           busy={pending}
         >
           Post update

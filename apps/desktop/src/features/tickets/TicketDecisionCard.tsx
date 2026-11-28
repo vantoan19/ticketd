@@ -5,34 +5,23 @@ import {
   useLayoutEffect,
   useMemo,
   useRef,
-  useState,
   type ReactNode,
 } from "react";
 import { ArrowRight } from "lucide-react";
 import { Kbd } from "@/components/ui/kbd";
-import { useStatusLine } from "@/components/ui/use-status-line";
 import {
   ariaKeyShortcuts,
   matchesShortcut,
   shortcutLabel,
 } from "@/lib/shortcuts";
-import { client, type Ticket } from "@/lib/api/client";
 import type { LatestUpdate } from "@/lib/api/progress";
-import { describeFailure } from "@/lib/api/describe-failure";
 import { editingBlockedReason, useWorkspaceState } from "@/lib/workspace-state";
 import { externalSource } from "./ticket-source";
 import { TicketReviewProof } from "./TicketReviewProof";
 import { TicketReply } from "./TicketReply";
 import { TicketSendBackForm } from "./TicketSendBackForm";
-import {
-  DraftRecoveryReadyContext,
-  useDraftRecovery,
-} from "@/lib/draft-recovery-context";
-import {
-  keepSendBackDraft,
-  readSendBackDraft,
-  type SendBackDraft,
-} from "./send-back-draft";
+import { DraftRecoveryGate } from "@/lib/draft-recovery-context";
+import type { TicketReviewDecision } from "./use-ticket-review-decision";
 import { SourceLink } from "./SourceLink";
 import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
@@ -52,11 +41,7 @@ import { NewUpdateDot } from "./NewUpdateDot";
 import { isNewUpdate } from "./ticket-seen-time";
 import "./ticket-decision-card.css";
 
-export type ReviewQueue = readonly Pick<Ticket, "reference" | "status">[];
-
-type ReviewDecision = (
-  { kind: "done" } | { kind: "sent back"; brief: string; agent: string }
-) & { next: string | undefined };
+export type { ReviewQueue } from "./use-ticket-review-decision";
 
 export function TicketDecisionCard({
   active,
@@ -69,7 +54,7 @@ export function TicketDecisionCard({
   blockers,
   doneFallback,
   select,
-  readReviewQueue,
+  reviewDecision,
 }: {
   active: boolean;
   seenTime: number | null;
@@ -81,30 +66,36 @@ export function TicketDecisionCard({
   blockers: ReactNode;
   doneFallback?: ReactNode;
   select: (reference: string) => void;
-  readReviewQueue?: (() => Promise<ReviewQueue>) | undefined;
+  reviewDecision: TicketReviewDecision;
 }) {
-  const { record: ticket, opening, changed, retry } = useOpenTicket();
+  const { record: ticket, opening } = useOpenTicket();
   const agent = useContext(AgentContext);
-  const line = useStatusLine();
   const blocked = editingBlockedReason(useWorkspaceState()) !== null;
-  const recovery = useDraftRecovery();
-  const recoveryReady = useContext(DraftRecoveryReadyContext);
   const latestUpdate = useOpenTicket("latestUpdate");
   const update =
     latestUpdate.value === undefined
       ? (ticket.progress_summary ?? null)
       : latestUpdate.value;
   const reviewerAgent = update?.editing_agent ?? "the agent";
-  const [decision, setDecision] = useState<ReviewDecision | null>(null);
-  const [draft, setDraft] = useState<SendBackDraft | null>(null);
-  const [pending, setPending] = useState(false);
-  const moving = useRef(false);
+  const {
+    canMove,
+    canSend,
+    cancelSendBack,
+    decision,
+    draft,
+    moveToDone,
+    openSendBack,
+    pending,
+    reviewVisible,
+    sendBack,
+    updateDraft,
+  } = reviewDecision;
   const card = useRef<HTMLElement>(null);
   const sendButton = useRef<HTMLButtonElement>(null);
   const field = useRef<HTMLTextAreaElement>(null);
   const restoreSendFocus = useRef(false);
   const next = useRef<HTMLAnchorElement>(null);
-  const nothing = useRef<HTMLParagraphElement>(null);
+  const queueMessage = useRef<HTMLParagraphElement>(null);
   const reference = ticket.reference;
   const owner = externalSource(ticket);
   const agentState =
@@ -114,143 +105,10 @@ export function TicketDecisionCard({
     !ticket.trashed &&
     ((ticket.status === "Done" && decision?.kind === "done") ||
       (ticket.status === "In progress" && decision?.kind === "sent back"));
-  const nextReference = decision?.next;
+  const nextReview = decision?.nextReview;
+  const nextReference =
+    nextReview?.kind === "next" ? nextReview.reference : undefined;
   const writingBack = draft !== null;
-  const reviewVisible = review && !agentState;
-  const canSend = reviewVisible && !blocked && !opening && recoveryReady;
-  const canMove =
-    reviewVisible && !owner && !blocked && !opening && !writingBack;
-  if (!active && decision) setDecision(null);
-  if ((!active || !reviewVisible) && writingBack) setDraft(null);
-
-  function openSendBack() {
-    if (!canSend || moving.current) return;
-    setDraft(
-      readSendBackDraft(recovery, ticket.id) ?? { brief: "", requestId: null },
-    );
-  }
-
-  function updateDraft(brief: string) {
-    const nextDraft = {
-      brief,
-      requestId: brief.trim() === draft?.brief.trim() ? draft.requestId : null,
-    };
-    setDraft(nextDraft);
-    void keepSendBackDraft(recovery, ticket.id, brief ? nextDraft : null).catch(
-      () => {},
-    );
-  }
-
-  function sendBack() {
-    if (!canSend || moving.current || !draft?.brief.trim()) return;
-    const intent = {
-      brief: draft.brief,
-      requestId: draft.requestId ?? crypto.randomUUID(),
-    };
-    setDraft(intent);
-    startDecision(intent);
-  }
-
-  function moveToDone() {
-    if (!canMove || moving.current) return;
-    startDecision();
-  }
-
-  function startDecision(send?: { brief: string; requestId: string }) {
-    const request = send?.requestId ?? crypto.randomUUID();
-    const undoRequest = crypto.randomUUID();
-    let next: Promise<string | undefined> | undefined;
-    async function decide() {
-      if (moving.current) return;
-      moving.current = true;
-      setPending(true);
-      try {
-        if (send) {
-          // A lost reply can be retried from the same saved draft with the same ID.
-          const saved = readSendBackDraft(recovery, ticket.id);
-          if (!saved || saved.brief === send.brief) {
-            await recovery.flush();
-            await keepSendBackDraft(recovery, ticket.id, send);
-          }
-        }
-        // Keep this queue through a retry, since the write may have landed
-        // before its reply was lost and removed the ticket from the results.
-        next ??= readReviewQueue?.()
-          .then((queue) => {
-            const slot = queue.findIndex(
-              (item) => item.reference === reference,
-            );
-            return [
-              ...queue.slice(slot + 1),
-              ...queue.slice(0, Math.max(0, slot)),
-            ].find(
-              (item) =>
-                item.reference !== reference && item.status === "In review",
-            )?.reference;
-          })
-          .catch(() => {
-            next = undefined;
-            return undefined;
-          });
-        const nextReference = await next;
-        const updated = send
-          ? await client.sendBack(reference, send.brief.trim(), request)
-          : await client.changeTicket(
-              reference,
-              { status: "Done", expected_status: "In review" },
-              request,
-            );
-        if (send) {
-          if (readSendBackDraft(recovery, ticket.id)?.requestId === request)
-            void keepSendBackDraft(recovery, ticket.id, null).catch(() => {});
-          setDraft(null);
-        }
-        setDecision(
-          send
-            ? {
-                kind: "sent back",
-                next: nextReference,
-                brief: send.brief.trim(),
-                agent: reviewerAgent,
-              }
-            : { kind: "done", next: nextReference },
-        );
-        line.show({
-          message: send
-            ? `Sent ${reference} back to In progress`
-            : `Moved ${reference} to Done`,
-          undo: async () => {
-            const restored = send
-              ? await client.undoSendBack(reference, request, undoRequest)
-              : await client.changeTicket(
-                  reference,
-                  { status: "In review", expected_status: "Done" },
-                  undoRequest,
-                );
-            setDecision(null);
-            await changed(restored);
-          },
-        });
-        await changed(updated);
-      } catch (reason) {
-        const failure = describeFailure(
-          reason,
-          send ? `send ${reference} back` : `move ${reference} to Done`,
-        );
-        if (failure.code === "conflict") await retry();
-        line.show({
-          tone: "error",
-          message: `${failure.title}. ${failure.sentence}`,
-          details: failure.details,
-          action: { label: "Retry", run: decide },
-        });
-      } finally {
-        moving.current = false;
-        setPending(false);
-      }
-    }
-    void decide();
-  }
 
   const reviewKey = useEffectEvent((event: KeyboardEvent) => {
     const target = event.target;
@@ -292,7 +150,7 @@ export function TicketDecisionCard({
   }, [active, reviewVisible]);
   useLayoutEffect(() => {
     if (!active) return;
-    if (decided) (next.current ?? nothing.current)?.focus();
+    if (decided) (next.current ?? queueMessage.current)?.focus();
     else if (writingBack) field.current?.focus();
     else if (restoreSendFocus.current) sendButton.current?.focus();
     restoreSendFocus.current = false;
@@ -340,11 +198,13 @@ export function TicketDecisionCard({
           </div>
         ) : (
           <p
-            ref={nothing}
+            ref={queueMessage}
             tabIndex={-1}
             className="ticket-decision-byline ticket-review-focus"
           >
-            Nothing else in review
+            {nextReview?.kind === "unavailable"
+              ? "Couldn't check what else is in review"
+              : "Nothing else in review"}
           </p>
         )}
       </DecisionPanel>
@@ -382,7 +242,9 @@ export function TicketDecisionCard({
         />
         {review && <TicketReviewProof onEvidence={onEvidence} />}
         {latest && (
-          <TicketReply active={active} disabled={opening || blocked} />
+          <DraftRecoveryGate>
+            <TicketReply active={active} disabled={opening || blocked} />
+          </DraftRecoveryGate>
         )}
         {review && draft && (
           <TicketSendBackForm
@@ -393,10 +255,10 @@ export function TicketDecisionCard({
             pending={pending}
             disabled={!canSend}
             onChange={updateDraft}
-            onSubmit={sendBack}
+            onSubmit={() => sendBack(reviewerAgent)}
             onCancel={() => {
               restoreSendFocus.current = true;
-              setDraft(null);
+              cancelSendBack();
             }}
           />
         )}
