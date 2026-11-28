@@ -9,15 +9,11 @@
   gap: 16px;
 }
 
-.plan-overview-file-ticket,
-.plan-overview-file-source {
+.plan-overview-file-ticket {
   display: flex;
   align-items: center;
   gap: 6px;
   min-width: 0;
-}
-
-.plan-overview-file-ticket {
   position: relative;
   min-height: 28px;
 }
@@ -34,22 +30,9 @@
   padding-block-start: 4px;
 }
 
-.plan-overview-file-tile {
+[data-overview-file-tile] {
   width: 96px;
   height: 72px;
-}
-
-.plan-overview-file-source {
-  flex: none;
-  padding: 4px 16px;
-}
-
-.plan-overview-file-source > svg {
-  flex: none;
-}
-
-.plan-overview-file-source > button {
-  margin-inline-start: auto;
 }
 
 :where([data-width~="max-600"]) .plan-overview-file-thumbnails {

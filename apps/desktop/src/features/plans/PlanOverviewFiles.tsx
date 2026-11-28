@@ -59,9 +59,7 @@ export function PlanOverviewFiles({
                     <div key={group.reference}>
                       <h3 className="plan-overview-file-ticket text-sm">
                         <StatusIcon status={group.status} size={14} />{" "}
-                        <Reference className="text-muted-foreground">
-                          {group.reference}
-                        </Reference>{" "}
+                        <Reference>{group.reference}</Reference>{" "}
                         <span>{group.title}</span>
                       </h3>
                       <div className="plan-overview-file-thumbnails">
@@ -72,7 +70,8 @@ export function PlanOverviewFiles({
                               key={file.id}
                               variant="outline"
                               size="card"
-                              className="plan-overview-file-tile overflow-hidden"
+                              className="overflow-hidden"
+                              data-overview-file-tile=""
                               aria-label={file.display_name}
                               onClick={() => openGroup(group, index)}
                             >
@@ -88,7 +87,7 @@ export function PlanOverviewFiles({
                           <Button
                             variant="outline"
                             size="card"
-                            className="plan-overview-file-tile"
+                            data-overview-file-tile=""
                             aria-label={`Show ${group.files.length - THUMBNAILS_PER_GROUP} more files for ${group.reference}`}
                             onClick={() =>
                               openGroup(group, THUMBNAILS_PER_GROUP)
@@ -165,25 +164,19 @@ function PlanFileViewer({
         if (pendingTicket.current) onOpenTicket(pendingTicket.current);
       }}
       fallbackFocus={fallbackFocus}
-      source={(close) => (
-        <div className="plan-overview-file-source text-sm">
-          <StatusIcon status={group.status} size={14} />
-          <Reference className="text-muted-foreground">
-            {group.reference}
-          </Reference>
-          <span className="truncate">{group.title}</span>
-          <Button
-            variant="ghost"
-            size="compact"
-            onClick={() => {
-              pendingTicket.current = group.reference;
-              close();
-            }}
-          >
-            Open ticket
-          </Button>
-        </div>
-      )}
+      source={{
+        content: (
+          <>
+            <StatusIcon status={group.status} size={14} />
+            <Reference>{group.reference}</Reference>
+            <span className="truncate">{group.title}</span>
+          </>
+        ),
+        actionLabel: "Open ticket",
+        onAction: () => {
+          pendingTicket.current = group.reference;
+        },
+      }}
     />
   );
 }
