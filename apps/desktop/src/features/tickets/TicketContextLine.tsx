@@ -5,7 +5,7 @@ import {
   type ReactElement,
   type ReactNode,
 } from "react";
-import { Bell, Folder, Layers, Plus } from "lucide-react";
+import { Bell, Folder, Layers, Plus, X } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import {
@@ -60,10 +60,12 @@ export function TicketBlockersPopover({
   work,
   select,
   trigger,
+  removable = false,
 }: {
   work: LinkedWorkState;
   select: (reference: string) => void;
   trigger: ReactElement;
+  removable?: boolean;
 }) {
   const [open, setOpen] = useState(false);
   const rows = orderBlockers(work);
@@ -86,7 +88,7 @@ export function TicketBlockersPopover({
         <div className="ticket-blockers-popover">
           <ul>
             {rows.map((row) => (
-              <li key={row.reference}>
+              <li key={row.reference} className="ticket-blocker-row">
                 <RailRow
                   icon={<StatusIcon status={row.status} decorative />}
                   onClick={() => {
@@ -103,6 +105,18 @@ export function TicketBlockersPopover({
                     {row.trashed && " · In Trash"}
                   </span>
                 </RailRow>
+                {removable && !readOnly && (
+                  <IconButton
+                    label={`Remove ${row.reference} from Blocked by`}
+                    size="icon-compact"
+                    disabled={work.pending}
+                    onClick={() =>
+                      void work.remove({ ...row, kind: "blocked_by" })
+                    }
+                  >
+                    <X aria-hidden="true" />
+                  </IconButton>
+                )}
               </li>
             ))}
           </ul>
@@ -187,6 +201,8 @@ export function TicketContextLine({
   work,
   select,
   onOpenSubtickets,
+  rail = false,
+  subtickets,
   addTriggerRef,
   additionalActions,
 }: {
@@ -195,6 +211,8 @@ export function TicketContextLine({
   work: LinkedWorkState;
   select: (reference: string) => void;
   onOpenSubtickets: () => void;
+  rail?: boolean;
+  subtickets?: ReactNode;
   addTriggerRef?: (button: HTMLButtonElement | null) => void;
   additionalActions?: ReactNode;
 }) {
@@ -215,12 +233,28 @@ export function TicketContextLine({
     ? `${plan.name}${plan.archived ? " (archived)" : ""}`
     : ticket.plan_id;
   const assignmentName = [projectName, planName].filter(Boolean).join(" / ");
-  const unresolved = orderBlockers(work).filter((row) => row.unresolved);
-  const firstBlocker = unresolved[0];
+  const blockers = orderBlockers(work);
+  const unresolved = blockers.filter((row) => row.unresolved);
+  const firstBlocker = unresolved[0] ?? (rail ? blockers[0] : undefined);
   const progress = work.current?.links?.children_progress;
   const chips: ReactElement[] = [];
+  const addRow = (label: string, control: ReactElement) => {
+    chips.push(
+      rail ? (
+        <div key={label} className="ticket-rail-property">
+          <span className="ticket-rail-label" aria-hidden="true">
+            {label}
+          </span>
+          {control}
+        </div>
+      ) : (
+        control
+      ),
+    );
+  };
 
-  chips.push(
+  addRow(
+    "Status",
     <TicketCommandPicker
       key="status"
       {...picker}
@@ -239,7 +273,32 @@ export function TicketContextLine({
       }
     />,
   );
-  if (assignmentName) {
+  if (rail) {
+    for (const [scope, name, Icon, shortcut] of [
+      ["Project", projectName, Folder, "ticket-project"],
+      ["Plan", planName, Layers, "ticket-plan"],
+    ] as const) {
+      if (!name) continue;
+      addRow(
+        scope,
+        <TicketCommandPicker
+          {...picker}
+          scope={scope}
+          trigger={
+            <RailRow
+              icon={<Icon aria-hidden="true" />}
+              aria-label={`${scope}: ${name}`}
+              aria-keyshortcuts={ariaKeyShortcuts(shortcut)}
+              disabled={readOnly}
+              readOnly={readOnly}
+            >
+              <CrossfadeText>{name}</CrossfadeText>
+            </RailRow>
+          }
+        />,
+      );
+    }
+  } else if (assignmentName) {
     const scope = projectName ? "Project" : "Plan";
     const trigger = (
       <RailRow
@@ -264,7 +323,8 @@ export function TicketContextLine({
         <CrossfadeText>{assignmentName}</CrossfadeText>
       </RailRow>
     );
-    chips.push(
+    addRow(
+      scope,
       projectName && planName ? (
         <PropertyMenu
           key="assignment"
@@ -292,22 +352,38 @@ export function TicketContextLine({
     );
   }
   if (firstBlocker) {
-    chips.push(
+    const more = (rail ? blockers.length : unresolved.length) - 1;
+    addRow(
+      "Blocked by",
       <TicketBlockersPopover
         key="blockers"
+        removable={rail}
         work={work}
         select={select}
         trigger={
-          <RailRow icon={<StatusDot tone="blocked" />}>
-            Blocked by {firstBlocker.reference}
-            {unresolved.length > 1 && ` +${unresolved.length - 1}`}
+          <RailRow
+            icon={
+              unresolved.length > 0 ? <StatusDot tone="blocked" /> : undefined
+            }
+            aria-label={
+              rail
+                ? `Blocked by ${firstBlocker.reference}${more > 0 ? ` +${more}` : ""}`
+                : undefined
+            }
+          >
+            {!rail && "Blocked by "}
+            {firstBlocker.reference}
+            {more > 0 && ` +${more}`}
           </RailRow>
         }
       />,
     );
   }
-  if (progress?.total) {
-    chips.push(
+  if (rail && subtickets) {
+    addRow("Subtickets", <>{subtickets}</>);
+  } else if (!rail && progress?.total) {
+    addRow(
+      "Subtickets",
       <RailRow
         key="subtickets"
         onClick={onOpenSubtickets}
@@ -341,7 +417,8 @@ export function TicketContextLine({
     );
   }
   if (ticket.tags.length > 0) {
-    chips.push(
+    addRow(
+      "Tags",
       <TicketCommandPicker
         key="tags"
         {...picker}
@@ -371,7 +448,8 @@ export function TicketContextLine({
   }
   if (reminder.value && !readOnly) {
     const summary = reminderSummary(reminder.value);
-    chips.push(
+    addRow(
+      "Reminder",
       <TicketCommandPicker
         key="reminder"
         {...picker}
@@ -406,71 +484,84 @@ export function TicketContextLine({
     { kind: "subticket", label: "Subticket…" },
     { kind: "related", label: "Link a ticket…" },
   ];
-  const last = chips.pop();
+  const add = !readOnly && (
+    <PropertyMenu
+      picker={picker}
+      trigger={
+        rail ? (
+          <Button
+            ref={addTriggerRef}
+            type="button"
+            variant="ghost"
+            size="compact"
+          >
+            <Plus aria-hidden="true" /> Add property
+          </Button>
+        ) : (
+          <IconButton
+            ref={addTriggerRef}
+            label="Add ticket property"
+            size="icon-compact"
+          >
+            <Plus />
+          </IconButton>
+        )
+      }
+      open={addProperty}
+      onOpenChange={setAddProperty}
+      label="Add ticket property"
+      onKeyDown={(event) =>
+        addBlockerKey(event, () => work.openLink("blocked_by"))
+      }
+    >
+      {missing.map((scope) => {
+        const shortcut = ticketCommandActions.find(
+          (action) => action.scope === scope,
+        )?.shortcut;
+        return (
+          <DropdownMenuItem key={scope} onSelect={() => setAddProperty(scope)}>
+            {scope}
+            {scope !== "Project" && shortcut && (
+              <Kbd aria-hidden="true">{shortcutLabel(shortcut)}</Kbd>
+            )}
+          </DropdownMenuItem>
+        );
+      })}
+      {missing.length > 0 && <DropdownMenuSeparator />}
+      {linkActions.map(({ kind, label }) => (
+        <DropdownMenuItem
+          key={kind}
+          onSelect={() => work.openLink(kind)}
+          {...(kind === "blocked_by" && { "aria-keyshortcuts": "B" })}
+        >
+          {label}
+          {kind === "blocked_by" && <Kbd aria-hidden="true">B</Kbd>}
+        </DropdownMenuItem>
+      ))}
+      {additionalActions && (
+        <>
+          <DropdownMenuSeparator />
+          {additionalActions}
+        </>
+      )}
+    </PropertyMenu>
+  );
+  const last = rail ? null : chips.pop();
   return (
     <div
-      className="ticket-context-line"
+      className={rail ? "ticket-rail-properties" : "ticket-context-line"}
       role="group"
       aria-label="Ticket properties"
     >
       {chips}
-      <span className="ticket-context-tail">
-        {last}
-        {!readOnly && (
-          <PropertyMenu
-            picker={picker}
-            trigger={
-              <IconButton
-                ref={addTriggerRef}
-                label="Add ticket property"
-                size="icon-compact"
-              >
-                <Plus />
-              </IconButton>
-            }
-            open={addProperty}
-            onOpenChange={setAddProperty}
-            label="Add ticket property"
-            onKeyDown={(event) =>
-              addBlockerKey(event, () => work.openLink("blocked_by"))
-            }
-          >
-            {missing.map((scope) => {
-              const shortcut = ticketCommandActions.find(
-                (action) => action.scope === scope,
-              )?.shortcut;
-              return (
-                <DropdownMenuItem
-                  key={scope}
-                  onSelect={() => setAddProperty(scope)}
-                >
-                  {scope}
-                  {scope !== "Project" && shortcut && (
-                    <Kbd aria-hidden="true">{shortcutLabel(shortcut)}</Kbd>
-                  )}
-                </DropdownMenuItem>
-              );
-            })}
-            {missing.length > 0 && <DropdownMenuSeparator />}
-            {linkActions.map(({ kind, label }) => (
-              <DropdownMenuItem
-                key={kind}
-                onSelect={() => work.openLink(kind)}
-                {...(kind === "blocked_by" && { "aria-keyshortcuts": "B" })}
-              >
-                {label}
-                {kind === "blocked_by" && <Kbd aria-hidden="true">B</Kbd>}
-              </DropdownMenuItem>
-            ))}
-            {additionalActions && (
-              <>
-                <DropdownMenuSeparator />
-                {additionalActions}
-              </>
-            )}
-          </PropertyMenu>
-        )}
-      </span>
+      {rail ? (
+        add
+      ) : (
+        <span className="ticket-context-tail">
+          {last}
+          {add}
+        </span>
+      )}
     </div>
   );
 }

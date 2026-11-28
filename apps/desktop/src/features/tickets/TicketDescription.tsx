@@ -120,7 +120,9 @@ function TicketDescriptionReading({ ticketId, ...markdown }: Props) {
   );
   const [opened, setOpened] = useState(() => readOpenFolds(ticketId));
   const [search, setSearch] = useState<DescriptionSearch | null>(null);
-  const [jump, setJump] = useState<{ offset: number } | null>(null);
+  const [jump, setJump] = useState<{ offset: number; atTop: boolean } | null>(
+    null,
+  );
   const [openedForJump, setOpenedForJump] = useState<string>();
   const root = useRef<HTMLDivElement>(null);
   const input = useRef<HTMLInputElement>(null);
@@ -169,7 +171,7 @@ function TicketDescriptionReading({ ticketId, ...markdown }: Props) {
       setOpenedForJump(
         folds.find(({ start, end }) => start <= offset && offset < end)?.id,
       );
-      setJump({ offset });
+      setJump({ offset, atTop: detail.target !== "acceptance" });
     }
 
     window.addEventListener("keydown", find);
@@ -194,7 +196,7 @@ function TicketDescriptionReading({ ticketId, ...markdown }: Props) {
     if (heading) {
       heading.tabIndex = -1;
       heading.focus({ preventScroll: true });
-      revealInDetail(heading);
+      revealInDetail(heading, undefined, jump.atTop ? 24 : undefined);
     }
   }, [jump]);
 

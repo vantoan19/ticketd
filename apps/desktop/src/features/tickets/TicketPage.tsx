@@ -1,6 +1,6 @@
 import { Alert, AlertActions, AlertDescription } from "@/components/ui/alert";
 import { Button } from "@/components/ui/button";
-import { useLayoutEffect, useRef, useState } from "react";
+import { useLayoutEffect, useRef, useState, type ReactNode } from "react";
 import { DropdownMenuItem } from "@/components/ui/dropdown-menu";
 import { Evidence } from "@/features/tickets/Evidence";
 import type { MentionTarget } from "@/features/tickets/Backlinks";
@@ -21,6 +21,7 @@ import { useLinkedWork, orderBlockers } from "@/features/tickets/useLinkedWork";
 import { Activity } from "@/features/tickets/Activity";
 import { SourceConversation } from "@/features/tickets/SourceConversation";
 import { TicketDescription } from "./TicketDescription";
+import { TicketOutline } from "./TicketOutline";
 import { ReadOnlyTitle, SourceDescription } from "./ReadOnlySource";
 import { SourceUnavailableNotice } from "@/features/tickets/SourceUnavailableNotice";
 import { NeedsReviewNotice } from "@/features/sync-review/NeedsReviewNotice";
@@ -43,10 +44,11 @@ import type { Plan } from "@/lib/api/plans";
 
 type NoteTarget = { id: string; key: number };
 
-/** The ticket document with its context line and linked work. */
+/** The ticket document with its properties and linked work. */
 export function TicketPage({
   active,
   expanded = false,
+  rail = false,
   swap = false,
   leaving = false,
   readReviewQueue,
@@ -60,6 +62,7 @@ export function TicketPage({
   /** Only the selected ticket reads its links, evidence, and backlinks. */
   active: boolean;
   expanded?: boolean;
+  rail?: boolean;
   /** Shown after another open ticket: its document fades up once that one has left. */
   swap?: boolean;
   /** Not the open ticket any more, kept on screen for one exit while it fades out. */
@@ -92,6 +95,7 @@ export function TicketPage({
   // Pages stay mounted while hidden and the shared scrollers keep their
   // offset, so showing a ticket starts its document at the top.
   const page = useRef<HTMLDivElement>(null);
+  const readingColumn = useRef<HTMLDivElement>(null);
   useLayoutEffect(() => {
     const content = page.current;
     if (!active || !content) return;
@@ -120,54 +124,51 @@ export function TicketPage({
       addTrigger={addTrigger}
     />
   );
-  const relationships = active && (
-    <LinkedWork
-      ref={linkedWork}
-      work={work}
-      select={select}
-      onMention={onMention}
-    />
-  );
   const runs = active && <TicketRunsSection runs={ticketRuns.runs} />;
   const blockerCount = orderBlockers(work).filter(
     (row) => row.unresolved,
   ).length;
+  const properties = (subtickets?: ReactNode) => (
+    <TicketContextLine
+      rail={rail}
+      subtickets={subtickets}
+      projects={projects}
+      plans={plans}
+      work={work}
+      select={select}
+      addTriggerRef={setAddTrigger}
+      additionalActions={
+        <>
+          <DropdownMenuItem
+            onSelect={() => setEvidenceRequest((count) => count + 1)}
+          >
+            Evidence…
+          </DropdownMenuItem>
+          <DropdownMenuItem
+            onSelect={() =>
+              setFileAddRequest({ kind: "file", key: Date.now() })
+            }
+          >
+            File…
+          </DropdownMenuItem>
+          <DropdownMenuItem
+            onSelect={() =>
+              setFileAddRequest({ kind: "document", key: Date.now() })
+            }
+          >
+            Document…
+          </DropdownMenuItem>
+        </>
+      }
+      onOpenSubtickets={() => {
+        linkedWork.current?.openSubtickets();
+        linked.current?.scrollIntoView({ block: "start" });
+      }}
+    />
+  );
   const context = (
     <>
-      <TicketContextLine
-        projects={projects}
-        plans={plans}
-        work={work}
-        select={select}
-        addTriggerRef={setAddTrigger}
-        additionalActions={
-          <>
-            <DropdownMenuItem
-              onSelect={() => setEvidenceRequest((count) => count + 1)}
-            >
-              Evidence…
-            </DropdownMenuItem>
-            <DropdownMenuItem
-              onSelect={() =>
-                setFileAddRequest({ kind: "file", key: Date.now() })
-              }
-            >
-              File…
-            </DropdownMenuItem>
-            <DropdownMenuItem
-              onSelect={() =>
-                setFileAddRequest({ kind: "document", key: Date.now() })
-              }
-            >
-              Document…
-            </DropdownMenuItem>
-          </>
-        }
-        onOpenSubtickets={() => {
-          linkedWork.current?.openSubtickets();
-          linked.current?.scrollIntoView({ block: "start" });
-        }}
-      />
+      {!rail && properties()}
       {ticket.status !== "Done" && (
         <TicketAgentStrip
           reference={ticket.reference}
@@ -209,11 +210,12 @@ export function TicketPage({
       data-fresh={fresh || undefined}
       data-leaving={leaving || undefined}
       data-trashed={ticket.trashed || undefined}
+      data-rail={rail || undefined}
     >
       {/* Mounted here, not inside the rail or the narrow layout, so crossing
           the breakpoint never remounts an open review and drops its state. */}
       {active && !ticket.trashed && <LinkedWorkDialogs work={work} />}
-      <div className="detail-document">
+      <div className="detail-document" ref={readingColumn}>
         {/* One notice for the whole state; the header and rail keep their shape. */}
         {ticket.trashed && (
           <Alert size="compact" role="status" className="mb-6">
@@ -244,7 +246,8 @@ export function TicketPage({
           <TicketParentLine
             parent={parent}
             select={select}
-            {...(parentRow &&
+            {...(!rail &&
+              parentRow &&
               !ticket.trashed &&
               !work.pending && { onRemove: () => void work.remove(parentRow) })}
           />
@@ -297,11 +300,20 @@ export function TicketPage({
             {context}
           </TicketEditor>
         )}
-        <RailPlacement value="column">
-          <div ref={linked} className="detail-connected">
-            {relationships}
-          </div>
-        </RailPlacement>
+        {!rail && (
+          <RailPlacement value="column">
+            <div ref={linked} className="detail-connected">
+              {active && (
+                <LinkedWork
+                  ref={linkedWork}
+                  work={work}
+                  select={select}
+                  onMention={onMention}
+                />
+              )}
+            </div>
+          </RailPlacement>
+        )}
         {active && (
           <Evidence
             trashed={ticket.trashed}
@@ -345,6 +357,26 @@ export function TicketPage({
           sourceName={source?.provider_name}
         />
       </div>
+      {rail && (
+        <aside className="ticket-detail-rail" aria-label="Ticket details">
+          {active ? (
+            <LinkedWork
+              ref={linkedWork}
+              work={work}
+              select={select}
+              onMention={onMention}
+              railLead={(subtickets) => (
+                <>
+                  {properties(subtickets)}
+                  <TicketOutline column={readingColumn} ticketId={ticket.id} />
+                </>
+              )}
+            />
+          ) : (
+            properties()
+          )}
+        </aside>
+      )}
     </div>
   );
 }
