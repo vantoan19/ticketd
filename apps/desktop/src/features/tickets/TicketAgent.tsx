@@ -11,7 +11,7 @@ import { useTicketAgents } from "@/features/chats/use-ticket-agents";
 import type { Ticket } from "@/lib/api/client";
 import { ariaKeyShortcuts } from "@/lib/shortcuts";
 import { useInboxAttention } from "./use-inbox-attention";
-import { useLatestUpdateOf } from "./open-ticket";
+import { useLatestUpdateOf, type TicketState } from "./open-ticket";
 import { AgentContext } from "./ticket-agent-context";
 import {
   agentState,
@@ -21,12 +21,15 @@ import {
 
 /** Keep the opening's decision to give agents room in the document. */
 export function TicketAgentSession({
-  ticket,
+  record,
+  preview,
   children,
 }: {
-  ticket: Ticket | undefined;
+  record: TicketState;
+  preview: Ticket | undefined;
   children: (loading: boolean) => ReactNode;
 }) {
+  const ticket = record.value === undefined ? preview : record.value;
   const { enabled, checking } = useChatFeature();
   const { show } = useStatusLine();
   const { list } = useLinkedChats(
@@ -62,30 +65,29 @@ export function TicketAgentSession({
   const state = agentState(chats, agents ?? [], now);
   const [opening, setOpening] = useState<{
     reference: string | undefined;
-    ready: boolean;
     withCard: boolean | null;
-  }>({ reference, ready: false, withCard: null });
+  }>({ reference, withCard: null });
   const sameOpening = opening.reference === reference;
+  const placed = opening.withCard !== null;
+  const currentTicket = !placed && record.current ? record.value : undefined;
   const ready =
     sameOpening &&
     Boolean(
       ticket &&
-      (opening.ready ||
-        failure ||
-        (latest.current && latest.value !== undefined)) &&
+      (placed || currentTicket || record.failure) &&
+      (placed || failure || (latest.current && latest.value !== undefined)) &&
       !checking &&
       (!enabled || (list && agents)),
     );
   if (!sameOpening) {
-    setOpening({ reference, ready: false, withCard: null });
-  } else if (ready && !opening.ready) {
+    setOpening({ reference, withCard: null });
+  } else if (ready && currentTicket && !placed) {
+    const { status, trashed } = currentTicket;
     setOpening({
       reference,
-      ready: true,
       withCard:
         Boolean(state) ||
-        (!ticket?.trashed &&
-          (ticket?.status === "In review" || ticket?.status === "In progress")),
+        (!trashed && (status === "In review" || status === "In progress")),
     });
   }
   return (
@@ -118,14 +120,15 @@ export function TicketAgentHeader({ reference }: { reference: string }) {
       ? agent.state
       : null;
   const { openChat, setOrigin } = useOpenTicketAgentChat(state, reference);
-  if (state?.kind === "request")
+  if (state?.kind === "request") {
+    const label = state.request === "question" ? "Question" : "Approval needed";
     return (
       <Tooltip content="Review the request in Chat">
         <Button
           ref={setOrigin}
           aria-keyshortcuts={ariaKeyShortcuts("ticket-agent-chat")}
           aria-label="Review request"
-          aria-description="Approval needed"
+          aria-description={label}
           variant="attention"
           size="compact-responsive"
           onClick={openChat}
@@ -133,7 +136,7 @@ export function TicketAgentHeader({ reference }: { reference: string }) {
           <span className="ticket-agent-header-long">
             <StatusDot tone="attention" size={6} />
           </span>
-          <span className="ticket-agent-header-long">Approval needed</span>
+          <span className="ticket-agent-header-long">{label}</span>
           <TriangleAlert
             className="ticket-agent-header-short"
             aria-hidden="true"
@@ -141,6 +144,7 @@ export function TicketAgentHeader({ reference }: { reference: string }) {
         </Button>
       </Tooltip>
     );
+  }
   if (state?.kind !== "working") return null;
   const working = state.agents[0] ?? state.chat;
   if (!working) return null;

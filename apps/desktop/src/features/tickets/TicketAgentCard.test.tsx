@@ -19,9 +19,11 @@ import { ticketAgentFixtures } from "@/features/chats/ticket-agent-fixtures";
 import { bridgeDefault, unknownCommands } from "@/test/bridge-defaults";
 import { StatusLineRegion } from "@/components/ui/status-line";
 import { isMacPlatform } from "@/lib/platform";
+import { deferred } from "@/lib/workspace-reads/test-support";
 import { TestReads } from "@/lib/workspace-reads/testing";
 import type { Ticket } from "@/lib/api/client";
 import { TicketDetails } from "./TicketDetails";
+import { useLatestUpdateOf } from "./open-ticket";
 import { ticketFor } from "./open-ticket/parts/ticket-fixture";
 
 const bridge = vi.hoisted(() => ({ invoke: vi.fn() }));
@@ -41,7 +43,8 @@ window.ResizeObserver = class {
 let linked: ChatSummary[];
 let agents: ReturnType<typeof ticketAgentFixtures>["one"];
 let items: object[];
-let answerFailure: boolean;
+let answer: Promise<null> | null;
+let savedTicket: Promise<Ticket> | null;
 let changedTicket: Ticket | null;
 
 function summary(
@@ -92,13 +95,15 @@ beforeEach(() => {
   linked = [];
   agents = [];
   items = [];
-  answerFailure = false;
+  answer = null;
+  savedTicket = null;
   changedTicket = null;
   requestChat.mockClear();
   bridge.invoke.mockImplementation(
     async (command: string, args?: { reference?: string }) => {
       if (command === "change_ticket" && changedTicket) return changedTicket;
       if (command === "show_ticket" && changedTicket) return changedTicket;
+      if (command === "show_ticket" && savedTicket) return savedTicket;
       if (command === "chat_harness_catalog") return [];
       if (command === "chat_ticket_agents") return agents;
       if (command === "chat_linked_to") return linked;
@@ -131,11 +136,7 @@ beforeEach(() => {
             cursor: 0,
           },
         };
-      if (command === "chat_answer") {
-        if (answerFailure)
-          throw { code: "failed", message: "Could not answer" };
-        return null;
-      }
+      if (command === "chat_answer") return answer;
       if (command === "is_following") return false;
       if (command === "chat_close" || command === "reminder") return null;
       if (command === "latest_update")
@@ -157,7 +158,12 @@ afterEach(() => {
   expect(unknownCommands.splice(0)).toEqual([]);
 });
 
-function open(record: Ticket) {
+function LatestUpdateRead({ reference }: { reference: string }) {
+  const latest = useLatestUpdateOf(reference);
+  return latest.current && <output>Latest update read</output>;
+}
+
+function open(record: Ticket, fromPreview = false) {
   const client = createHostChatClient({
     invoke: bridge.invoke,
     channel: () => null,
@@ -180,7 +186,8 @@ function open(record: Ticket) {
           requestChat,
         }}
       >
-        <TestReads primed={{ ticket: record }}>
+        <TestReads {...(!fromPreview && { primed: { ticket: record } })}>
+          {fromPreview && <LatestUpdateRead reference={record.reference} />}
           <StatusLineRegion>
             <TicketDetails
               mention={null}
@@ -192,6 +199,7 @@ function open(record: Ticket) {
               opened={selection ? [selection] : []}
               onMentionReady={vi.fn()}
               onClearMention={vi.fn()}
+              preview={fromPreview ? record : undefined}
               projects={[]}
               plans={[]}
             />
@@ -237,24 +245,39 @@ test("a pending request replaces both working and ready for review, and answers 
   });
 });
 
-test("a rejected answer stays on the request and can be retried with the same host choice", async () => {
+test("a rejected answer keeps the chosen button focused and the same shortcut can retry", async () => {
   linked = [summary("approval")];
   agents = [{ ...main, approval: { summary: request.command } }];
   items = [{ ...request, folder: "/work/other-folder" }];
-  answerFailure = true;
+  const pending = deferred<null>();
+  answer = pending.promise;
   open(ticket);
   const card = within(
     await screen.findByRole("region", { name: "Request from an agent" }),
   );
-  const allow = await card.findByRole("button", { name: "Allow in this Chat" });
+  const allow = await card.findByRole<HTMLButtonElement>("button", {
+    name: "Allow in this Chat",
+  });
+  const deny = card.getByRole<HTMLButtonElement>("button", { name: "Deny" });
   expect(card.getByText("/work/other-folder")).toBeTruthy();
   expect(card.getByText(request.options[1]!.warning!)).toBeTruthy();
-  fireEvent.click(allow);
+  deny.focus();
+  fireEvent.keyDown(deny, { key: "2" });
+  expect(document.activeElement).toBe(allow);
+  expect(allow.getAttribute("aria-busy")).toBe("true");
+  expect(allow.disabled).toBe(false);
+  expect(deny.disabled).toBe(true);
+  fireEvent.keyDown(allow, { key: "2" });
+  await act(async () =>
+    pending.reject({ code: "failed", message: "Could not answer" }),
+  );
   expect(
     await card.findByText("Answer not sent · Pick again to retry"),
   ).toBeTruthy();
-  answerFailure = false;
-  fireEvent.click(allow);
+  expect(document.activeElement).toBe(allow);
+  expect(deny.disabled).toBe(false);
+  answer = null;
+  fireEvent.keyDown(allow, { key: "2" });
   await waitFor(() =>
     expect(
       card.queryByText("Answer not sent · Pick again to retry"),
@@ -415,7 +438,7 @@ test.each(["Todo", "Done", "Canceled", "Trash"])(
   },
 );
 
-test("working and approval stay in the header when the ticket opened without a card", async () => {
+test("working, questions, and approvals stay in the header when the ticket opened without a card", async () => {
   const reopen = open(ticket);
   await waitFor(() =>
     expect(
@@ -434,18 +457,56 @@ test("working and approval stay in the header when the ticket opened without a c
   expect(
     screen.queryByRole("region", { name: "Agents on this ticket" }),
   ).toBeNull();
-  agents = [{ ...main, approval: { summary: request.command } }];
-  items = [request];
+  agents = [];
+  linked = [summary("question")];
+  items = [{ ...request, request: "question", subject: "Which release?" }];
   reopen(2);
-  await screen.findByRole("button", { name: "Review request" });
+  const question = await screen.findByRole("button", {
+    name: "Review request",
+  });
+  expect(question.textContent).toBe("Question");
+  expect(question.getAttribute("aria-description")).toBe("Question");
+  fireEvent.click(question);
+  expect(requestChat).toHaveBeenLastCalledWith(
+    expect.objectContaining({ chatId: main.chat_id }),
+  );
+  agents = [{ ...main, approval: { summary: request.command } }];
+  linked = [summary("approval")];
+  items = [request];
+  reopen(3);
+  await within(question).findByText("Approval needed");
+  expect(question.getAttribute("aria-description")).toBe("Approval needed");
   expect(
     screen.queryByRole("region", { name: "Request from an agent" }),
   ).toBeNull();
-  await act(async () => reopen(2, null));
-  reopen(2);
+  await act(async () => reopen(3, null));
+  reopen(3);
   expect(
     await screen.findByRole("region", { name: "Request from an agent" }),
   ).toBeTruthy();
+});
+
+test("a stale Todo preview cannot keep a review ticket's later request out of its card", async () => {
+  const pending = deferred<Ticket>();
+  savedTicket = pending.promise;
+  const refresh = open(ticket, true);
+  expect(
+    screen.getByRole("heading", { name: ticket.title, level: 1 }),
+  ).toBeTruthy();
+  await screen.findByText("Latest update read");
+  expect(
+    screen.getByRole("status", { name: "Loading ticket agent context" }),
+  ).toBeTruthy();
+
+  await act(async () => pending.resolve({ ...ticket, status: "In review" }));
+  await screen.findByRole("region", { name: "Ready for review" });
+  linked = [summary("approval")];
+  items = [request];
+  refresh(1);
+  expect(
+    await screen.findByRole("region", { name: "Request from an agent" }),
+  ).toBeTruthy();
+  expect(screen.queryByRole("button", { name: "Review request" })).toBeNull();
 });
 
 test("review shortcuts work from a focused button in the ticket header", async () => {

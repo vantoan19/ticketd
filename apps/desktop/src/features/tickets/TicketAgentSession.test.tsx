@@ -1,9 +1,11 @@
 // @vitest-environment jsdom
 import { cleanup, render, screen } from "@testing-library/react";
+import type { ReactNode } from "react";
 import { afterEach, expect, test, vi } from "vitest";
 import { TestReads } from "@/lib/workspace-reads/testing";
 import { LatestUpdate } from "./LatestUpdate";
 import { TicketAgentSession } from "./TicketAgent";
+import { useTicket } from "./open-ticket";
 import { OpenTicketFor } from "./open-ticket/parts/activity-testing";
 import { ticketFor } from "./open-ticket/parts/ticket-fixture";
 
@@ -22,14 +24,27 @@ const report = {
   editing_agent: "Agent",
   supporting_document_id: null,
 };
+const ticket = ticketFor("T-KQ1");
+
+function Session({ children }: { children?: ReactNode }) {
+  const record = useTicket(ticket.reference);
+  return (
+    <TicketAgentSession record={record} preview={ticket}>
+      {(loading) => (
+        <>
+          <output>{loading ? "loading" : "ready"}</output>
+          {children}
+        </>
+      )}
+    </TicketAgentSession>
+  );
+}
 
 test("the agent context waits for the latest update, then is ready", async () => {
   bridge.invoke.mockResolvedValue(report);
   render(
-    <TestReads primed={{ ticket: ticketFor("T-KQ1") }}>
-      <TicketAgentSession ticket={ticketFor("T-KQ1")}>
-        {(loading) => <output>{loading ? "loading" : "ready"}</output>}
-      </TicketAgentSession>
+    <TestReads primed={{ ticket }}>
+      <Session />
     </TestReads>,
   );
   expect(screen.getByText("loading")).toBeTruthy();
@@ -39,15 +54,10 @@ test("the agent context waits for the latest update, then is ready", async () =>
 test("the agent context and the Latest update property share one read", async () => {
   bridge.invoke.mockResolvedValue(report);
   render(
-    <OpenTicketFor reference="T-KQ1">
-      <TicketAgentSession ticket={ticketFor("T-KQ1")}>
-        {(loading) => (
-          <>
-            <output>{loading ? "loading" : "ready"}</output>
-            <LatestUpdate active />
-          </>
-        )}
-      </TicketAgentSession>
+    <OpenTicketFor reference={ticket.reference}>
+      <Session>
+        <LatestUpdate active />
+      </Session>
     </OpenTicketFor>,
   );
   await screen.findByText("ready");
@@ -65,21 +75,20 @@ test("the agent context is ready even when the Ticket's record cannot be read", 
   });
   render(
     <TestReads>
-      <TicketAgentSession ticket={ticketFor("T-KQ1")}>
-        {(loading) => <output>{loading ? "loading" : "ready"}</output>}
-      </TicketAgentSession>
+      <Session />
     </TestReads>,
   );
   expect(await screen.findByText("ready")).toBeTruthy();
+  expect(bridge.invoke).toHaveBeenCalledWith("show_ticket", {
+    reference: ticket.reference,
+  });
 });
 
 test("a failed read of the latest update still lets the page open", async () => {
   bridge.invoke.mockRejectedValue(new Error("Database unavailable"));
   render(
-    <TestReads primed={{ ticket: ticketFor("T-KQ1") }}>
-      <TicketAgentSession ticket={ticketFor("T-KQ1")}>
-        {(loading) => <output>{loading ? "loading" : "ready"}</output>}
-      </TicketAgentSession>
+    <TestReads primed={{ ticket }}>
+      <Session />
     </TestReads>,
   );
   expect(await screen.findByText("ready")).toBeTruthy();

@@ -131,7 +131,8 @@ export function TicketDetails({
   const open = (reference: string | null) => setSelected(reference);
   // The selected ticket's record, shared with its page; the header, the agent
   // session and the triage card sit above the pages and read it from here.
-  const ticket = useTicket(selected).value ?? undefined;
+  const record = useTicket(selected);
+  const ticket = record.value ?? undefined;
   useMentionReadiness({
     selected,
     mention,
@@ -174,7 +175,7 @@ export function TicketDetails({
       aria-labelledby="detail-heading"
     >
       <OverlayBoundary element={boundary}>
-        <TicketAgentSession ticket={ticket ?? preview}>
+        <TicketAgentSession record={record} preview={preview}>
           {(agentLoading) => (
             <>
               <TicketHeader
