@@ -40,6 +40,12 @@ pub struct PlanView {
     /// Latest updates for the Overview's In progress and In review rows, by reference.
     #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
     pub latest_updates: BTreeMap<String, LatestUpdate>,
+    /// When the Overview's members entered their current status, by reference.
+    #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
+    pub status_since: BTreeMap<String, String>,
+    /// URL from the newest pull request evidence on the Plan's members.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub pull_request: Option<String>,
 }
 
 /// What `ticketd plan context` prints. Fields serialize in this order, which is the
@@ -113,6 +119,52 @@ fn plan_counts(connection: &Connection, id: &str) -> Result<PlanCounts, Error> {
     }
     Ok(counts)
 }
+fn member_status_times(
+    connection: &Connection,
+    id: &str,
+) -> Result<BTreeMap<String, String>, Error> {
+    // Creation is recorded for recent tickets. For older ones the oldest
+    // surviving history gives the earliest time we can associate with them.
+    let mut stmt = connection.prepare(
+        "WITH creation AS (
+            SELECT ticket_id, MIN(at) AS created_at
+            FROM workspace_events WHERE type = 'ticket.created'
+            GROUP BY ticket_id
+        )
+        SELECT t.reference, COALESCE(
+            (SELECT timestamp FROM ticket_history
+             WHERE ticket_id = t.id AND kind = 'status' AND to_value = t.status
+             ORDER BY timestamp DESC, number DESC LIMIT 1),
+            creation.created_at,
+            (SELECT timestamp FROM ticket_history WHERE ticket_id = t.id
+             ORDER BY timestamp, number LIMIT 1)
+        )
+        FROM tickets t LEFT JOIN creation ON creation.ticket_id = t.id
+        WHERE t.plan_id = ?1 AND t.trashed = 0",
+    )?;
+    let rows = stmt.query_map([id], |row| {
+        let timestamp = row.get::<_, Option<String>>(1)?;
+        timestamp
+            .map(|timestamp| Ok((row.get(0)?, timestamp)))
+            .transpose()
+    })?;
+    Ok(rows
+        .filter_map(Result::transpose)
+        .collect::<Result<_, _>>()?)
+}
+
+fn latest_pull_request(connection: &Connection, id: &str) -> Result<Option<String>, Error> {
+    Ok(connection
+        .query_row(
+            "SELECT e.value FROM tickets t JOIN evidence e ON e.ticket_id = t.id
+             WHERE t.plan_id = ?1 AND t.trashed = 0 AND e.kind = 'pull_request'
+             ORDER BY e.created_at DESC, e.number DESC LIMIT 1",
+            [id],
+            |row| row.get(0),
+        )
+        .optional()?)
+}
+
 pub(crate) fn get(connection: &Connection, id: &str) -> Result<Plan, Error> {
     connection
         .query_row(
@@ -248,6 +300,10 @@ impl Workspace {
     pub fn show_plan_overview(&self, id: &str) -> Result<PlanView, Error> {
         self.read_plan(id, None, 0, true, true)
     }
+    /// Re-read the current Overview link without hydrating the Plan's members.
+    pub fn plan_pull_request(&self, id: &str) -> Result<Option<String>, Error> {
+        latest_pull_request(&self.connection, id)
+    }
     /// Preserve the Plan view and full counts while bounding member/document reads.
     pub fn show_plan_bounded(
         &self,
@@ -315,12 +371,19 @@ impl Workspace {
                 })?
                 .collect::<Result<Vec<_>, _>>()?
             };
+            let (status_since, pull_request) = if overview {
+                (member_status_times(tx, id)?, latest_pull_request(tx, id)?)
+            } else {
+                (BTreeMap::new(), None)
+            };
             Ok(PlanView {
                 plan,
                 members,
                 counts,
                 documents,
                 latest_updates,
+                status_since,
+                pull_request,
             })
         })
     }
