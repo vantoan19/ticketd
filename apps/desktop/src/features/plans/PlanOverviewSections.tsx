@@ -146,11 +146,8 @@ function FoldedWorkSection({
   return (
     <section className="plan-overview-work-fold" aria-labelledby={title}>
       <Disclosure
-        label={
-          <>
-            <span id={title}>{label}</span>{" "}
-          </>
-        }
+        label={<span id={title}>{label}</span>}
+        aria-label={`${label} ${count}`}
         count={count}
         open={open}
         onOpenChange={setOpen}
