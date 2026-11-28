@@ -3,7 +3,7 @@ import { FailureAlert } from "@/components/ui/failure-alert";
 import { RecordLink } from "@/components/ui/record-link";
 import { StatusIcon } from "@/features/tickets/StatusIcon";
 import { plansClient, type Plan, type PlanActivity } from "@/lib/api/plans";
-import { plainText } from "@/lib/plain-text";
+import { firstSentence } from "@/lib/plain-text";
 import { usePreferences } from "@/lib/preferences";
 import { read, skip, useRead } from "@/lib/workspace-reads";
 import "./plan-overview-changes.css";
@@ -76,17 +76,11 @@ function ChangeText({ event }: { event: PlanActivity }) {
       );
     case "joined":
       return <span>Joined · {event.title}</span>;
-    case "update": {
-      const text = plainText(event.brief);
-      const first = new Intl.Segmenter(undefined, { granularity: "sentence" })
-        .segment(text)
-        [Symbol.iterator]()
-        .next();
+    case "update":
       return (
         <span title={event.title}>
-          {first.value?.segment.trim() || event.title}
+          {firstSentence(event.brief) || event.title}
         </span>
       );
-    }
   }
 }

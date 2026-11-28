@@ -659,12 +659,13 @@ test("the Overview shows new changes, opens their ticket, and clears on return",
   expect(within(updates).queryByText("Joined · Member 7")).toBeNull();
   expect(within(updates).queryByText("Another sentence.")).toBeNull();
 
-  fireEvent.click(
-    within(updates).getByRole("button", { name: /Verified the release\./ }),
-  );
-  expect(
-    await screen.findByRole("button", { name: "Close ticket details" }),
-  ).toBeTruthy();
+  const update = within(updates).getByRole("button", {
+    name: /Verified the release\./,
+  });
+  fireEvent.click(update);
+  const close = await screen.findByRole("button", {
+    name: "Close ticket details",
+  });
   expect(bridge.invoke).toHaveBeenCalledWith("show_ticket", {
     reference: "T-KQ1",
   });
@@ -673,6 +674,8 @@ test("the Overview shows new changes, opens their ticket, and clears on return",
     screen.getByRole("region", { name: "Since you last looked" }),
   ).toBeTruthy();
 
+  fireEvent.click(close);
+  await waitFor(() => expect(document.activeElement).toBe(update));
   fireEvent.click(screen.getByRole("button", { name: "Plans" }));
   await screen.findByRole("heading", { name: "Plans" });
   fireEvent.click(await screen.findByRole("button", { name: "Launch" }));
