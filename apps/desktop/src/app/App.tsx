@@ -1560,11 +1560,6 @@ function AppContent() {
                                           known={workspace.plansKnown}
                                           failure={workspace.plansFailure}
                                           retry={workspace.refreshPlans}
-                                          projects={projects}
-                                          onTicket={(reference) => {
-                                            setSelected(reference);
-                                            setView("tickets");
-                                          }}
                                           archived={view === "archived-plans"}
                                           onOpen={(id) =>
                                             scope("all", "all", id)

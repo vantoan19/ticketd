@@ -191,6 +191,11 @@ opens the graph to understand dependency chains.
   status counts, linked Documents, membership, and archive and reactivation.
   List folds Done by default and remembers the choice per Plan on this computer.
   Shared parent or project labels are hidden when every displayed row has the same one.
+- **Plans.** Two-line rows show progress, current status words, and the latest
+  member change. Plans with reviews come first, then newest changes, with the
+  order held while the page is open. An orange dot marks reviews or a Plan
+  ready to wrap up. The sidebar also marks Plans with reviews. Archived rows
+  show how much work is left and offer Reactivate with Undo.
 - **Editor.** Descriptions, Activities, and Documents edit in place with Markdown
   shortcuts, slash commands, checklists, fenced code, simple GFM tables, and offline
   Mermaid diagrams. Markdown stays canonical, source editing is always available, and
