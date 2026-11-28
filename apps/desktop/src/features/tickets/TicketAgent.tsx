@@ -6,6 +6,7 @@ import { Button } from "@/components/ui/button";
 import { StatusDot } from "@/components/ui/status-dot";
 import { Badge } from "@/components/ui/badge";
 import { HarnessMark } from "@/features/chats/HarnessMark";
+import { rankSchema, type ChatSummary } from "@/features/chats/client";
 import { useChatFeature, useLinkedChats } from "@/features/chats/use-chats";
 import { useTicketAgents } from "@/features/chats/use-ticket-agents";
 import type { Ticket } from "@/lib/api/client";
@@ -18,6 +19,30 @@ import {
   useOpenTicketAgentChat,
   useAgentActivityTime,
 } from "./ticket-agent-state";
+
+function mergeChatSummaries(projected: ChatSummary[], linked: ChatSummary[]) {
+  const byId = new Map(projected.map((chat) => [chat.id, chat]));
+  for (const chat of linked) {
+    const previous = byId.get(chat.id);
+    if (!previous) {
+      byId.set(chat.id, chat);
+      continue;
+    }
+    // Request and resolution both update the Chat's timestamp. When the reads
+    // have the same timestamp, keep the higher-ranked request from either.
+    const recency =
+      Date.parse(chat.updated_at) - Date.parse(previous.updated_at);
+    if (
+      recency > 0 ||
+      (!recency &&
+        (chat.status.rank === "approval" || chat.status.rank === "question") &&
+        rankSchema.options.indexOf(chat.status.rank) <
+          rankSchema.options.indexOf(previous.status.rank))
+    )
+      byId.set(chat.id, chat);
+  }
+  return [...byId.values()];
+}
 
 /** Keep the opening's decision to give agents room in the document. */
 export function TicketAgentSession({
@@ -55,12 +80,7 @@ export function TicketAgentSession({
         chat.tickets.some((link) => link.reference === reference),
       ) ?? [])
     : [];
-  const chats = [
-    ...projected,
-    ...linked.filter(
-      (chat) => !projected.some((current) => current.id === chat.id),
-    ),
-  ];
+  const chats = mergeChatSummaries(projected, linked);
   const now = useAgentActivityTime(chats);
   const state = agentState(chats, agents ?? [], now);
   const [opening, setOpening] = useState<{

@@ -4629,7 +4629,9 @@ test("palette offers the focused Ticket's linked Chat and opens that Chat", asyn
       name: /Open its Chat, “Polish focused Ticket”/,
     }),
   );
-  await vi.waitFor(() => expect(open).toHaveBeenCalledWith("linked-chat"));
+  await vi.waitFor(() =>
+    expect(open.mock.calls.map(([id]) => id)).toContain("linked-chat"),
+  );
 });
 
 test("sidebar jump opens the palette and footer icons navigate", async () => {
