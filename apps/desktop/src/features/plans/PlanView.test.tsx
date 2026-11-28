@@ -43,6 +43,7 @@ type Fake = { id: string; reference: string; status: string; plan: string };
 let plans: { id: string; name: string; archived: boolean; purpose: string }[] =
   [];
 let tickets: Fake[] = [];
+let documents: { id: string; heading: string; trashed: boolean }[] = [];
 const calls: [string, unknown][] = [];
 
 const ticket = (item: Fake) => ({
@@ -69,6 +70,7 @@ beforeEach(() => {
     { id: "3", reference: "T-KQ3", status: "Todo", plan: "" },
   ];
   calls.length = 0;
+  documents = [];
   bridge.invoke.mockImplementation(async (command: string, args: never) => {
     const input = args as Record<string, never> | undefined;
     calls.push([command, input]);
@@ -80,7 +82,11 @@ beforeEach(() => {
         const count = (status: string) =>
           members.filter((item) => item.status === status).length;
         return {
-          plan: plans.find((item) => item.id === input?.id),
+          plan: {
+            ...plans.find((item) => item.id === input?.id),
+            spec_document_id: documents[0]?.id ?? null,
+          },
+          documents,
           members: members.map(ticket),
           counts: {
             todo: count("Todo"),
@@ -92,6 +98,16 @@ beforeEach(() => {
           },
         };
       }
+      case "show_document":
+        return {
+          id: "spec",
+          title: "Release specification",
+          body: "Release checklist",
+          heading: "Release specification",
+          updated_at: "2026-11-28T01:00:00Z",
+          created_at: "2026-11-28T01:00:00Z",
+          trashed: false,
+        };
       case "search_tickets":
         return tickets
           .filter((item) =>
@@ -164,11 +180,11 @@ async function chooseAction(name: string) {
 async function openLaunch() {
   render(<App />);
   fireEvent.click(await screen.findByRole("button", { name: "Launch" }));
-  const heading = await screen.findByRole("heading", { name: "Launch" });
-  await screen.findByRole("img", { name: /Launch, .* done/ });
-  return heading;
+  const overview = await screen.findByRole("region", { name: "Launch" });
+  await within(overview).findByText(/^[0-9]+ of [0-9]+ done$/);
+  return within(overview).getByRole("heading", { name: "Launch" });
 }
-const context = () => screen.getByRole("group", { name: "Plan context" });
+const context = () => screen.getByRole("region", { name: "Launch" });
 
 test("the header counts the Plan's tickets and its progress, and Remove from Plan offers Undo", async () => {
   tickets.push({
@@ -177,13 +193,9 @@ test("the header counts the Plan's tickets and its progress, and Remove from Pla
     status: "Duplicate",
     plan: "e1",
   });
-  const heading = await openLaunch();
-  // The count sits beside the name; per-status counts live in the groups.
-  expect(heading.parentElement!.textContent).toContain("3");
+  await openLaunch();
   expect(within(context()).getByText("1 of 2 done")).toBeTruthy();
-  expect(
-    screen.getByRole("img", { name: "Launch, 1 of 2 done, 0 moving" }),
-  ).toBeTruthy();
+  fireEvent.click(screen.getByRole("radio", { name: "List" }));
   // An active Plan shows no state chip (plans PL-05).
   expect(screen.queryByText("Active Plan")).toBeNull();
 
@@ -193,7 +205,6 @@ test("the header counts the Plan's tickets and its progress, and Remove from Pla
   await waitFor(() =>
     expect(screen.queryByRole("button", { name: /^T-KQ1/ })).toBeNull(),
   );
-  await waitFor(() => expect(screen.getByText("1 of 1 done")).toBeTruthy());
   expect(calls).toContainEqual([
     "set_plan",
     { reference: "T-KQ1", plan: null },
@@ -224,7 +235,7 @@ test("an empty name says so in the context line and changes nothing", async () =
   const field = screen.getByRole("textbox", { name: "Plan name" });
   fireEvent.change(field, { target: { value: "   " } });
   fireEvent.keyDown(field, { key: "Enter" });
-  const error = await within(context()).findByRole("alert");
+  const error = await screen.findByRole("alert");
   expect(error.textContent).toBe("A Plan needs a name.");
   expect(calls.some(([command]) => command === "change_plan")).toBe(false);
   expect((field as HTMLInputElement).value).toBe("   ");
@@ -440,10 +451,11 @@ test("renaming focuses the title, shows its hint in the context line, and F2 sta
   await chooseAction("Rename");
   const field = screen.getByRole("textbox", { name: "Plan name" });
   await waitFor(() => expect(document.activeElement).toBe(field));
-  expect(within(context()).getByText("Enter saves · Esc cancels")).toBeTruthy();
+  expect(screen.getByText("Enter saves · Esc cancels")).toBeTruthy();
   fireEvent.keyDown(field, { key: "Escape" });
   expect(screen.queryByRole("textbox", { name: "Plan name" })).toBeNull();
   // F2 in the ticket list is about the ticket, not the Plan.
+  fireEvent.click(screen.getByRole("radio", { name: "List" }));
   const list = screen.getByRole("region", { name: "Launch" });
   fireEvent.keyDown(within(list).getByText("Title of T-KQ1"), { key: "F2" });
   expect(screen.queryByRole("textbox", { name: "Plan name" })).toBeNull();
@@ -455,8 +467,101 @@ test("renaming focuses the title, shows its hint in the context line, and F2 sta
 
 test("an empty Plan detail teaches the keys and hides its toolbar band", async () => {
   await openLaunch();
+  fireEvent.click(screen.getByRole("radio", { name: "List" }));
   const hint = screen.getByText("Enter").closest("p")!;
   expect(hint.textContent).toBe("↑↓ move Enter open");
   const detail = screen.getByRole("region", { name: "Ticket details" });
   expect(detail.hasAttribute("data-empty")).toBe(true);
+});
+
+test("every visit to a Plan starts on Overview and its ticket views have no summary", async () => {
+  plans[0]!.purpose = "Prepare the release";
+  render(<App />);
+  const launch = () =>
+    within(screen.getByRole("navigation", { name: "Plan scopes" })).getByRole(
+      "button",
+      { name: "Launch" },
+    );
+  fireEvent.click(await screen.findByRole("button", { name: "Launch" }));
+  const switchView = (name: string) =>
+    fireEvent.click(screen.getByRole("radio", { name }));
+  expect(
+    screen
+      .getByRole("radio", { name: "Overview" })
+      .getAttribute("aria-checked"),
+  ).toBe("true");
+  const overview = await screen.findByRole("region", { name: "Launch" });
+  expect(within(overview).getByText("Prepare the release")).toBeTruthy();
+  expect(await within(overview).findByText("1 of 2 done")).toBeTruthy();
+  for (const name of ["List", "Board", "Flow"]) {
+    switchView(name);
+    expect(screen.queryByText("Prepare the release")).toBeNull();
+    expect(screen.queryByText("1 of 2 done")).toBeNull();
+  }
+  fireEvent.click(launch());
+  expect(
+    screen
+      .getByRole("radio", { name: "Overview" })
+      .getAttribute("aria-checked"),
+  ).toBe("true");
+  expect(screen.getByText("Prepare the release")).toBeTruthy();
+});
+
+test("keeps the Overview head while the Plan loads and retries in the pane", async () => {
+  const respond = bridge.invoke.getMockImplementation()!;
+  let finish: (() => void) | undefined;
+  let first = true;
+  bridge.invoke.mockImplementation(async (command: string, args: never) => {
+    const input = args as Record<string, unknown> | undefined;
+    if (
+      command === "show_plan" &&
+      !input?.limit &&
+      input?.includeMembers !== false &&
+      first
+    ) {
+      first = false;
+      await new Promise<void>((resolve) => {
+        finish = resolve;
+      });
+      throw new Error("The workspace is busy");
+    }
+    return respond(command, args);
+  });
+
+  render(<App />);
+  fireEvent.click(await screen.findByRole("button", { name: "Launch" }));
+  const overview = screen.getByRole("region", { name: "Launch" });
+  expect(
+    within(overview).getByRole("heading", { name: "Launch" }),
+  ).toBeTruthy();
+  expect(
+    within(overview).getByRole("status", { name: "Loading Plan" }),
+  ).toBeTruthy();
+  await waitFor(() => expect(finish).toBeDefined());
+  finish?.();
+  fireEvent.click(
+    await within(overview).findByRole("button", { name: "Retry" }),
+  );
+  expect(await within(overview).findByText("1 of 2 done")).toBeTruthy();
+});
+
+test("a long purpose expands and the spec opens with a route back to its Plan", async () => {
+  plans[0]!.purpose = "Make the launch safe and easy to verify. ".repeat(4);
+  documents = [
+    { id: "spec", heading: "Release specification", trashed: false },
+  ];
+  await openLaunch();
+  const more = within(context()).getByRole("button", { name: "Show more" });
+  expect(more.getAttribute("aria-expanded")).toBe("false");
+  fireEvent.click(more);
+  const less = within(context()).getByRole("button", { name: "Show less" });
+  expect(less.getAttribute("aria-expanded")).toBe("true");
+  fireEvent.click(
+    within(context()).getByRole("button", {
+      name: "Spec: Release specification",
+    }),
+  );
+  const back = await screen.findByRole("button", { name: "Back to Launch" });
+  fireEvent.click(back);
+  expect(await screen.findByRole("region", { name: "Launch" })).toBeTruthy();
 });

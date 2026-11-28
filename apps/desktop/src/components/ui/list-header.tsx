@@ -97,7 +97,8 @@ export function PaneHeader({
   titleControl?: (title: string) => ReactNode;
   /** The heading's id, for `aria-labelledby` and focus after a change. */
   titleId?: string;
-  titleLevel?: 1 | 2;
+  /** Pass null when the pane below already supplies its heading. */
+  titleLevel?: 1 | 2 | null;
   icon?: ReactNode;
   titleEditor?: ReactNode;
   count?: ReactNode;
@@ -121,7 +122,7 @@ export function PaneHeader({
     observer.observe(element);
     return () => observer.disconnect();
   }, []);
-  const Heading = titleLevel === 1 ? "h1" : "h2";
+  const Heading = titleLevel === null ? "span" : titleLevel === 1 ? "h1" : "h2";
   const shell = useShellLeading();
   const { notice } = useShellSlot();
   return (
@@ -170,7 +171,11 @@ export function PaneHeader({
                 ) : (
                   // The full title while it is cut, below the header.
                   <Tooltip content={title} side="bottom" overflowOnly>
-                    <Heading id={titleId} tabIndex={titleId ? -1 : undefined}>
+                    <Heading
+                      id={titleId}
+                      data-slot="pane-heading"
+                      tabIndex={titleId ? -1 : undefined}
+                    >
                       {title}
                     </Heading>
                   </Tooltip>
