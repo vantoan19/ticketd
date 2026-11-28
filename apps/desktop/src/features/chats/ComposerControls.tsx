@@ -677,7 +677,7 @@ function PermissionPicker({
     );
   return (
     <DropdownMenu open={open} onOpenChange={setOpen}>
-      <Tooltip content={held ? `${label} from your next message` : null}>
+      <Tooltip content={held ? `${label} applies on the next turn` : null}>
         <DropdownMenuTrigger asChild>
           <Button
             type="button"
@@ -686,7 +686,7 @@ function PermissionPicker({
             data-control="permission"
             aria-label={
               held
-                ? `Permissions: ${label}, from your next message`
+                ? `Permissions: ${label}, applies on the next turn`
                 : `Permissions: ${label}`
             }
           >

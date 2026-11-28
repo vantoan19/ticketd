@@ -28,6 +28,7 @@ import {
   type ProjectRef,
   type TranscriptItem,
 } from "@/features/chats/client";
+import { changeHeld, changePending } from "@/features/chats/composer-settings";
 import { canSteer, changeLine } from "@/features/chats/model";
 import {
   ticketAgentsSchema,
@@ -606,6 +607,11 @@ export function createMockChatClient(
   /** A main turn is in progress: not when only sub-agents run (`turn_running` false). */
   const turnRuns = (chat: ChatState) =>
     live(chat) && chat.turn_running !== false;
+  const reportedChat = (chat: ChatState): ChatState => {
+    const permission = chat.settings?.permission;
+    if (!changeHeld(permission) && !changePending(permission)) return chat;
+    return { ...chat, steering: { ...chat.steering, available: false } };
+  };
   const overview = (): ChatOverview => {
     const all = [...chats.values()].filter(
       (entry) => entry.chat.retention !== "trashed",
@@ -718,9 +724,16 @@ export function createMockChatClient(
     });
   };
   const parseChanges = (entry: Stored, changes: Change[]) =>
-    changes.map((change, index) =>
-      chatChangeSchema.parse({ ...change, seq: entry.seq + index + 1 }),
-    );
+    changes.map((change, index) => {
+      const reported =
+        change.kind === "chat"
+          ? { ...change, chat: reportedChat(change.chat) }
+          : change;
+      return chatChangeSchema.parse({
+        ...reported,
+        seq: entry.seq + index + 1,
+      });
+    });
   const emit = (entry: Stored, change: Change) => {
     if (entry.pending) {
       if (change.kind !== "chat") entry.pending.push(change);
@@ -848,6 +861,9 @@ export function createMockChatClient(
     text: string,
     files?: ChatAttachmentInput[],
   ) => {
+    const { settings } = get(id).chat;
+    const permission = settings?.permission;
+    const change = permission?.change;
     push(id, {
       id: nextId("user"),
       at: now,
@@ -861,6 +877,17 @@ export function createMockChatClient(
       problem: null,
       turn_running: null,
       doing: { label: "Working", since: now },
+      ...(permission &&
+        change?.state === "held" && {
+          settings: {
+            ...settings,
+            permission: {
+              ...permission,
+              current: change.value,
+              change: { value: change.value, state: "applied" },
+            },
+          },
+        }),
     });
   };
   const mediaTypeOf = ({ dataUrl }: ChatAttachmentInput) =>
@@ -966,7 +993,7 @@ export function createMockChatClient(
     if (!turnRuns(chat)) startTurn(id, text, files);
     else if (
       canSteer(
-        chat,
+        reportedChat(chat),
         files?.some((file) => file.dataUrl.startsWith("data:image/")),
       )
     )
@@ -1261,7 +1288,7 @@ export function createMockChatClient(
       if (entry.chat.unseen) patch(id, { unseen: false });
       return chatSnapshotSchema.parse(
         structuredClone({
-          chat: entry.chat,
+          chat: reportedChat(entry.chat),
           items: entry.items,
           cursor: entry.seq,
         }),
@@ -1381,7 +1408,7 @@ export function createMockChatClient(
       if (
         turnRuns(chat) &&
         !canSteer(
-          chat,
+          reportedChat(chat),
           queued.attachments?.some((file) =>
             file.media_type.startsWith("image/"),
           ),

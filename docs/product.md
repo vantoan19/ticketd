@@ -774,9 +774,11 @@ what New Chat last started it with.
 - **Conversation.** The UI streams responses, tool activity, native approval requests,
   and questions. Observed activity is Idle, Working, Waiting for you, Interrupted, or
   Failed; a finished turn is not evidence that the task succeeded. Sending during a
-  turn steers it where the harness supports that, otherwise the message is visibly
-  queued. ticketd owns the queue. Stop pauses it and requests interruption without
-  claiming every tool stopped.
+  turn steers it where the harness supports steering. If a permission change is
+  pending, the follow-up waits in the queue so it can use the chosen permissions
+  on the next turn. Harnesses without steering also queue follow-ups. ticketd owns
+  the queue. Stop pauses it and requests interruption without claiming every tool
+  stopped.
 - **Chat attachments.** Paste a screenshot or files copied in the system file manager,
   or choose multiple files with **Attach files**. The composer shows removable filenames
   and image previews and can send attachments with or without text. Chat captures the
