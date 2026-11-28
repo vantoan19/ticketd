@@ -266,6 +266,9 @@ function RecoveredActivity({
   const recoveryOwner = `activity:${ticketId}`;
   const statusLine = useStatusLine();
   const submitHint = shortcutLabel("update-post");
+  const composerPrompt = sourceName
+    ? `Write an update · not posted to ${sourceName}`
+    : "Write an update…";
   const [deleteError, setDeleteError] = useState<FailureDescription | null>(
     null,
   );
@@ -1129,7 +1132,6 @@ function RecoveredActivity({
         !stub
       }
     >
-      {/* The note is only worth saying where a source owns the ticket and could be confused for the destination. */}
       <SectionHeader
         level={2}
         title="Activity"
@@ -1139,9 +1141,6 @@ function RecoveredActivity({
           totalUpdates
             ? `${totalUpdates}${activity.more && updateCount.value === undefined ? "+" : ""}`
             : undefined
-        }
-        caption={
-          sourceName && <>Only in ticketd · never sent to {sourceName}</>
         }
         actions={
           <SegmentedControl
@@ -1216,7 +1215,7 @@ function RecoveredActivity({
                   attachmentTicketReference={reference}
                   recoveryOwner={recoveryOwner}
                   label="New update"
-                  placeholder="Write an update…"
+                  placeholder={composerPrompt}
                   value={draft}
                   onChange={setDraft}
                   readOnly={pending}
@@ -1343,7 +1342,7 @@ function RecoveredActivity({
               >
                 <span className="activity-composer-prompt">
                   <MessageSquare aria-hidden="true" />
-                  <span>Write an update…</span>
+                  <span>{composerPrompt}</span>
                 </span>
                 <Kbd aria-hidden="true">{shortcutLabel("ticket-update")}</Kbd>
               </button>

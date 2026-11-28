@@ -312,19 +312,9 @@ test("Activity puts the composer before labelled notes and quiet relative histor
       ? [{ type: "authored", activity: { ...note, reported_at: recent } }]
       : [],
   );
-  render(
-    <Activity
-      {...props}
-      reference="T-KQ50"
-      sourceName="GitHub"
-      latestNoteId="n"
-    />,
-  );
+  render(<Activity {...props} reference="T-KQ50" latestNoteId="n" />);
   const body = await screen.findByText("Body");
   expect(screen.getByRole("heading", { name: /^Activity/ })).toBeTruthy();
-  expect(
-    screen.getByText("Only in ticketd · never sent to GitHub"),
-  ).toBeTruthy();
   expect(screen.getByText("Latest")).toBeTruthy();
   expect(screen.getByText("2 h ago")).toBeTruthy();
   expect(

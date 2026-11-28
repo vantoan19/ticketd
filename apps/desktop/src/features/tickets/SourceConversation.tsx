@@ -7,10 +7,10 @@ import {
   describeFailure,
   type FailureDescription,
 } from "@/lib/api/describe-failure";
-import { useEffect, useState } from "react";
+import { Fragment, useEffect, useState } from "react";
 import {
+  ChevronRight,
   CircleAlert,
-  LockKeyhole,
   MessageSquare,
   Circle,
   UserMinus,
@@ -108,11 +108,8 @@ function describeEvent(entry: EventEntry): {
 }
 
 /**
- * The source's comments and timeline events for a ticket, read-only, joined on
- * one connected timeline like Activity; the Read-only mark on each comment is
- * the provenance signal. Locally authored notes are not shown here and nothing in this
- * section can be edited or composed. Reloading keeps the rows in place, and a
- * failed reload keeps whatever was retrieved before.
+ * The source's comments and events share a read-only timeline. Reloading keeps
+ * the rows in place, and a failed reload keeps whatever was retrieved before.
  */
 export function SourceConversation({
   source,
@@ -129,6 +126,7 @@ export function SourceConversation({
   const [entries, setEntries] = useState<ConversationEntry[] | null>(null);
   const [error, setError] = useState<FailureDescription | null>(null);
   const [attempt, setAttempt] = useState(0);
+  const [commentsExpanded, setCommentsExpanded] = useState(false);
   const refreshedAt = source.last_refreshed_at;
   useEffect(() => {
     let active = true;
@@ -148,6 +146,8 @@ export function SourceConversation({
   }, [reference, revision, refreshedAt, attempt]);
   const name = source.provider_name;
   const owned = source.ownership === "external";
+  const comments = entries?.filter((entry) => entry.type === "comment") ?? [];
+  const firstHiddenComment = comments.length > 3 ? comments[1] : undefined;
   // Provenance only: after takeover there is nothing to show unless it was retrieved.
   if (!owned && !error && (entries === null || entries.length === 0))
     return null;
@@ -159,6 +159,7 @@ export function SourceConversation({
       <SectionHeader
         level={2}
         title={`${name} conversation`}
+        count={comments.length}
         actions={
           owned &&
           !source.unavailable && (
@@ -166,11 +167,9 @@ export function SourceConversation({
           )
         }
       >
-        <span className="source-caption">
-          {owned
-            ? `${entries?.filter((entry) => entry.type === "comment").length ?? 0} comments · read-only`
-            : "archive · no longer refreshed"}
-        </span>
+        {!owned && (
+          <span className="source-caption">archive · no longer refreshed</span>
+        )}
       </SectionHeader>
       {error && (
         <FailureState
@@ -192,55 +191,66 @@ export function SourceConversation({
       )}
       {entries && entries.length > 0 && (
         <Timeline aria-label="Conversation">
-          {entries.map((entry) =>
-            entry.type === "comment" ? (
-              <CommentRow
-                key={`${entry.type}-${entry.id}`}
-                icon={MessageSquare}
-                label={`Comment by ${entry.author} on ${name}, read-only`}
-                header={
-                  <span>
-                    <strong>{entry.author}</strong> commented on {name} ·{" "}
-                    <Tooltip content={formatDateTime(entry.created_at)}>
-                      <time dateTime={entry.created_at} tabIndex={0}>
-                        {relativeDateTime(entry.created_at, now)}
-                      </time>
-                    </Tooltip>
-                    {entry.edited_at && (
-                      <>
-                        {" "}
-                        · <span>edited</span>
-                      </>
-                    )}
-                  </span>
-                }
-                actions={
-                  <span className="source-card-actions">
-                    <span className="source-readonly-label">
-                      <LockKeyhole aria-hidden="true" />
-                      Read-only
-                    </span>
-                    <SourceLink url={entry.url}>View on {name}</SourceLink>
-                  </span>
-                }
-              >
-                <div className="markdown-preview description-document">
-                  <MarkdownDocument
-                    source={entry.body}
-                    select={select}
-                    revision={revision}
-                  />
-                </div>
-              </CommentRow>
-            ) : (
-              <SourceEvent
-                key={`${entry.type}-${entry.id}`}
-                entry={entry}
-                name={name}
-                now={now}
-              />
-            ),
-          )}
+          {entries.map((entry) => {
+            const key = `${entry.type}-${entry.id}`;
+            if (entry.type === "event")
+              return (
+                <SourceEvent key={key} entry={entry} name={name} now={now} />
+              );
+
+            const showComment =
+              !firstHiddenComment ||
+              commentsExpanded ||
+              entry === comments[0] ||
+              entry === comments.at(-1);
+            return (
+              <Fragment key={key}>
+                {entry === firstHiddenComment && (
+                  <li className="source-conversation-fold">
+                    <button
+                      type="button"
+                      className="ui-disclosure-trigger"
+                      aria-expanded={commentsExpanded}
+                      onClick={() => setCommentsExpanded((open) => !open)}
+                    >
+                      <ChevronRight aria-hidden="true" />
+                      <span>{comments.length - 2} more comments</span>
+                    </button>
+                  </li>
+                )}
+                {showComment && (
+                  <CommentRow
+                    icon={MessageSquare}
+                    label={`Comment by ${entry.author} on ${name}`}
+                    header={
+                      <span>
+                        <strong>{entry.author}</strong> commented on {name} ·{" "}
+                        <Tooltip content={formatDateTime(entry.created_at)}>
+                          <time dateTime={entry.created_at} tabIndex={0}>
+                            {relativeDateTime(entry.created_at, now)}
+                          </time>
+                        </Tooltip>
+                        {entry.edited_at && (
+                          <>
+                            {" "}
+                            · <span>edited</span>
+                          </>
+                        )}
+                      </span>
+                    }
+                  >
+                    <div className="markdown-preview description-document">
+                      <MarkdownDocument
+                        source={entry.body}
+                        select={select}
+                        revision={revision}
+                      />
+                    </div>
+                  </CommentRow>
+                )}
+              </Fragment>
+            );
+          })}
         </Timeline>
       )}
     </section>
