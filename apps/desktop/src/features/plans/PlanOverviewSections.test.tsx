@@ -324,6 +324,29 @@ test("J and K move between visible rows, Enter opens beside the Plan, and closin
   expect(review.hasAttribute("aria-current")).toBe(false);
 });
 
+test("closing a ticket opened from the strip focuses its work row", async () => {
+  const { overview } = await openPlan([
+    member(11, "Review copy", "In review"),
+    member(12, "Build package", "Todo", "Ready"),
+  ]);
+  const toolbar = within(overview).getByRole("toolbar", {
+    name: "Plan progress",
+  });
+  const section = within(overview).getByRole("region", { name: "Needs you" });
+  const row = within(section).getByRole("button", { name: /T-11 Review copy/ });
+  const user = userEvent.setup();
+
+  await user.click(
+    within(toolbar).getByRole("button", { name: /T-11 Review copy/ }),
+  );
+  const close = await screen.findByRole("button", {
+    name: "Close ticket details",
+  });
+  await user.click(close);
+
+  await waitFor(() => expect(document.activeElement).toBe(row));
+});
+
 test("Start in Chat opens an unsent draft about the Ready ticket", async () => {
   const { overview, create } = await openPlan(
     [
