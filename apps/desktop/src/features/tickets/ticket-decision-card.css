@@ -7,10 +7,6 @@
   padding: 16px 20px;
 }
 
-.ticket-decision-card + .editor-body {
-  margin-top: 32px;
-}
-
 .ticket-decision-byline,
 .ticket-decision-row {
   display: flex;

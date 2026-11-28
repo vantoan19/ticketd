@@ -171,6 +171,7 @@ export function TicketDetails({
                 onClose={() => open(null)}
                 {...(openGraph && { onOpenGraph: () => showGraph(selected) })}
                 position={position}
+                outsideResults={outsideResults}
                 projects={projects}
                 {...(returnLabel && { returnLabel })}
                 {...(onAdjacent && { onAdjacent })}
@@ -224,7 +225,6 @@ export function TicketDetails({
                     swap={swap.swapped && reference === selected}
                     leaving={reference === swap.leaving}
                     seed={reference === selected ? preview : undefined}
-                    outsideResults={outsideResults && reference === selected}
                     readReviewQueue={
                       reference === selected ? readReviewQueue : undefined
                     }
@@ -264,10 +264,9 @@ const OpenedPage = memo(function OpenedPage({
   swap,
   leaving,
   seed,
-  outsideResults,
-  readReviewQueue,
   projects,
   plans,
+  readReviewQueue,
   inboxTarget,
   mention,
   actions,
@@ -279,10 +278,9 @@ const OpenedPage = memo(function OpenedPage({
   swap: boolean;
   leaving: boolean;
   seed: Ticket | undefined;
-  outsideResults: boolean;
-  readReviewQueue: (() => Promise<ReviewQueue>) | undefined;
   projects: Project[];
   plans: Plan[];
+  readReviewQueue: (() => Promise<ReviewQueue>) | undefined;
   /** The Inbox note to show, when it is on this page. */
   inboxTarget: InboxTarget | null;
   /** The mention being followed, when it is on this page. */
@@ -296,10 +294,9 @@ const OpenedPage = memo(function OpenedPage({
         expanded={expanded}
         swap={swap}
         leaving={leaving}
-        outsideResults={outsideResults}
-        {...(readReviewQueue && { readReviewQueue })}
         projects={projects}
         plans={plans}
+        readReviewQueue={readReviewQueue}
         select={actions.select}
         onOpenGraph={() => actions.openGraph(reference)}
         noteTarget={newest(

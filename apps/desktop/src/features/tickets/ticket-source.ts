@@ -53,7 +53,7 @@ export function connectionUnavailableText(source: TicketSource): string | null {
   }
 }
 
-/** The state line's words, and the tone of its dot, if it has one. */
+/** The source state and the tone of its dot in the description header. */
 export function sourceState(source: TicketSource): {
   text: string;
   tone: "positive" | "attention" | null;
@@ -77,7 +77,7 @@ export function sourceState(source: TicketSource): {
       ? ` (${categoryLabel.toLowerCase()})`
       : "";
   return {
-    text: `${source.provider_name}: ${label}${qualifier}`,
+    text: `${label}${qualifier}`,
     tone:
       category === "open"
         ? "positive"
@@ -137,7 +137,7 @@ export function unavailableNotice(
           : `${name} could not be reached for ${source.display}`;
   return {
     title: "Source unavailable",
-    // One sentence: the state line and the Source rail say since when.
+    // The description card and this notice keep the last synced copy readable.
     detail: `${cause}, and nothing in ticketd was deleted or completed.`,
     since: `Since ${since}`,
   };

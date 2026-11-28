@@ -35,6 +35,7 @@ export function RailSection({
         aria-labelledby={id}
       >
         <SectionHeader
+          level={2}
           title={label}
           titleId={id}
           actions={actions}

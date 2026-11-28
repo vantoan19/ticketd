@@ -57,6 +57,23 @@ beforeEach(() => {
     if (command === "show_ticket") return ticket;
     if (command === "latest_update") return latest;
     if (command === "ticket_evidence_page") return evidence;
+    if (command === "contextual_relationships" && ticket.prerequisites.length) {
+      const base = bridgeDefault(command) as {
+        relationships: Record<string, unknown>;
+      };
+      return {
+        relationships: {
+          ...base.relationships,
+          prerequisites: {
+            items: ticket.prerequisites.map((blocker) => ({
+              ...blocker,
+              title: { text: blocker.title },
+            })),
+            next_offset: null,
+          },
+        },
+      };
+    }
     if (command === "change_ticket") {
       if (writeFailure) throw { code: writeFailure, message: "Cannot write." };
       const patch = (
@@ -169,7 +186,7 @@ test("Reply posts an update in the card and keeps the ticket In progress", async
   fireEvent.click(card.getByRole("button", { name: "Post update" }));
   expect(await card.findByText("Please include the screenshots.")).toBeTruthy();
   expect(
-    screen.getByRole("combobox", { name: "Status: In progress" }),
+    screen.getByRole("button", { name: "Status: In progress" }),
   ).toBeTruthy();
   expect(bridge.invoke).toHaveBeenCalledWith("add_activity_with_details", {
     reference: "T-KQ1",
@@ -418,4 +435,40 @@ test("a GitHub-owned review opens at its source", async () => {
   } finally {
     vi.unstubAllGlobals();
   }
+});
+
+test("the review names open blockers and opens the same list as the context line", async () => {
+  ticket = {
+    ...review,
+    prerequisites: [
+      {
+        reference: "T-KQ2",
+        title: "Waiting for artwork",
+        status: "Todo",
+        trashed: false,
+        unresolved: true,
+      },
+      {
+        reference: "T-KQ3",
+        title: "Final copy",
+        status: "Done",
+        trashed: false,
+        unresolved: false,
+      },
+    ],
+  };
+  const select = vi.fn();
+  open(select);
+  const card = within(
+    await screen.findByRole("region", { name: "Ready for review" }),
+  );
+  fireEvent.click(card.getByRole("button", { name: "1 blocker still open" }));
+  const blockers = within(
+    await screen.findByRole("dialog", { name: "Blockers" }),
+  );
+  expect(blockers.getByText("1 of 2 still open")).toBeTruthy();
+  fireEvent.click(
+    blockers.getByRole("button", { name: /Waiting for artwork/ }),
+  );
+  expect(select).toHaveBeenCalledWith("T-KQ2");
 });

@@ -44,6 +44,7 @@ export function TicketDecisionCard({
   onEvidence,
   blockerCount,
   blockers,
+  doneFallback,
   select,
   readReviewQueue,
 }: {
@@ -52,6 +53,7 @@ export function TicketDecisionCard({
   onEvidence: () => void;
   blockerCount: number;
   blockers: ReactNode;
+  doneFallback?: ReactNode;
   select: (reference: string) => void;
   readReviewQueue?: (() => Promise<ReviewQueue>) | undefined;
 }) {
@@ -211,7 +213,7 @@ export function TicketDecisionCard({
     !agent?.agents.length &&
     agent?.chat?.status.rank !== "working" &&
     agent?.chat?.status.rank !== "approval";
-  if (!review && !latest) return null;
+  if (!review && !latest) return ticket.status === "Done" ? doneFallback : null;
   return (
     <DecisionPanel
       state={review ? "Ready for review" : "Latest update"}

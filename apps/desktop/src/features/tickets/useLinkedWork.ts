@@ -1,6 +1,6 @@
 import { useStatusLine } from "@/components/ui/use-status-line";
 import { useRef, useState } from "react";
-import type { Relationships } from "@/lib/api/client";
+import type { Relationships, Ticket } from "@/lib/api/client";
 import {
   describeFailure,
   type FailureDescription,
@@ -159,3 +159,23 @@ export function useLinkedWork() {
 }
 
 export type LinkedWorkState = ReturnType<typeof useLinkedWork>;
+
+export function orderBlockers(work: LinkedWorkState) {
+  const prerequisites = work.current?.links?.prerequisites;
+  if (!prerequisites)
+    return [...work.ticket.prerequisites].sort(
+      (a, b) => Number(b.unresolved) - Number(a.unresolved),
+    );
+  const rows: Ticket["prerequisites"] = work.rows.filter(
+    (row) => row.kind === "blocked_by",
+  );
+  if (prerequisites.next_offset !== null) {
+    // The ticket record already contains all blockers; the paged links hold
+    // the newer values and optimistic removals for the rows they have read.
+    const loaded = new Set(prerequisites.items.map((row) => row.reference));
+    rows.push(
+      ...work.ticket.prerequisites.filter((row) => !loaded.has(row.reference)),
+    );
+  }
+  return rows.sort((a, b) => Number(b.unresolved) - Number(a.unresolved));
+}
