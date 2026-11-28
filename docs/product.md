@@ -190,6 +190,11 @@ opens the graph to understand dependency chains.
 - **Plan view.** Member tickets as a List or Board, a Flow view of dependencies,
   status counts, linked Documents, membership, and archive and reactivation.
   Dependencies from outside the Plan appear as boundary nodes, not members.
+- **Plans.** Two-line rows show progress, current status words, and the latest
+  member change. Plans with reviews come first, then newest changes, with the
+  order held while the page is open. An orange dot marks reviews or a Plan
+  ready to wrap up. The sidebar also marks Plans with reviews. Archived rows
+  show how much work is left and offer Reactivate with Undo.
 - **Editor.** Descriptions, Activities, and Documents edit in place with Markdown
   shortcuts, slash commands, checklists, fenced code, simple GFM tables, and offline
   Mermaid diagrams. Markdown stays canonical, source editing is always available, and

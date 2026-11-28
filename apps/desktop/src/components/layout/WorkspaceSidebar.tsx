@@ -56,6 +56,7 @@ import type { SidebarCounts } from "@/lib/api/counts";
 import {
   useContext,
   useEffect,
+  useId,
   useState,
   type ComponentType,
   type ReactNode,
@@ -121,6 +122,7 @@ type GroupEntry = {
   icon: ReactNode;
   onSelect: () => void;
   count?: string;
+  reviewCount?: number;
 };
 
 /**
@@ -266,13 +268,18 @@ export function WorkspaceSidebar({
               (await plansClient.show(plan.id, 0, 0, false)).counts,
             ] as const;
           } catch {
-            return null;
+            return [plan.id, null] as const;
           }
         }),
     ).then((results) => {
       if (live)
-        setPlanProgress(
-          Object.fromEntries(results.filter((result) => result !== null)),
+        setPlanProgress((previous) =>
+          Object.fromEntries(
+            results.flatMap(([id, result]) => {
+              const counts = result ?? previous[id];
+              return counts ? [[id, counts]] : [];
+            }),
+          ),
         );
     });
     return () => {
@@ -319,24 +326,27 @@ export function WorkspaceSidebar({
       onSelect: () => scope("all", "unlinked"),
     },
   ];
-  const planEntries: GroupEntry[] = [
-    ...plans
-      .filter((e) => !e.archived)
-      .map((e) => ({
-        key: e.id,
-        label: e.name,
-        active: navigation.plan === e.id && view === "tickets",
-        icon: planProgress[e.id] ? (
-          <PlanRing name={e.name} counts={planProgress[e.id]!} decorative />
+  const planScopeDescription = useId();
+  const planEntries: GroupEntry[] = plans
+    .filter((plan) => !plan.archived)
+    .map((plan) => {
+      const progress = planProgress[plan.id];
+      return {
+        key: plan.id,
+        label: plan.name,
+        active: navigation.plan === plan.id && view === "tickets",
+        icon: progress ? (
+          <PlanRing name={plan.name} counts={progress} decorative />
         ) : (
           <Layers size={16} aria-hidden="true" />
         ),
-        count: planProgress[e.id]
-          ? `${planProgress[e.id]!.done}/${planProgress[e.id]!.todo + planProgress[e.id]!.in_progress + planProgress[e.id]!.in_review + planProgress[e.id]!.done}`
+        count: progress
+          ? `${progress.done}/${progress.todo + progress.in_progress + progress.in_review + progress.done}`
           : "",
-        onSelect: () => scope("all", "all", e.id),
-      })),
-  ];
+        reviewCount: progress?.in_review ?? 0,
+        onSelect: () => scope("all", "all", plan.id),
+      };
+    });
   // Ended as Needs attention, and not yet run again, taken over or dismissed.
   const runsWaiting = counts?.runs_needing_you ?? 0;
   const automationsLabel =
@@ -636,8 +646,10 @@ export function WorkspaceSidebar({
                         <SidebarMenuButton
                           isActive={entry.active}
                           aria-label={entry.label}
-                          aria-description={
-                            entry.count ? `${entry.count} completed` : undefined
+                          aria-describedby={
+                            entry.count
+                              ? `${planScopeDescription}-${entry.key}`
+                              : undefined
                           }
                           onClick={entry.onSelect}
                         >
@@ -646,7 +658,26 @@ export function WorkspaceSidebar({
                             <span className="sidebar-label">{entry.label}</span>
                           </Tooltip>
                           {entry.count && (
-                            <span className="sidebar-count">{entry.count}</span>
+                            <>
+                              <span
+                                className="sidebar-count"
+                                aria-hidden="true"
+                              >
+                                {!!entry.reviewCount && (
+                                  <StatusDot tone="attention" size={6} />
+                                )}
+                                {entry.count}
+                              </span>
+                              <span
+                                id={`${planScopeDescription}-${entry.key}`}
+                                hidden
+                              >
+                                {entry.reviewCount
+                                  ? `${entry.reviewCount} in review · `
+                                  : ""}
+                                {entry.count} completed
+                              </span>
+                            </>
                           )}
                         </SidebarMenuButton>
                       </SidebarMenuItem>

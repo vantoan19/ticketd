@@ -1,0 +1,74 @@
+@import "../../components/ui/surface-roles/plans-plan.css";
+
+.plan-index-list {
+  display: grid;
+  gap: 2px;
+  margin: 0;
+  padding: 0;
+}
+.plan-index-list .plan-index-row {
+  position: relative;
+  display: grid;
+  grid-template-columns: 20px minmax(0, 1fr) auto;
+  grid-template-areas:
+    "ring name count"
+    ". state time";
+  align-items: center;
+  gap: 2px 10px;
+  min-height: 58px;
+  padding: 9px 12px;
+}
+/* The row is one target and the timestamp and archive button are independent. */
+.plan-index-open {
+  position: absolute;
+  inset: 0;
+}
+.plan-index-ring {
+  grid-area: ring;
+}
+.plan-index-name {
+  grid-area: name;
+}
+.plan-index-count {
+  grid-area: count;
+  justify-self: end;
+}
+.plan-index-state {
+  grid-area: state;
+  display: flex;
+  align-items: baseline;
+  gap: 6px;
+}
+.plan-index-time {
+  position: relative;
+  grid-area: time;
+  justify-self: end;
+}
+.plan-index-row:has(.plan-index-action) {
+  grid-template-columns: 20px minmax(0, 1fr) auto auto;
+  grid-template-areas:
+    "ring name count action"
+    ". state time action";
+}
+.plan-index-action {
+  position: relative;
+  grid-area: action;
+  visibility: hidden;
+}
+.plan-index-row:is(:hover, :focus-within) .plan-index-action {
+  visibility: visible;
+}
+@media (hover: none) {
+  .plan-index-action {
+    visibility: visible;
+  }
+}
+@media (max-width: 640px) {
+  .plan-index-action button {
+    width: 32px;
+    padding-inline: 0;
+  }
+  .plan-index-action-label {
+    display: none;
+  }
+}
