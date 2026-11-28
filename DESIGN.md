@@ -647,8 +647,19 @@ the space below the shared pane header for tickets.
   lines, with Show more for text over 150 characters. The spec is a quiet link.
   Countable progress leads the line in ink, with nonzero swatches for In review,
   In progress, Ready and Blocked, and the last change at the right. Canceled
-  and Duplicate are excluded. Loading keeps the head and shows a progress
-  skeleton and three skeleton rows. A failed read shows Retry below the head.
+  and Duplicate are excluded. Loading keeps the head and shows skeletons for
+  the count, strip and three rows. A failed read shows Retry below the head.
+- **Overview progress strip:** one segment per counted ticket, ordered Done
+  (oldest first), In review, In progress, Ready and Blocked, with open work
+  ordered by how many tickets it unblocks. Each 8px segment sits in a 24px
+  target, with 2px gaps. Segments and swatches use `--seg-done`,
+  `--seg-review`, `--seg-progress` and `--track`, with a 1px
+  `--control-boundary` outline for Blocked. Hover or keyboard focus shows the
+  reference, title and status. Click or Enter opens the ticket beside the
+  Overview. Tab enters at the first segment, Left and Right move between
+  segments, and Home and End reach the ends. The open ticket's segment is
+  taller and carries `aria-current`. Above 60 counted tickets, proportional
+  status runs show the counts.
 - **Overview work:** Needs you leads with an orange dot, followed by In progress,
   Ready, Blocked and Done. Each heading has a muted count. Status icons and
   disclosure chevrons sit in the gutter. Rows are at least 36px tall, with a

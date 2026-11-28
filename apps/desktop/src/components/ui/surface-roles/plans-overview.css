@@ -19,7 +19,7 @@
 .plan-overview-purpose-text {
   overflow-wrap: anywhere;
 }
-.plan-overview :is(button, a):focus-visible {
+.plan-overview :is(button, a, time[tabindex]):focus-visible {
   outline: 2px solid var(--ring);
   outline-offset: 2px;
   box-shadow: none;
@@ -29,19 +29,22 @@
   line-height: var(--text-ui-line);
   font-variant-numeric: tabular-nums;
 }
-.plan-overview-swatch {
+:is(.plan-overview-swatch, .plan-overview-strip-mark) {
   border-radius: var(--radius-segment);
 }
-.plan-overview-swatch[data-status="review"] {
+.plan-overview-strip-mark[data-status="done"] {
+  background: var(--seg-done);
+}
+:is(.plan-overview-swatch, .plan-overview-strip-mark)[data-status="review"] {
   background: var(--seg-review);
 }
-.plan-overview-swatch[data-status="progress"] {
+:is(.plan-overview-swatch, .plan-overview-strip-mark)[data-status="progress"] {
   background: var(--seg-progress);
 }
-.plan-overview-swatch[data-status="ready"] {
+:is(.plan-overview-swatch, .plan-overview-strip-mark)[data-status="ready"] {
   background: var(--track);
 }
-.plan-overview-swatch[data-status="blocked"] {
+:is(.plan-overview-swatch, .plan-overview-strip-mark)[data-status="blocked"] {
   border: 1px solid var(--control-boundary);
 }
 .plan-overview-section-heading {
