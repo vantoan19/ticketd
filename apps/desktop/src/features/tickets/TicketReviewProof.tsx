@@ -41,7 +41,7 @@ export function TicketReviewProof({ onEvidence }: { onEvidence: () => void }) {
             asChild
             variant="outline"
             size="compact"
-            className="ticket-proof-link"
+            className="min-w-0 max-w-full"
           >
             <SourceLink url={item.value} icon={false}>
               {content}
@@ -53,7 +53,7 @@ export function TicketReviewProof({ onEvidence }: { onEvidence: () => void }) {
               <Button
                 variant="outline"
                 size="compact"
-                className="ticket-proof-link"
+                className="min-w-0 max-w-full"
               >
                 {content}
               </Button>

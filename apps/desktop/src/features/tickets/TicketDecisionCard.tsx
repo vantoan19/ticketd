@@ -267,8 +267,12 @@ export function DecisionPanel({
   children: ReactNode;
 }) {
   return (
-    <Card asChild variant="well" className="ticket-decision-card">
-      <section ref={cardRef} aria-label={state}>
+    <Card asChild variant="well">
+      <section
+        className="ticket-decision-card"
+        ref={cardRef}
+        aria-label={state}
+      >
         {children}
       </section>
     </Card>
@@ -316,16 +320,14 @@ function TicketReport({
             <span aria-hidden="true">·</span>
             <Time value={update.reported_at} />
           </div>
-          <Clamp
-            key={update.activity_id}
-            lines={4}
-            className="ticket-decision-report"
-          >
-            <MarkdownDocument
-              source={full.value?.brief ?? update.brief.text}
-              select={select}
-            />
-          </Clamp>
+          <div className="ticket-decision-report">
+            <Clamp key={update.activity_id} lines={4}>
+              <MarkdownDocument
+                source={full.value?.brief ?? update.brief.text}
+                select={select}
+              />
+            </Clamp>
+          </div>
         </>
       ) : (
         <p className="ticket-decision-byline">
