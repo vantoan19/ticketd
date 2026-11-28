@@ -25,6 +25,7 @@ const review: Ticket = {
   title: "Ship the rail",
   body: "## Draft\n\n- [x] An unrelated task\n\n## How would you know it worked?\n\n- [x] One\n- [ ] Two\n\n## Links\n\n- [x] Another unrelated task",
   status: "In review",
+  status_history_number: 7,
   trashed: false,
   tags: [],
   project_id: null,
@@ -98,7 +99,11 @@ beforeEach(() => {
       ).patch;
       if (ticket.status !== patch.expected_status)
         throw { code: "conflict", message: "This ticket has changed." };
-      ticket = { ...ticket, status: patch.status };
+      ticket = {
+        ...ticket,
+        status: patch.status,
+        status_history_number: (ticket.status_history_number ?? 0) + 1,
+      };
       return ticket;
     }
     if (command === "send_back") {
@@ -209,7 +214,11 @@ test("a review decision uses the current status, stays on the ticket and offers 
   ).toBeTruthy();
   expect(bridge.invoke).toHaveBeenCalledWith("change_ticket", {
     reference: "T-KQ1",
-    patch: { expected_status: "Done", status: "In review" },
+    patch: {
+      expected_status: "Done",
+      expected_status_history_number: 8,
+      status: "In review",
+    },
     requestId: expect.any(String),
   });
 });

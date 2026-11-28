@@ -520,7 +520,7 @@ test("review shortcuts work from a focused button in the ticket header", async (
   });
   expect(document.activeElement).toBe(reason);
   fireEvent.keyDown(reason, { key: "Escape" });
-  changedTicket = { ...ticket, status: "Done" };
+  changedTicket = { ...ticket, status: "Done", status_history_number: 8 };
   headerControl.focus();
   fireEvent.keyDown(headerControl, {
     key: "Enter",
@@ -532,7 +532,7 @@ test("review shortcuts work from a focused button in the ticket header", async (
 test("an approval arriving after a review decision takes the card while Undo remains available", async () => {
   const reopen = open({ ...ticket, status: "In review" });
   const move = await screen.findByRole("button", { name: "Move to Done" });
-  changedTicket = { ...ticket, status: "Done" };
+  changedTicket = { ...ticket, status: "Done", status_history_number: 8 };
   fireEvent.click(move);
   await screen.findByText("Done · just now · by you");
 

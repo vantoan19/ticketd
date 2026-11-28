@@ -925,7 +925,7 @@ Counts remain unknown until their own read succeeds. Initial failures retain an 
 
 ### Review decisions
 
-After Move to Done the card reads “Done · just now · by you”. After Send back it reads “Sent back · waiting for {agent}” and quotes the submitted update. Focus moves to “Next to review”, which follows the current list’s order and wraps. When the queue is empty, focus moves to “Nothing else in review”. The pane’s status line offers Undo on “Moved {reference} to Done” or “Sent {reference} back to In progress”. A failed write keeps the draft and offers Retry in the status line. If the ticket left In review elsewhere, the card refreshes to show its current state.
+After Move to Done the card reads “Done · just now · by you”. After Send back it reads “Sent back · waiting for {agent}” and quotes the submitted update. Focus moves to “Next to review”, which follows the current list’s order and wraps. When the queue is empty, focus moves to “Nothing else in review”. If the queue could not be read, the card tells the person and keeps the decision. The pane’s status line offers Undo on “Moved {reference} to Done” or “Sent {reference} back to In progress”. A failed write keeps the draft and offers Retry in the status line. If the ticket left In review elsewhere, the card refreshes to show its current state.
 
 ### Failures and error language
 

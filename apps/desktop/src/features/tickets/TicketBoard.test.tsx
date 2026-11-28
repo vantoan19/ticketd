@@ -566,7 +566,7 @@ test("a pending decision and its next review survive expanding the board peek", 
   });
   const write = vi.fn(async () => {
     await pendingWrite;
-    const done = { ...first, status: "Done" };
+    const done = { ...first, status: "Done", status_history_number: 8 };
     saved = saved.map((item) =>
       item.reference === first.reference ? done : item,
     );
@@ -605,6 +605,7 @@ test("a pending decision and its next review survive expanding the board peek", 
   const next = screen.getByRole("link", { name: "Next to review" });
   expect(next.getAttribute("href")).toBe("ticketd://ticket/T-KQ3");
   expect(document.activeElement).toBe(next);
+  expect(screen.getByRole("button", { name: "Undo" })).toBeTruthy();
 });
 
 test("the board peek shows complete section counts even when their lists are paged", async () => {

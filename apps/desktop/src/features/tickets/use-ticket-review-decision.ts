@@ -168,21 +168,32 @@ export function useTicketReviewDecision(
               }
             : { kind: "done", nextReview },
         );
+        const completionNumber = updated.status_history_number;
+        const undo = send
+          ? () => client.undoSendBack(reference, request, undoRequest)
+          : completionNumber === undefined
+            ? undefined
+            : () =>
+                client.changeTicket(
+                  reference,
+                  {
+                    status: "In review",
+                    expected_status: "Done",
+                    expected_status_history_number: completionNumber,
+                  },
+                  undoRequest,
+                );
         line.show({
           message: send
             ? `Sent ${reference} back to In progress`
             : `Moved ${reference} to Done`,
-          undo: async () => {
-            const restored = send
-              ? await client.undoSendBack(reference, request, undoRequest)
-              : await client.changeTicket(
-                  reference,
-                  { status: "In review", expected_status: "Done" },
-                  undoRequest,
-                );
-            setDecision(null);
-            await changed(restored);
-          },
+          ...(undo && {
+            undo: async () => {
+              const restored = await undo();
+              setDecision(null);
+              await changed(restored);
+            },
+          }),
         });
         await changed(updated);
       } catch (reason) {

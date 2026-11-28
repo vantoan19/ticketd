@@ -30,6 +30,7 @@ export function bridgeDefault(
     case "activity_update_count":
       return 0;
     case "latest_update":
+    case "get_activity":
       return null;
     case "document_context_links":
       return [[], []];
