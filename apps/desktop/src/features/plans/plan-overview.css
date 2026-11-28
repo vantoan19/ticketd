@@ -114,6 +114,23 @@
 .plan-overview-strip-target[aria-current="true"] .plan-overview-strip-mark {
   height: 12px;
 }
+@media (pointer: coarse) {
+  .plan-overview-progress {
+    grid-template-columns: minmax(0, 1fr);
+  }
+  .plan-overview-strip[role="toolbar"] {
+    overflow-x: auto;
+  }
+  .plan-overview-strip[role="toolbar"] > .plan-overview-strip-target {
+    min-width: 44px;
+    height: 44px;
+  }
+  .plan-overview-strip[role="toolbar"]
+    > .plan-overview-strip-target:focus-visible {
+    outline-offset: -2px;
+  }
+}
+
 .plan-overview-loading-rows {
   display: grid;
   gap: 20px;
