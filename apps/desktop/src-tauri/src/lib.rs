@@ -1443,6 +1443,12 @@ fn plan_activity(id: String, limit: u32) -> Result<Vec<ticketd_core::PlanActivit
         .map_err(BridgeFailure::from)
 }
 #[tauri::command(async)]
+fn plan_files(id: String) -> Result<Vec<ticketd_core::PlanTicketFiles>, BridgeFailure> {
+    open_workspace()
+        .and_then(|w| w.plan_files(&id))
+        .map_err(BridgeFailure::from)
+}
+#[tauri::command(async)]
 fn create_plan(name: String) -> Result<Plan, BridgeFailure> {
     open_workspace()
         .and_then(|mut w| w.create_plan(&name))
@@ -2624,6 +2630,7 @@ pub fn run() -> Result<(), tauri::Error> {
             list_plans,
             show_plan,
             plan_activity,
+            plan_files,
             set_plan_document,
             set_ticket_document,
             set_plan_spec,

@@ -1,4 +1,5 @@
 import { useId, useState, type ReactNode } from "react";
+import { Paperclip } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Count } from "@/components/ui/count";
 import { Disclosure } from "@/components/ui/disclosure";
@@ -7,7 +8,7 @@ import { Time } from "@/components/ui/time";
 import { useChatAboutTicket } from "@/features/chats/use-ticket-chats";
 import { StatusIcon } from "@/features/tickets/StatusIcon";
 import type { Project } from "@/lib/api/client";
-import type { View } from "@/lib/api/plans";
+import type { PlanTicketFiles, View } from "@/lib/api/plans";
 import { firstSentence } from "@/lib/plain-text";
 import type { PlanOverviewWork } from "./PlanOverview";
 import "./plan-overview-work.css";
@@ -22,12 +23,16 @@ export function PlanOverviewSections({
   projects,
   selected,
   onOpen,
+  files,
+  onOpenFiles,
 }: {
   work: PlanOverviewWork;
   updates: View["latest_updates"];
   projects: readonly Project[];
   selected: string | null;
   onOpen: OpenTicket;
+  files: ReadonlyMap<string, PlanTicketFiles>;
+  onOpenFiles: (group: PlanTicketFiles) => void;
 }) {
   const { inReview, inProgress, ready, blocked, done, notCounted } =
     work.sections;
@@ -59,6 +64,8 @@ export function PlanOverviewSections({
           }
           selected={selected === item.ticket.reference}
           onOpen={onOpen}
+          files={files.get(item.ticket.reference)}
+          onOpenFiles={onOpenFiles}
         />
       ))}
     </ul>
@@ -175,6 +182,8 @@ function PlanOverviewRow({
   folder,
   selected,
   onOpen,
+  files,
+  onOpenFiles,
 }: {
   item: WorkItem;
   brief: string;
@@ -182,6 +191,8 @@ function PlanOverviewRow({
   folder: string | null;
   selected: boolean;
   onOpen: OpenTicket;
+  files: PlanTicketFiles | undefined;
+  onOpenFiles: (group: PlanTicketFiles) => void;
 }) {
   const chat = useChatAboutTicket(
     group === "Ready" && ticket.id
@@ -253,6 +264,20 @@ function PlanOverviewRow({
           </span>
         )}
       </button>
+      {files && (group === "In review" || group === "In progress") && (
+        <Button
+          type="button"
+          variant="ghost"
+          size="card"
+          className="min-h-6 min-w-8 gap-1 px-1"
+          data-overview-files=""
+          aria-label={`${files.files.length} ${files.files.length === 1 ? "file" : "files"} for ${ticket.reference}`}
+          onClick={() => onOpenFiles(files)}
+        >
+          <Paperclip data-icon="inline-start" aria-hidden="true" />
+          <Count>{files.files.length}</Count>
+        </Button>
+      )}
       {chat && (
         <Button
           type="button"

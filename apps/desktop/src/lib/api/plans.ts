@@ -2,6 +2,7 @@ import { invoke } from "@/lib/api/bridge-failure";
 import { lazySchema } from "@/lib/api/lazy-schema";
 import { z } from "zod";
 import { ticketStatuses } from "@/lib/statuses";
+import { attachmentSchema } from "./attachments";
 import { graphSchema, ticketSchema } from "./client";
 import { latestUpdateSchema } from "./progress";
 const planSchema = lazySchema(() =>
@@ -72,11 +73,26 @@ const activitySchema = lazySchema(() => {
   );
 });
 
+const filesSchema = lazySchema(() =>
+  z.array(
+    z.object({
+      reference: z.string(),
+      title: z.string(),
+      status: z.enum(ticketStatuses),
+      files: z.array(attachmentSchema).min(1),
+    }),
+  ),
+);
+
 export type Plan = z.infer<typeof planSchema>;
 export type View = z.infer<typeof viewSchema>;
 export type PlanCounts = View["counts"];
 export type PlanActivity = z.infer<typeof activitySchema>[number];
+export type PlanTicketFiles = z.infer<typeof filesSchema>[number];
 export const plansClient = {
+  async files(id: string) {
+    return filesSchema.parse(await invoke("plan_files", { id }));
+  },
   async activity(id: string, limit: number) {
     return activitySchema.parse(await invoke("plan_activity", { id, limit }));
   },

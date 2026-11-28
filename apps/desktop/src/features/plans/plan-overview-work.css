@@ -89,6 +89,11 @@
   margin: 4px 0 4px 4px;
 }
 
+[data-overview-files] {
+  grid-column: 2;
+  margin-block: 6px;
+}
+
 .plan-overview-row-time {
   grid-column: 3;
   padding: 8px 0 0 12px;
@@ -109,6 +114,13 @@
 }
 
 :where([data-width~="max-600"]) [data-overview-action] {
+  grid-row: 2;
+  grid-column: 1;
+  justify-self: start;
+  margin: 0 0 4px 62px;
+}
+
+:where([data-width~="max-600"]) [data-overview-files] {
   grid-row: 2;
   grid-column: 1;
   justify-self: start;

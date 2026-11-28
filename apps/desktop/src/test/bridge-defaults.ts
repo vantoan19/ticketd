@@ -61,6 +61,7 @@ export function bridgeDefault(
     case "ticket_history":
     case "list_evidence":
     case "ticket_attachments":
+    case "plan_files":
     case "list_attachments":
     case "search_attachments":
     case "ticket_backlinks":

@@ -21,9 +21,11 @@ import { compactAgo, formatDateTime } from "@/lib/format";
 import { matchesShortcut } from "@/lib/shortcuts";
 import { PlanDocuments } from "./PlanDocuments";
 import { PlanOverviewChanges } from "./PlanOverviewChanges";
+import { PlanOverviewFiles } from "./PlanOverviewFiles";
 import { PlanOverviewSections } from "./PlanOverviewSections";
 import { PlanOverviewStrip } from "./PlanOverviewStrip";
 import { planWorkModel } from "./plan-work-model";
+import { usePlanOverviewFiles } from "./usePlanOverviewFiles";
 import { usePlanAction, type PlanViewState } from "./usePlanView";
 import "./plan-overview.css";
 
@@ -52,6 +54,10 @@ export function PlanOverview({
   const titleId = useId();
   const openDocument = useContext(DocumentNavigation);
   const current = view?.plan.id === plan.id ? view.plan : plan;
+  const files = usePlanOverviewFiles(
+    view?.members.length ? plan.id : null,
+    work,
+  );
   const spec = view?.documents.find(
     (document) => document.id === view.plan.spec_document_id,
   );
@@ -111,10 +117,18 @@ export function PlanOverview({
                     projects={projects}
                     selected={selected}
                     onOpen={onOpen}
+                    files={files.byTicket}
+                    onOpenFiles={files.openGroup}
                   />
                 )}
                 {/* PlanEmptyState */}
-                {/* PlanOverviewFiles */}
+                {view.members.length > 0 && (
+                  <PlanOverviewFiles
+                    archived={current.archived}
+                    state={files}
+                    onOpenTicket={onOpen}
+                  />
+                )}
                 {view.members.length > 0 && (
                   <PlanOverviewChanges
                     plan={current}
