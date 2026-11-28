@@ -1,7 +1,7 @@
 import { invoke } from "@/lib/api/bridge-failure";
 import { lazySchema } from "@/lib/api/lazy-schema";
 import { z } from "zod";
-import { graphSchema } from "./client";
+import { graphSchema, ticketSchema } from "./client";
 const planSchema = lazySchema(() =>
   z.object({
     id: z.string(),
@@ -12,7 +12,8 @@ const planSchema = lazySchema(() =>
 );
 const viewSchema = lazySchema(() =>
   z.object({
-    plan: planSchema.extend({
+    plan: z.object({
+      ...planSchema.shape,
       spec_document_id: z.string().nullable().default(null),
     }),
     documents: z
@@ -35,6 +36,11 @@ const viewSchema = lazySchema(() =>
         status: z.string(),
         project_id: z.string().nullable(),
         availability: z.string().nullable().default(null),
+        prerequisites: ticketSchema.shape.prerequisites.default([]),
+        parent: ticketSchema.shape.parent.default(null),
+        children: ticketSchema.shape.children.default([]),
+        updated_at: ticketSchema.shape.updated_at,
+        latest_update: ticketSchema.shape.latest_update,
       }),
     ),
   }),

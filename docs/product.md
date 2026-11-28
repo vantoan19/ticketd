@@ -187,8 +187,10 @@ opens the graph to understand dependency chains.
   remembered locally.
 - **Ticket detail.** Description, Activities and history, links, hierarchy,
   dependencies, tags, Documents, attachments, evidence, reminder, and Chats.
-- **Plan view.** Member tickets as a List or Board, a Flow view of dependencies,
-  status counts, linked Documents, membership, and archive and reactivation.
+- **Plan view.** Opening a Plan starts on its Overview, which shows its purpose,
+  progress and linked Documents. Open a member beside the Overview, or switch
+  to List, Board or the dependency Flow. Dependencies from outside the Plan
+  appear as boundary nodes. A Plan can be archived and reactivated.
   List folds Done by default and remembers the choice per Plan on this computer.
   Shared parent or project labels are hidden when every displayed row has the same one.
 - **Plans.** Two-line rows show progress, current status words, and the latest

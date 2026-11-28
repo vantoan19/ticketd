@@ -1,0 +1,66 @@
+.plan-overview {
+  background: var(--surface);
+  color: var(--foreground);
+}
+.plan-overview-purpose,
+.plan-overview-links,
+.plan-overview-progress-word,
+.plan-overview-progress-line time {
+  color: var(--muted-foreground);
+}
+.plan-overview-purpose {
+  font-size: var(--text-reading);
+  line-height: var(--text-doc-line);
+}
+.plan-overview-purpose-edit {
+  text-align: start;
+}
+.plan-overview-title,
+.plan-overview-purpose-text {
+  overflow-wrap: anywhere;
+}
+.plan-overview :is(button, a):focus-visible {
+  outline: 2px solid var(--ring);
+  outline-offset: 2px;
+  box-shadow: none;
+}
+.plan-overview-progress-line {
+  font-size: var(--text-ui);
+  line-height: var(--text-ui-line);
+  font-variant-numeric: tabular-nums;
+}
+.plan-overview-swatch {
+  border-radius: var(--radius-segment);
+}
+.plan-overview-swatch[data-status="review"] {
+  background: var(--seg-review);
+}
+.plan-overview-swatch[data-status="progress"] {
+  background: var(--seg-progress);
+}
+.plan-overview-swatch[data-status="ready"] {
+  background: var(--track);
+}
+.plan-overview-swatch[data-status="blocked"] {
+  border: 1px solid var(--control-boundary);
+}
+.plan-overview-section-heading {
+  font-size: var(--text-ui);
+  line-height: var(--text-ui-line);
+  font-weight: 500;
+}
+.plan-overview-documents {
+  list-style: none;
+}
+.plan-overview-document {
+  text-align: start;
+}
+.plan-overview-document [data-slot="record-title"] > span:first-of-type {
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.plan-overview-document
+  [data-slot="record-title"]
+  > :is(svg, [data-slot="badge"]) {
+  flex: none;
+}
