@@ -2,6 +2,9 @@
 //! the status model, through the shared-core interface against the fake storage.
 #![allow(clippy::unwrap_used)] // Setup that fails must fail the test.
 
+#[path = "support/old_workspace.rs"]
+mod old_workspace;
+
 use std::io::Cursor;
 use std::path::PathBuf;
 
@@ -2313,6 +2316,7 @@ fn a_format_97_workspace_with_a_drive_binding_becomes_a_google_drive_binding_and
     drop(desk);
     let path = desks.directory.path().join("a");
     let fixture = rusqlite::Connection::open(&path).unwrap();
+    old_workspace::remove_github_integration(&fixture);
     let mut columns = String::new();
     for column in [
         "provider",
@@ -2366,6 +2370,7 @@ fn a_format_98_s3_binding_has_no_endpoint_recorded_until_the_desktop_records_one
         .unwrap();
     drop(desk);
     let fixture = rusqlite::Connection::open(&path).unwrap();
+    old_workspace::remove_github_integration(&fixture);
     fixture
         .execute_batch(
             "ALTER TABLE sync_state DROP COLUMN s3_endpoint;

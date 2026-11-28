@@ -22,7 +22,11 @@ import { initialUpdateState } from "@/features/updates/update-state";
 import type { UpdateSnapshot } from "@/features/updates/client";
 import type { SourceEntry, SourceStatus } from "@/lib/api/sources";
 import { SettingsNavigation } from "@/lib/settings-navigation";
-import { githubSource } from "@/test/source-fixtures";
+import {
+  beaconSource,
+  githubIntegration,
+  githubSource,
+} from "@/test/source-fixtures";
 
 // The line reads what the app already holds; nothing here reaches a real bridge.
 const bridge = vi.hoisted(() => ({ invoke: vi.fn() }));
@@ -89,18 +93,21 @@ function line({
   sync = null,
   sources = [],
   entries = [],
+  github = null,
   update = initialUpdateState,
 }: {
   needsSetup?: SettingsState["needsSetup"];
   sync?: SyncStatusValue["status"];
   sources?: SourceStatus[];
   entries?: SourceEntry[];
+  github?: SourceActivity["github"];
   update?: UpdateSnapshot;
 } = {}) {
   const activity: SourceActivity = {
     refreshing: false,
     sources,
     entries,
+    github,
     intervalSecs: 300,
     openSettings: openSourceSettings,
     refreshAll,
@@ -225,19 +232,21 @@ test("detailed logging is a line that opens Diagnostics", async () => {
   expect(openPage).toHaveBeenLastCalledWith("diagnostics");
 });
 
-test("a source whose sign-in ended says so, and Sign in opens its page instead of retrying", () => {
+test("GitHub with an expired sign-in opens its integration page", () => {
   line({
-    entries: [connection],
+    entries: [githubSource],
+    github: githubIntegration("not_signed_in"),
     sources: [
       health({
+        connection_id: null,
         health: "unavailable",
         error: { code: "unauthenticated", message: "Bad credentials" },
       }),
     ],
   });
-  expect(screen.getByText("Work GitHub needs sign-in")).toBeTruthy();
-  fireEvent.click(screen.getByRole("button", { name: "Sign in" }));
-  expect(openSourceSettings).toHaveBeenLastCalledWith("work-github");
+  expect(screen.getByText("GitHub needs sign-in")).toBeTruthy();
+  fireEvent.click(screen.getByRole("button", { name: "Sign in to GitHub" }));
+  expect(openSourceSettings).toHaveBeenLastCalledWith("github");
   expect(refreshAll).not.toHaveBeenCalled();
   expect(screen.queryByRole("button", { name: "Retry" })).toBeNull();
 });
@@ -275,10 +284,25 @@ test("the folded rail drops the Retry word, as it drops Sign in", () => {
 });
 
 test("a connection whose extension is missing gets a line of its own, once", () => {
-  line({ entries: [{ ...connection, unavailable: true }] });
-  expect(screen.getAllByText("Work GitHub unavailable")).toHaveLength(1);
-  fireEvent.click(screen.getByRole("button", { name: "Open Work GitHub" }));
-  expect(openSourceSettings).toHaveBeenLastCalledWith("work-github");
+  line({
+    entries: [
+      {
+        ...beaconSource,
+        saved: {
+          id: "work-beacon",
+          name: "Work Beacon",
+          provider: "beacon",
+          config: {},
+          account: "sam",
+          saved_at: "2026-01-01T00:00:00Z",
+        },
+        unavailable: true,
+      },
+    ],
+  });
+  expect(screen.getAllByText("Work Beacon unavailable")).toHaveLength(1);
+  fireEvent.click(screen.getByRole("button", { name: "Open Work Beacon" }));
+  expect(openSourceSettings).toHaveBeenLastCalledWith("work-beacon");
 });
 
 test("sync that stopped stays the one sync line, with its fix a click away", () => {
