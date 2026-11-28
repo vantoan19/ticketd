@@ -251,7 +251,17 @@ export function TicketPage({
     if (!active || leaving) return;
     const follow = (event: FocusEvent) => {
       const origin = decisionFocusRef.current;
-      if (origin && event.target !== origin.element) origin.moved = true;
+      if (!origin || origin.moved || event.target === origin.element) return;
+      // Expanding the peek focuses this pane's non-tabbable reference heading
+      // while the outgoing board can still be mounted during its transition.
+      const heading = page.current
+        ?.closest(".ticket-detail")
+        ?.querySelector("#detail-heading");
+      if (heading && event.target === heading) {
+        origin.element = heading;
+      } else {
+        origin.moved = true;
+      }
     };
     document.addEventListener("focusin", follow);
     return () => {
