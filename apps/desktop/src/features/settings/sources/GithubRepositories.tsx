@@ -9,6 +9,7 @@ import {
   SettingsRow,
 } from "@/features/settings/layout/SettingsList";
 import { SettingsSection } from "@/features/settings/layout/SettingsSection";
+import { GithubProjectLogin } from "@/features/settings/sources/GithubProjectLogin";
 import { GithubRepositoryEditor } from "@/features/settings/sources/GithubRepositoryEditor";
 import {
   lastGithubRefresh,
@@ -132,6 +133,7 @@ export function GithubRepositories({
                 onChanged();
               }}
               onRemove={() => setRemoving(repository)}
+              onLoginChanged={onChanged}
             />
           );
         })}
@@ -217,6 +219,7 @@ function RepositoryRow({
   onToggle,
   onSaved,
   onRemove,
+  onLoginChanged,
 }: {
   repository: GithubRepository;
   activeLogin: string | null | undefined;
@@ -225,6 +228,7 @@ function RepositoryRow({
   onToggle: () => void;
   onSaved: () => void;
   onRemove: () => void;
+  onLoginChanged: () => void;
 }) {
   const id = useId();
   const [saving, setSaving] = useState(false);
@@ -266,11 +270,17 @@ function RepositoryRow({
       />
       {editing && (
         <div className="github-repository-editor" id={id}>
-          {repository.project_login && (
-            <p className="settings-list-row-description">
-              Project login for {repository.repository.split("/")[0]} is pinned
-              to {repository.project_login}.
-            </p>
+          {repository.project && (
+            <SettingsList>
+              <GithubProjectLogin
+                site={{
+                  project: repository.project,
+                  host: repository.repository.split("/")[0] ?? "github.com",
+                  login: repository.project_login,
+                }}
+                onChanged={onLoginChanged}
+              />
+            </SettingsList>
           )}
           <p className="settings-list-row-description">
             {repository.last_refreshed_at

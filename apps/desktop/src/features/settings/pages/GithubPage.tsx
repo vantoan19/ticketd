@@ -12,8 +12,13 @@ import {
 } from "@/features/settings/layout/SettingsList";
 import { GithubRepositories } from "@/features/settings/sources/GithubRepositories";
 import { GithubMark } from "@/features/settings/sources/GithubMark";
+import { GithubProjectLogin } from "@/features/settings/sources/GithubProjectLogin";
+import { SettingsSection } from "@/features/settings/layout/SettingsSection";
 import { GithubSignInRow } from "@/features/settings/sources/GithubSignInRow";
-import type { GithubIntegration } from "@/lib/api/github";
+import {
+  getGithubHostReadiness,
+  type GithubIntegration,
+} from "@/lib/api/github";
 
 export function GithubPage({
   integration,
@@ -50,7 +55,9 @@ export function GithubPage({
                 key={host.host}
                 host={host}
                 onChanged={onCheck}
-                onCheck={onCheck}
+                onCheck={() => {
+                  void getGithubHostReadiness(host.host).then(onCheck, onCheck);
+                }}
               />
             ))
           ) : (
@@ -76,6 +83,19 @@ export function GithubPage({
           onChanged={onChanged}
           {...(projectSetup && { projectSetup })}
         />
+      )}
+      {!!integration?.project_sites_without_rules?.length && (
+        <SettingsSection title="Project logins">
+          <SettingsList>
+            {integration.project_sites_without_rules.map((site) => (
+              <GithubProjectLogin
+                key={`${site.project.id}/${site.host}`}
+                site={site}
+                onChanged={onChanged}
+              />
+            ))}
+          </SettingsList>
+        </SettingsSection>
       )}
     </SettingsDrillIn>
   );

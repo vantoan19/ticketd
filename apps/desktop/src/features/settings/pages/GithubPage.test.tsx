@@ -16,6 +16,7 @@ import {
   getGithubIntegration,
   removeGithubRepository,
   signInGithub,
+  setGithubProjectLogin,
   type GithubIntegration,
 } from "@/lib/api/github";
 import { githubSource } from "@/test/source-fixtures";
@@ -24,6 +25,7 @@ vi.mock("@/lib/api/github", async (importOriginal) => ({
   ...(await importOriginal<typeof import("@/lib/api/github")>()),
   getGithubIntegration: vi.fn(),
   signInGithub: vi.fn(),
+  setGithubProjectLogin: vi.fn(),
   removeGithubRepository: vi.fn(),
 }));
 vi.mock("@tauri-apps/api/core", () => ({ invoke: vi.fn() }));
@@ -242,4 +244,48 @@ test("adding the first Enterprise repository checks its full site and offers can
   expect(invoke).toHaveBeenCalledWith("cancel_github_sign_in", {
     host: "github.example.test:8443",
   });
+});
+
+test("a Project can select and clear its GitHub login before adding an import rule", async () => {
+  const site = {
+    project: { id: "platform", name: "Platform" },
+    host: "github.example.test",
+    login: null,
+  };
+  const integration = { ...connected, project_sites_without_rules: [site] };
+  vi.mocked(setGithubProjectLogin).mockImplementation(
+    async (_project, _host, login) => {
+      vi.mocked(getGithubIntegration).mockResolvedValue({
+        ...integration,
+        project_sites_without_rules: [{ ...site, login }],
+      });
+    },
+  );
+  open(integration);
+  await userEvent.click(
+    await screen.findByRole("button", { name: "GitHub login for Platform" }),
+  );
+  const login = screen.getByRole("textbox", { name: "GitHub CLI login" });
+  await userEvent.type(login, "platform-bot");
+  await userEvent.click(
+    screen.getByRole("button", { name: "Save Project login" }),
+  );
+  expect(setGithubProjectLogin).toHaveBeenCalledWith(
+    "platform",
+    "github.example.test",
+    "platform-bot",
+  );
+  expect(await screen.findByText("platform-bot")).toBeTruthy();
+  await userEvent.click(
+    screen.getByRole("button", { name: "GitHub login for Platform" }),
+  );
+  await userEvent.click(
+    screen.getByRole("button", { name: "Use active login" }),
+  );
+  expect(setGithubProjectLogin).toHaveBeenLastCalledWith(
+    "platform",
+    "github.example.test",
+    null,
+  );
+  await waitFor(() => expect(screen.queryByText("platform-bot")).toBeNull());
 });

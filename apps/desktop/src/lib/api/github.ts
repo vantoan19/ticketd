@@ -29,16 +29,24 @@ const migrationNoticeSchema = z.object({
   message: z.string(),
 });
 
+const projectSiteSchema = z.object({
+  project: z.object({ id: z.string(), name: z.string() }),
+  host: z.string(),
+  login: z.string().nullable(),
+});
+
 const integrationSchema = z.object({
   id: z.literal("github"),
   hosts: z.array(hostSchema),
   repositories: z.array(repositorySchema),
   migration_notices: z.array(migrationNoticeSchema),
+  project_sites_without_rules: z.array(projectSiteSchema).optional(),
 });
 
 export type GithubHost = z.infer<typeof hostSchema>;
 export type GithubRepositoryRule = z.infer<typeof repositoryRuleSchema>;
 export type GithubRepository = z.infer<typeof repositorySchema>;
+export type GithubProjectSite = z.infer<typeof projectSiteSchema>;
 export type GithubMigrationNotice = z.infer<typeof migrationNoticeSchema>;
 export type GithubIntegration = z.infer<typeof integrationSchema>;
 
