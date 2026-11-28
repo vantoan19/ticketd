@@ -1,0 +1,57 @@
+.plan-overview-files-heading {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+}
+
+.plan-overview-file-groups {
+  display: grid;
+  gap: 16px;
+}
+
+.plan-overview-file-ticket,
+.plan-overview-file-source {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+}
+
+.plan-overview-file-ticket {
+  position: relative;
+  min-height: 28px;
+}
+
+.plan-overview-file-ticket > svg {
+  position: absolute;
+  inset-inline-start: -20px;
+}
+
+.plan-overview-file-thumbnails {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  padding-block-start: 4px;
+}
+
+.plan-overview-file-tile {
+  width: 96px;
+  height: 72px;
+}
+
+.plan-overview-file-source {
+  flex: none;
+  padding: 4px 16px;
+}
+
+.plan-overview-file-source > svg {
+  flex: none;
+}
+
+.plan-overview-file-source > button {
+  margin-inline-start: auto;
+}
+
+:where([data-width~="max-600"]) .plan-overview-file-thumbnails {
+  display: none;
+}

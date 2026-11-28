@@ -191,8 +191,9 @@ opens the graph to understand dependency chains.
   progress and linked Documents. The progress strip opens member tickets beside
   the Overview and groups them by status above 60 counted tickets. Work appears
   under Needs you, In progress, Ready, Blocked and Done. Reviews and active work
-  show the first sentence of their latest update. Ready favors tickets that
-  unblock more Plan work and offers Start in Chat while Chats are on. Blocked
+  show the first sentence of their latest update. A paperclip opens attached
+  files. Ready favors tickets that unblock more Plan work and offers Start in
+  Chat while Chats are on. Blocked
   names what each ticket waits on and folds above three tickets. Done starts
   folded and keeps Canceled and Duplicate under Not counted. Switch to List,
   Board or the dependency Flow for other ticket views. Dependencies from outside
@@ -360,6 +361,11 @@ An active Plan with tickets shows Ready to wrap up on the Overview when all
 tickets are closed or the only open tickets are waiting solely on tickets
 outside the Plan. Move opens the Plan picker for the remaining tickets.
 Archive Plan acts immediately, with Undo and Retry on the status line.
+
+The Overview's Files section groups direct Attachments by member ticket. Go
+through all opens a single viewer in Overview order. Each file names the
+ticket it came from and offers Open ticket. Archived Plans show the total and
+keep Go through all available.
 
 On an active Plan's Overview, Since you last looked shows the latest change
 for up to five tickets. It includes status changes, tickets joining the Plan,

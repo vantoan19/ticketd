@@ -680,6 +680,8 @@ the space below the shared pane header for tickets.
   longest waiting.
   In progress puts the latest updates first. Both show the first sentence of
   the latest update under the title, with 8px above and below a row with a note.
+  When the ticket has files, a paperclip and file count open that ticket's
+  files in the Attachment viewer. The paperclip target is at least 32 × 24px.
   Ready puts the most unblocking work first and shows Parent of N or Unblocks N.
   Start in Chat appears on Ready rows on hover, focus or touch while Chats are on.
   Blocked follows Flow order, names its blockers for assistive technology and
@@ -687,6 +689,14 @@ the space below the shared pane header for tickets.
   Done starts folded and lists Canceled and Duplicate under Not counted. J and
   K move between visible rows outside text fields, Enter opens the focused
   ticket, and the open row has `aria-current`. Focus uses a 2px `--ring` outline.
+- **Overview files:** after Done, Files shows the total and Go through all.
+  Direct Attachments are grouped in Overview reading order, with each ticket's
+  status icon, reference and title. Each group shows up to five 96 × 72px tiles
+  with an image or extension. The +N tile opens the first additional file.
+  Three groups show before Show N more tickets. Go through all walks every
+  attachment in order using the shared viewer. Its source line above the file
+  shows that file's ticket with an Open ticket action. An archived Plan shows
+  the heading and Go through all. The section is hidden when there are no files.
 - **Since you last looked:** after Files and before Documents, up to five 36px
   rows show the latest status change, join or authored update for different
   tickets. A status change shows its icon, ticket title and new status. A new
@@ -702,7 +712,8 @@ the space below the shared pane header for tickets.
   Closing detail restores focus to the ticket's entry. At pane widths up to
   600px, measured through the shared width queries, the purpose, head links
   and status words after the progress count hide. Work titles take up to two
-  lines and row metadata moves under the title.
+  lines and row metadata moves under the title. The Files thumbnails hide,
+  while the paperclips and Go through all remain available.
 - **List:** Done starts folded. Its 32px disclosure sits within the 36px group header, with a right-pointing chevron, name and ticket count. Opening the group turns the chevron down and shows the rows in place. The choice is remembered per Plan on this computer. A parent or project label shared by all displayed rows is hidden.
 - **Feedback:** archiving, Remove from Plan, removing or unsetting a Document and adding tickets act at once and say so on the status line with Undo; a failure is the status line's failure with Retry, never a banner pushed into the header. Archive/reactivate stays distinct from completing tickets.
 
