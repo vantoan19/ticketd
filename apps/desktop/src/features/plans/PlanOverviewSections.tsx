@@ -155,8 +155,9 @@ function FoldedWorkSection({
     if (selection !== null) setOpen(true);
   }
   return (
-    <section className="plan-overview-work-fold" aria-labelledby={title}>
+    <section aria-labelledby={title}>
       <Disclosure
+        variant="gutter"
         label={<span id={title}>{label}</span>}
         aria-label={`${label} ${count}`}
         count={count}
@@ -225,8 +226,9 @@ function PlanOverviewRow({
     `${ticket.reference} ${ticket.title}`,
     blocker
       ? `Blocked by ${waitsOn
-          .map(({ reference, title, trashed }) =>
-            `${reference} ${title}${trashed ? " (in Trash)" : ""}`,
+          .map(
+            ({ reference, title, trashed }) =>
+              `${reference} ${title}${trashed ? " (in Trash)" : ""}`,
           )
           .join(", ")}`
       : group === "Not counted"

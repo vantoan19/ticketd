@@ -25,6 +25,7 @@ export function Disclosure({
   label,
   "aria-label": ariaLabel,
   count,
+  variant,
   defaultOpen = false,
   open: controlled,
   onOpenChange,
@@ -34,6 +35,7 @@ export function Disclosure({
   label: ReactNode;
   "aria-label"?: string;
   count?: number;
+  variant?: "gutter";
   defaultOpen?: boolean;
   open?: boolean;
   onOpenChange?: (open: boolean) => void;
@@ -44,7 +46,7 @@ export function Disclosure({
   const open = controlled ?? own;
   const body = useId();
   return (
-    <div data-slot="disclosure" className={className}>
+    <div data-slot="disclosure" data-variant={variant} className={className}>
       <button
         type="button"
         className="ui-disclosure-trigger"

@@ -2,10 +2,6 @@
   list-style: none;
 }
 
-.plan-overview-work-fold .ui-disclosure-trigger {
-  font-weight: 500;
-}
-
 .plan-overview-row-open {
   text-align: start;
   font-size: var(--text-ui);

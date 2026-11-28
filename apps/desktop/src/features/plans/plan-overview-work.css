@@ -16,20 +16,6 @@
   inset-inline-start: -17px;
 }
 
-.plan-overview-work-fold .ui-disclosure-trigger {
-  position: relative;
-  min-height: 24px;
-}
-
-.plan-overview-work-fold .ui-disclosure-trigger > svg {
-  position: absolute;
-  inset-inline-start: -20px;
-}
-
-.plan-overview-work-fold .ui-disclosure-body {
-  padding: 4px 0 0;
-}
-
 .plan-overview-not-counted h3 {
   margin: 8px 0 0;
 }
