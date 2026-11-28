@@ -3814,7 +3814,11 @@ fn a_project_publication_syncs_without_discovering_issues_until_a_rule_is_saved(
     let report = workspace
         .refresh_connection(&engine, "github", &RefreshOptions::default())
         .unwrap();
-    assert_eq!(report.updated, [ticket.reference.clone()], "{report:?}");
+    assert_eq!(
+        report.updated.as_slice(),
+        std::slice::from_ref(&ticket.reference),
+        "{report:?}"
+    );
     assert!(report.imported.is_empty());
     assert_eq!(
         workspace.show_ticket(&ticket.reference).unwrap().title,
