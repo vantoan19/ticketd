@@ -191,6 +191,8 @@ opens the graph to understand dependency chains.
   progress and linked Documents. Open a member beside the Overview, or switch
   to List, Board or the dependency Flow. Dependencies from outside the Plan
   appear as boundary nodes. A Plan can be archived and reactivated.
+  List folds Done by default and remembers the choice per Plan on this computer.
+  Shared parent or project labels are hidden when every displayed row has the same one.
 - **Editor.** Descriptions, Activities, and Documents edit in place with Markdown
   shortcuts, slash commands, checklists, fenced code, simple GFM tables, and offline
   Mermaid diagrams. Markdown stays canonical, source editing is always available, and
@@ -332,9 +334,10 @@ change`; an empty value clears it) or by a person in the reader's Edit mode. The
 
 A Plan page shows its purpose, linked Documents, progress, and tickets. Set as spec
 selects an existing Document as the Plan's principal long-form entry point without
-copying it. Creating a ticket from inside a Plan makes it a member. The Flow view
-adds and removes blockers and rejects cycles. CLI: the `plan` command group, including
-`spec`, `document`, and `context`.
+copying it. Creating a ticket from inside a Plan makes it a member. Flow shows open
+tickets in Can start, After one step, and Later. Later appears when it has tickets.
+Outside blockers are named on the tickets that wait on them. The CLI's `plan`
+command group includes `spec`, `document`, and `context`.
 
 ### Context graph
 

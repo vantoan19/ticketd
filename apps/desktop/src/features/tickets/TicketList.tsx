@@ -13,6 +13,7 @@ import { m } from "motion/react";
 import {
   AlarmClock,
   Bot,
+  ChevronRight,
   Cloud,
   CornerDownRight,
   Folder,
@@ -20,6 +21,7 @@ import {
   LoaderCircle,
   Plus,
 } from "lucide-react";
+import { Button } from "@/components/ui/button";
 import { Item } from "@/components/ui/item";
 import { IconButton } from "@/components/ui/icon-button";
 import { StatusDot } from "@/components/ui/status-dot";
@@ -101,6 +103,23 @@ function stillHere(mounted: Mounted, listed: ReadonlySet<string>): Mounted {
     : { cascading, still };
 }
 
+function hasSharedContext(tickets: Ticket[], scope: RowScope): boolean {
+  const first = tickets[0];
+  if (!first) return false;
+  const { parent, project_id: project } = first;
+  if (parent)
+    return tickets.every(
+      (ticket) =>
+        ticket.parent?.reference === parent.reference &&
+        ticket.parent.trashed === parent.trashed,
+    );
+  return Boolean(
+    scope.showProject &&
+    project &&
+    tickets.every((ticket) => !ticket.parent && ticket.project_id === project),
+  );
+}
+
 export function TicketList({
   tickets,
   selected,
@@ -111,6 +130,7 @@ export function TicketList({
   selectable,
   selectionDisabled = false,
   scope,
+  hideSharedContext = false,
   rowAction,
   grouping,
   singleStatus = false,
@@ -145,6 +165,8 @@ export function TicketList({
   selectable: boolean;
   selectionDisabled?: boolean;
   scope: RowScope;
+  /** In a Plan, omit a parent or project label shared by every displayed row. */
+  hideSharedContext?: boolean;
   /** An optional control after each row, revealed on hover and keyboard focus. */
   rowAction?: (ticket: Ticket) => ReactNode;
   /**
@@ -153,6 +175,8 @@ export function TicketList({
    */
   grouping?: {
     counts: StatusCounts;
+    /** A Plan List can fold its Done group. */
+    done?: { open: boolean; onOpenChange: (open: boolean) => void };
     /** Omit to hide the per-group Add action (a read-only scope). */
     onAdd?: (status: string, trigger: HTMLButtonElement) => void;
   };
@@ -214,13 +238,16 @@ export function TicketList({
       ? groupTickets(sticky.tickets, grouping.counts, sticky.status).flatMap(
           (group) => [
             { header: group },
-            ...group.tickets.map((ticket) => ({ ticket })),
+            ...(group.status === "Done" && grouping.done?.open === false
+              ? []
+              : group.tickets.map((ticket) => ({ ticket }))),
           ],
         )
       : sticky.tickets.map((ticket) => ({ ticket }));
   const ordered = entries.flatMap((entry) =>
     "ticket" in entry ? [entry.ticket] : [],
   );
+  const hideContext = hideSharedContext && hasSharedContext(ordered, scope);
   const tabStop =
     ordered.find((ticket) => ticket.id === focusedRow)?.id ??
     ordered.find((ticket) => ticket.reference === selected)?.id ??
@@ -300,6 +327,7 @@ export function TicketList({
             };
             if ("header" in entry) {
               const { status, count, tickets: shown } = entry.header;
+              const done = status === "Done" ? grouping?.done : undefined;
               // Ready is summarised here, not repeated on every row (list R-10);
               // only a whole group can say how many are ready.
               const ready =
@@ -315,15 +343,39 @@ export function TicketList({
                     // The gap above a group opens and closes with its header.
                     {...rowMotion("smooth", position === 0 ? 0 : 6)}
                   >
-                    <StatusIcon status={status} decorative />
-                    <h2>{status}</h2>
-                    {/* Always the group's total, never the part shown (list R-09). */}
-                    {/* The noun sits outside Count so the number alone crossfades. */}
-                    <Count>{count}</Count>
-                    <span className="sr-only">
-                      {" "}
-                      {count === 1 ? "ticket" : "tickets"}
-                    </span>
+                    {done ? (
+                      <h2>
+                        <Button
+                          type="button"
+                          variant="ghost"
+                          size="xs"
+                          className="-ml-2"
+                          aria-label={`Done ${count} ${count === 1 ? "ticket" : "tickets"}`}
+                          aria-expanded={done.open}
+                          onClick={() => done.onOpenChange(!done.open)}
+                        >
+                          <ChevronRight
+                            data-icon="inline-start"
+                            aria-hidden="true"
+                            className={done.open ? "rotate-90" : undefined}
+                          />
+                          Done
+                          <Count>{count}</Count>
+                        </Button>
+                      </h2>
+                    ) : (
+                      <>
+                        <StatusIcon status={status} decorative />
+                        <h2>{status}</h2>
+                        {/* Always the group's total, never the part shown (list R-09). */}
+                        {/* The noun sits outside Count so the number alone crossfades. */}
+                        <Count>{count}</Count>
+                        <span className="sr-only">
+                          {" "}
+                          {count === 1 ? "ticket" : "tickets"}
+                        </span>
+                      </>
+                    )}
                     {status === "Todo" && shown.length === count && (
                       <span className="ticket-group-meta">
                         <CrossfadeText>{`· ${ready} ready`}</CrossfadeText>
@@ -508,6 +560,7 @@ export function TicketList({
                       ticket={ticket}
                       grouped={Boolean(grouping && !singleStatus)}
                       scope={scope}
+                      hideContext={hideContext}
                       simple={simple}
                       navigator={navigator}
                       trashView={trashView}
@@ -585,6 +638,7 @@ type RowFaceProps = {
   /** The group header names the status, so the row's glyph has no tooltip. */
   grouped: boolean;
   scope: RowScope;
+  hideContext: boolean;
   simple: boolean;
   navigator: boolean;
   trashView: boolean;
@@ -650,6 +704,7 @@ function sameRowFace(before: RowFaceProps, after: RowFaceProps): boolean {
 function RowDetails({
   ticket,
   scope,
+  hideContext,
   simple,
   navigator,
   trashView,
@@ -659,6 +714,7 @@ function RowDetails({
 }: {
   ticket: Ticket;
   scope: RowScope;
+  hideContext: boolean;
   simple: boolean;
   navigator: boolean;
   trashView: boolean;
@@ -668,11 +724,12 @@ function RowDetails({
 }) {
   const now = useNow();
   const state = readiness(ticket);
-  const context = rowContextItem(ticket, scope, false);
+  const context = hideContext ? null : rowContextItem(ticket, scope, false);
   const duplicate = rowContextItem(ticket, scope);
   const unavailable = Boolean(externalSource(ticket)?.unavailable);
-  const contextLabel =
-    context?.label ?? (ticket.project_id ? "" : "No project");
+  const contextLabel = hideContext
+    ? ""
+    : (context?.label ?? (ticket.project_id ? "" : "No project"));
   const update = ticket.progress_summary;
   const editingHarness = useEditingHarness();
   const harness = editingHarness(update?.editing_agent);
@@ -700,7 +757,7 @@ function RowDetails({
       {navigator ? (
         <span className="ticket-navigator-caption">
           <Reference>{ticket.reference}</Reference>
-          <span>·</span>
+          {(!hideContext || label || update) && <span>·</span>}
           {label === "Working" && chat ? (
             <HarnessMark harness={chat.harness_id} name={chat.harness_name} />
           ) : (!label || label === "Ready for review") && harness ? (

@@ -133,10 +133,11 @@ export function TicketWorkspaceView({
   const filtersMenu = useFiltersMenu();
   const dependenciesOpen =
     planView === "dependencies" && scopedPlan && !inboxMode;
-  const overviewOpen = planView === "overview" && scopedPlan && !inboxMode;
-  const ticketLayout = overviewOpen ? "list" : workspace.layout;
+  const overviewPlan =
+    planView === "overview" && !inboxMode ? scopedPlan : undefined;
+  const ticketLayout = overviewPlan ? "list" : workspace.layout;
   const board = ticketLayout === "board" && !inboxMode;
-  const overviewMembers = overviewOpen ? planState.view?.members : undefined;
+  const overviewMembers = overviewPlan ? planState.view?.members : undefined;
   const overviewWork = useMemo(
     () => (overviewMembers ? planWorkModel(overviewMembers) : null),
     [overviewMembers],
@@ -156,7 +157,7 @@ export function TicketWorkspaceView({
       ? null
       : { index: overviewIndex + 1, total: overviewOrder.length };
   const openAdjacent = (direction: 1 | -1) => {
-    if (!overviewOpen) return workspace.openAdjacent(direction);
+    if (!overviewPlan) return workspace.openAdjacent(direction);
     if (overviewIndex < 0) return;
     const target = overviewOrder[overviewIndex + direction];
     if (target) setSelected(target);
@@ -223,13 +224,13 @@ export function TicketWorkspaceView({
       const trigger = overviewTrigger.current;
       const target =
         reference &&
-        overviewOpen &&
+        overviewPlan &&
         trigger?.reference === reference &&
         listRef.current?.contains(trigger.element)
           ? trigger.element
           : reference
             ? listRef.current?.querySelector<HTMLElement>(
-                overviewOpen
+                overviewPlan
                   ? `[data-overview-reference="${reference}"]`
                   : board
                     ? `[data-board-reference="${reference}"]`
@@ -340,7 +341,7 @@ export function TicketWorkspaceView({
             plans={workspace.plans}
             state={planState}
             mode={
-              overviewOpen
+              overviewPlan
                 ? "overview"
                 : dependenciesOpen
                   ? "dependencies"
@@ -419,10 +420,10 @@ export function TicketWorkspaceView({
             defaultSize={inboxMode ? 392 : 360}
           >
             {inbox ??
-              (overviewOpen ? (
+              (overviewPlan ? (
                 <PlanOverview
-                  key={overviewOpen.id}
-                  plan={overviewOpen}
+                  key={overviewPlan.id}
+                  plan={overviewPlan}
                   state={planState}
                   work={overviewWork}
                   paneRef={listRef}
@@ -501,7 +502,7 @@ export function TicketWorkspaceView({
               hidden={inboxMode && !!triage?.chatId}
               leaving={detailLeaving}
               {...(inboxMode && { context: "inbox" as const })}
-              {...(overviewOpen && {
+              {...(overviewPlan && {
                 overview: {
                   position: overviewPosition,
                   onAdjacent: openAdjacent,
