@@ -228,12 +228,19 @@ test("Quit names the runs it would stop", async () => {
   expect(client.quit).toBe(false);
 });
 
-test("working Chats spin once, on the sidebar's Chats item, and say Working with no spinner in the list", async () => {
+test("working Chats show a spinner in each row until work stops", async () => {
   const client = createMockChatClient({
     enabled: true,
     chats: [
       { chat: chatState({ id: "c1", title: "Limiter", activity: "working" }) },
-      { chat: chatState({ id: "c2", title: "Billing", activity: "working" }) },
+      {
+        chat: chatState({
+          id: "c2",
+          title: "Billing",
+          activity: "working",
+          unseen: true,
+        }),
+      },
     ],
   });
   app(client);
@@ -241,11 +248,21 @@ test("working Chats spin once, on the sidebar's Chats item, and say Working with
   expect(entry.querySelector(".sidebar-working")).not.toBeNull();
   fireEvent.click(entry);
   const list = within(await screen.findByRole("list", { name: "Chats" }));
-  for (const name of [/^Limiter/, /^Billing/]) {
-    const row = list.getByRole("button", { name });
-    expect(row.textContent).toContain("Working");
-    expect(row.querySelector(".chat-spin")).toBeNull();
+  const limiter = list.getByRole("button", { name: /^Limiter/ });
+  const billing = list.getByRole("button", { name: /^Billing.*unread/ });
+  for (const row of [limiter, billing]) {
+    expect(within(row).getByText("Working")).toBeTruthy();
+    expect(row.querySelector(".chat-spin")?.getAttribute("aria-hidden")).toBe(
+      "true",
+    );
   }
+  expect(billing.querySelector('[data-slot="status-dot"]')).not.toBeNull();
+
+  await act(() => client.stop("c1"));
+  const stopped = await list.findByRole("button", {
+    name: /^Limiter.*You stopped it/,
+  });
+  expect(stopped.querySelector(".chat-spin")).toBeNull();
 });
 
 test("Quit asks before stopping working Chats; Cancel leaves them running", async () => {

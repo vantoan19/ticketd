@@ -5190,5 +5190,5 @@ test("between steps, while words stream, the one live line says Writing", async 
   expect(working()).toMatch(/^Writing/);
   // Its clock counts from when it appeared, not from the turn's start.
   expect(working()).not.toMatch(/for/);
-  expect(document.querySelectorAll(".chat-spin")).toHaveLength(1);
+  expect(document.querySelectorAll(".chat-scroll .chat-spin")).toHaveLength(1);
 });
