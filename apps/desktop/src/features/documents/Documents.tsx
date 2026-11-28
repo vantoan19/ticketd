@@ -2,7 +2,12 @@ import { emptyCopy } from "@/lib/empty-copy";
 import { PaneHeader, ReturnCrumb } from "@/components/ui/list-header";
 import { Count } from "@/components/ui/count";
 import { NavigatorSearch } from "@/components/ui/navigator";
-import { focusNavigatorRow } from "@/lib/navigator";
+import { GroupHeader, PagedGroupBody } from "@/components/ui/grouped-list";
+import {
+  useGroupFolds,
+  useGroupedListFocus,
+  usePagedGroup,
+} from "@/components/ui/use-grouped-list";
 import { SegmentedControl } from "@/components/ui/segmented-control";
 import {
   DropdownMenu,
@@ -45,8 +50,6 @@ import { Button } from "@/components/ui/button";
 import { enter } from "@/components/ui/enter";
 import {
   ArrowLeft,
-  ChevronDown,
-  ChevronRight,
   Clock,
   FileText,
   MoreHorizontal,
@@ -138,7 +141,6 @@ export function Documents({
       searchTrigger.current?.focus();
     }
   }, [searchOpen]);
-  const [focusedRow, setFocusedRow] = useState<string | null>(null);
   const [groupPins, setGroupPins] = useState<DocumentSummary[]>([]);
   const engaged = useRef(false);
   const pendingBrowse = useRef<{
@@ -171,27 +173,15 @@ export function Documents({
   const {
     documentsView: view,
     documentsSort: sort,
-    documentGroups,
     openDocuments,
   } = usePreferences();
   const expanded = openDocuments === "expanded";
   const [showTrash, setShowTrash] = useState(false);
   const sorted = view === "recent" && sort !== "opened";
   const [work, setWork] = useState<CurrentWork | null>(null);
-  const [finished, setFinished] = useState<DocumentSummary[]>([]);
-  const [finishedOffset, setFinishedOffset] = useState(0);
-  const [finishedLoaded, setFinishedLoaded] = useState(false);
-  const [unlinked, setUnlinked] = useState<DocumentSummary[]>([]);
-  const [unlinkedOffset, setUnlinkedOffset] = useState(0);
-  const [unlinkedLoaded, setUnlinkedLoaded] = useState(false);
-  /** Plan groups and Open tickets start open; the two folds of old work start closed. */
-  const groupOpen = (key: string, fallback = true) =>
-    documentGroups[key] ?? fallback;
-  const toggleGroup = (key: string, fallback = true) =>
-    setPreference("documentGroups", {
-      ...documentGroups,
-      [key]: !groupOpen(key, fallback),
-    });
+  // Plan groups and Open tickets start open. The two folds of old work start closed.
+  const { isOpen: groupOpen, setOpen: setGroupOpen } =
+    useGroupFolds("documentGroups");
   const finishedOpen = groupOpen("finished", false);
   const unlinkedOpen = groupOpen("unlinked", false);
   const [all, setAll] = useState<DocumentSummary[]>([]);
@@ -431,75 +421,27 @@ export function Documents({
     attempt,
     failLoad,
   ]);
-  // The two folds of old work read their Documents only while open, each with its own
-  // answer, error and Retry: one fold's answer never settles the other's.
-  const [finishedError, setFinishedError] = useState<FailureDescription | null>(
-    null,
-  );
-  const [unlinkedError, setUnlinkedError] = useState<FailureDescription | null>(
-    null,
-  );
-  const [finishedAttempt, setFinishedAttempt] = useState(0);
-  const [unlinkedAttempt, setUnlinkedAttempt] = useState(0);
   const foldOpen = active && view === "current" && !showTrash;
-  useEffect(() => {
-    if (!foldOpen || !finishedOpen) {
-      setFinishedError(null);
-      return;
-    }
-    let current = true;
-    void upTo(finishedOffset, (at) => documents.finished(at, includeSupport))
-      .then((items) => {
-        if (!current) return;
-        setFinished(items);
-        setFinishedLoaded(true);
-        setFinishedError(null);
-      })
-      .catch((reason: unknown) => {
-        if (current)
-          setFinishedError(describeFailure(reason, "load Finished work"));
-      });
-    return () => {
-      current = false;
-    };
-  }, [
-    foldOpen,
-    finishedOpen,
-    finishedOffset,
-    includeSupport,
-    changeVersion,
-    finishedAttempt,
-  ]);
-  useEffect(() => {
-    if (!foldOpen || !unlinkedOpen) {
-      setUnlinkedError(null);
-      return;
-    }
-    let current = true;
-    void upTo(unlinkedOffset, (at) => documents.unlinked(at, includeSupport))
-      .then((items) => {
-        if (!current) return;
-        setUnlinked(items);
-        setUnlinkedLoaded(true);
-        setUnlinkedError(null);
-      })
-      .catch((reason: unknown) => {
-        if (current)
-          setUnlinkedError(
-            describeFailure(reason, "load Documents with no Plan or ticket"),
-          );
-      });
-    return () => {
-      current = false;
-    };
-  }, [
-    foldOpen,
-    unlinkedOpen,
-    unlinkedOffset,
-    includeSupport,
-    changeVersion,
-    unlinkedAttempt,
-  ]);
+  const readFinished = useCallback(
+    (offset: number) => documents.finished(offset, includeSupport),
+    [includeSupport],
+  );
+  const readUnlinked = useCallback(
+    (offset: number) => documents.unlinked(offset, includeSupport),
+    [includeSupport],
+  );
+  const finished = usePagedGroup({
+    open: foldOpen && finishedOpen,
+    readPage: readFinished,
+    revision: changeVersion,
+    loadAction: "load Finished work",
+  });
+  const unlinked = usePagedGroup({
+    open: foldOpen && unlinkedOpen,
+    readPage: readUnlinked,
+    revision: changeVersion,
+    loadAction: "load Documents with no Plan or ticket",
+  });
   useEffect(() => {
     openGeneration.current++;
     setOpening(null);
@@ -642,9 +584,6 @@ export function Documents({
         <Count>{unpinned(items).length}</Count>
       </h2>
     );
-  // A fold's rows are on screen only once loaded, and not while its read has failed.
-  const finishedShown = finishedOpen && finishedLoaded && !finishedError;
-  const unlinkedShown = unlinkedOpen && unlinkedLoaded && !unlinkedError;
   /** Everything the arrow keys visit, in order: Documents, and the headers that fold them. */
   const rovingItems: string[] = [];
   const visibleRows = showTrash
@@ -657,8 +596,8 @@ export function Documents({
             ...groups.flatMap((group) =>
               groupOpen(groupKey(group.plan)) ? group.documents : [],
             ),
-            ...(finishedShown ? finished : []),
-            ...(unlinkedShown ? unlinked : []),
+            ...finished.rows,
+            ...unlinked.rows,
           ]
         : [...groupPins, ...unpinned(sorted ? all : recent)];
   if (!showTrash && !searching && view === "current") {
@@ -670,19 +609,19 @@ export function Documents({
     }
     if (work && work.finished > 0) {
       rovingItems.push("group:finished");
-      if (finishedShown) rovingItems.push(...finished.map((doc) => doc.id));
+      rovingItems.push(...finished.rows.map((doc) => doc.id));
     }
     if (work && work.unlinked > 0) {
       rovingItems.push("group:unlinked");
-      if (unlinkedShown) rovingItems.push(...unlinked.map((doc) => doc.id));
+      rovingItems.push(...unlinked.rows.map((doc) => doc.id));
     }
   } else rovingItems.push(...visibleRows.map((doc) => doc.id));
-  const tabRow =
-    rovingItems.find((item) => item === focusedRow) ??
-    rovingItems.find((item) => item === selected?.id) ??
-    rovingItems[0];
-  // A Document can show twice (pinned, and in its group); only its first row is a tab stop.
-  let tabRowClaimed = false;
+  const roving = useGroupedListFocus(
+    navigator,
+    rovingItems,
+    "documents-move",
+    selected?.id,
+  );
   // The reader's place in the list as it shows now: a step goes to the neighbour in that order.
   // A Document the list shows twice (pinned, and in its Plan group) counts once, at its first row.
   const walkable = visibleRows.filter(
@@ -708,7 +647,7 @@ export function Documents({
     },
   };
   const commandId =
-    visibleRows.find((doc) => doc.id === focusedRow)?.id ??
+    visibleRows.find((doc) => doc.id === roving.focusedId)?.id ??
     selected?.id ??
     null;
   const commandPinned = pins.some((doc) => doc.id === commandId);
@@ -754,26 +693,24 @@ export function Documents({
     onCommandsChange?.(active ? commands : null);
     return () => onCommandsChange?.(null);
   }, [active, commands, onCommandsChange]);
-  /** Moves focus along the roving order: Documents and group headers together. */
-  const moveFocus = (current: HTMLElement, key: string) =>
-    focusNavigatorRow(
-      [
-        ...(navigator.current?.querySelectorAll<HTMLButtonElement>(
-          "[data-document-row], [data-group-header]",
-        ) ?? []),
-      ],
-      current,
-      key,
-    );
   /** The dot between the parts of a row's meta line. */
   const separator = <span aria-hidden="true">·</span>;
   /** `grouped` rows sit under a header that names their Plan, so they do not repeat it. */
   const list = (
     items: DocumentSummary[],
-    mark = "",
-    inTrash = false,
-    grouped = false,
-    passages = false,
+    {
+      mark = "",
+      inTrash = false,
+      grouped = false,
+      passages = false,
+      pinnedSection = false,
+    }: {
+      mark?: string;
+      inTrash?: boolean;
+      grouped?: boolean;
+      passages?: boolean;
+      pinnedSection?: boolean;
+    } = {},
   ) => (
     <ul className="document-list">
       {items.map((doc, index) => {
@@ -782,8 +719,12 @@ export function Documents({
         const context = grouped
           ? groupRowContext(doc)
           : documentRowContext(doc);
-        const tabStop = tabRow === doc.id && !tabRowClaimed;
-        if (tabStop) tabRowClaimed = true;
+        const duplicate =
+          !pinnedSection &&
+          !showTrash &&
+          !searching &&
+          groupPins.some((pin) => pin.id === doc.id);
+        const row = roving.item(doc.id, duplicate);
         const snippet =
           passages && doc.snippet && !sameText(doc.snippet, doc.heading)
             ? doc.snippet
@@ -812,20 +753,12 @@ export function Documents({
                   aria-current={selected?.id === doc.id || undefined}
                   aria-describedby={metaId}
                   data-document-row={doc.id}
-                  tabIndex={tabStop ? 0 : -1}
-                  onFocus={() => setFocusedRow(doc.id)}
-                  aria-keyshortcuts={
-                    ariaKeyShortcuts("documents-move") + " Enter"
-                  }
+                  {...row}
+                  aria-keyshortcuts={row["aria-keyshortcuts"] + " Enter"}
                   onKeyDown={(event) => {
-                    if (matchesShortcut(event, "documents-move")) {
-                      event.preventDefault();
-                      event.stopPropagation();
-                      moveFocus(event.currentTarget, event.key);
-                    } else if (
-                      matchesShortcut(event, "documents-pin") &&
-                      !inTrash
-                    ) {
+                    row.onKeyDown(event);
+                    if (event.defaultPrevented) return;
+                    if (matchesShortcut(event, "documents-pin") && !inTrash) {
                       event.preventDefault();
                       listAction(
                         `${pinned ? "unpin" : "pin"} ${doc.heading}`,
@@ -969,8 +902,8 @@ export function Documents({
     setOffset(0);
     setRecentOffset(0);
     setAllOffset(0);
-    setFinishedOffset(0);
-    setUnlinkedOffset(0);
+    finished.resetPaging();
+    unlinked.resetPaging();
   };
   const chooseSort = (value: string) => {
     if (value !== "opened" && value !== "updated" && value !== "title") return;
@@ -980,49 +913,20 @@ export function Documents({
     setAllOffset(0);
     setPreference("documentsSort", value);
   };
-  /**
-   * A header that folds a group: a button naming the group, its count, and open or closed.
-   * Custom rather than a Disclosure: its trigger cannot join the list's roving focus (one tab
-   * stop, J/K and arrows move between headers and rows), and the group's rows are not its body.
-   */
   const groupHeader = (
     key: string,
     label: string,
     count: number,
     open: boolean,
-    fallback = true,
-  ) => {
-    const item = `group:${key}`;
-    return (
-      <h2 className="documents-group-header">
-        <button
-          type="button"
-          className="documents-group-toggle"
-          aria-expanded={open}
-          data-group-header={key}
-          tabIndex={tabRow === item ? 0 : -1}
-          aria-keyshortcuts={ariaKeyShortcuts("documents-move")}
-          onFocus={() => setFocusedRow(item)}
-          onClick={() => toggleGroup(key, fallback)}
-          onKeyDown={(event) => {
-            if (matchesShortcut(event, "documents-move")) {
-              event.preventDefault();
-              event.stopPropagation();
-              moveFocus(event.currentTarget, event.key);
-            }
-          }}
-        >
-          {open ? (
-            <ChevronDown aria-hidden="true" />
-          ) : (
-            <ChevronRight aria-hidden="true" />
-          )}
-          <span className="documents-group-name">{label}</span>{" "}
-          <Count>{count}</Count>
-        </button>
-      </h2>
-    );
-  };
+  ) => (
+    <GroupHeader
+      label={<span className="documents-group-name">{label}</span>}
+      count={count}
+      open={open}
+      onOpenChange={(next) => setGroupOpen(key, next)}
+      roving={roving.item(`group:${key}`)}
+    />
+  );
   /** One group of word-search results: its name and count, then its rows. */
   const searchGroup = (
     label: string,
@@ -1034,7 +938,7 @@ export function Documents({
         <h2 className="documents-search-heading">
           {label} <Count>{items.length}</Count>
         </h2>
-        {list(items, query, false, false, !titles)}
+        {list(items, { mark: query, passages: !titles })}
       </section>
     );
   const pinnedSection = !showTrash && !searching && groupPins.length > 0 && (
@@ -1044,7 +948,7 @@ export function Documents({
         Pinned
         <Count>{groupPins.length}</Count>
       </h2>
-      {list(groupPins)}
+      {list(groupPins, { pinnedSection: true })}
       {pins.length >= pinOffset + 50 && (
         <Pager
           noun="pinned Documents"
@@ -1082,7 +986,7 @@ export function Documents({
               group.documents.length,
               open,
             )}
-            {open && list(group.documents, "", false, true)}
+            {open && list(group.documents, { grouped: true })}
           </div>
         );
       })}
@@ -1095,30 +999,14 @@ export function Documents({
                 "Finished work",
                 work.finished,
                 finishedOpen,
-                false,
               )}
-              {finishedOpen &&
-                (finishedError ? (
-                  <FailureAlert
-                    size="compact"
-                    failure={finishedError}
-                    onRetry={() => setFinishedAttempt((value) => value + 1)}
-                  />
-                ) : finishedLoaded ? (
-                  list(finished)
-                ) : (
-                  <EmptyState
-                    size="inline"
-                    role="status"
-                    description="Loading Documents…"
-                  />
-                ))}
-              {finishedOpen && finished.length >= finishedOffset + 50 && (
-                <Pager
-                  noun="Documents of finished work"
-                  onMore={() => setFinishedOffset(finishedOffset + 50)}
-                />
-              )}
+              <PagedGroupBody
+                page={finished}
+                noun="Documents of finished work"
+                loadingText="Loading Documents…"
+              >
+                {(rows) => list(rows)}
+              </PagedGroupBody>
             </div>
           )}
           {work.unlinked > 0 && (
@@ -1128,30 +1016,14 @@ export function Documents({
                 "No Plan or ticket",
                 work.unlinked,
                 unlinkedOpen,
-                false,
               )}
-              {unlinkedOpen &&
-                (unlinkedError ? (
-                  <FailureAlert
-                    size="compact"
-                    failure={unlinkedError}
-                    onRetry={() => setUnlinkedAttempt((value) => value + 1)}
-                  />
-                ) : unlinkedLoaded ? (
-                  list(unlinked)
-                ) : (
-                  <EmptyState
-                    size="inline"
-                    role="status"
-                    description="Loading Documents…"
-                  />
-                ))}
-              {unlinkedOpen && unlinked.length >= unlinkedOffset + 50 && (
-                <Pager
-                  noun="Documents with no Plan or ticket"
-                  onMore={() => setUnlinkedOffset(unlinkedOffset + 50)}
-                />
-              )}
+              <PagedGroupBody
+                page={unlinked}
+                noun="Documents with no Plan or ticket"
+                loadingText="Loading Documents…"
+              >
+                {(rows) => list(rows)}
+              </PagedGroupBody>
             </div>
           )}
         </div>
@@ -1403,7 +1275,7 @@ export function Documents({
                   />
                 )
               )}
-              {list(trash, "", true)}
+              {list(trash, { inTrash: true })}
               {trash.length >= trashOffset + 50 && (
                 <Pager
                   noun="Documents in Trash"

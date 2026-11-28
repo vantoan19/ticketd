@@ -27,6 +27,8 @@ const preferencesSchema = z.object({
   documentsSort: z.enum(["opened", "updated", "title"]).catch("opened"),
   /** Which Current work groups are open, by Plan id or `finished`; unset follows the default. */
   documentGroups: z.record(z.string(), z.boolean()).catch({}),
+  /** Which groups in the Files list are open. */
+  fileGroups: z.record(z.string(), z.boolean()).catch({}),
   /** Set up ticketd was hidden from its panel bar. The page stays findable by search. */
   setupHidden: z.boolean().catch(false),
   /** Every Set up ticketd step was ticked once; nothing comes back to Settings after that. */
@@ -55,6 +57,7 @@ const DEFAULTS: Preferences = {
   documentsView: "current",
   documentsSort: "opened",
   documentGroups: {},
+  fileGroups: {},
   setupHidden: false,
   setupFinished: false,
   settingsPage: "appearance",
