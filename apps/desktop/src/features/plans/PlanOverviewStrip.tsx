@@ -1,5 +1,5 @@
 import { useRef, useState, type KeyboardEvent } from "react";
-import { Tooltip } from "@/components/ui/tooltip";
+import { Tooltip, TooltipSide } from "@/components/ui/tooltip";
 import type { PlanOverviewWork } from "./PlanOverview";
 
 type Strip = PlanOverviewWork["strip"];
@@ -22,9 +22,15 @@ type StripProps = {
 export function PlanOverviewStrip(props: StripProps) {
   const { strip, selected } = props;
   if (!strip.length) return null;
-  if (strip.length > 60)
-    return <PlanOverviewStatusRuns strip={strip} selected={selected} />;
-  return <PlanOverviewTicketSegments {...props} />;
+  return (
+    <TooltipSide side="bottom">
+      {strip.length > 60 ? (
+        <PlanOverviewStatusRuns strip={strip} selected={selected} />
+      ) : (
+        <PlanOverviewTicketSegments {...props} />
+      )}
+    </TooltipSide>
+  );
 }
 
 function PlanOverviewTicketSegments({ strip, selected, onOpen }: StripProps) {
