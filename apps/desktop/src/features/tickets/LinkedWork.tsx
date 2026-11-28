@@ -496,7 +496,8 @@ export function LinkedWork({
     hasRelationships ||
     mentions.value?.total ||
     mentions.failure ||
-    documentLinks.length;
+    documentLinks.value?.total ||
+    documentLinks.failure;
   return (
     <>
       {railBeforeLinked}

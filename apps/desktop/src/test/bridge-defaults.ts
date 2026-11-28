@@ -43,6 +43,9 @@ export function bridgeDefault(
       };
     case "ticket_peek_counts":
       return { linked: 0, files: 0 };
+    case "ticket_mention_passages":
+      return { items: [], next_offset: null };
+    case "ticket_document_mentions":
     case "ticket_backlinks":
     case "ticket_evidence_page":
       return { items: [], total: 0 };
