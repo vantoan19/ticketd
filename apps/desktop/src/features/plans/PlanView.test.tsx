@@ -561,7 +561,10 @@ test("the progress strip has one Tab stop and opens the focused ticket beside it
   await user.click(
     screen.getByRole("button", { name: "Close ticket details" }),
   );
-  expect(document.activeElement).toBe(review);
+  const reviewRow = within(context()).getByRole("button", {
+    name: "T-KQ2 Title of T-KQ2, In review",
+  });
+  expect(document.activeElement).toBe(reviewRow);
   expect(review.hasAttribute("aria-current")).toBe(false);
   await user.click(done);
   expect(calls).toContainEqual(["show_ticket", { reference: "T-KQ1" }]);
@@ -1097,8 +1100,11 @@ test("the Overview shows new changes, opens their ticket, and clears on return",
     screen.getByRole("region", { name: "Since you last looked" }),
   ).toBeTruthy();
 
+  const row = within(context()).getByRole("button", {
+    name: "T-KQ1 Title of T-KQ1, Held by source",
+  });
   fireEvent.click(close);
-  await waitFor(() => expect(document.activeElement).toBe(update));
+  await waitFor(() => expect(document.activeElement).toBe(row));
   fireEvent.click(screen.getByRole("button", { name: "Plans" }));
   await screen.findByRole("heading", { name: "Plans" });
   fireEvent.click(await screen.findByRole("button", { name: "Launch" }));
@@ -1472,7 +1478,9 @@ test("retrying a large wrap-up move resumes with the batch that failed", async (
   const choices = await screen.findByRole("dialog", { name: "Plan choices" });
   fireEvent.click(within(choices).getByRole("option", { name: "Follow-up" }));
   const failure = await screen.findByRole("alert");
-  expect(failure.textContent).toContain("Couldn't move 101 tickets.");
+  expect(failure.textContent).toContain(
+    "Confirmed 100 of 101 tickets moved. Couldn't confirm the rest.",
+  );
   expect(
     await within(context()).findByRole("button", { name: "Move T-B100…" }),
   ).toBeTruthy();
