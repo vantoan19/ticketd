@@ -649,6 +649,20 @@ the space below the shared pane header for tickets.
   In progress, Ready and Blocked, and the last change at the right. Canceled
   and Duplicate are excluded. Loading keeps the head and shows a progress
   skeleton and three skeleton rows. A failed read shows Retry below the head.
+- **Overview work:** Needs you leads with an orange dot, followed by In progress,
+  Ready, Blocked and Done. Each heading has a muted count. Status icons and
+  disclosure chevrons sit in the gutter. Rows are at least 36px tall, with a
+  62px muted mono reference column, a single-line title, metadata and time at
+  the right. Needs you puts the reviews that unblock the most tickets first.
+  In progress puts the latest updates first. Both show the first sentence of
+  the latest update under the title, with 8px above and below a row with a note.
+  Ready puts the most unblocking work first and shows Parent of N or Unblocks N.
+  Start in Chat appears on Ready rows on hover, focus or touch while Chats are on.
+  Blocked follows Flow order, names its blockers for assistive technology and
+  shows “after T-X” plus a count of additional blockers. It folds above three.
+  Done starts folded and lists Canceled and Duplicate under Not counted. J and
+  K move between visible rows outside text fields, Enter opens the focused
+  ticket, and the open row has `aria-current`. Focus uses a 2px `--ring` outline.
 - **Overview documents:** the spec appears first with a Spec badge, then
   Documents in newest-first order. Six display before Show all. Each directly
   opens the Document, with Back to the Plan in the reader. On active Plans
@@ -657,7 +671,8 @@ the space below the shared pane header for tickets.
   the detail. The detail's previous and next follow the Overview's reading order.
   Closing detail restores focus to the ticket's entry. At pane widths up to
   600px, measured through the shared width queries, the purpose, head links
-  and status words after the progress count hide.
+  and status words after the progress count hide. Work titles take up to two
+  lines and row metadata moves under the title.
 - **List:** Done starts folded. Its 32px disclosure sits within the 36px group header, with a right-pointing chevron, name and ticket count. Opening the group turns the chevron down and shows the rows in place. The choice is remembered per Plan on this computer. A parent or project label shared by all displayed rows is hidden.
 - **Feedback:** archiving, Remove from Plan, removing or unsetting a Document and adding tickets act at once and say so on the status line with Undo; a failure is the status line's failure with Retry, never a banner pushed into the header. Archive/reactivate stays distinct from completing tickets.
 

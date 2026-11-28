@@ -188,7 +188,12 @@ opens the graph to understand dependency chains.
 - **Ticket detail.** Description, Activities and history, links, hierarchy,
   dependencies, tags, Documents, attachments, evidence, reminder, and Chats.
 - **Plan view.** Opening a Plan starts on its Overview, which shows its purpose,
-  progress and linked Documents. Open a member beside the Overview, or switch
+  progress and linked Documents. Work appears under Needs you, In progress,
+  Ready, Blocked and Done. Reviews and active work show the first sentence of
+  their latest update. Ready favors tickets that unblock more Plan work and
+  offers Start in Chat while Chats are on. Blocked names what each ticket waits
+  on and folds above three tickets. Done starts folded and keeps Canceled and
+  Duplicate under Not counted. Open a member beside the Overview, or switch
   to List, Board or the dependency Flow. Dependencies from outside the Plan
   appear as boundary nodes. A Plan can be archived and reactivated.
   List folds Done by default and remembers the choice per Plan on this computer.

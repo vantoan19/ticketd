@@ -2,6 +2,7 @@ import { invoke } from "@/lib/api/bridge-failure";
 import { lazySchema } from "@/lib/api/lazy-schema";
 import { z } from "zod";
 import { graphSchema, ticketSchema } from "./client";
+import { latestUpdateSchema } from "./progress";
 const planSchema = lazySchema(() =>
   z.object({
     id: z.string(),
@@ -29,8 +30,10 @@ const viewSchema = lazySchema(() =>
       canceled: z.number(),
       duplicate: z.number().default(0),
     }),
+    latest_updates: z.record(z.string(), latestUpdateSchema).default({}),
     members: z.array(
       z.object({
+        id: ticketSchema.shape.id.optional(),
         reference: z.string(),
         title: z.string(),
         status: z.string(),
