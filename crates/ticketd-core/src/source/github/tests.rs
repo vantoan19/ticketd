@@ -3795,6 +3795,8 @@ fn removing_a_repository_during_refresh_preserves_its_tickets_and_leaves_the_oth
                 "repos/o/two/issues?state=open&per_page=100" => {
                     json!([public_issue(201, 1, "o/two")])
                 }
+                "repos/o/one/issues/1" => public_issue(101, 1, "o/one"),
+                "repos/o/two/issues/1" => public_issue(201, 1, "o/two"),
                 "graphql" => json!({"data": {}}),
                 "/user" => json!({"id": 1, "login": "octo"}),
                 endpoint if endpoint.ends_with("per_page=100") => json!([]),
