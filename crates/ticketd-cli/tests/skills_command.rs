@@ -94,6 +94,19 @@ fn the_context_guide_asks_for_documents_people_can_skim() {
 }
 
 #[test]
+fn the_tickets_guide_asks_for_tickets_people_can_skim() {
+    let dir = tempfile::tempdir().unwrap();
+    let guide = run(dir.path(), &["skills", "get", "tickets"]);
+    let section = guide
+        .split("\n## Write tickets people can skim\n")
+        .nth(1)
+        .and_then(|rest| rest.split("\n## ").next())
+        .expect("the tickets guide should explain how to write skimmable tickets");
+    assert!(section.contains("`## Acceptance criteria`"));
+    assert!(section.contains("`- [ ]`"));
+}
+
+#[test]
 fn installation_is_repeatable_and_preserves_differing_files_until_explicit_replacement() {
     let dir = tempfile::tempdir().unwrap();
     // Relative destinations work for either harness and can contain spaces.
