@@ -225,7 +225,7 @@ function ChatRow({
             {chatTime(chat.updated_at, now)}
           </span>
           <span className="chat-row-sub">
-            <ChatStatus status={chat.status} activity={chat.activity} />
+            <ChatStatus status={chat.status} activity={chat.activity} spinner />
             <RowContext chat={chat} />
           </span>
           {chat.status.unseen && <span className="sr-only">, unread</span>}
