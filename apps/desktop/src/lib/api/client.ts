@@ -890,10 +890,22 @@ export const client = {
       })
       .parse(await invoke("ticket_backlinks", { reference, limit: 3, offset }));
   },
-  async activityFeed(reference: string, offset: number) {
+  async activityFeed(reference: string, offset: number, updatesOnly = false) {
+    return z.array(activityFeedSchema).parse(
+      await invoke("activity_feed", {
+        reference,
+        limit: 50,
+        offset,
+        ...(updatesOnly && { updatesOnly }),
+      }),
+    );
+  },
+  async activityUpdateCount(reference: string) {
     return z
-      .array(activityFeedSchema)
-      .parse(await invoke("activity_feed", { reference, limit: 50, offset }));
+      .number()
+      .int()
+      .nonnegative()
+      .parse(await invoke("activity_update_count", { reference }));
   },
   async activity(reference: string, id: string) {
     return activitySchema

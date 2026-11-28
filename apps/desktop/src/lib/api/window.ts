@@ -12,6 +12,8 @@ declare global {
 /** Set once the app decided to close, so the close guard lets the next request through. */
 let quitting = false;
 
+export const windowQuittingEvent = "ticketd:window-quitting";
+
 export const windowClient = {
   /**
    * The desktop starts hidden so its stored theme is painted before showing;
@@ -73,6 +75,7 @@ export const windowClient = {
   /** Closes the window past the guard. */
   async quit() {
     quitting = true;
+    window.dispatchEvent(new Event(windowQuittingEvent));
     const win = getCurrentWindow();
     // An ordinary close passes the guard now, should destroying be refused.
     await win.destroy().catch(() => win.close());

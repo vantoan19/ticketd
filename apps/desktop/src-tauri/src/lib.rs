@@ -1079,14 +1079,26 @@ fn activity_feed(
     reference: String,
     limit: u32,
     offset: u32,
+    updates_only: Option<bool>,
 ) -> Result<Vec<serde_json::Value>, BridgeFailure> {
     open_workspace()
         .and_then(|workspace| {
-            let feed = workspace.activity_feed(&reference, limit, offset)?;
+            let feed = if updates_only.unwrap_or(false) {
+                workspace.activity_updates(&reference, limit, offset)?
+            } else {
+                workspace.activity_feed(&reference, limit, offset)?
+            };
             ticket_credit::credited_feed(&workspace, &reference, feed)
         })
         .map_err(BridgeFailure::from)
 }
+#[tauri::command(async)]
+fn activity_update_count(reference: String) -> Result<u32, BridgeFailure> {
+    open_workspace()
+        .and_then(|workspace| workspace.activity_update_count(&reference))
+        .map_err(BridgeFailure::from)
+}
+
 #[tauri::command(async)]
 fn get_activity(reference: String, id: String) -> Result<Option<Activity>, BridgeFailure> {
     open_workspace()
@@ -2728,6 +2740,7 @@ pub fn run() -> Result<(), tauri::Error> {
             source_conversation,
             latest_update,
             activity_feed,
+            activity_update_count,
             first_agent_update,
             get_activity,
             add_activity,

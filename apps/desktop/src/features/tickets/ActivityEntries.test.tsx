@@ -37,6 +37,7 @@ beforeAll(async () => {
 });
 afterEach(() => {
   cleanup();
+  localStorage.removeItem("ticketd:activity-view");
   bridge.invoke.mockReset();
 });
 
@@ -74,6 +75,137 @@ const note = {
   editing_agent: "cli-agent",
 };
 
+test("opens on the newest three updates and remembers All for the next ticket", async () => {
+  bridge.invoke.mockImplementation(async (command: string) => {
+    if (command === "activity_feed")
+      return [5, 4, 3, 2, 1].map((number) => ({
+        type: "authored",
+        activity: {
+          ...note,
+          id: String(number),
+          brief: `Update ${number}`,
+          reported_at: `2026-10-31T1${number}:00:00Z`,
+          updated_at: `2026-10-31T1${number}:00:00Z`,
+        },
+      }));
+    throw new Error(`Unexpected ${command}`);
+  });
+  const first = render(<Activity {...props} reference="T-KQ20" />);
+  await screen.findByText("Update 5");
+  expect(
+    screen.getByRole("radio", { name: "Updates", checked: true }),
+  ).toBeTruthy();
+  expect(screen.getAllByRole("article").map((row) => row.textContent)).toEqual([
+    expect.stringContaining("Update 5"),
+    expect.stringContaining("Update 4"),
+    expect.stringContaining("Update 3"),
+  ]);
+  const earlier = screen.getByRole("button", {
+    name: "2 earlier updates",
+    expanded: false,
+  });
+  fireEvent.click(earlier);
+  expect(await screen.findByText("Update 1")).toBeTruthy();
+  expect(earlier.getAttribute("aria-expanded")).toBe("true");
+  fireEvent.click(screen.getByRole("radio", { name: "All" }));
+  first.unmount();
+  render(<Activity {...props} reference="T-KQ21" />);
+  await screen.findByText("Update 5");
+  expect(
+    screen.getByRole("radio", { name: "All", checked: true }),
+  ).toBeTruthy();
+});
+
+test("counts earlier authored updates even when recorded changes fill the All feed", async () => {
+  const authored = Array.from({ length: 52 }, (_, index) => ({
+    type: "authored",
+    activity: { ...note, id: String(index), brief: `Authored update ${index}` },
+  }));
+  const automated = Array.from({ length: 50 }, (_, index) => ({
+    type: "automatic",
+    id: index,
+    event: {
+      kind: "status",
+      from_value: "Todo",
+      to_value: "In progress",
+      timestamp: "2026-10-31T11:00:00Z",
+      editing_agent: null,
+    },
+  }));
+  bridge.invoke.mockImplementation(
+    async (
+      command: string,
+      args?: { updatesOnly?: boolean; offset: number },
+    ) => {
+      if (command === "activity_feed")
+        return (args?.updatesOnly ? authored : automated).slice(
+          args?.offset ?? 0,
+          (args?.offset ?? 0) + 50,
+        );
+      if (command === "activity_update_count") return 52;
+      throw new Error(`Unexpected ${command}`);
+    },
+  );
+  render(<Activity {...props} reference="T-KQ20" />);
+  await screen.findByText("Authored update 0");
+  const earlier = await screen.findByRole("button", {
+    name: "49 earlier updates",
+    expanded: false,
+  });
+  expect(screen.getAllByRole("article")).toHaveLength(3);
+  expect(
+    screen.queryByRole("button", { name: "Show more activity" }),
+  ).toBeNull();
+  fireEvent.click(earlier);
+  await screen.findByText("Authored update 49");
+  await screen.findByText("Authored update 51");
+  expect(
+    screen.getByRole("button", { name: "49 earlier updates", expanded: true }),
+  ).toBe(earlier);
+  expect(bridge.invoke).toHaveBeenCalledWith("activity_feed", {
+    reference: "T-KQ20",
+    offset: 0,
+    limit: 50,
+    updatesOnly: true,
+  });
+});
+
+test("an update that occupies seven lines offers Show more", async () => {
+  const brief = "An update that fills seven rendered lines.";
+  const height = vi
+    .spyOn(HTMLElement.prototype, "scrollHeight", "get")
+    .mockImplementation(function (this: HTMLElement) {
+      return this.textContent === brief ? 140 : 0;
+    });
+  const computedStyle = window.getComputedStyle;
+  const style = vi
+    .spyOn(window, "getComputedStyle")
+    .mockImplementation((element, pseudo) => {
+      const result = computedStyle(element, pseudo);
+      if (element.textContent === brief) result.lineHeight = "20px";
+      return result;
+    });
+  try {
+    bridge.invoke.mockImplementation(async (command: string) => {
+      if (command === "activity_feed")
+        return [{ type: "authored", activity: { ...note, brief } }];
+      throw new Error(`Unexpected ${command}`);
+    });
+    render(<Activity {...props} reference="T-KQ20" />);
+    const more = await screen.findByRole("button", {
+      name: "Show more",
+      expanded: false,
+    });
+    fireEvent.click(more);
+    expect(
+      screen.getByRole("button", { name: "Show less", expanded: true }),
+    ).toBeTruthy();
+  } finally {
+    height.mockRestore();
+    style.mockRestore();
+  }
+});
+
 test("a change that came from a source reads as the source, not as an agent", async () => {
   bridge.invoke.mockImplementation(async (command: string) => {
     if (command === "list_sources") return [githubSource];
@@ -94,6 +226,7 @@ test("a change that came from a source reads as the source, not as an agent", as
     throw new Error(`Unexpected ${command}`);
   });
   render(<Activity {...props} reference="T-KQ20" />);
+  fireEvent.click(screen.getByRole("radio", { name: "All" }));
   fireEvent.click(await screen.findByRole("button", { name: /^1 change:/ }));
   await screen.findByText("Changed on GitHub");
   expect(screen.queryByText(/Agent:/)).toBeNull();
@@ -131,6 +264,7 @@ test("shows an editing agent only when one was recorded and words history as sen
     throw new Error(`Unexpected ${command}`);
   });
   render(<Activity {...props} reference="T-KQ20" />);
+  fireEvent.click(screen.getByRole("radio", { name: "All" }));
   fireEvent.click(await screen.findByRole("button", { name: /^1 change:/ }));
   await screen.findByText("Status Todo → In progress");
   expect(screen.queryByText(/Only in ticketd/)).toBeNull();
@@ -271,6 +405,7 @@ test("changes made together share one row, and Updates hides the rows", async ()
       : [],
   );
   render(<Activity {...props} reference="T-KQ21" />);
+  fireEvent.click(screen.getByRole("radio", { name: "All" }));
   fireEvent.click(await screen.findByRole("button", { name: /^2 changes:/ }));
   expect(screen.getByText("Added evidence “PR #482”")).toBeTruthy();
   expect(screen.getByText("Added evidence “fix branch”")).toBeTruthy();
@@ -280,28 +415,30 @@ test("changes made together share one row, and Updates hides the rows", async ()
 });
 
 test("says no updates, not no activity, when the Updates filter hides only history (DB-21)", async () => {
-  bridge.invoke.mockImplementation(async (command: string) =>
-    command === "activity_feed"
-      ? [
-          {
-            type: "automatic",
-            id: 1,
-            event: {
-              kind: "status",
-              from_value: "Todo",
-              to_value: "In progress",
-              timestamp: "2026-10-31T11:00:00Z",
-              editing_agent: null,
+  bridge.invoke.mockImplementation(
+    async (command: string, args?: { updatesOnly?: boolean }) =>
+      command === "activity_feed" && !args?.updatesOnly
+        ? [
+            {
+              type: "automatic",
+              id: 1,
+              event: {
+                kind: "status",
+                from_value: "Todo",
+                to_value: "In progress",
+                timestamp: "2026-10-31T11:00:00Z",
+                editing_agent: null,
+              },
             },
-          },
-        ]
-      : [],
+          ]
+        : [],
   );
   render(<Activity {...props} reference="T-KQ60" />);
+  fireEvent.click(screen.getByRole("radio", { name: "All" }));
   fireEvent.click(await screen.findByRole("button", { name: /^1 change:/ }));
   await screen.findByText("Status Todo → In progress");
   fireEvent.click(screen.getByRole("radio", { name: "Updates" }));
-  expect(screen.getByText("No updates yet.")).toBeTruthy();
+  expect(await screen.findByText("No updates yet.")).toBeTruthy();
   expect(screen.queryByText(/No updates or recorded changes/)).toBeNull();
   fireEvent.click(screen.getByRole("button", { name: "Show all activity" }));
   expect(

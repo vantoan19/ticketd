@@ -8773,7 +8773,9 @@ test("an empty Ticket folds Activity and R opens its existing composer without l
   fireEvent.click(
     await screen.findByRole("button", { name: "Edit Markdown source" }),
   );
-  const brief = screen.getByRole("textbox", { name: "New update source" });
+  const brief = await screen.findByRole("textbox", {
+    name: "New update source",
+  });
   fireEvent.change(brief, { target: { value: "A retained update draft" } });
   fireEvent.keyDown(brief, { key: "Escape" });
   expect(
@@ -11121,6 +11123,7 @@ test("Activity folds recorded changes between authored updates and expands every
   await user.click(
     await screen.findByRole("button", { name: /Folded history outcome/ }),
   );
+  await user.click(await screen.findByRole("radio", { name: "All" }));
   const timeline = await screen.findByRole("list", {
     name: "Activity timeline",
   });
