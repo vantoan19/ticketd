@@ -68,38 +68,44 @@ export function PlanIndexRow({
     .filter(Boolean)
     .join(". ");
   return (
-    <Item className="plan-index-row" data-archived={plan.archived || undefined}>
-      <button
-        className="plan-index-open"
-        type="button"
-        aria-label={`Open Plan ${plan.name}`}
-        aria-describedby={descriptionId}
-        onClick={onOpen}
-      />
-      <span hidden id={descriptionId}>
-        {description}
-      </span>
-      <span className="plan-index-ring">
-        {counts ? (
-          <PlanRing name={plan.name} counts={counts} size={20} decorative />
-        ) : (
-          <Layers size={20} aria-hidden />
-        )}
-      </span>
-      <span className="plan-index-name truncate">{plan.name}</span>
-      {count && <span className="plan-index-count tabular-nums">{count}</span>}
-      <span className="plan-index-state text-muted-foreground">
-        {needsAttention && <StatusDot tone="attention" size={6} />}
-        {unread && <StatusDot tone="unread" size={6} />}
-        <span>{state}</span>
-      </span>
-      {details?.updated && (
-        <Time
-          className="plan-index-time text-muted-foreground"
-          value={details.updated}
+    <Item asChild>
+      <div
+        className="plan-index-row"
+        data-archived={plan.archived || undefined}
+      >
+        <button
+          className="plan-index-open"
+          type="button"
+          aria-label={`Open Plan ${plan.name}`}
+          aria-describedby={descriptionId}
+          onClick={onOpen}
         />
-      )}
-      {children}
+        <span hidden id={descriptionId}>
+          {description}
+        </span>
+        <span className="plan-index-ring">
+          {counts ? (
+            <PlanRing name={plan.name} counts={counts} size={20} decorative />
+          ) : (
+            <Layers size={20} aria-hidden />
+          )}
+        </span>
+        <span className="plan-index-name truncate">{plan.name}</span>
+        {count && (
+          <span className="plan-index-count tabular-nums">{count}</span>
+        )}
+        <span className="plan-index-state text-muted-foreground">
+          {needsAttention && <StatusDot tone="attention" size={6} />}
+          {unread && <StatusDot tone="unread" size={6} />}
+          <span>{state}</span>
+        </span>
+        {details?.updated && (
+          <span className="plan-index-time text-muted-foreground">
+            <Time value={details.updated} />
+          </span>
+        )}
+        {children}
+      </div>
     </Item>
   );
 }
@@ -107,11 +113,21 @@ export function PlanIndexRow({
 export function PlanIndexRowSkeleton() {
   return (
     <div className="plan-index-row">
-      <Skeleton className="plan-index-ring size-5" />
-      <Skeleton className="plan-index-name h-4 w-36 max-w-full" />
-      <Skeleton className="plan-index-state h-3 w-48 max-w-full" />
-      <Skeleton className="plan-index-count h-4 w-14" />
-      <Skeleton className="plan-index-time h-3 w-10" />
+      <div className="plan-index-ring">
+        <Skeleton shape="circle" className="size-5" />
+      </div>
+      <div className="plan-index-name">
+        <Skeleton className="h-4 w-36 max-w-full" />
+      </div>
+      <div className="plan-index-state">
+        <Skeleton className="h-3 w-48 max-w-full" />
+      </div>
+      <div className="plan-index-count">
+        <Skeleton className="h-4 w-14" />
+      </div>
+      <div className="plan-index-time">
+        <Skeleton className="h-3 w-10" />
+      </div>
     </div>
   );
 }
