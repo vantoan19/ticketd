@@ -1,0 +1,29 @@
+@import "../../components/ui/surface-roles/tickets-decision-card.css";
+
+.ticket-decision-card {
+  display: grid;
+  gap: 8px;
+  margin-top: 24px;
+  padding: 16px 20px;
+}
+
+.ticket-decision-byline,
+.ticket-decision-row {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.ticket-decision-report {
+  overflow-wrap: anywhere;
+}
+
+.ticket-decision-report .ui-clamp-toggle button {
+  min-height: 28px;
+}
+
+.ticket-reply {
+  display: grid;
+  gap: 8px;
+}

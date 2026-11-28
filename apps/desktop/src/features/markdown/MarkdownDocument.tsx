@@ -339,8 +339,13 @@ function mentionBlock(tag: string) {
       anchors && offset !== undefined && /^h[1-4]$/.test(tag)
         ? anchors.get(offset)
         : undefined;
-    const attributes =
-      outlined === undefined ? props : { ...props, id: outlined.id };
+    const attributes = {
+      ...props,
+      ...(outlined && { id: outlined.id }),
+      ...(offset !== undefined && /^h[1-6]$/.test(tag) && {
+        "data-heading-offset": offset,
+      }),
+    };
     const marked =
       mark !== null && isMentionBlock(node as PositionedNode, mark);
     if (outlined?.foldable && folding) {

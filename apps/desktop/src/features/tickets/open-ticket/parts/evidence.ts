@@ -15,6 +15,7 @@ const evidenceRead = pagedRead({
   join: (pages) => ({
     items: pages.flatMap((page) => page.items),
     total: pages[0]?.total ?? 0,
+    proof: pages[0]?.proof ?? [],
   }),
   failure: "load evidence",
   more: "load more evidence",

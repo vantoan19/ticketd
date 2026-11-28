@@ -90,6 +90,7 @@ export function TicketDetailPane({
         opened={opened}
         onMentionReady={workspace.markMentionReady}
         onClearMention={workspace.clearMention}
+        readReviewQueue={workspace.readReviewQueue}
         preview={resultTickets.find((ticket) => ticket.reference === selected)}
         projects={projects}
         plans={plans}

@@ -43,9 +43,8 @@
   overflow: hidden;
   text-overflow: ellipsis;
 }
-.evidence-item > button {
+.evidence-item-value > button {
   max-width: 100%;
-  justify-self: start;
 }
 .evidence-item-meta {
   grid-column: 4;

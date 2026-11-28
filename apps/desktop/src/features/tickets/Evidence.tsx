@@ -41,7 +41,8 @@ import {
   type FailureDescription,
 } from "@/lib/api/describe-failure";
 import "./evidence.css";
-import { useEffect, useId, useRef, useState } from "react";
+import { useEffect, useId, useLayoutEffect, useRef, useState } from "react";
+import { revealInDetail } from "./detail-scroll";
 import {
   client,
   type Evidence as EvidenceRecord,
@@ -111,6 +112,7 @@ export function Evidence({
   trashed,
   folded = false,
   addRequest = 0,
+  showRequest = 0,
   addTrigger,
 }: {
   trashed: boolean;
@@ -120,6 +122,7 @@ export function Evidence({
   folded?: boolean;
   /** Bump to open Add evidence from outside the section. */
   addRequest?: number;
+  showRequest?: number;
   addTrigger?: HTMLElement | null;
 }) {
   const { entries: sources } = useSources();
@@ -134,6 +137,20 @@ export function Evidence({
   const items = read.value?.items ?? noItems;
   const total = read.value?.total ?? 0;
   const [expanded, setExpanded] = useState(false);
+  const section = useRef<HTMLElement>(null);
+  const show = useRef(showRequest);
+  useLayoutEffect(() => {
+    if (show.current === showRequest) return;
+    show.current = showRequest;
+    setExpanded(true);
+    const heading = section.current?.querySelector<HTMLElement>(
+      "[data-focus-target]",
+    );
+    if (heading) {
+      heading.focus({ preventScroll: true });
+      revealInDetail(heading);
+    }
+  }, [showRequest]);
   const [composing, setComposing] = useState(false);
   const [draft, setDraft] = useState<EvidenceInput>(blank);
   const [editing, setEditing] = useState<EvidenceRecord | null>(null);
@@ -273,7 +290,9 @@ export function Evidence({
             );
           }}
         />
-        <Time className="evidence-item-meta" value={item.created_at} />
+        <span className="evidence-item-meta">
+          <Time value={item.created_at} />
+        </span>
         <span className="evidence-item-actions">
           <span className="evidence-reveal">
             <CopyButton label="Copy" subject={item.name} text={item.value} />
@@ -332,11 +351,17 @@ export function Evidence({
   }
   return (
     <section
+      ref={section}
       aria-label="Evidence"
       className="evidence-section"
       hidden={empty && folded && !error}
     >
-      <SectionHeader title="Evidence" level={2} count={total || undefined} />
+      <SectionHeader
+        title="Evidence"
+        level={2}
+        count={total || undefined}
+        focusTarget
+      />
       {!loaded && !error && (
         <div role="status" aria-label="Loading evidence">
           <ol className="evidence-list" aria-hidden="true">
@@ -345,9 +370,15 @@ export function Evidence({
                 <span className="evidence-kind-icon">
                   <Skeleton className="h-4 w-4" />
                 </span>
-                <Skeleton className="evidence-item-name h-4 w-28 max-w-full" />
-                <Skeleton className="evidence-item-value h-4 w-24 max-w-full" />
-                <Skeleton className="evidence-item-meta h-4 w-12" />
+                <span className="evidence-item-name">
+                  <Skeleton className="h-4 w-28 max-w-full" />
+                </span>
+                <span className="evidence-item-value">
+                  <Skeleton className="h-4 w-24 max-w-full" />
+                </span>
+                <span className="evidence-item-meta">
+                  <Skeleton className="h-4 w-12" />
+                </span>
               </li>
             ))}
           </ol>
@@ -545,22 +576,23 @@ function EvidenceValue({
   if (/^https:\/\/\S+$/.test(item.value)) {
     const pr = pullRequest(item.value, sources);
     return (
-      <Tooltip content={item.value}>
-        <Button
-          type="button"
-          className="evidence-item-value"
-          variant="link"
-          size="inline"
-          aria-label={`Open ${item.name}`}
-          onClick={() =>
-            void workspaceClient.openLink(item.value).catch(onOpenFailed)
-          }
-        >
-          <span className="truncate">
-            {pr ? `${pr.repository} #${pr.number}` : readableUrl(item.value)}
-          </span>
-        </Button>
-      </Tooltip>
+      <span className="evidence-item-value">
+        <Tooltip content={item.value}>
+          <Button
+            type="button"
+            variant="link"
+            size="inline"
+            aria-label={`Open ${item.name}`}
+            onClick={() =>
+              void workspaceClient.openLink(item.value).catch(onOpenFailed)
+            }
+          >
+            <span className="truncate">
+              {pr ? `${pr.repository} #${pr.number}` : readableUrl(item.value)}
+            </span>
+          </Button>
+        </Tooltip>
+      </span>
     );
   }
   return (
