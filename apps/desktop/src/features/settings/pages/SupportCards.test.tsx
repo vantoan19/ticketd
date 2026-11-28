@@ -24,7 +24,7 @@ afterEach(() => {
   vi.clearAllMocks();
 });
 
-const COFFEE = "https://buymeacoffee.com/example";
+const COFFEE = "https://ko-fi.com/example";
 
 test("with a Buy me a coffee page, both cards open their links in the browser", async () => {
   render(<SupportCards coffeeUrl={COFFEE} />);
