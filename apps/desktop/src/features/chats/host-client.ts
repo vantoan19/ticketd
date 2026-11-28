@@ -103,7 +103,7 @@ export function tauriBridge(): HostBridge {
 }
 
 const failureSchema = z.object({
-  code: z.enum(["stale", "gone", "failed", "project_archived"]),
+  code: z.enum(["stale", "gone", "failed", "project_archived", "contact_lost"]),
   message: z.string(),
 });
 const invalidAttachment = z.object({
@@ -123,6 +123,7 @@ const openedSchema = z.object({
 const UNCLAIMED_LIMIT = 1000;
 
 type Feed = {
+  key: string | AbortSignal;
   /** Absent until the backend has named the feed. */
   subscription?: number;
   /** Changes that arrived before a listener was attached. */
@@ -131,6 +132,7 @@ type Feed = {
   /** The last sequence number handed on. */
   last: number;
   closed: boolean;
+  removeAbortListener?: () => void;
 };
 
 /** The Chat screens' client over the desktop backend, which owns all execution. */
@@ -175,12 +177,14 @@ export function createHostChatClient(
     };
   }
 
-  /** Feeds opened and not yet subscribed to, by Chat. */
-  const unclaimed = new Map<string, Feed>();
+  /** Feeds awaiting their view. Readers without a signal use the Chat ID. */
+  const unclaimed = new Map<Feed["key"], Feed>();
   function close(feed: Feed) {
     if (feed.closed) return;
+    if (unclaimed.get(feed.key) === feed) unclaimed.delete(feed.key);
     feed.closed = true;
     feed.waiting = [];
+    feed.removeAbortListener?.();
     if (feed.subscription !== undefined)
       void bridge
         .invoke("chat_close", { subscription: feed.subscription })
@@ -192,10 +196,10 @@ export function createHostChatClient(
     close(feed);
     listener?.({ seq: feed.last + 1, kind: "resync" });
   }
-  function receive(id: string, feed: Feed, message: unknown) {
+  function receive(feed: Feed, message: unknown) {
     // An update's changes come as one array, so the view draws once for them.
     if (Array.isArray(message)) {
-      for (const each of message) receive(id, feed, each);
+      for (const each of message) receive(feed, each);
       return;
     }
     if (feed.closed) return;
@@ -207,10 +211,7 @@ export function createHostChatClient(
       return feed.listener(change.data);
     }
     feed.waiting.push(change.data);
-    if (feed.waiting.length > UNCLAIMED_LIMIT) {
-      if (unclaimed.get(id) === feed) unclaimed.delete(id);
-      close(feed);
-    }
+    if (feed.waiting.length > UNCLAIMED_LIMIT) close(feed);
   }
 
   return {
@@ -276,9 +277,10 @@ export function createHostChatClient(
         .parse(await call("chat_folder_use", { path })),
     createChat: async (input) =>
       createdChatSchema.parse(await call("chat_create", { input })),
-    async openChat(id) {
-      const feed: Feed = { waiting: [], last: 0, closed: false };
-      const changes = bridge.channel((message) => receive(id, feed, message));
+    async openChat(id, signal) {
+      const key = signal ?? id;
+      const feed: Feed = { key, waiting: [], last: 0, closed: false };
+      const changes = bridge.channel((message) => receive(feed, message));
       let opened;
       try {
         opened = openedSchema.parse(
@@ -290,19 +292,29 @@ export function createHostChatClient(
       }
       feed.subscription = opened.subscription;
       feed.last = opened.snapshot.cursor;
-      // An earlier open of this Chat that nobody subscribed to is abandoned.
-      const earlier = unclaimed.get(id);
-      if (earlier) close(earlier);
-      if (feed.closed)
+      if (feed.closed) {
         // Dropped while opening; the subscriber finds no feed and opens again.
         void bridge
           .invoke("chat_close", { subscription: opened.subscription })
           .catch(() => {});
-      else unclaimed.set(id, feed);
+      } else if (signal?.aborted) {
+        close(feed);
+      } else {
+        const earlier = unclaimed.get(key);
+        if (earlier) close(earlier);
+        unclaimed.set(key, feed);
+        if (signal) {
+          const cancel = () => close(feed);
+          signal.addEventListener("abort", cancel, { once: true });
+          feed.removeAbortListener = () =>
+            signal.removeEventListener("abort", cancel);
+        }
+      }
       return opened.snapshot;
     },
-    subscribe(id, cursor, listener) {
-      const feed = unclaimed.get(id);
+    subscribe(id, cursor, listener, signal) {
+      const key = signal ?? id;
+      const feed = unclaimed.get(key);
       if (!feed || feed.closed || feed.last !== cursor) {
         // No feed follows that snapshot: the view opens the Chat again.
         let current = true;
@@ -313,7 +325,7 @@ export function createHostChatClient(
           current = false;
         };
       }
-      unclaimed.delete(id);
+      unclaimed.delete(key);
       feed.listener = listener;
       for (const change of feed.waiting.splice(0)) {
         if (feed.closed) break;

@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 import { cleanup, render, screen } from "@testing-library/react";
-import type { ReactNode } from "react";
+import { useContext, type ReactNode } from "react";
 import { afterEach, expect, test, vi } from "vitest";
 import { TestReads } from "@/lib/workspace-reads/testing";
 import { LatestUpdate } from "./LatestUpdate";
@@ -8,6 +8,7 @@ import { TicketAgentSession } from "./TicketAgent";
 import { useTicket } from "./open-ticket";
 import { OpenTicketFor } from "./open-ticket/parts/activity-testing";
 import { ticketFor } from "./open-ticket/parts/ticket-fixture";
+import { AgentContext } from "./ticket-agent-context";
 
 const bridge = vi.hoisted(() => ({ invoke: vi.fn() }));
 vi.mock("@tauri-apps/api/core", () => bridge);
@@ -37,6 +38,16 @@ function Session({ children }: { children?: ReactNode }) {
         </>
       )}
     </TicketAgentSession>
+  );
+}
+
+function AgentReadiness() {
+  return (
+    <output>
+      {useContext(AgentContext)?.ready
+        ? "Agent context ready"
+        : "Agent context unavailable"}
+    </output>
   );
 }
 
@@ -75,10 +86,12 @@ test("the agent context is ready even when the Ticket's record cannot be read", 
   });
   render(
     <TestReads>
-      <Session />
+      <Session>
+        <AgentReadiness />
+      </Session>
     </TestReads>,
   );
-  expect(await screen.findByText("ready")).toBeTruthy();
+  expect(await screen.findByText("Agent context ready")).toBeTruthy();
   expect(bridge.invoke).toHaveBeenCalledWith("show_ticket", {
     reference: ticket.reference,
   });

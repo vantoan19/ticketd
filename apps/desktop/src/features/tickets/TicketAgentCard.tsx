@@ -13,6 +13,7 @@ import { Time } from "@/components/ui/time";
 import { useStatusLine } from "@/components/ui/use-status-line";
 import { HarnessMark } from "@/features/chats/HarnessMark";
 import {
+  ChatError,
   useChatClient,
   type ChatSummary,
   type TranscriptItem,
@@ -123,16 +124,15 @@ export function TicketAgentCard({
 function useAgentChat(id: string) {
   const chat = useChat(id);
   const { show } = useStatusLine();
-  const reportFailure = useEffectEvent(() => {
-    if (chat.error)
-      show({
-        tone: "error",
-        message: chat.error.sentence,
-        action: { label: "Retry", run: chat.retry },
-      });
-  });
+  const reportFailure = useEffectEvent((message: string) =>
+    show({
+      tone: "error",
+      message,
+      action: { label: "Retry", run: chat.retry },
+    }),
+  );
   useEffect(() => {
-    if (chat.error) reportFailure();
+    if (chat.error) return reportFailure(chat.error.sentence);
   }, [chat.error]);
   return chat.snapshot;
 }
@@ -262,21 +262,34 @@ function ApprovalChoices({
   children: React.ReactNode;
 }) {
   const client = useChatClient();
+  const { show } = useStatusLine();
   const choiceId = useId();
   const inFlight = useRef(false);
   const [picked, setPicked] = useState<string | null>(null);
-  const [failed, setFailed] = useState(false);
+  const [failure, setFailure] = useState<"refused" | "contact_lost" | null>(
+    null,
+  );
+  const deliveryUnknown = failure === "contact_lost";
   const pick = (optionId: string) => {
     if (inFlight.current) return;
     inFlight.current = true;
     setPicked(optionId);
-    setFailed(false);
+    setFailure(null);
     void client
       .answer(chatId, request.id, { option_id: optionId })
-      .catch(() => {
+      .catch((reason: unknown) => {
+        if (reason instanceof ChatError && reason.code === "contact_lost") {
+          setFailure("contact_lost");
+          // The request can expire as soon as contact is lost.
+          show({
+            tone: "error",
+            message: "Couldn't confirm whether the answer arrived.",
+          });
+          return;
+        }
         inFlight.current = false;
         setPicked(null);
-        setFailed(true);
+        setFailure("refused");
       });
   };
   const onKey = (event: KeyboardEvent<HTMLDivElement>) => {
@@ -307,7 +320,7 @@ function ApprovalChoices({
   return (
     <div className="ticket-agent-content" onKeyDown={onKey}>
       {announcement}
-      {failed && (
+      {failure === "refused" && (
         <p role="status" className="ticket-decision-byline">
           Answer not sent · Pick again to retry
         </p>
@@ -324,8 +337,10 @@ function ApprovalChoices({
                 type="button"
                 size="compact"
                 variant="outline"
-                disabled={picked !== null && picked !== option.id}
-                busy={picked === option.id}
+                disabled={
+                  deliveryUnknown || (picked !== null && picked !== option.id)
+                }
+                busy={!deliveryUnknown && picked === option.id}
                 onClick={() => pick(option.id)}
                 aria-keyshortcuts={index < 3 ? String(index + 1) : undefined}
                 aria-describedby={warningId}

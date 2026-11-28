@@ -80,8 +80,8 @@ const MAX_LAST_MESSAGES: usize = 200;
 const RESTORING_WORKSPACE: &str =
     "The workspace is being restored from a backup. Try again when it has finished.";
 
-/// A refused request. `stale` means the request, turn or runtime it named is no longer
-/// current; the message is shown to the person as it is.
+/// A Chat command failure. `stale` names a request, turn or runtime that is no
+/// longer current. `contact_lost` means an answer's delivery is unknown.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 pub struct ChatFailure {
     pub code: &'static str,
@@ -118,6 +118,10 @@ impl From<HostError> for ChatFailure {
     fn from(error: HostError) -> Self {
         match error {
             HostError::InteractionExpired | HostError::SubAgentGone => stale(error.to_string()),
+            HostError::ContactLost => Self {
+                code: "contact_lost",
+                message: error.to_string(),
+            },
             HostError::Core(error) => error.into(),
             other => failed(other.to_string()),
         }

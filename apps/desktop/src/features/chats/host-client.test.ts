@@ -4,6 +4,7 @@ import {
   createHostChatClient,
   type HostBridge,
 } from "@/features/chats/host-client";
+import { deferred } from "@/lib/workspace-reads/test-support";
 
 const chat = {
   id: "c1",
@@ -195,6 +196,49 @@ describe("the desktop Chat client", () => {
 
     expect(stub.invoke).toHaveBeenCalledWith("chat_close", { subscription: 7 });
     expect(seen).toHaveLength(1);
+  });
+
+  it("closes a late canceled open without displacing other views with the same cursor", async () => {
+    const stub = stubBridge();
+    const lateReply = deferred<unknown>();
+    stub.invoke
+      .mockImplementationOnce(() => lateReply.promise)
+      .mockResolvedValueOnce(opened(8).chat_open)
+      .mockResolvedValueOnce(opened(9).chat_open);
+    const client = createHostChatClient(stub.bridge);
+    const abandoned = new AbortController();
+    const ticket = new AbortController();
+    const detail = new AbortController();
+    const late = client.openChat("c1", abandoned.signal);
+    abandoned.abort();
+    const ticketRead = await client.openChat("c1", ticket.signal);
+    const detailRead = await client.openChat("c1", detail.signal);
+    lateReply.resolve(opened(7).chat_open);
+    await late;
+
+    const ticketChanged = vi.fn();
+    const detailChanged = vi.fn();
+    client.subscribe("c1", ticketRead.cursor, ticketChanged, ticket.signal);
+    client.subscribe("c1", detailRead.cursor, detailChanged, detail.signal);
+    const ticketChange = { seq: 1, kind: "item", item: response("ticket") };
+    const detailChange = { seq: 1, kind: "item", item: response("detail") };
+    stub.push(ticketChange, 1);
+    stub.push(detailChange, 2);
+    expect(ticketChanged).toHaveBeenCalledExactlyOnceWith(ticketChange);
+    expect(detailChanged).toHaveBeenCalledExactlyOnceWith(detailChange);
+    expect(
+      stub.invoke.mock.calls.filter(([command]) => command === "chat_close"),
+    ).toEqual([["chat_close", { subscription: 7 }]]);
+
+    ticket.abort();
+    stub.push({ seq: 2, kind: "text", item_id: "m1", text: " later" }, 1);
+    stub.push({ seq: 2, kind: "text", item_id: "m1", text: " later" }, 2);
+    expect(ticketChanged).toHaveBeenCalledTimes(1);
+    expect(detailChanged).toHaveBeenCalledTimes(2);
+    expect(stub.invoke).toHaveBeenLastCalledWith("chat_close", {
+      subscription: 8,
+    });
+    detail.abort();
   });
 
   it("rejects backend values that do not match the contract", async () => {

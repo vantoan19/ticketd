@@ -18,6 +18,7 @@ import {
 import { ticketAgentFixtures } from "@/features/chats/ticket-agent-fixtures";
 import { bridgeDefault, unknownCommands } from "@/test/bridge-defaults";
 import { StatusLineRegion } from "@/components/ui/status-line";
+import { useStatusLine } from "@/components/ui/use-status-line";
 import { isMacPlatform } from "@/lib/platform";
 import { deferred } from "@/lib/workspace-reads/test-support";
 import { TestReads } from "@/lib/workspace-reads/testing";
@@ -25,6 +26,7 @@ import type { Ticket } from "@/lib/api/client";
 import { TicketDetails } from "./TicketDetails";
 import { useLatestUpdateOf } from "./open-ticket";
 import { ticketFor } from "./open-ticket/parts/ticket-fixture";
+import { InboxAttentionContext } from "./use-inbox-attention";
 
 const bridge = vi.hoisted(() => ({ invoke: vi.fn() }));
 vi.mock("@tauri-apps/api/core", () => bridge);
@@ -41,9 +43,11 @@ window.ResizeObserver = class {
   disconnect() {}
 };
 let linked: ChatSummary[];
+let projected: ChatSummary[];
 let agents: ReturnType<typeof ticketAgentFixtures>["one"];
 let items: object[];
 let answer: Promise<null> | null;
+let transcript: Promise<void> | null;
 let savedTicket: Promise<Ticket> | null;
 let changedTicket: Ticket | null;
 
@@ -93,9 +97,11 @@ const request = {
 
 beforeEach(() => {
   linked = [];
+  projected = [];
   agents = [];
   items = [];
   answer = null;
+  transcript = null;
   savedTicket = null;
   changedTicket = null;
   requestChat.mockClear();
@@ -107,7 +113,8 @@ beforeEach(() => {
       if (command === "chat_harness_catalog") return [];
       if (command === "chat_ticket_agents") return agents;
       if (command === "chat_linked_to") return linked;
-      if (command === "chat_open")
+      if (command === "chat_open") {
+        if (transcript) await transcript;
         return {
           subscription: 1,
           snapshot: {
@@ -136,6 +143,7 @@ beforeEach(() => {
             cursor: 0,
           },
         };
+      }
       if (command === "chat_answer") return answer;
       if (command === "is_following") return false;
       if (command === "chat_close" || command === "reminder") return null;
@@ -154,6 +162,7 @@ beforeEach(() => {
 });
 afterEach(() => {
   cleanup();
+  vi.useRealTimers();
   bridge.invoke.mockReset();
   expect(unknownCommands.splice(0)).toEqual([]);
 });
@@ -163,7 +172,23 @@ function LatestUpdateRead({ reference }: { reference: string }) {
   return latest.current && <output>Latest update read</output>;
 }
 
-function open(record: Ticket, fromPreview = false) {
+function PostNewOutcome() {
+  const { show } = useStatusLine();
+  return (
+    <button
+      type="button"
+      onClick={() => show({ tone: "error", message: "Newer status" })}
+    >
+      Post newer status
+    </button>
+  );
+}
+
+function open(
+  record: Ticket,
+  fromPreview = false,
+  withStatusPublisher = false,
+) {
   const client = createHostChatClient({
     invoke: bridge.invoke,
     channel: () => null,
@@ -186,25 +211,41 @@ function open(record: Ticket, fromPreview = false) {
           requestChat,
         }}
       >
-        <TestReads {...(!fromPreview && { primed: { ticket: record } })}>
-          {fromPreview && <LatestUpdateRead reference={record.reference} />}
-          <StatusLineRegion>
-            <TicketDetails
-              mention={null}
-              selected={selection}
-              expanded={false}
-              onExpand={vi.fn()}
-              onReturn={vi.fn()}
-              setSelected={select}
-              opened={selection ? [selection] : []}
-              onMentionReady={vi.fn()}
-              onClearMention={vi.fn()}
-              preview={fromPreview ? record : undefined}
-              projects={[]}
-              plans={[]}
-            />
-          </StatusLineRegion>
-        </TestReads>
+        <InboxAttentionContext
+          value={{
+            entries: [],
+            approvals: [],
+            chats: projected,
+            statuses: new Map(),
+            reminders: new Map(),
+            latestStatusChanges: new Map(),
+            loading: false,
+            error: null,
+            needsCount: 0,
+            reload: () => {},
+          }}
+        >
+          <TestReads {...(!fromPreview && { primed: { ticket: record } })}>
+            {fromPreview && <LatestUpdateRead reference={record.reference} />}
+            <StatusLineRegion>
+              {withStatusPublisher && <PostNewOutcome />}
+              <TicketDetails
+                mention={null}
+                selected={selection}
+                expanded={false}
+                onExpand={vi.fn()}
+                onReturn={vi.fn()}
+                setSelected={select}
+                opened={selection ? [selection] : []}
+                onMentionReady={vi.fn()}
+                onClearMention={vi.fn()}
+                preview={fromPreview ? record : undefined}
+                projects={[]}
+                plans={[]}
+              />
+            </StatusLineRegion>
+          </TestReads>
+        </InboxAttentionContext>
       </ChatFeatureContext>
     </ChatClientContext>
   );
@@ -322,8 +363,127 @@ test("the agent’s question opens its Chat and is answered there", async () => 
   });
 });
 
+test.each(["linked", "projected"])(
+  "a pending request from the %s read takes precedence over working at the same time",
+  async (source) => {
+    linked = [summary(source === "linked" ? "approval" : "working")];
+    projected = [summary(source === "projected" ? "approval" : "working")];
+    items = [request];
+    open(ticket);
+    const card = await screen.findByRole("region", {
+      name: "Request from an agent",
+    });
+    expect(
+      await within(card).findByRole("button", { name: "Allow once" }),
+    ).toBeTruthy();
+  },
+);
+
+test("the newer Chat summary clears an older pending request", async () => {
+  projected = [
+    summary("approval", {
+      updated_at: new Date(Date.parse(now) - 1000).toISOString(),
+    }),
+  ];
+  linked = [summary("working")];
+  open(ticket);
+  expect(
+    await screen.findByRole("region", { name: "Agents on this ticket" }),
+  ).toBeTruthy();
+  expect(
+    screen.queryByRole("region", { name: "Request from an agent" }),
+  ).toBeNull();
+});
+
+test("leaving a ticket closes a transcript feed even when it opens late", async () => {
+  const pending = deferred<void>();
+  transcript = pending.promise;
+  linked = [summary("working")];
+  const select = open(ticket);
+  await waitFor(() =>
+    expect(bridge.invoke).toHaveBeenCalledWith("chat_open", {
+      chatId: main.chat_id,
+      changes: null,
+    }),
+  );
+  select(0, null);
+  await act(async () => pending.resolve());
+  expect(bridge.invoke).toHaveBeenCalledWith("chat_close", { subscription: 1 });
+});
+
+test.each([false, true])(
+  "a transcript error clears on navigation (newer status: %s)",
+  async (withNewerStatus) => {
+    const pending = deferred<void>();
+    transcript = pending.promise;
+    linked = [summary("working")];
+    const select = open(ticket, false, withNewerStatus);
+    await screen.findByRole("region", { name: "Agents on this ticket" });
+    await act(async () =>
+      pending.reject({ code: "failed", message: "Transcript unavailable" }),
+    );
+    expect(await screen.findByRole("button", { name: "Retry" })).toBeTruthy();
+    if (withNewerStatus) {
+      fireEvent.click(
+        screen.getByRole("button", { name: "Post newer status" }),
+      );
+      await screen.findByText("Newer status");
+    }
+    select(0, null);
+    await waitFor(() =>
+      expect(screen.queryByRole("button", { name: "Retry" })).toBeNull(),
+    );
+    if (withNewerStatus)
+      expect(screen.getByText("Newer status").closest("[inert]")).toBeNull();
+  },
+);
+
+test("a lost answer keeps choices disabled and the delivery status visible after the request closes", async () => {
+  linked = [summary("approval")];
+  items = [request];
+  const pending = deferred<null>();
+  answer = pending.promise;
+  const refresh = open({ ...ticket, status: "In review" });
+  const card = within(
+    await screen.findByRole("region", { name: "Request from an agent" }),
+  );
+  const allow = await card.findByRole<HTMLButtonElement>("button", {
+    name: "Allow once",
+  });
+  fireEvent.click(allow);
+  await act(async () =>
+    pending.reject({
+      code: "contact_lost",
+      message:
+        "contact with the harness was lost; whether the answer arrived is unknown",
+    }),
+  );
+  const message = "Couldn't confirm whether the answer arrived.";
+  expect(await screen.findByText(message)).toBeTruthy();
+  for (const name of ["Allow once", "Allow in this Chat", "Deny"]) {
+    expect(card.getByRole<HTMLButtonElement>("button", { name }).disabled).toBe(
+      true,
+    );
+  }
+  expect(screen.queryByRole("button", { name: "Retry" })).toBeNull();
+  expect(card.queryByText(/Pick again/)).toBeNull();
+
+  const openChat = card.getByRole("button", { name: "Open Chat" });
+  openChat.focus();
+  fireEvent.keyDown(openChat, { key: "1" });
+  expect(
+    bridge.invoke.mock.calls.filter(([command]) => command === "chat_answer"),
+  ).toHaveLength(1);
+
+  linked = [summary("done")];
+  refresh(1);
+  await screen.findByRole("region", { name: "Ready for review" });
+  expect(screen.getByText(message)).toBeTruthy();
+});
+
 test("working shows the report, current step, and other agents; O opens the main Chat", async () => {
-  agents = ticketAgentFixtures().many;
+  vi.setSystemTime(new Date(now));
+  agents = ticketAgentFixtures(Date.parse(now)).many;
   linked = [summary("working")];
   open({ ...ticket, status: "In review" });
   const card = within(
@@ -335,7 +495,7 @@ test("working shows the report, current step, and other agents; O opens the main
     "Claude Opus 5.5 and 3 others are working on this ticket",
   );
   expect(working.textContent).toContain("Waiting for 2 sub-agents");
-  expect(working.textContent).toMatch(/1m 3[1-9]s/);
+  expect(working.textContent).toContain("1m 31s");
   expect(card.getByText(/Last report/).textContent).toContain("from codex");
   expect(card.getByRole("button", { name: "Show" })).toBeTruthy();
   const openChat = card.getByRole("button", { name: "Open Chat" });

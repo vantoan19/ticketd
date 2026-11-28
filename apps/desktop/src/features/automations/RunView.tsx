@@ -291,15 +291,18 @@ export function RunView({
     ) ?? false;
   useEffect(() => {
     if (!chat || !chatEnded) return;
-    let current = true;
-    chats.openChat(chat).then(
-      (opened) => current && opened.items.length === 0 && setEmptyChat(chat),
-      // ChatDetail reads the same Chat and says why it could not.
-      () => {},
-    );
-    return () => {
-      current = false;
-    };
+    const read = new AbortController();
+    const { signal } = read;
+    void chats
+      .openChat(chat, signal)
+      .then(
+        (opened) =>
+          !signal.aborted && opened.items.length === 0 && setEmptyChat(chat),
+        // ChatDetail reads the same Chat and says why it could not.
+        () => {},
+      )
+      .finally(() => read.abort());
+    return () => read.abort();
   }, [chats, chat, chatEnded]);
 
   const harness =
