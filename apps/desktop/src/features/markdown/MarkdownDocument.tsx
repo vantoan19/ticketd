@@ -342,9 +342,10 @@ function mentionBlock(tag: string) {
     const attributes = {
       ...props,
       ...(outlined && { id: outlined.id }),
-      ...(offset !== undefined && /^h[1-6]$/.test(tag) && {
-        "data-heading-offset": offset,
-      }),
+      ...(offset !== undefined &&
+        /^h[1-6]$/.test(tag) && {
+          "data-heading-offset": offset,
+        }),
     };
     const marked =
       mark !== null && isMentionBlock(node as PositionedNode, mark);
@@ -616,7 +617,7 @@ export function MarkdownDocument({
   headings?: readonly OutlineHeading[] | undefined;
   /** Folds hide the sections named here and give each foldable heading its chevron. */
   folding?: SectionFolding | undefined;
-  /** Group top-level blocks at these source offsets and expose heading offsets. */
+  /** Group top-level blocks at these source offsets. */
   ranges?: readonly MarkdownBlockRange[] | undefined;
   renderRange?: RenderBlockRange | undefined;
 }) {

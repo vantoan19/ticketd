@@ -189,7 +189,7 @@ function TicketDescriptionReading({ ticketId, ...markdown }: Props) {
   useLayoutEffect(() => {
     if (!jump) return;
     const heading = root.current?.querySelector<HTMLElement>(
-      `[data-markdown-offset="${jump.offset}"]`,
+      `[data-heading-offset="${jump.offset}"]`,
     );
     if (heading) {
       heading.tabIndex = -1;

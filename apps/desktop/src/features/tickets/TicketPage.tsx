@@ -32,7 +32,7 @@ import { useTicketTrash } from "@/features/tickets/use-ticket-trash";
 import type { Project } from "@/lib/api/client";
 import { useOpenTicket } from "./open-ticket";
 import { TicketDecisionCard, type ReviewQueue } from "./TicketDecisionCard";
-import { revealInDetail } from "./detail-scroll";
+import { revealTicketDescription } from "./description-navigation";
 import { plural } from "@/lib/format";
 import { useWorkspaceChange } from "@/lib/workspace-change";
 import type { Plan } from "@/lib/api/plans";
@@ -187,15 +187,7 @@ export function TicketPage({
         doneFallback={<TicketClosingLine />}
         onEvidence={() => setShowEvidenceRequest((count) => count + 1)}
         select={select}
-        onAcceptance={(offset) => {
-          const heading = page.current?.querySelector<HTMLElement>(
-            `.description-document [data-heading-offset="${offset}"]`,
-          );
-          if (!heading) return;
-          heading.tabIndex = -1;
-          heading.focus({ preventScroll: true });
-          revealInDetail(heading);
-        }}
+        onAcceptance={() => revealTicketDescription(ticket.id, "acceptance")}
       />
     </>
   );

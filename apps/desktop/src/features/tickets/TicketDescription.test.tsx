@@ -18,12 +18,16 @@ afterEach(() => {
   localStorage.clear();
 });
 
-function detail(body: string, id = "description") {
+function detail(
+  body: string,
+  id = "description",
+  status: Ticket["status"] = "Todo",
+) {
   const ticket: Ticket = {
     id,
     reference: "T-FOLD1",
     title: "Description example",
-    status: "Todo",
+    status,
     trashed: false,
     body,
     project_id: null,
@@ -163,11 +167,32 @@ test("find opens every matching fold and editing shows the full description", as
     expect(screen.queryByRole("searchbox")).toBeNull();
 
     fireEvent.keyDown(window, { key: "e" });
-    expect(
-      await screen.findByText("Before acceptance contains the search phrase."),
-    ).toBeTruthy();
+    const editor = await screen.findByRole("textbox", {
+      name: "Description rich text",
+    });
+    expect(editor.textContent).toContain(
+      "Before acceptance contains the search phrase.",
+    );
     expect(screen.queryByRole("button", { name: /more section/ })).toBeNull();
   } finally {
     platform.mockRestore();
   }
+});
+
+test("the review card's acceptance count returns from Edit to the visible checklist", async () => {
+  detail(longSpec, "in-review", "In review");
+  const acceptance = screen.getByRole("button", { name: "Acceptance 0 of 1" });
+  fireEvent.keyDown(window, { key: "e" });
+  const editor = await screen.findByRole("textbox", {
+    name: "Description rich text",
+  });
+  expect(editor.textContent).toContain(
+    "Before acceptance contains the search phrase.",
+  );
+  fireEvent.click(acceptance);
+  const checklist = screen.getByRole("heading", {
+    name: "Acceptance criteria",
+  });
+  expect(document.activeElement).toBe(checklist);
+  expect(screen.queryByRole("heading", { name: "User Stories" })).toBeNull();
 });
