@@ -105,11 +105,13 @@ export function Documents({
   onDocumentClose,
   listRequest,
   backLabel = "Back to Documents",
+  preferReturnCrumb = false,
   onCommandsChange,
 }: {
   onCommandsChange?: (commands: DocumentCommands | null) => void;
   /** Names where the reader's Back button goes: the list, or the ticket it was opened from. */
   backLabel?: string;
+  preferReturnCrumb?: boolean;
   capture: boolean;
   active: boolean;
   onCapture?: () => void;
@@ -1577,6 +1579,7 @@ export function Documents({
           onOpenDocument={open}
           closeRequest={(listRequest ?? 0) + readerCloseRequest}
           backLabel={backLabel}
+          preferReturnCrumb={preferReturnCrumb}
           {...(openGraph ? { onOpenGraph: openGraph } : {})}
           onOpenPlan={(id) => {
             setSelected(null);

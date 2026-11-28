@@ -285,6 +285,7 @@ type DocumentEditorProps = {
   closeRequest?: number;
   /** Label of the reader's footer button; the Documents list says where it returns to. */
   backLabel?: string;
+  preferReturnCrumb?: boolean;
   children?: ReactNode | ((state: { trashed: boolean }) => ReactNode);
 };
 
@@ -311,6 +312,7 @@ function RecoveredDocumentEditor({
   onTogglePin,
   closeRequest = 0,
   backLabel = "Back to work",
+  preferReturnCrumb = false,
   children,
 }: DocumentEditorProps) {
   const { conflicts } = useConflicts();
@@ -1226,7 +1228,7 @@ function RecoveredDocumentEditor({
   const connected = groupConnections(links);
   // The header names the Plan the Document belongs to: the one it is the spec of, else an Active
   // one, else an Archived one (the core orders the row's Plans that way).
-  const crumbPlan = row?.plans?.[0];
+  const crumbPlan = preferReturnCrumb ? null : row?.plans?.[0];
   // A Plan attached to the Document is listed under Linked, not as a mention.
   const isMention = (item: (typeof connected)[number]) =>
     item.kind !== "plan" || item.passages.length > 0;
@@ -1556,7 +1558,10 @@ function RecoveredDocumentEditor({
               </IconButton>
             </span>
           )}
-          <span className="document-return">
+          <span
+            className="document-return"
+            data-preferred={preferReturnCrumb || undefined}
+          >
             <Button
               variant="ghost"
               size="sm"
@@ -1564,7 +1569,9 @@ function RecoveredDocumentEditor({
               onClick={requestClose}
             >
               <ArrowLeft aria-hidden="true" />
-              {backLabel.replace(/^Back to /, "")}
+              <span className="document-crumb-name">
+                {backLabel.replace(/^Back to /, "")}
+              </span>
             </Button>
           </span>
           {crumbPlan && (
@@ -1583,7 +1590,7 @@ function RecoveredDocumentEditor({
             </span>
           )}
           {/* A slash separates two crumbs: with nothing before it (full width, no Plan) it is not drawn. */}
-          {(crumbPlan || !expanded) && (
+          {(preferReturnCrumb || crumbPlan || !expanded) && (
             <span aria-hidden="true" className="document-crumb-sep">
               /
             </span>

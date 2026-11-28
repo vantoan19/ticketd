@@ -349,6 +349,18 @@
 .document-bar .document-return {
   margin-inline: -12px -10px;
 }
+.document-bar .document-return[data-preferred] {
+  flex: 0 1000 auto;
+  min-width: 96px;
+}
+.document-bar .document-return[data-preferred] .ui-button {
+  min-width: 0;
+}
+.document-return .document-crumb-name {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
 .document-actions {
   display: flex;
   flex: none;
@@ -1023,7 +1035,7 @@
   display: flex;
   flex: none;
 }
-.document-bar[data-expanded] .document-return {
+.document-bar[data-expanded] .document-return:not([data-preferred]) {
   display: none;
 }
 .document-position {
@@ -1303,7 +1315,9 @@
 :where([data-width~="max-879"]) .document-rail-track {
   display: none;
 }
-:where([data-width~="max-879"]) .document-bar[data-expanded] .document-return {
+:where([data-width~="max-879"])
+  .document-bar[data-expanded]
+  .document-return:not([data-preferred]) {
   display: flex;
 }
 :where([data-width~="max-879"])

@@ -140,6 +140,7 @@ beforeEach(() => {
         );
         return member ? ticket(member) : null;
       }
+      case "open_document":
       case "show_document":
         return {
           id: "spec",
@@ -872,6 +873,19 @@ test("a long purpose expands and the spec opens with a route back to its Plan", 
   documents = [
     { id: "spec", heading: "Release specification", trashed: false },
   ];
+  const respond = bridge.invoke.getMockImplementation()!;
+  bridge.invoke.mockImplementation((command, args) =>
+    command === "document_row"
+      ? {
+          id: "spec",
+          heading: "Release specification",
+          plans: [{ id: "e1", name: "Launch", archived: false, spec: true }],
+          tickets: [],
+          tags: [],
+        }
+      : respond(command, args),
+  );
+  setPreference("openDocuments", "expanded");
   await openLaunch();
   const more = within(context()).getByRole("button", { name: "Show more" });
   expect(more.getAttribute("aria-expanded")).toBe("false");
@@ -884,8 +898,15 @@ test("a long purpose expands and the spec opens with a route back to its Plan", 
     }),
   );
   const back = await screen.findByRole("button", { name: "Back to Launch" });
+  await waitFor(() =>
+    expect(bridge.invoke).toHaveBeenCalledWith("document_row", { id: "spec" }),
+  );
+  expect(screen.queryByRole("button", { name: "Open Plan Launch" })).toBeNull();
   fireEvent.click(back);
-  expect(await screen.findByRole("region", { name: "Launch" })).toBeTruthy();
+  const overview = await screen.findByRole("region", { name: "Launch" });
+  expect(
+    within(overview).getByRole("button", { name: "Show less" }),
+  ).toBeTruthy();
 });
 
 test("a first visit records a last look only after leaving the Plan", async () => {
