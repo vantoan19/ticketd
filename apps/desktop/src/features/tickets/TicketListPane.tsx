@@ -50,7 +50,7 @@ import { SourceFilter, SourceRefresh } from "@/features/tickets/SourceFilter";
 import { TicketList } from "@/features/tickets/TicketList";
 import { TicketBoard } from "./TicketBoard";
 import { DisplayMenu } from "@/features/tickets/DisplayMenu";
-import { usePreferences } from "@/lib/preferences";
+import { setPreference, usePreferences } from "@/lib/preferences";
 import { TicketRowsSkeleton } from "@/features/tickets/TicketRowsSkeleton";
 import type { BulkEdit } from "@/features/tickets/useBulkEdit";
 import type { Ticket } from "@/lib/api/client";
@@ -94,7 +94,7 @@ function TicketListBody({
   filtersMenu?: FiltersMenuState;
   projectNotice?: ReactNode;
 }) {
-  const { ticketRows } = usePreferences();
+  const { ticketRows, planListDone } = usePreferences();
   const {
     projects,
     plans,
@@ -591,6 +591,7 @@ function TicketListBody({
                       cascade={cascade}
                       onCascaded={cascaded}
                       tickets={visibleTickets}
+                      hideSharedContext={Boolean(scopedPlan)}
                       empty={emptyView}
                       scope={{
                         showPlan: !navigation.plan,
@@ -612,6 +613,17 @@ function TicketListBody({
                         counts && {
                           grouping: {
                             counts,
+                            ...(scopedPlan && {
+                              done: {
+                                open: planListDone[scopedPlan.id] ?? false,
+                                onOpenChange: (open: boolean) => {
+                                  setPreference("planListDone", {
+                                    ...planListDone,
+                                    [scopedPlan.id]: open,
+                                  });
+                                },
+                              },
+                            }),
                             ...(!addDisabled && {
                               onAdd: (
                                 status: string,

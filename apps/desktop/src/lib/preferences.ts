@@ -10,6 +10,8 @@ const preferencesSchema = z.object({
   /** Read a Document beside the list ("split") or at full width ("expanded"); the reader's toggle sets it. */
   openDocuments: z.enum(["split", "expanded"]).catch("split"),
   ticketLayout: z.enum(["list", "board"]).catch("list"),
+  /** Which Plans have their List’s Done group open on this computer. */
+  planListDone: z.record(z.string(), z.boolean()).catch({}),
   sidebarCollapsed: z.boolean().catch(false),
   ticketRows: z.enum(["detailed", "simple"]).catch("simple"),
   followCreated: z.boolean().catch(true),
@@ -45,6 +47,7 @@ const DEFAULTS: Preferences = {
   openTickets: "split",
   openDocuments: "split",
   ticketLayout: "list",
+  planListDone: {},
   sidebarCollapsed: false,
   ticketRows: "simple",
   followCreated: true,
