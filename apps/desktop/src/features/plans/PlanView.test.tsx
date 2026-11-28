@@ -1232,6 +1232,91 @@ test("wrap-up opens the Plan picker and moves only tickets left blocked outside 
   ).toBeTruthy();
 });
 
+test.each(["Retry", "Undo"] as const)(
+  "partial wrap-up reports confirmed moves and offers %s",
+  async (recovery) => {
+    plans.push({ id: "e2", name: "Follow-up", archived: false, purpose: "" });
+    const blocked = Array.from({ length: 101 }, (_, index): Fake => ({
+      id: `blocked-${index}`,
+      reference: `T-WR${index + 100}`,
+      status: "Todo",
+      plan: "e1",
+      availability: "Blocked",
+      prerequisites: [outsideBlocker],
+    }));
+    tickets = [
+      ...blocked,
+      { id: "done", reference: "T-KQ2", status: "Done", plan: "e1" },
+    ];
+
+    type Batch = {
+      references: string[];
+      change: { plan_id: string };
+      requestId: string;
+    };
+    const batches: Batch[] = [];
+    const answer = bridge.invoke.getMockImplementation()!;
+    let failed = false;
+    let lostReply: unknown;
+    bridge.invoke.mockImplementation(async (command: string, args: never) => {
+      if (command !== "bulk_change") return answer(command, args);
+      const batch = args as Batch;
+      batches.push(batch);
+      if (batch.change.plan_id === "e2" && batch.references.length === 1) {
+        if (!failed) {
+          failed = true;
+          // Exercise recovery both when the move stopped and when the reply
+          // was lost after Core committed.
+          if (recovery === "Retry") lostReply = await answer(command, args);
+          throw new Error("The last batch could not be confirmed");
+        }
+        return lostReply;
+      }
+      return answer(command, args);
+    });
+
+    await openLaunch();
+    const panel = within(context()).getByRole("region", {
+      name: "Ready to wrap up",
+    });
+    fireEvent.click(
+      within(panel).getByRole("button", { name: "Move 101 tickets…" }),
+    );
+    const choices = await screen.findByRole("dialog", { name: "Plan choices" });
+    fireEvent.click(within(choices).getByRole("option", { name: "Follow-up" }));
+
+    const partial = await screen.findByText(
+      "Confirmed 100 of 101 tickets moved. Couldn't confirm the rest.",
+    );
+    const notice = within(partial.closest('[role="alert"]')! as HTMLElement);
+    expect(notice.getByRole("button", { name: "Retry" })).toBeTruthy();
+    expect(notice.getByRole("button", { name: "Undo" })).toBeTruthy();
+    const [confirmed, unconfirmed] = batches;
+    expect(confirmed?.references).toHaveLength(100);
+    expect(unconfirmed?.references).toHaveLength(1);
+
+    fireEvent.click(notice.getByRole("button", { name: recovery }));
+    if (recovery === "Retry") {
+      await screen.findByText("Moved 101 tickets to Follow-up");
+      expect(batches[2]).toEqual(unconfirmed);
+      expect(batches).toHaveLength(3);
+      fireEvent.click(screen.getByRole("button", { name: "Undo" }));
+    }
+    await within(panel).findByText(
+      "101 tickets are left, blocked by other Plans.",
+    );
+    const restores = batches.filter((batch) => batch.change.plan_id === "e1");
+    expect(restores.flatMap((batch) => batch.references)).toEqual(
+      recovery === "Retry"
+        ? [...confirmed!.references, ...unconfirmed!.references]
+        : confirmed!.references,
+    );
+    expect(new Set(restores.map((batch) => batch.requestId)).size).toBe(
+      restores.length,
+    );
+  },
+);
+
 test("wrap-up names a single ticket left blocked outside the Plan", async () => {
   tickets[0]!.availability = "Blocked";
   tickets[0]!.prerequisites = [outsideBlocker];

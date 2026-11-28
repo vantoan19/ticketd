@@ -6,6 +6,7 @@ import { afterEach, beforeEach, expect, test, vi } from "vitest";
 import { MotionProvider } from "@/components/ui/motion";
 import { StatusLineRegion } from "@/components/ui/status-line";
 import { TooltipProvider } from "@/components/ui/tooltip";
+import { TestReads } from "@/lib/workspace-reads/testing";
 import { applyTokens, rootTokens } from "@/test/motion-tokens";
 import { PlanFlow } from "./PlanFlow";
 import { PlanList } from "./PlanList";
@@ -69,15 +70,17 @@ function list() {
   return render(
     <MotionProvider>
       <TooltipProvider>
-        <StatusLineRegion>
-          <PlanList
-            plans={plans}
-            archived={false}
-            onOpen={() => {}}
-            onArchivedChange={() => {}}
-            refresh={async () => {}}
-          />
-        </StatusLineRegion>
+        <TestReads>
+          <StatusLineRegion>
+            <PlanList
+              plans={plans}
+              archived={false}
+              onOpen={() => {}}
+              onArchivedChange={() => {}}
+              refresh={async () => {}}
+            />
+          </StatusLineRegion>
+        </TestReads>
       </TooltipProvider>
     </MotionProvider>,
   );
