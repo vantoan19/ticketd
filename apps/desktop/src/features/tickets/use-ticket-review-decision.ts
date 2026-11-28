@@ -107,18 +107,17 @@ export function useTicketReviewDecision(
     const eligible = new Set(
       queue
         .filter(
-          (item) =>
-            item.status === "In review" &&
-            item.reference !== reference &&
-            item.reference !== stale.reference,
+          (item) => item.status === "In review" && item.reference !== reference,
         )
         .map((item) => item.reference),
     );
     // The decision removed its row. Continue from the original position when
     // possible, then consider tickets that entered the queue since the decision.
-    const successors = stale.successors.filter((item) => eligible.delete(item));
+    const originalOrder = [stale.reference, ...stale.successors].filter(
+      (item) => eligible.delete(item),
+    );
     const nextReview = nextReviewFrom(
-      [...successors, ...eligible],
+      [...originalOrder, ...eligible],
       stale.reference,
     );
     if (accept()) {
@@ -174,17 +173,17 @@ export function useTicketReviewDecision(
     void startDecision();
   }
 
-  function startDecision(send?: {
+  function startDecision(originalSend?: {
     brief: string;
     requestId: string | null;
     agent: string;
   }) {
-    const request = send?.requestId ?? crypto.randomUUID();
+    const request = originalSend?.requestId ?? crypto.randomUUID();
     const undoRequest = crypto.randomUUID();
     let queueRead: Promise<NextReview> | undefined;
-    let submitted = Boolean(send?.requestId);
+    let submitted = Boolean(originalSend?.requestId);
 
-    async function decide() {
+    async function decide(send = originalSend) {
       if (moving.current) return;
       moving.current = true;
       setPending(true);
@@ -323,7 +322,7 @@ export function useTicketReviewDecision(
     }
 
     function retryDecision() {
-      if (!send) return decide();
+      if (!originalSend) return decide();
       const current = latestDraft.current;
       if (current?.reviewNumber !== reviewNumber || !current.brief.trim()) {
         line.show({
@@ -333,14 +332,14 @@ export function useTicketReviewDecision(
         return;
       }
       if (
-        current.brief === send.brief &&
-        (!current.requestId || current.requestId === request)
+        current.requestId === request &&
+        current.brief.trim() === originalSend.brief.trim()
       )
-        return decide();
+        return decide({ ...originalSend, brief: current.brief });
       return startDecision({
         brief: current.brief,
         requestId: current.requestId,
-        agent: send.agent,
+        agent: originalSend.agent,
       });
     }
 
