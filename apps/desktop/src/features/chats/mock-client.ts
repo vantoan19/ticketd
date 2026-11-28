@@ -1281,15 +1281,21 @@ export function createMockChatClient(
       }
       return { chat_id: id };
     },
-    async openChat(id) {
+    async openChat(id, historyStart, loadEarlier) {
       const entry = get(id);
       // Opening a Chat any way marks it seen.
       marked.delete(id);
       if (entry.chat.unseen) patch(id, { unseen: false });
+      const start =
+        historyStart === undefined
+          ? Math.max(0, entry.items.length - 200)
+          : Math.max(0, historyStart - 1 - (loadEarlier ? 200 : 0));
       return chatSnapshotSchema.parse(
         structuredClone({
           chat: reportedChat(entry.chat),
-          items: entry.items,
+          items: entry.items.slice(start),
+          earlier: start > 0,
+          history_start: entry.items.length === 0 ? null : start + 1,
           cursor: entry.seq,
         }),
       );

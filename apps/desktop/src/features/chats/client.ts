@@ -932,6 +932,8 @@ export type ChatState = z.infer<typeof chatStateSchema>;
 export const chatSnapshotSchema = z.object({
   chat: chatStateSchema,
   items: z.array(transcriptItemSchema),
+  earlier: z.boolean().optional(),
+  history_start: z.number().int().nullish(),
   /** Sequence number of the last change the snapshot includes. */
   cursor: z.number().int().nonnegative(),
 });
@@ -1092,7 +1094,11 @@ export interface ChatClient {
     effort?: string;
     permission?: string;
   }): Promise<CreatedChat>;
-  openChat(id: string): Promise<ChatSnapshot>;
+  openChat(
+    id: string,
+    historyStart?: number,
+    loadEarlier?: boolean,
+  ): Promise<ChatSnapshot>;
   /** Changes after `cursor`, in order. */
   subscribe(
     id: string,

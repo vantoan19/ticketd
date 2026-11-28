@@ -1724,7 +1724,7 @@ export function Transcript({
   items: TranscriptItem[];
   parts: TranscriptPart[];
   actions: TranscriptActions;
-  /** Before the first part: a sub-agent view's brief. */
+  /** Before the first part: the history control or a sub-agent view's brief. */
   lead?: ReactNode;
   /** After the last part: how a sub-agent ended. */
   trail?: ReactNode;
@@ -1791,6 +1791,7 @@ export function Transcript({
   if (picked)
     return (
       <div className="chat-col" ref={contentRef}>
+        {lead}
         {items.map(
           (item) =>
             (item.kind === "user" || item.kind === "response") && (

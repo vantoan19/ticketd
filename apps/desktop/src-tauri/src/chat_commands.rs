@@ -607,10 +607,15 @@ pub async fn chat_create(bridge: State<'_, ChatBridge>, input: NewChatInput) -> 
 pub async fn chat_open(
     bridge: State<'_, ChatBridge>,
     chat_id: String,
+    history_start: Option<i64>,
+    load_earlier: Option<bool>,
     changes: Channel<Value>,
 ) -> Outcome<Opened> {
     let sink = Arc::new(move |change| changes.send(change).is_ok());
-    bridge.chats.open(&chat_id, sink).await
+    bridge
+        .chats
+        .open(&chat_id, history_start, load_earlier.unwrap_or(false), sink)
+        .await
 }
 
 #[tauri::command]
