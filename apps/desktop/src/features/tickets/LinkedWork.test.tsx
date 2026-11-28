@@ -147,7 +147,7 @@ function bridge(
 function Sections() {
   const work = useLinkedWork();
   return (
-    <StatusLineRegion>
+    <>
       <TicketContextLine
         projects={[]}
         plans={[]}
@@ -159,7 +159,7 @@ function Sections() {
         <LinkedWork work={work} select={vi.fn()} onMention={vi.fn()} />
       </RailPlacement>
       <LinkedWorkDialogs work={work} />
-    </StatusLineRegion>
+    </>
   );
 }
 function Section({
@@ -171,7 +171,9 @@ function Section({
 }) {
   return (
     <TestOpenTicket ticket={ticket} {...(signal && { signal })}>
-      <Sections />
+      <StatusLineRegion>
+        <Sections />
+      </StatusLineRegion>
     </TestOpenTicket>
   );
 }
