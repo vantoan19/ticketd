@@ -120,6 +120,7 @@ beforeEach(() => {
       return ticket;
     }
     if (command === "add_activity_with_details") {
+      if (writeFailure) throw { code: writeFailure, message: "Cannot write." };
       const { brief } = args as { brief: string };
       latest = update(brief);
       return {
@@ -151,13 +152,14 @@ function open(select = vi.fn(), reviewQueue = [ticket]) {
 function ticketView(
   select: (reference: string | null) => void,
   reviewQueue: Ticket[],
+  readReviewQueue = async () => reviewQueue,
 ) {
   return (
     <StatusLineRegion>
       <TestOpenTicket ticket={ticket}>
         <TicketPage
           active
-          readReviewQueue={async () => reviewQueue}
+          readReviewQueue={readReviewQueue}
           projects={[]}
           plans={[]}
           select={select}
@@ -237,6 +239,34 @@ test("Reply posts an update in the card and keeps the ticket In progress", async
     existingDocumentId: null,
     requestId: expect.any(String),
   });
+});
+
+test("a successful Reply retry leaves a newer draft open", async () => {
+  ticket = { ...review, status: "In progress" };
+  writeFailure = "failed";
+  open();
+  const card = within(
+    await screen.findByRole("region", { name: "Latest update" }),
+  );
+  fireEvent.click(card.getByRole("button", { name: "Reply" }));
+  const field = card.getByRole("textbox", { name: "Reply" });
+  fireEvent.change(field, { target: { value: "First reply" } });
+  fireEvent.click(card.getByRole("button", { name: "Post update" }));
+  const retry = await screen.findByRole("button", { name: "Retry" });
+  fireEvent.change(field, { target: { value: "New draft" } });
+
+  writeFailure = null;
+  fireEvent.click(retry);
+  expect(await card.findByText("First reply")).toBeTruthy();
+  expect(card.getByRole("textbox", { name: "Reply" })).toHaveProperty(
+    "value",
+    "New draft",
+  );
+  const writes = bridge.invoke.mock.calls.filter(
+    ([command]) => command === "add_activity_with_details",
+  );
+  expect(writes).toHaveLength(2);
+  expect(writes[1]).toEqual(writes[0]);
 });
 
 test.each(["Todo", "Done", "Canceled", "Duplicate", "Trash"])(
@@ -375,6 +405,19 @@ test("a successful decision suggests the next In review ticket, wrapping at the 
   expect(select).not.toHaveBeenCalled();
   fireEvent.click(next);
   expect(select).toHaveBeenCalledWith("T-KQ2");
+});
+
+test("a failed queue read leaves the review decision available and reports the failure", async () => {
+  const readReviewQueue = vi
+    .fn()
+    .mockRejectedValue(new Error("Queue unavailable"));
+  render(ticketView(vi.fn(), [ticket], readReviewQueue));
+  fireEvent.click(await screen.findByRole("button", { name: "Move to Done" }));
+  const card = within(await screen.findByRole("region", { name: "Done" }));
+  expect(card.queryByText("Nothing else in review")).toBeNull();
+  expect(document.activeElement).toBe(
+    card.getByText("Couldn't check what else is in review"),
+  );
 });
 
 test("the shortcut skips a text field and a decision picks the later review before wrapping", async () => {
@@ -614,6 +657,30 @@ test("a failed Send back keeps the draft and Retry repeats the same write", asyn
   );
   expect(writes).toHaveLength(2);
   expect(writes[0]).toEqual(writes[1]);
+});
+
+test("Retry sends the edited Send back draft with a new request ID", async () => {
+  writeFailure = "failed";
+  open();
+  fireEvent.click(await screen.findByRole("button", { name: "Send back" }));
+  const field = screen.getByRole("textbox", { name: "What needs to change?" });
+  fireEvent.change(field, { target: { value: "First reason" } });
+  fireEvent.click(screen.getByRole("button", { name: "Send back" }));
+  const retry = await screen.findByRole("button", { name: "Retry" });
+  fireEvent.change(field, { target: { value: "Revised reason" } });
+
+  writeFailure = null;
+  fireEvent.click(retry);
+  const decision = within(
+    await screen.findByRole("region", { name: "Sent back" }),
+  );
+  expect(decision.getByText("Revised reason")).toBeTruthy();
+  const writes = bridge.invoke.mock.calls.filter(
+    ([command]) => command === "send_back",
+  );
+  expect(writes).toHaveLength(2);
+  expect(writes[1]?.[1]).toMatchObject({ brief: "Revised reason" });
+  expect(writes[1]?.[1].requestId).not.toBe(writes[0]?.[1].requestId);
 });
 
 test("Send back refreshes a ticket that left review without posting its draft", async () => {

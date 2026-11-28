@@ -42,7 +42,11 @@ import { TicketEditor } from "@/features/tickets/TicketEditor";
 import { useTicketTrash } from "@/features/tickets/use-ticket-trash";
 import type { Project } from "@/lib/api/client";
 import { useOpenTicket } from "./open-ticket";
-import { TicketDecisionCard, type ReviewQueue } from "./TicketDecisionCard";
+import { TicketDecisionCard } from "./TicketDecisionCard";
+import {
+  useTicketReviewDecision,
+  type ReviewQueue,
+} from "./use-ticket-review-decision";
 import { useTicketSeenTime } from "./ticket-seen-time";
 import { revealTicketDescription } from "./description-navigation";
 import { plural } from "@/lib/format";
@@ -202,12 +206,16 @@ export function TicketPage({
       }}
     />
   );
+  const reviewDecision = useTicketReviewDecision(
+    active && !leaving,
+    readReviewQueue,
+  );
   const decisionCard = (
     <TicketDecisionCard
       active={active && !leaving}
       seenTime={seenTime}
       onRepresentedUpdate={setRepresentedUpdate}
-      readReviewQueue={readReviewQueue}
+      reviewDecision={reviewDecision}
       blockerCount={blockerCount}
       blockers={
         blockerCount > 0 ? (
