@@ -17,6 +17,7 @@ import type { MentionTarget } from "@/features/tickets/Backlinks";
 import type { FollowedMention } from "@/features/tickets/useTicketWorkspace";
 import type { Plan } from "@/lib/api/plans";
 import { TicketPage } from "@/features/tickets/TicketPage";
+import type { ReviewQueue } from "./TicketDecisionCard";
 import { usePageSwap } from "./use-page-swap";
 type NoteTarget = { id: string; key: number };
 type InboxTarget = { reference: string; id: string; key: number };
@@ -52,9 +53,11 @@ export function TicketDetails({
   onAdjacent,
   returnLabel,
   outsideResults = false,
+  reviewQueue,
   leaving = false,
 }: {
   outsideResults?: boolean;
+  reviewQueue?: ReviewQueue | undefined;
   /** The pane is fading out after the ticket closed: it takes no input. */
   leaving?: boolean;
   hidden?: boolean;
@@ -221,6 +224,7 @@ export function TicketDetails({
                     leaving={reference === swap.leaving}
                     seed={reference === selected ? preview : undefined}
                     outsideResults={outsideResults && reference === selected}
+                    reviewQueue={reference === selected ? reviewQueue : undefined}
                     projects={projects}
                     plans={plans}
                     inboxTarget={
@@ -257,6 +261,7 @@ const OpenedPage = memo(function OpenedPage({
   leaving,
   seed,
   outsideResults,
+  reviewQueue,
   projects,
   plans,
   inboxTarget,
@@ -270,6 +275,7 @@ const OpenedPage = memo(function OpenedPage({
   leaving: boolean;
   seed: Ticket | undefined;
   outsideResults: boolean;
+  reviewQueue: ReviewQueue | undefined;
   projects: Project[];
   plans: Plan[];
   /** The Inbox note to show, when it is on this page. */
@@ -285,6 +291,7 @@ const OpenedPage = memo(function OpenedPage({
         swap={swap}
         leaving={leaving}
         outsideResults={outsideResults}
+        {...(reviewQueue && { reviewQueue })}
         projects={projects}
         plans={plans}
         select={actions.select}

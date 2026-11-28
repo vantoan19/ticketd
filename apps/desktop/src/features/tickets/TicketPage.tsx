@@ -46,6 +46,8 @@ import { useSourcesConfigured } from "@/features/tickets/use-publication-preview
 import { useTicketTrash } from "@/features/tickets/use-ticket-trash";
 import type { Project } from "@/lib/api/client";
 import { useOpenTicket } from "./open-ticket";
+import { TicketDecisionCard, type ReviewQueue } from "./TicketDecisionCard";
+import { revealInDetail } from "./detail-scroll";
 import { useWorkspaceChange } from "@/lib/workspace-change";
 import type { Plan } from "@/lib/api/plans";
 
@@ -57,6 +59,7 @@ export function TicketPage({
   swap = false,
   leaving = false,
   outsideResults = false,
+  reviewQueue = [],
   projects,
   plans,
   select,
@@ -73,6 +76,7 @@ export function TicketPage({
   leaving?: boolean;
   /** The ticket is not among the list's current results. */
   outsideResults?: boolean;
+  reviewQueue?: ReviewQueue;
   projects: Project[];
   plans: Plan[];
   select: (reference: string | null) => void;
@@ -345,6 +349,22 @@ export function TicketPage({
       )}
     </TicketProperties>
   );
+  const decisionCard = (
+    <TicketDecisionCard
+      active={active && !leaving}
+      reviewQueue={reviewQueue}
+      select={select}
+      onAcceptance={(offset) => {
+        const heading = page.current?.querySelector<HTMLElement>(
+          `.description-document [data-heading-offset="${offset}"]`,
+        );
+        if (!heading) return;
+        heading.tabIndex = -1;
+        heading.focus({ preventScroll: true });
+        revealInDetail(heading);
+      }}
+    />
+  );
   return (
     <div
       ref={page}
@@ -396,6 +416,7 @@ export function TicketPage({
             )}
             {strip}
             {stateLine}
+            {decisionCard}
             <div className="editor-body">
               {source && contentLocked ? (
                 <SourceDescription
@@ -431,6 +452,7 @@ export function TicketPage({
             revision={revision}
             mention={mention}
             stateLine={stateLine}
+            decisionCard={decisionCard}
           >
             {strip}
           </TicketEditor>

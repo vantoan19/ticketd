@@ -127,6 +127,7 @@ type TicketEditorProps = {
    * The ticket's stable state line. Editor controls float outside the prose.
    */
   stateLine?: ReactNode;
+  decisionCard?: ReactNode;
   /** Under the state row: the folded property strip. */
   children?: ReactNode;
   select?: (reference: string) => void;
@@ -149,6 +150,7 @@ function RecoveredTicketEditor({
   readOnly = false,
   onSaved,
   stateLine,
+  decisionCard,
   children,
   select,
   revision,
@@ -728,6 +730,7 @@ function RecoveredTicketEditor({
           }
         />
       )}
+      {decisionCard}
       <div
         className="editor-body"
         ref={bodyRef}

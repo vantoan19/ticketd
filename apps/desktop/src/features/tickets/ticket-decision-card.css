@@ -1,0 +1,13 @@
+.ticket-decision-card {
+  display: grid;
+  gap: 8px;
+  padding: 16px 20px;
+}
+
+.ticket-decision-byline,
+.ticket-decision-row {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 8px;
+}

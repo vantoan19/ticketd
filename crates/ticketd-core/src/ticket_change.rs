@@ -219,6 +219,10 @@ pub(crate) fn edit(
     // An editor that sends the values it loaded is refused when someone else has since
     // changed them (ADR 0015). A caller that omits them overwrites.
     if stale(&patch.title, &patch.expected_title, &ticket.title)
+        || (patch.status.is_some()
+            && patch
+                .expected_status
+                .is_some_and(|expected| expected != ticket.status))
         || stale(&patch.body, &patch.expected_body, &ticket.body)
     {
         return Err(Error::TicketChanged(reference.to_owned()));
