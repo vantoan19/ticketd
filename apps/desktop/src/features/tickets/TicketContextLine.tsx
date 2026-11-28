@@ -55,7 +55,7 @@ function addBlockerKey(event: KeyboardEvent, addBlocker: () => void) {
   addBlocker();
 }
 
-function orderBlockers(work: LinkedWorkState) {
+export function orderBlockers(work: LinkedWorkState) {
   const prerequisites = work.current?.links?.prerequisites;
   if (!prerequisites)
     return [...work.ticket.prerequisites].sort(
@@ -206,12 +206,16 @@ export function TicketContextLine({
   work,
   select,
   onOpenSubtickets,
+  addTriggerRef,
+  additionalActions,
 }: {
   projects: Project[];
   plans: Plan[];
   work: LinkedWorkState;
   select: (reference: string) => void;
   onOpenSubtickets: () => void;
+  addTriggerRef?: (button: HTMLButtonElement | null) => void;
+  additionalActions?: ReactNode;
 }) {
   const { record: ticket, changed } = useOpenTicket();
   const reminder = useOpenTicket("reminder");
@@ -435,7 +439,11 @@ export function TicketContextLine({
           <PropertyMenu
             picker={picker}
             trigger={
-              <IconButton label="Add ticket property" size="icon-compact">
+              <IconButton
+                ref={addTriggerRef}
+                label="Add ticket property"
+                size="icon-compact"
+              >
                 <Plus />
               </IconButton>
             }
@@ -473,6 +481,12 @@ export function TicketContextLine({
                 {kind === "blocked_by" && <Kbd aria-hidden="true">B</Kbd>}
               </DropdownMenuItem>
             ))}
+            {additionalActions && (
+              <>
+                <DropdownMenuSeparator />
+                {additionalActions}
+              </>
+            )}
           </PropertyMenu>
         )}
       </span>

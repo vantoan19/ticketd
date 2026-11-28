@@ -35,7 +35,9 @@ test("each major ticket section opens with its heading row, set apart by space a
             mention_end: 14,
           },
         ]
-      : [],
+      : command === "ticket_evidence_page"
+        ? { items: [], total: 0 }
+        : [],
   );
   const work = {
     rows: [],

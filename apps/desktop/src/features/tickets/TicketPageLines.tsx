@@ -8,7 +8,7 @@ import {
 import { Check } from "lucide-react";
 import { RecordLink } from "@/components/ui/record-link";
 import { Tooltip } from "@/components/ui/tooltip";
-import type { Ticket } from "@/lib/api/client";
+import { client, type Ticket } from "@/lib/api/client";
 import { historyClient } from "@/lib/api/history";
 import { formatDateTime, relativeDateTime } from "@/lib/format";
 import { useNow } from "@/lib/use-now";
@@ -99,6 +99,20 @@ const doneTime = read({
   failure: "load the completion time",
 });
 
+const remainingPullRequest = read({
+  key: "ticket-pull-request",
+  async call({ reference, offset }: { reference: string; offset: number }) {
+    let next = offset;
+    while (true) {
+      const page = await client.evidencePage(reference, next);
+      const pr = page.items.find((item) => item.kind === "pull_request");
+      next += page.items.length;
+      if (pr || !page.items.length || next >= page.total) return pr ?? null;
+    }
+  },
+  failure: "load pull request evidence",
+});
+
 export function TicketClosingLine() {
   const { record: ticket } = useOpenTicket();
   const now = useNow();
@@ -106,7 +120,15 @@ export function TicketClosingLine() {
   const timestamp = useRead(doneTime, closed ? skip : ticket.reference);
   const evidence = useOpenTicket("evidence");
   const time = closed ?? timestamp.value;
-  const pr = evidence.value?.find((item) => item.kind === "pull_request");
+  const loaded = evidence.value;
+  const visiblePR = loaded?.items.find((item) => item.kind === "pull_request");
+  const laterPR = useRead(
+    remainingPullRequest,
+    !visiblePR && loaded && loaded.items.length < loaded.total
+      ? { reference: ticket.reference, offset: loaded.items.length }
+      : skip,
+  );
+  const pr = visiblePR ?? laterPR.value;
   const number =
     pr?.value.match(
       /\/(?:pull|pull-requests|merge_requests)\/(\d+)(?:[/?#]|$)/,

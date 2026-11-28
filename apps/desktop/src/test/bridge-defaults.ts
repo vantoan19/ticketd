@@ -39,6 +39,8 @@ export function bridgeDefault(
         tickets: [],
         tags: [],
       };
+    case "ticket_evidence_page":
+      return { items: [], total: 0 };
     case "automation_run_taken_over_in":
       return null;
     case "automation_agent_list":

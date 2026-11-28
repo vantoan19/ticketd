@@ -19,12 +19,14 @@ export function DocumentRow({
   onUnlink,
   onOpenUpdate,
   ticketReference,
+  cardWidth,
 }: {
   link: DocumentLink;
   readOnly: boolean;
   onUnlink: () => void;
   onOpenUpdate?: ((activityId: string) => void) | undefined;
   ticketReference: string;
+  cardWidth: number;
 }) {
   const openDocument = useContext(DocumentNavigation);
   const [ref, near] = useNearViewport<HTMLDivElement>();
@@ -85,6 +87,7 @@ export function DocumentRow({
         }
         onOpen={() => openDocument?.(link.target_id)}
         action={action}
+        width={cardWidth}
       />
     </li>
   );

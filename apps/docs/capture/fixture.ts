@@ -246,6 +246,15 @@ mockIPC(
         return hasFeature(a) ? workspace.history : [];
       case "list_evidence":
         return hasFeature(a) ? workspace.evidence : [];
+      case "ticket_evidence_page": {
+        const items = hasFeature(a)
+          ? [...workspace.evidence]
+              .reverse()
+              .sort((a, b) => b.created_at.localeCompare(a.created_at))
+          : [];
+        const offset = a.offset ?? 0;
+        return { items: items.slice(offset, offset + 50), total: items.length };
+      }
       case "contextual_relationships":
         return hasFeature(a)
           ? { relationships: workspace.context.relationships }

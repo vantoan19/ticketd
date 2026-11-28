@@ -1,15 +1,21 @@
-import { client, type Evidence, type Ticket } from "@/lib/api/client";
-import { byOffset, pagedRead, skip, usePagedRead } from "@/lib/workspace-reads";
-
-/** The core answers evidence in pages of this many; a shorter page is the last. */
-const pageSize = 50;
+import { client, type Ticket } from "@/lib/api/client";
+import { pagedRead, skip, usePagedRead } from "@/lib/workspace-reads";
 
 /** A Ticket's evidence records, a page at a time. */
 const evidenceRead = pagedRead({
   key: "evidence",
-  call: (reference: string, offset) => client.evidence(reference, offset),
-  next: byOffset<Evidence>(pageSize),
-  join: (pages: readonly Evidence[][]) => pages.flat(),
+  call: (reference: string, offset) => client.evidencePage(reference, offset),
+  next: (page, pages) => {
+    const loaded = pages.reduce(
+      (count, loaded) => count + loaded.items.length,
+      0,
+    );
+    return page.items.length > 0 && loaded < page.total ? loaded : null;
+  },
+  join: (pages) => ({
+    items: pages.flatMap((page) => page.items),
+    total: pages[0]?.total ?? 0,
+  }),
   failure: "load evidence",
   more: "load more evidence",
 });

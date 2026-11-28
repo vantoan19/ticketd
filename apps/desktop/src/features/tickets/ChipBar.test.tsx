@@ -150,27 +150,15 @@ test("a narrow pane shows only present properties and adds a project through the
     "Parent…",
     "Subticket…",
     "Link a ticket…",
+    "Evidence…",
+    "File…",
+    "Document…",
   ]);
   fireEvent.click(within(menu).getByRole("menuitem", { name: "Project" }));
   fireEvent.click(await screen.findByRole("option", { name: "Web portal" }));
   await waitFor(() =>
     expect(changes).toEqual([expect.objectContaining({ reference: "T-KQ1" })]),
   );
-});
-
-test("narrow, empty linked context offers one add row after the description", async () => {
-  renderDetails();
-  resizePane(500);
-  const bar = await screen.findByRole("group", { name: "Ticket properties" });
-  const connected = await screen.findByRole("group", {
-    name: "Add to this ticket",
-  });
-  expect(bar.contains(connected)).toBe(false);
-  expect(
-    screen
-      .getByText("A description to read.")
-      .compareDocumentPosition(connected) & Node.DOCUMENT_POSITION_FOLLOWING,
-  ).toBeTruthy();
 });
 
 test("widening the pane keeps the same bar", async () => {

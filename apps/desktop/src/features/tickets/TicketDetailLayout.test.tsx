@@ -46,7 +46,8 @@ beforeEach(() => {
     // A reported change reads the open Ticket again.
     if (command === "show_ticket") return current;
     if (command === "ticket_history") return history;
-    if (command === "list_evidence") return evidence;
+    if (command === "ticket_evidence_page")
+      return { items: evidence, total: evidence.length };
     if (command === "search_tickets")
       return [{ ...ticket, reference: "T-KQ9", title: "New prerequisite" }];
     if (command === "add_dependency") return current;
@@ -292,21 +293,21 @@ test("the description owns its shortcut, and E starts editing", async () => {
   ).toBeTruthy();
 });
 
-test("an empty ticket groups the Evidence and File actions below the description", async () => {
+test("an empty ticket offers Evidence and Files in its context menu", async () => {
   renderDetails();
-  const row = await screen.findByRole("group", {
-    name: "Add to this ticket",
+  const context = await screen.findByRole("group", {
+    name: "Ticket properties",
   });
-  await within(row).findByRole("button", { name: "File" });
+  fireEvent.keyDown(
+    within(context).getByRole("button", { name: "Add ticket property" }),
+    { key: "Enter" },
+  );
+  const menu = await screen.findByRole("menu", { name: "Add ticket property" });
+  expect(within(menu).getByRole("menuitem", { name: "File…" })).toBeTruthy();
   expect(
-    within(row)
-      .getAllByRole("button")
-      .map((button) => button.textContent),
-  ).toEqual(["Evidence", "File"]);
-  // No empty sections stand in a stack under the description.
-  expect(screen.queryByRole("heading", { name: "Subtickets" })).toBeNull();
-  expect(screen.queryByRole("heading", { name: /^Evidence/ })).toBeNull();
-  fireEvent.click(within(row).getByRole("button", { name: "Evidence" }));
+    within(menu).getByRole("menuitem", { name: "Document…" }),
+  ).toBeTruthy();
+  fireEvent.click(within(menu).getByRole("menuitem", { name: "Evidence…" }));
   expect(
     await screen.findByRole("dialog", { name: "Add evidence" }),
   ).toBeTruthy();
@@ -432,7 +433,14 @@ test("the context line reads Status, Project / Plan, blockers, subtickets, tags,
           ? item.textContent?.slice(0, -1)
           : item.textContent,
       ),
-  ).toEqual(["Blocked by…", "Subticket…", "Link a ticket…"]);
+  ).toEqual([
+    "Blocked by…",
+    "Subticket…",
+    "Link a ticket…",
+    "Evidence…",
+    "File…",
+    "Document…",
+  ]);
 });
 
 test.each(["blockers", "add menu"])(
@@ -502,7 +510,7 @@ test.each(["blockers", "add menu"])(
     );
     await waitFor(() =>
       expect(bridge.invoke).toHaveBeenCalledWith("add_dependency", {
-        prerequisite: "T-KQ9",
+        blocker: "T-KQ9",
         dependent: ticket.reference,
       }),
     );
@@ -558,3 +566,90 @@ test.each([false, true])(
     expect(screen.queryByRole("status", { name: "Ticket agent" })).toBeNull();
   },
 );
+
+test("Files previews three beside the list and four in the expanded ticket, with a header disclosure", async () => {
+  const files = ["report", "logs", "results", "patch", "runbook"].map(
+    (name) => ({
+      id: name,
+      kind: "local_snapshot",
+      display_name: `${name}.txt`,
+      original_filename: `${name}.txt`,
+      locator: `${name}/bytes/${name}.txt`,
+      size_bytes: 32,
+    }),
+  );
+  bridge.invoke.mockImplementation(async (command: string, args?: object) => {
+    if (command === "show_ticket") return ticket;
+    if (command === "ticket_attachments") return files;
+    if (command === "attachment_preview")
+      return {
+        attachment: files.find(
+          (file) => file.id === (args as { id: string }).id,
+        ),
+        status: "unsupported",
+        media_type: null,
+        message: null,
+        can_open: true,
+        usage: { total: 0, entries: [], legacy_drafts_pending: false },
+      };
+    return bridgeDefault(command, args as { reference?: string });
+  });
+  const props = {
+    mention: null,
+    selected: ticket.reference,
+    setSelected: vi.fn(),
+    opened: [ticket.reference],
+    onMentionReady: vi.fn(),
+    onClearMention: vi.fn(),
+    projects: [],
+    plans: [],
+  };
+  const details = (expanded: boolean) => (
+    <TestReads primed={{ ticket }}>
+      <TicketDetails
+        {...props}
+        expanded={expanded}
+        onExpand={() => view.rerender(details(true))}
+        onReturn={() => view.rerender(details(false))}
+      />
+    </TestReads>
+  );
+  const view = render(details(false));
+  const filesList = await screen.findByRole("list", { name: "Files" });
+  const names = () =>
+    within(filesList)
+      .getAllByRole("button", { name: /\.txt$/ })
+      .map((card) => card.getAttribute("aria-label"));
+  await within(filesList).findByRole("button", { name: "report.txt" });
+  expect(names()).toEqual(["report.txt", "logs.txt", "results.txt"]);
+  fireEvent.click(screen.getByRole("button", { name: "Expand ticket" }));
+  expect(names()).toEqual([
+    "report.txt",
+    "logs.txt",
+    "results.txt",
+    "patch.txt",
+  ]);
+  const section = within(screen.getByRole("region", { name: "Files 5" }));
+  const more = section.getByRole("button", { name: "Show all 5" });
+  expect(
+    within(filesList).queryByRole("button", { name: "Show all 5" }),
+  ).toBeNull();
+  expect(section.queryByRole("button", { name: "Attach" })).toBeNull();
+  expect(more.getAttribute("aria-expanded")).toBe("false");
+  fireEvent.click(more);
+  expect(more.getAttribute("aria-expanded")).toBe("true");
+  expect(names()).toEqual([
+    "report.txt",
+    "logs.txt",
+    "results.txt",
+    "patch.txt",
+    "runbook.txt",
+  ]);
+  fireEvent.click(section.getByRole("button", { name: "Show less" }));
+  expect(names()).toEqual([
+    "report.txt",
+    "logs.txt",
+    "results.txt",
+    "patch.txt",
+  ]);
+});

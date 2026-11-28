@@ -1,7 +1,7 @@
 import { Alert, AlertActions, AlertDescription } from "@/components/ui/alert";
 import { Button } from "@/components/ui/button";
 import { useLayoutEffect, useRef, useState } from "react";
-import { Plus } from "lucide-react";
+import { DropdownMenuItem } from "@/components/ui/dropdown-menu";
 import { Evidence } from "@/features/tickets/Evidence";
 import { Backlinks, type MentionTarget } from "@/features/tickets/Backlinks";
 import { RailPlacement } from "@/features/tickets/rail-placement";
@@ -9,7 +9,10 @@ import { TicketClosingLine, TicketParentLine } from "./TicketPageLines";
 import { TicketContextLine } from "./TicketContextLine";
 import { TicketAgentStrip } from "./TicketAgent";
 import { LinkedWork, LinkedWorkDialogs } from "@/features/tickets/LinkedWork";
-import { TicketFiles } from "@/features/tickets/TicketFiles";
+import {
+  TicketFiles,
+  type FileAddRequest,
+} from "@/features/tickets/TicketFiles";
 import { useLinkedWork } from "@/features/tickets/useLinkedWork";
 import { Activity } from "@/features/tickets/Activity";
 import { SourceConversation } from "@/features/tickets/SourceConversation";
@@ -36,6 +39,7 @@ type NoteTarget = { id: string; key: number };
 /** The ticket document with its context line and linked work. */
 export function TicketPage({
   active,
+  expanded = false,
   swap = false,
   leaving = false,
   projects,
@@ -48,6 +52,7 @@ export function TicketPage({
 }: {
   /** Only the selected ticket reads its links, evidence, and backlinks. */
   active: boolean;
+  expanded?: boolean;
   /** Shown after another open ticket: its document fades up once that one has left. */
   swap?: boolean;
   /** Not the open ticket any more, kept on screen for one exit while it fades out. */
@@ -70,31 +75,11 @@ export function TicketPage({
   const [updateTarget, setUpdateTarget] = useState<NoteTarget | null>(null);
   const work = useLinkedWork();
   const trash = useTicketTrash(changed);
-  // Empty Evidence and Files offer their add actions together.
-  const [evidenceCount, setEvidenceCount] = useState<number | null>(null);
   const [evidenceRequest, setEvidenceRequest] = useState(0);
-  const [fileAddTarget, setFileAddTarget] = useState<HTMLSpanElement | null>(
+  const [fileAddRequest, setFileAddRequest] = useState<FileAddRequest | null>(
     null,
   );
-  const addRow = active && !ticket.trashed && (
-    <div
-      className="ticket-add-row"
-      role="group"
-      aria-label="Add to this ticket"
-    >
-      {evidenceCount === 0 && (
-        <Button
-          variant="ghost"
-          size="sm"
-          onClick={() => setEvidenceRequest((count) => count + 1)}
-        >
-          <Plus aria-hidden="true" />
-          Evidence
-        </Button>
-      )}
-      <span ref={setFileAddTarget} />
-    </div>
-  );
+  const [addTrigger, setAddTrigger] = useState<HTMLButtonElement | null>(null);
   const ticketRuns = useTicketRuns(ticket.reference, active);
   // Pages stay mounted while hidden and the shared scrollers keep their
   // offset, so showing a ticket starts its document at the top.
@@ -120,7 +105,10 @@ export function TicketPage({
     <TicketFiles
       key={ticket.reference}
       onOpenUpdate={(id) => setUpdateTarget({ id, key: Date.now() })}
-      emptyTarget={fileAddTarget}
+      expanded={expanded}
+      addRequest={fileAddRequest}
+      hideEmpty
+      addTrigger={addTrigger}
     />
   );
   const relationships = active && (
@@ -136,6 +124,30 @@ export function TicketPage({
         plans={plans}
         work={work}
         select={select}
+        addTriggerRef={setAddTrigger}
+        additionalActions={
+          <>
+            <DropdownMenuItem
+              onSelect={() => setEvidenceRequest((count) => count + 1)}
+            >
+              Evidence…
+            </DropdownMenuItem>
+            <DropdownMenuItem
+              onSelect={() =>
+                setFileAddRequest({ kind: "file", key: Date.now() })
+              }
+            >
+              File…
+            </DropdownMenuItem>
+            <DropdownMenuItem
+              onSelect={() =>
+                setFileAddRequest({ kind: "document", key: Date.now() })
+              }
+            >
+              Document…
+            </DropdownMenuItem>
+          </>
+        }
         onOpenSubtickets={() =>
           linked.current?.scrollIntoView({ block: "start" })
         }
@@ -248,7 +260,6 @@ export function TicketPage({
             {context}
           </TicketEditor>
         )}
-        {addRow}
         <RailPlacement value="column">
           <div ref={linked} className="detail-connected">
             {relationships}
@@ -259,7 +270,7 @@ export function TicketPage({
             trashed={ticket.trashed}
             folded
             addRequest={evidenceRequest}
-            onCount={setEvidenceCount}
+            addTrigger={addTrigger}
           />
         )}
         {

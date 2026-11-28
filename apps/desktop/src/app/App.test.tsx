@@ -8463,14 +8463,8 @@ test("a blocker removed and re-added through Linked is visible and can be remove
     await screen.findByRole("button", { name: "Add ticket property" }),
     { key: "ArrowDown" },
   );
-  fireEvent.click(
-    await screen.findByRole("menuitem", { name: "Link a ticket…" }),
-  );
+  fireEvent.click(await screen.findByRole("menuitem", { name: "Blocked by…" }));
   const dialog = await screen.findByRole("dialog", { name: "Link a ticket" });
-  fireEvent.click(
-    within(dialog).getByRole("combobox", { name: /Relationship/ }),
-  );
-  fireEvent.click(await screen.findByRole("option", { name: "is blocked by" }));
   fireEvent.change(
     within(dialog).getByRole("combobox", {
       name: "Ticket",
@@ -8504,7 +8498,8 @@ test("empty Ticket evidence adds, removes, and restores through Undo", async () 
     ) => {
       if (command === "find_tickets") return [current];
       if (command === "show_ticket") return current;
-      if (command === "list_evidence") return items;
+      if (command === "ticket_evidence_page")
+        return { items, total: items.length };
       if (command === "add_evidence") {
         const key = args?.requestId ?? "";
         const known = writes.get(key);
@@ -8545,7 +8540,11 @@ test("empty Ticket evidence adds, removes, and restores through Undo", async () 
   fireEvent.click(
     await screen.findByRole("button", { name: /Evidence outcome/ }),
   );
-  fireEvent.click(await screen.findByRole("button", { name: "Evidence" }));
+  fireEvent.keyDown(
+    await screen.findByRole("button", { name: "Add ticket property" }),
+    { key: "Enter" },
+  );
+  fireEvent.click(await screen.findByRole("menuitem", { name: "Evidence…" }));
   const dialog = await screen.findByRole("dialog", { name: "Add evidence" });
   fireEvent.change(within(dialog).getByLabelText("Name"), {
     target: { value: "Review" },
@@ -8640,9 +8639,12 @@ test("empty Ticket Files adds an existing file and detaches with Undo", async ()
   );
   render(<App />);
   fireEvent.click(await screen.findByRole("button", { name: /File outcome/ }));
-  fireEvent.keyDown(await screen.findByRole("button", { name: "File" }), {
-    key: "Enter",
-  });
+  fireEvent.keyDown(
+    await screen.findByRole("button", { name: "Add ticket property" }),
+    {
+      key: "Enter",
+    },
+  );
   fireEvent.click(await screen.findByRole("menuitem", { name: "File…" }));
   fireEvent.click(await screen.findByRole("radio", { name: "Existing files" }));
   fireEvent.click(
@@ -8747,12 +8749,12 @@ test("an empty Ticket folds Activity and R opens its existing composer without l
   });
   render(<App />);
   fireEvent.click(await screen.findByRole("button", { name: /Quiet outcome/ }));
-  await screen.findByRole("button", { name: "File" });
+  await screen.findByRole("button", { name: "Add ticket property" });
   await vi.waitFor(() =>
     expect(screen.queryByRole("heading", { name: "Activity" })).toBeNull(),
   );
   expect(
-    screen.getAllByRole("group", { name: "Add to this ticket" }),
+    screen.getAllByRole("group", { name: "Ticket properties" }),
   ).toHaveLength(1);
   fireEvent.keyDown(document.body, { key: "r" });
   expect(await screen.findByRole("heading", { name: "Activity" })).toBeTruthy();
@@ -11016,7 +11018,8 @@ test("pointer Delete removes existing evidence directly and Undo restores its fi
     (command: string, args?: { input?: typeof original }) => {
       if (command === "find_tickets") return [current];
       if (command === "show_ticket") return current;
-      if (command === "list_evidence") return items;
+      if (command === "ticket_evidence_page")
+        return { items, total: items.length };
       if (command === "delete_evidence") {
         items = [];
         return;
@@ -11169,7 +11172,10 @@ test("Evidence announces a pending initial read without claiming empty and retai
   bridge.invoke.mockImplementation((command: string) => {
     if (command === "find_tickets") return [current];
     if (command === "show_ticket") return current;
-    if (command === "list_evidence") return initial ? firstRead : [record];
+    if (command === "ticket_evidence_page")
+      return initial
+        ? firstRead.then((items) => ({ items, total: items.length }))
+        : { items: [record], total: 1 };
     return bridgeDefault(command);
   });
   render(<App />);
@@ -11203,7 +11209,7 @@ test("Evidence announces a pending initial read without claiming empty and retai
   bridge.invoke.mockImplementation((command: string) => {
     if (command === "find_tickets") return [current];
     if (command === "show_ticket") return current;
-    if (command === "list_evidence")
+    if (command === "ticket_evidence_page")
       throw new Error("SYNTHETIC_REFRESH_FAILURE");
     return bridgeDefault(command);
   });
@@ -12065,7 +12071,7 @@ test("Activity R focuses the single composer and failed posting retains its requ
   });
   render(<App />);
   fireEvent.click(await screen.findByRole("button", { name: /First/ }));
-  await screen.findByRole("button", { name: "File" });
+  await screen.findByRole("button", { name: "Add ticket property" });
   fireEvent.keyDown(document.body, { key: "r" });
   const editor = await screen.findByRole("textbox", {
     name: "New update rich text",
@@ -12201,7 +12207,7 @@ test("Ticket description and update draft share one visible floating bar and fol
   });
   render(<App />);
   fireEvent.click(await screen.findByRole("button", { name: /First/ }));
-  await screen.findByRole("button", { name: "File" });
+  await screen.findByRole("button", { name: "Add ticket property" });
   fireEvent.keyDown(document.body, { key: "r" });
   const update = await screen.findByRole("textbox", {
     name: "New update rich text",
