@@ -183,13 +183,19 @@ test("the header is the version and one promise line, and Help holds the four li
   ]);
 });
 
-test("About ends with a Support ticketd section that stars the repository", async () => {
+test("About opens the repository and the maintainer's Ko-fi profile", async () => {
   renderPage();
   expect(screen.getByRole("heading", { name: "Support ticketd" })).toBeTruthy();
   fireEvent.click(screen.getByRole("button", { name: "Star on GitHub" }));
   await waitFor(() =>
     expect(workspaceClient.openLink).toHaveBeenCalledWith(
       "https://github.com/vantoan19/ticketd",
+    ),
+  );
+  fireEvent.click(screen.getByRole("button", { name: "Buy me a coffee" }));
+  await waitFor(() =>
+    expect(workspaceClient.openLink).toHaveBeenLastCalledWith(
+      "https://ko-fi.com/vantoan19",
     ),
   );
 });

@@ -1,7 +1,7 @@
 {
   "$schema": "../gen/schemas/desktop-schema.json",
   "identifier": "default",
-  "description": "Main window; may reveal a file in the file manager, open ticketd's GitHub pages and linked GitHub issues, show native save and open dialogs, and follow the Light or Dark choice for the title bar and window color, draw its own title bar (drag, minimize, maximize, close), hold a close request open while pending uploads finish and then close, zoom its own page for accessible reflow, read its own size and scale and resize itself to redraw a webview that lost its display scale, and send system notifications for due reminders and Chats, with no filesystem or shell access.",
+  "description": "The main window can reveal a file in the file manager, open ticketd's GitHub pages, linked GitHub issues, and the maintainer's Ko-fi profile, show native save and open dialogs, and follow the Light or Dark choice for the title bar and window color, draw its own title bar (drag, minimize, maximize, close), hold a close request open while pending uploads finish and then close, zoom its own page for accessible reflow, read its own size and scale and resize itself to redraw a webview that lost its display scale, and send system notifications for due reminders and Chats, with no filesystem or shell access.",
   "windows": ["main"],
   "permissions": [
     "core:event:allow-emit-to",
@@ -52,7 +52,7 @@
           "url": "https://cli.github.com/"
         },
         {
-          "url": "https://buymeacoffee.com/*"
+          "url": "https://ko-fi.com/vantoan19"
         },
         {
           "url": "https://code.claude.com/docs/*"

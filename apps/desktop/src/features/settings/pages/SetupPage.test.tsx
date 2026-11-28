@@ -32,13 +32,6 @@ import { githubSource, githubIntegration } from "@/test/source-fixtures";
 
 vi.mock("@/lib/api/github", () => ({ getGithubIntegration: vi.fn() }));
 
-const coffee = vi.hoisted(() => ({ url: null as string | null }));
-vi.mock("@/lib/support-links", () => ({
-  REPOSITORY_URL: "https://github.com/vantoan19/ticketd",
-  get BUY_ME_A_COFFEE_URL() {
-    return coffee.url;
-  },
-}));
 vi.mock("@tauri-apps/api/core", () => ({
   invoke: vi.fn().mockResolvedValue(104857600),
 }));
@@ -189,7 +182,6 @@ function Settings({
 
 beforeEach(() => {
   resetNotificationPermission();
-  coffee.url = null;
   vi.mocked(cliClient.check).mockResolvedValue(withCommand);
   vi.mocked(agentSkillsClient.list).mockResolvedValue(skillsReady);
   vi.mocked(client.firstAgentUpdate).mockResolvedValue(null);
@@ -256,19 +248,14 @@ test("every step ticks from what is true on this computer, and the row counts th
     "Notifications are allowed.",
   );
   expect(setupRow()?.textContent).toBe("Set up ticketd 5 of 5");
-  // Finished: the page reads as a summary with one quiet line, and no Hide.
   expect(screen.queryByRole("button", { name: "Hide checklist" })).toBeNull();
-  expect(screen.getByText(/ticketd is free and open source/).textContent).toBe(
-    "ticketd is free and open source. If it helps you, Star on GitHub.",
-  );
 });
 
-test("the finished line opens the repository, and Buy me a coffee only once the maintainer has a name", async () => {
+test("the finished line opens the repository and the maintainer's Ko-fi profile", async () => {
   vi.mocked(client.firstAgentUpdate).mockResolvedValue(agentUpdate);
   vi.mocked(sourcesClient.list).mockResolvedValue([githubSource]);
   vi.mocked(getGithubIntegration).mockResolvedValue(githubIntegration());
   vi.mocked(notificationClient.permission).mockResolvedValue(allowed);
-  coffee.url = "https://buymeacoffee.com/maintainer";
   render(<Settings sync={synced} />);
   await settle();
   expect(screen.getByText(/ticketd is free and open source/).textContent).toBe(
@@ -280,7 +267,7 @@ test("the finished line opens the repository, and Buy me a coffee only once the 
   );
   fireEvent.click(screen.getByRole("link", { name: "Buy me a coffee" }));
   expect(workspaceClient.openLink).toHaveBeenLastCalledWith(
-    "https://buymeacoffee.com/maintainer",
+    "https://ko-fi.com/vantoan19",
   );
 });
 
