@@ -398,22 +398,24 @@ export function WorkspaceSidebar({
             </Button>
           </Tooltip>
         </div>
-        <Tooltip
-          content="Search or jump to…"
-          shortcut={shortcutLabel("command-palette")}
-        >
-          <Button
-            variant="jump"
-            aria-label="Search or jump to…"
-            data-responsive-navigation="search"
-            aria-keyshortcuts={ariaKeyShortcuts("command-palette")}
-            onClick={(event) => onOpenPalette(event.currentTarget)}
+        <div className="sidebar-nav sidebar-jump">
+          <Tooltip
+            content="Search or jump to…"
+            shortcut={shortcutLabel("command-palette")}
           >
-            <Search aria-hidden="true" />
-            <span>Search or jump to…</span>
-            <Kbd aria-hidden="true">{shortcutLabel("command-palette")}</Kbd>
-          </Button>
-        </Tooltip>
+            <SidebarMenuButton
+              type="button"
+              aria-label="Search or jump to…"
+              data-responsive-navigation="search"
+              aria-keyshortcuts={ariaKeyShortcuts("command-palette")}
+              onClick={(event) => onOpenPalette(event.currentTarget)}
+            >
+              <Search aria-hidden="true" />
+              <span className="sidebar-label">Search or jump to…</span>
+              <Kbd aria-hidden="true">{shortcutLabel("command-palette")}</Kbd>
+            </SidebarMenuButton>
+          </Tooltip>
+        </div>
       </SidebarHeader>
       <SidebarContent
         className="sidebar-body"

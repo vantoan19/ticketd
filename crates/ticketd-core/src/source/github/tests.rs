@@ -168,6 +168,49 @@ fn issue(id: u64, number: u64, repo: &str) -> Value {
     })
 }
 
+#[test]
+fn repository_picker_filters_paginated_results_from_the_github_cli() {
+    let http = Arc::new(Fixture::default());
+    let mut connector = connector_at(DEFAULT_API_URL, &http, None);
+    connector.repository_options_gh = Some(gh::GhApi::new(|args| {
+        let [api, hostname, host, include, endpoint] = args else {
+            panic!("unexpected GitHub CLI arguments: {args:?}");
+        };
+        assert_eq!(
+            [*api, *hostname, *host, *include],
+            ["api", "--hostname", "github.com", "--include"]
+        );
+        let first = "user/repos?per_page=100&sort=pushed&affiliation=owner,collaborator,organization_member";
+        let next = "user/repos?affiliation=owner%2Ccollaborator%2Corganization_member&page=2&per_page=100&sort=pushed";
+        let (page, link) = match *endpoint {
+            endpoint if endpoint == first => (
+                json!([{"full_name": "acme/gizmo", "private": false}]),
+                format!("Link: <https://api.github.com/{next}>; rel=\"next\"\r\n"),
+            ),
+            endpoint if endpoint == next => (
+                json!([{"full_name": "acme/widgets", "private": true}]),
+                String::new(),
+            ),
+            _ => panic!("unexpected GitHub endpoint: {endpoint}"),
+        };
+        Ok(gh::Output {
+            success: true,
+            stdout: format!(
+                "HTTP/2.0 200 OK\r\n{link}Content-Type: application/json\r\n\r\n{page}"
+            )
+            .into_bytes(),
+            stderr: Vec::new(),
+        })
+    }));
+    let options = connector
+        .options("repositories", "WIDGET", &ConfigValues::new())
+        .unwrap();
+    assert_eq!(options.len(), 1);
+    assert_eq!(options[0].value, "acme/widgets");
+    assert_eq!(options[0].description.as_deref(), Some("Private"));
+    assert!(http.urls().is_empty());
+}
+
 fn public_issue(id: u64, number: u64, repository: &str) -> Value {
     let mut item = issue(id, number, repository);
     item["url"] = json!(format!(

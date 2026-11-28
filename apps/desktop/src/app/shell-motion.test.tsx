@@ -228,7 +228,7 @@ it("the collapsed sidebar fades its labels out and narrows on the smooth spring"
     /\.sidebar \{[^}]*transition:\s*width var\(--spring-smooth-t\) var\(--spring-smooth\)/,
   );
   expect(styles).toMatch(
-    /\.sidebar\[data-collapsed\] :is\(\.sidebar-label[^{]*\{[^}]*opacity: 0;[^}]*var\(--dur-exit\)/,
+    /\.sidebar\[data-collapsed\]\s+:is\(\.sidebar-label[^{]*\{[^}]*opacity: 0;[^}]*var\(--dur-exit\)/,
   );
 });
 
@@ -312,8 +312,7 @@ it("what the rail drops stays hidden until the width has opened", () => {
     ".sidebar-wordmark",
     ".sidebar-heading",
     ".sidebar-count",
-    ".ui-button-jump > span",
-    ".ui-button-jump kbd",
+    ".sidebar-jump kbd",
   ])
     expect(rules).toContain(part);
   expect(rules).toMatch(/\.sidebar:not\(\[data-collapsed\]\)/);
