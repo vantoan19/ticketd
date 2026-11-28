@@ -23,25 +23,10 @@ test("a card shrinking above the viewport in an instant keeps the document ancho
     },
   );
 
-  const cardTop = 350;
-  const viewportHeight = 300;
-  const otherContentHeight = 720;
-  let offset = 500;
-  let scroller: HTMLElement;
-  let card: HTMLElement;
-  const cardHeight = () =>
-    parseFloat(
-      card.querySelector<HTMLElement>(".ticket-decision-content")!.style.height,
-    );
-  const scrollHeight = () => otherContentHeight + cardHeight();
-  const clamp = (top: number) =>
-    Math.max(0, Math.min(top, scrollHeight() - viewportHeight));
   vi.spyOn(HTMLElement.prototype, "getBoundingClientRect").mockImplementation(
     function (this: HTMLElement) {
       if (this.classList.contains("ticket-decision-measure"))
         return new DOMRect(0, 0, 0, contentHeight);
-      if (this === card)
-        return new DOMRect(0, cardTop - scroller.scrollTop, 0, cardHeight());
       return new DOMRect();
     },
   );
@@ -52,8 +37,20 @@ test("a card shrinking above the viewport in an instant keeps the document ancho
       </div>
     </div>,
   );
-  scroller = container.querySelector<HTMLElement>(".detail-scroll")!;
-  card = container.querySelector<HTMLElement>('[data-testid="card"]')!;
+  const scroller = container.querySelector<HTMLElement>(".detail-scroll")!;
+  const card = container.querySelector<HTMLElement>('[data-testid="card"]')!;
+  const box = card.querySelector<HTMLElement>(".ticket-decision-content")!;
+  const cardTop = 350;
+  const viewportHeight = 300;
+  const otherContentHeight = 720;
+  let offset = 500;
+  const cardHeight = () => parseFloat(box.style.height);
+  const scrollHeight = () => otherContentHeight + cardHeight();
+  const clamp = (top: number) =>
+    Math.max(0, Math.min(top, scrollHeight() - viewportHeight));
+  vi.spyOn(card, "getBoundingClientRect").mockImplementation(
+    () => new DOMRect(0, cardTop - scroller.scrollTop, 0, cardHeight()),
+  );
   Object.defineProperties(scroller, {
     clientHeight: { value: viewportHeight },
     scrollHeight: { get: scrollHeight },
