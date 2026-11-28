@@ -15,9 +15,13 @@
 .plan-flow-lanes {
   position: relative;
   display: grid;
-  grid-template-columns: repeat(3, minmax(280px, 1fr));
+  grid-template-columns: repeat(2, minmax(280px, 1fr));
   gap: 32px;
   min-height: 100%;
+  min-width: 592px;
+}
+.plan-flow-lanes[data-has-later] {
+  grid-template-columns: repeat(3, minmax(280px, 1fr));
   min-width: 904px;
 }
 /* A lane's panel arrives with its heading, not before it: the well fades in on

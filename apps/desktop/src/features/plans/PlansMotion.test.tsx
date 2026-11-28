@@ -163,9 +163,9 @@ test("a Flow's lane headings and tickets arrive in turn, left to right", async (
   await screen.findByRole("button", { name: /T-A1/ });
   const arrivals = appears(container).map((each) => each.textContent);
   expect(arrivals).toEqual([
-    expect.stringContaining("Now"),
+    expect.stringContaining("Can start"),
     expect.stringContaining("T-A1"),
-    expect.stringContaining("Next"),
+    expect.stringContaining("After one step"),
     expect.stringContaining("T-B1"),
     expect.stringContaining("Later"),
     expect.stringContaining("T-C1"),
