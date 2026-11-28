@@ -20,6 +20,7 @@ type OpenTicket = (reference: string, trigger?: HTMLElement) => void;
 export function PlanOverviewSections({
   work,
   updates,
+  statusSince,
   projects,
   selected,
   onOpen,
@@ -28,6 +29,7 @@ export function PlanOverviewSections({
 }: {
   work: PlanOverviewWork;
   updates: View["latest_updates"];
+  statusSince: View["status_since"];
   projects: readonly Project[];
   selected: string | null;
   onOpen: OpenTicket;
@@ -55,6 +57,7 @@ export function PlanOverviewSections({
           key={item.ticket.reference}
           item={item}
           brief={updates[item.ticket.reference]?.brief.text ?? ""}
+          timestamp={statusSince[item.ticket.reference]}
           subtickets={subtickets.get(item.ticket.reference) ?? 0}
           folder={
             projects.find(
@@ -178,6 +181,7 @@ function NotCounted({ children }: { children: ReactNode }) {
 function PlanOverviewRow({
   item: { ticket, group, unblocks, waitsOn },
   brief,
+  timestamp,
   subtickets,
   folder,
   selected,
@@ -187,6 +191,7 @@ function PlanOverviewRow({
 }: {
   item: WorkItem;
   brief: string;
+  timestamp: string | undefined;
   subtickets: number;
   folder: string | null;
   selected: boolean;
@@ -290,14 +295,13 @@ function PlanOverviewRow({
           Start in Chat
         </Button>
       )}
-      <PlanOverviewRowTime ticket={ticket} />
+      <PlanOverviewRowTime timestamp={timestamp} />
     </li>
   );
 }
 
-function PlanOverviewRowTime({ ticket }: { ticket: View["members"][number] }) {
-  const timestamp = ticket.updated_at;
-  if (!timestamp || !Number.isFinite(Date.parse(timestamp))) return null;
+function PlanOverviewRowTime({ timestamp }: { timestamp: string | undefined }) {
+  if (!timestamp) return null;
   return (
     <span className="plan-overview-row-time">
       <Time value={timestamp} format="compact" />

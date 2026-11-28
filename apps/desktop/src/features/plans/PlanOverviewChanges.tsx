@@ -45,6 +45,11 @@ export function PlanOverviewChanges({
         <ul className="plan-overview-changes">
           {changes.map((event) => (
             <li key={event.reference}>
+              {event.kind === "status" && (
+                <span className="plan-overview-change-icon">
+                  <StatusIcon status={event.to} decorative />
+                </span>
+              )}
               <RecordLink
                 variant="row"
                 reference={event.reference}
@@ -68,7 +73,6 @@ function ChangeText({ event }: { event: PlanActivity }) {
     case "status":
       return (
         <>
-          <StatusIcon status={event.to} decorative />
           <span>{event.title}</span>
           <span className="text-muted-foreground">{event.to}</span>
         </>

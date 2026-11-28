@@ -33,6 +33,10 @@ const viewSchema = lazySchema(() =>
       duplicate: z.number().default(0),
     }),
     latest_updates: z.record(z.string(), latestUpdateSchema).default({}),
+    status_since: z
+      .record(z.string(), z.iso.datetime({ offset: true }))
+      .default({}),
+    pull_request: z.string().nullable().default(null),
     members: z.array(
       z.object({
         id: ticketSchema.shape.id.optional(),
@@ -92,6 +96,9 @@ export type PlanTicketFiles = z.infer<typeof filesSchema>[number];
 export const plansClient = {
   async files(id: string) {
     return filesSchema.parse(await invoke("plan_files", { id }));
+  },
+  async openPullRequest(id: string, url: string) {
+    await invoke("open_plan_pull_request", { id, url });
   },
   async activity(id: string, limit: number) {
     return activitySchema.parse(await invoke("plan_activity", { id, limit }));

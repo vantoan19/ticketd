@@ -58,6 +58,11 @@
   -webkit-box-orient: vertical;
   overflow: hidden;
 }
+.plan-overview-links {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px 12px;
+}
 .plan-overview-links [data-slot="record-title"] svg {
   flex: none;
   width: 14px;

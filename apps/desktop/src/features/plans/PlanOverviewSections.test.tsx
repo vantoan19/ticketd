@@ -84,6 +84,7 @@ async function openPlan(
   members: Member[],
   latest_updates: Record<string, Update> = {},
   chatEnabled = false,
+  facts: { status_since?: Record<string, string>; pull_request?: string } = {},
 ) {
   const count = (status: string) =>
     members.filter((ticket) => ticket.status === status).length;
@@ -100,6 +101,10 @@ async function openPlan(
             plan,
             members,
             latest_updates,
+            status_since: Object.fromEntries(
+              members.map((ticket) => [ticket.reference, ticket.updated_at]),
+            ),
+            ...facts,
             counts: {
               todo: count("Todo"),
               in_review: count("In review"),
@@ -109,6 +114,8 @@ async function openPlan(
               duplicate: count("Duplicate"),
             },
           };
+        case "open_plan_pull_request":
+          return null;
         case "show_ticket":
           return members.find((ticket) => ticket.reference === args?.reference);
         case "find_tickets_with_updates":
@@ -135,6 +142,7 @@ async function openPlan(
 afterEach(() => {
   cleanup();
   invoke.mockReset();
+  vi.restoreAllMocks();
 });
 
 test("groups the work in reading order and puts the reviews and ready tickets that unblock the most first", async () => {
@@ -340,4 +348,87 @@ test("Start in Chat opens an unsent draft about the Ready ticket", async () => {
   expect(screen.getByRole("button", { name: "Back to T-31" })).toBeTruthy();
   expect(create).not.toHaveBeenCalled();
   expect(invoke).not.toHaveBeenCalledWith("show_ticket", { reference: "T-31" });
+});
+
+test("shows time in each current status and puts longer waiting reviews first after unblocking priority", async () => {
+  vi.spyOn(Date, "now").mockReturnValue(Date.parse("2026-11-28T12:00:00Z"));
+  const recent = member(21, "Recent review", "In review");
+  const oldest = member(22, "Old review", "In review");
+  const mostUnblocking = member(23, "Release review", "In review");
+  const { overview } = await openPlan(
+    [
+      recent,
+      oldest,
+      mostUnblocking,
+      member(31, "Writing tests", "In progress"),
+      member(41, "Prepare the notes", "Todo", "Ready"),
+      member(51, "Publish release", "Todo", "Blocked", [mostUnblocking]),
+      member(61, "Finish review", "Done"),
+    ],
+    {},
+    false,
+    {
+      status_since: {
+        "T-21": "2026-11-28T09:00:00Z",
+        "T-22": "2026-11-27T12:00:00Z",
+        "T-23": "2026-11-28T11:30:00Z",
+        "T-31": "2026-11-28T10:00:00Z",
+        "T-41": "2026-11-26T12:00:00Z",
+        "T-51": "2026-11-25T12:00:00Z",
+        "T-61": "2026-11-24T12:00:00Z",
+      },
+    },
+  );
+  const regions = within(overview);
+  const needsYou = within(
+    await regions.findByRole("region", { name: "Needs you" }),
+  );
+  expect(needsYou.getAllByRole("button")).toEqual([
+    needsYou.getByRole("button", { name: /Release review/ }),
+    needsYou.getByRole("button", { name: /Old review/ }),
+    needsYou.getByRole("button", { name: /Recent review/ }),
+  ]);
+  expect(needsYou.getAllByRole("time").map((time) => time.textContent)).toEqual(
+    ["30m", "1d", "3h"],
+  );
+  for (const [name, time] of [
+    ["In progress", "2h"],
+    ["Ready", "2d"],
+    ["Blocked", "3d"],
+  ] as const) {
+    expect(
+      within(regions.getByRole("region", { name })).getByRole("time")
+        .textContent,
+    ).toBe(time);
+  }
+  const done = within(regions.getByRole("region", { name: "Done" }));
+  fireEvent.click(done.getByRole("button", { name: "Done 1" }));
+  expect(done.getByRole("time").textContent).toBe("4d");
+  expect(done.getByRole("time").getAttribute("datetime")).toBe(
+    "2026-11-24T12:00:00Z",
+  );
+});
+
+test("opens the pull request from the number in its URL", async () => {
+  const url = "https://github.com/example/app/pull/616?view=files";
+  const { overview } = await openPlan([], {}, false, { pull_request: url });
+  const pr = await within(overview).findByRole("button", {
+    name: "Pull request #616",
+  });
+  expect(pr.textContent).toBe("#616");
+  fireEvent.click(pr);
+  expect(invoke).toHaveBeenCalledWith("open_plan_pull_request", {
+    id: plan.id,
+    url,
+  });
+});
+
+test("the Plan head has no pull request action when no member has one", async () => {
+  const { overview } = await openPlan([
+    member(21, "Approve release", "In review"),
+  ]);
+  await within(overview).findByRole("region", { name: "Needs you" });
+  expect(
+    within(overview).queryByRole("button", { name: /pull request/i }),
+  ).toBeNull();
 });
