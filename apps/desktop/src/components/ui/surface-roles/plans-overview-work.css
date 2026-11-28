@@ -54,7 +54,8 @@
   }
 }
 
-:where([data-width~="max-600"]) .plan-overview-row-title {
+:where([data-width~="max-600"])
+  :is(.plan-overview-row-title, .plan-overview-row-note) {
   display: -webkit-box;
   -webkit-line-clamp: 2;
   -webkit-box-orient: vertical;
