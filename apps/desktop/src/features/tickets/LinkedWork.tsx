@@ -8,9 +8,16 @@ import {
   type Ref,
 } from "react";
 import { Progress } from "@/components/ui/progress";
-import { X } from "lucide-react";
+import { MoreHorizontal, X } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Disclosure } from "@/components/ui/disclosure";
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuGroup,
+  DropdownMenuItem,
+  DropdownMenuTrigger,
+} from "@/components/ui/dropdown-menu";
 import { IconButton } from "@/components/ui/icon-button";
 import { FailureAlert, FailureState } from "@/components/ui/failure-alert";
 import { RecordLink } from "@/components/ui/record-link";
@@ -92,6 +99,44 @@ const relatedKinds: LinkKind[] = ["related", "discovered_while", "discoveries"];
 const openLimit = 7;
 const activeStatuses = ["In review", "In progress", "Todo"];
 
+function BlockingSubticketActions({
+  row,
+  blocker,
+  disabled,
+  onRemove,
+}: {
+  row: LinkRow;
+  blocker: LinkRow;
+  disabled: boolean;
+  onRemove: (row: LinkRow) => void;
+}) {
+  return (
+    <DropdownMenu>
+      <DropdownMenuTrigger asChild>
+        <IconButton
+          size="icon-xs"
+          label={`Actions for linked ${row.reference}`}
+        >
+          <MoreHorizontal aria-hidden="true" />
+        </IconButton>
+      </DropdownMenuTrigger>
+      <DropdownMenuContent align="end">
+        <DropdownMenuGroup>
+          <DropdownMenuItem disabled={disabled} onSelect={() => onRemove(row)}>
+            Remove subticket
+          </DropdownMenuItem>
+          <DropdownMenuItem
+            disabled={disabled}
+            onSelect={() => onRemove(blocker)}
+          >
+            Remove blocker
+          </DropdownMenuItem>
+        </DropdownMenuGroup>
+      </DropdownMenuContent>
+    </DropdownMenu>
+  );
+}
+
 export type LinkedWorkHandle = { openSubtickets(): void };
 
 export function LinkedWork({
@@ -118,11 +163,23 @@ export function LinkedWork({
   const links = current?.links;
   const related = work.rows.filter((row) => relatedKinds.includes(row.kind));
   const subtickets = work.rows.filter((row) => row.kind === "subticket");
-  const blockers = work.rows.filter((row) => row.kind === "blocked_by");
+  const subticketReferences = new Set(subtickets.map((row) => row.reference));
+  const blockersByReference = new Map(
+    work.rows
+      .filter((row) => row.kind === "blocked_by")
+      .map((row) => [row.reference, row]),
+  );
+  const blockers = [...blockersByReference.values()].filter(
+    (row) => !subticketReferences.has(row.reference),
+  );
   const blocking = work.rows.filter((row) => row.kind === "blocks");
   const parent = work.rows.filter((row) => row.kind === "parent");
   const duplicates = work.rows.filter((row) => isDuplicateKind(row.kind));
-  const allBlockers = links ? orderBlockers(work) : [];
+  const allBlockers = links
+    ? orderBlockers(work).filter(
+        (row) => !subticketReferences.has(row.reference),
+      )
+    : [];
   const subticketPartial = links?.children.next_offset != null;
   const total = subticketPartial
     ? (links?.children_progress.total ?? 0)
@@ -222,43 +279,59 @@ export function LinkedWork({
   const external = externalDuplicateTarget(ticket);
   const isGitHubOwned = externalSource(ticket)?.provider === "github";
   const order = work.rows.map((row) => `${row.kind}-${row.reference}`).join();
-  const renderRow = (row: LinkRow) => (
-    <ReferenceRow
-      key={`${row.kind}-${row.reference}`}
-      kind={row.kind}
-      animated
-      layoutDependency={order}
-      density={density}
-      reference={row.reference}
-      title={row.title}
-      status={row.status}
-      statusLabel={statusText(row)}
-      caption={statusText(row)}
-      onOpen={() => select(row.reference)}
-      action={
-        readOnly ? undefined : isDuplicateKind(row.kind) ? (
-          externalSource(work.ticket)?.status_locked ? undefined : (
-            <RemoveDuplicate
+  function renderRow(row: LinkRow) {
+    const blocker =
+      row.kind === "subticket"
+        ? blockersByReference.get(row.reference)
+        : undefined;
+    const caption = blocker
+      ? `${statusText(row)} · blocks this`
+      : statusText(row);
+    return (
+      <ReferenceRow
+        key={`${row.kind}-${row.reference}`}
+        kind={row.kind}
+        animated
+        layoutDependency={order}
+        density={density}
+        reference={row.reference}
+        title={row.title}
+        status={row.status}
+        statusLabel={statusText(row)}
+        caption={caption}
+        onOpen={() => select(row.reference)}
+        action={
+          readOnly ? undefined : isDuplicateKind(row.kind) ? (
+            externalSource(work.ticket)?.status_locked ? undefined : (
+              <RemoveDuplicate
+                row={row}
+                ticket={reference}
+                disabled={pending}
+                onRemove={() => void work.remove(row)}
+              />
+            )
+          ) : blocker ? (
+            <BlockingSubticketActions
               row={row}
-              ticket={reference}
+              blocker={blocker}
               disabled={pending}
-              onRemove={() => void work.remove(row)}
+              onRemove={(link) => void work.remove(link)}
             />
+          ) : (
+            <IconButton
+              label={`Remove ${row.reference} from ${linkLabel(row.kind)}`}
+              size="icon-xs"
+              tooltipSide="top"
+              disabled={pending}
+              onClick={() => void work.remove(row)}
+            >
+              <X aria-hidden="true" />
+            </IconButton>
           )
-        ) : (
-          <IconButton
-            label={`Remove ${row.reference} from ${linkLabel(row.kind)}`}
-            size="icon-xs"
-            tooltipSide="top"
-            disabled={pending}
-            onClick={() => void work.remove(row)}
-          >
-            <X aria-hidden="true" />
-          </IconButton>
-        )
-      }
-    />
-  );
+        }
+      />
+    );
+  }
   const hasRelationships =
     !current ||
     current.failure ||
