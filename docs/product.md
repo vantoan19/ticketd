@@ -403,7 +403,7 @@ display name. The per-file limit is 100 MiB.
   Markdown links (`ticketd://attachment/<workspace-id>/<attachment-id>`) by file
   selection, drop, or screenshot paste, with per-file progress, Cancel, and Retry.
 - The Attachments library searches names, filenames, IDs, and sizes, with All files,
-  In use, and Unused filters. Images, video, and audio preview locally, a self-contained HTML report renders read-only and offline in the viewer, a PDF opens as pages with a page number, zoom and Fit, and a log or text file opens with line numbers, Find, Wrap lines and copy (the whole file up to 20 MB, otherwise its last 5 MB, and the viewer says which).
+  In use, and Unused filters. Images, video, and audio preview locally. Zoom in on an image and drag it to inspect areas outside the visible preview. A self-contained HTML report renders read-only and offline in the viewer, a PDF opens as pages with a page number, zoom and Fit, and a log or text file opens with line numbers, Find, Wrap lines and copy (the whole file up to 20 MB, otherwise its last 5 MB, and the viewer says which).
 - Cleanup is explicit and reversible: unused files move to quarantine, can be
   restored, and are removed only by a confirmed purge that rechecks every protecting
   reference (saved references, drafts, Undo, Trash).

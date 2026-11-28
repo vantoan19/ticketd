@@ -386,12 +386,19 @@
   flex: none;
   max-width: none;
   margin: auto;
+  user-select: none;
 }
 .attachment-preview-image[data-zoom="in"] {
   cursor: zoom-in;
 }
 .attachment-preview-image[data-zoom="out"] {
   cursor: zoom-out;
+}
+.attachment-preview-image[data-pannable] {
+  cursor: grab;
+}
+.attachment-preview-image[data-dragging] {
+  cursor: grabbing;
 }
 .attachment-preview-canvas video {
   max-width: 100%;

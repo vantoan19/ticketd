@@ -4,6 +4,7 @@ import {
   useRef,
   useState,
   type CSSProperties,
+  type PointerEvent as ReactPointerEvent,
   type RefObject,
 } from "react";
 import { ZoomIn, ZoomOut } from "lucide-react";
@@ -18,12 +19,13 @@ import { ViewBar, ViewBarGroup } from "./ViewBar";
 /** The room around the picture inside the stage: 20px, and 72px under it for the bar. */
 const PAD = 20;
 const BAR_ROOM = 72;
+const DRAG_THRESHOLD = 4;
 
 /**
  * A picture in the viewer: it fits inside the stage above the view bar on its own
  * checkerboard, and the stage stays recessed. The bar is the zoom group
- * ("- 66% + · Fit"); clicking the picture toggles Fit and 100%, and + - 0 zoom and
- * fit while the stage has focus (the PDF's keys, `attachments-zoom`).
+ * ("- 66% + · Fit"); clicking the picture toggles Fit and 100%, and dragging
+ * pans an overflowing picture. + - 0 zoom and fit while the stage has focus.
  */
 export function ImageStage({
   file,
@@ -44,8 +46,13 @@ export function ImageStage({
   // The width the stage shows, which the bar spans so it stays centered while it scrolls.
   const [shown, setShown] = useState(0);
   const [zoom, setZoom] = useState<number | "fit">("fit");
+  const [dragging, setDragging] = useState(false);
+  const dragListeners = useRef<AbortController | null>(null);
+  const suppressClick = useRef(false);
   // The point of the picture in the middle of the view, kept across a zoom.
   const anchor = useRef<{ x: number; y: number } | null>(null);
+
+  useEffect(() => () => dragListeners.current?.abort(), []);
 
   useEffect(() => {
     const picture = image.current;
@@ -79,6 +86,61 @@ export function ImageStage({
 
   const fit = natural ? fitScale(natural, room) : 1;
   const scale = zoom === "fit" ? fit : zoom;
+
+  function startPan(event: ReactPointerEvent<HTMLImageElement>) {
+    if (event.button !== 0) return;
+    suppressClick.current = false;
+    const stage = scrollerRef.current;
+    // Touch already pans the scroll container with the platform's gestures.
+    if (
+      event.pointerType !== "mouse" ||
+      !stage ||
+      (stage.scrollWidth <= stage.clientWidth &&
+        stage.scrollHeight <= stage.clientHeight)
+    )
+      return;
+    const { pointerId, currentTarget } = event;
+    currentTarget.setPointerCapture(pointerId);
+    dragListeners.current?.abort();
+    const controller = new AbortController();
+    dragListeners.current = controller;
+    const options = { signal: controller.signal };
+    let x = event.clientX;
+    let y = event.clientY;
+
+    function endPan() {
+      controller.abort();
+      dragListeners.current = null;
+      setDragging(false);
+    }
+    function endPointer(pointer: PointerEvent) {
+      if (pointer.pointerId === pointerId) endPan();
+    }
+    // Listen through the end of the gesture even if the pointer crosses the
+    // toolbar or the edge of the preview.
+    window.addEventListener(
+      "pointermove",
+      (pointer) => {
+        if (pointer.pointerId !== pointerId) return;
+        const dx = pointer.clientX - x;
+        const dy = pointer.clientY - y;
+        if (!suppressClick.current) {
+          if (Math.hypot(dx, dy) < DRAG_THRESHOLD) return;
+          suppressClick.current = true;
+          setDragging(true);
+        }
+        stage.scrollLeft -= dx;
+        stage.scrollTop -= dy;
+        x = pointer.clientX;
+        y = pointer.clientY;
+      },
+      options,
+    );
+    window.addEventListener("pointerup", endPointer, options);
+    window.addEventListener("pointercancel", endPointer, options);
+    window.addEventListener("lostpointercapture", endPointer, options);
+    window.addEventListener("blur", endPan, options);
+  }
 
   function changeZoom(next: number | "fit") {
     const stage = scrollerRef.current;
@@ -124,6 +186,10 @@ export function ImageStage({
   }, [keysRef, scale, fit]);
 
   const fitted = zoom === "fit";
+  const pannable =
+    natural &&
+    (Math.round(natural.width * scale) > room.width ||
+      Math.round(natural.height * scale) > room.height);
   return (
     <>
       <div className="attachment-picture">
@@ -132,8 +198,11 @@ export function ImageStage({
           className="attachment-preview-image"
           src={url}
           alt={file.display_name}
+          draggable={false}
           // A click toggles between the picture fitted and at its own size.
           data-zoom={fitted ? "in" : "out"}
+          data-pannable={pannable ? "" : undefined}
+          data-dragging={dragging ? "" : undefined}
           style={
             natural
               ? { width: Math.round(natural.width * scale), height: "auto" }
@@ -144,7 +213,11 @@ export function ImageStage({
               event.currentTarget;
             if (width > 0 && height > 0) setNatural({ width, height });
           }}
-          onClick={() => changeZoom(fitted ? 1 : "fit")}
+          onPointerDown={startPan}
+          onClick={() => {
+            if (!suppressClick.current) changeZoom(fitted ? 1 : "fit");
+            suppressClick.current = false;
+          }}
           onError={onError}
         />
       </div>
