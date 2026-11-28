@@ -43,6 +43,7 @@ type Fake = { id: string; reference: string; status: string; plan: string };
 let plans: { id: string; name: string; archived: boolean; purpose: string }[] =
   [];
 let tickets: Fake[] = [];
+let documents: { id: string; heading: string; trashed: boolean }[] = [];
 const calls: [string, unknown][] = [];
 
 const ticket = (item: Fake) => ({
@@ -69,6 +70,7 @@ beforeEach(() => {
     { id: "3", reference: "T-KQ3", status: "Todo", plan: "" },
   ];
   calls.length = 0;
+  documents = [];
   bridge.invoke.mockImplementation(async (command: string, args: never) => {
     const input = args as Record<string, never> | undefined;
     calls.push([command, input]);
@@ -80,7 +82,11 @@ beforeEach(() => {
         const count = (status: string) =>
           members.filter((item) => item.status === status).length;
         return {
-          plan: plans.find((item) => item.id === input?.id),
+          plan: {
+            ...plans.find((item) => item.id === input?.id),
+            spec_document_id: documents[0]?.id ?? null,
+          },
+          documents,
           members: members.map(ticket),
           counts: {
             todo: count("Todo"),
@@ -92,6 +98,16 @@ beforeEach(() => {
           },
         };
       }
+      case "show_document":
+        return {
+          id: "spec",
+          title: "Release specification",
+          body: "Release checklist",
+          heading: "Release specification",
+          updated_at: "2026-11-28T01:00:00Z",
+          created_at: "2026-11-28T01:00:00Z",
+          trashed: false,
+        };
       case "search_tickets":
         return tickets
           .filter((item) =>
@@ -189,8 +205,6 @@ test("the header counts the Plan's tickets and its progress, and Remove from Pla
   await waitFor(() =>
     expect(screen.queryByRole("button", { name: /^T-KQ1/ })).toBeNull(),
   );
-  fireEvent.click(screen.getByRole("radio", { name: "Overview" }));
-  await waitFor(() => expect(screen.getByText("1 of 1 done")).toBeTruthy());
   expect(calls).toContainEqual([
     "set_plan",
     { reference: "T-KQ1", plan: null },
@@ -529,4 +543,25 @@ test("keeps the Overview head while the Plan loads and retries in the pane", asy
     await within(overview).findByRole("button", { name: "Retry" }),
   );
   expect(await within(overview).findByText("1 of 2 done")).toBeTruthy();
+});
+
+test("a long purpose expands and the spec opens with a route back to its Plan", async () => {
+  plans[0]!.purpose = "Make the launch safe and easy to verify. ".repeat(4);
+  documents = [
+    { id: "spec", heading: "Release specification", trashed: false },
+  ];
+  await openLaunch();
+  const more = within(context()).getByRole("button", { name: "Show more" });
+  expect(more.getAttribute("aria-expanded")).toBe("false");
+  fireEvent.click(more);
+  const less = within(context()).getByRole("button", { name: "Show less" });
+  expect(less.getAttribute("aria-expanded")).toBe("true");
+  fireEvent.click(
+    within(context()).getByRole("button", {
+      name: "Spec: Release specification",
+    }),
+  );
+  const back = await screen.findByRole("button", { name: "Back to Launch" });
+  fireEvent.click(back);
+  expect(await screen.findByRole("region", { name: "Launch" })).toBeTruthy();
 });

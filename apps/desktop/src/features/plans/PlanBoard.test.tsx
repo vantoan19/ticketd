@@ -223,13 +223,13 @@ test("workspace changes refresh Plan membership, status, counts, and readiness w
       "Blocked by T-KQ2",
     ),
   ).toBeTruthy();
-  // Per-status counts live in the columns; the header keeps the progress.
-  expect(screen.getByText("0 of 2 done")).toBeTruthy();
   expect(screen.getByRole("textbox", { name: "Title" })).toHaveProperty(
     "value",
     "My unsaved title",
   );
   expect(screen.getByText(/not in the current results/i)).toBeTruthy();
+  chooseView("Overview");
+  expect(screen.getByText("0 of 2 done")).toBeTruthy();
 });
 
 test("a delayed previous Plan response cannot replace the current Plan's Board or header", async () => {
@@ -255,12 +255,14 @@ test("a delayed previous Plan response cannot replace the current Plan's Board o
   });
   expect(screen.getByRole("heading", { name: "Next release" })).toBeTruthy();
   expect(screen.getByText("Prepare next release")).toBeTruthy();
+  expect(screen.getByText("0 of 1 done")).toBeTruthy();
+  chooseView("Board");
+  await settle();
   const board = within(
     screen.getByRole("region", { name: "Ticket status board" }),
   );
   expect(board.getByRole("button", { name: /^T-KQ3\D/ })).toBeTruthy();
   expect(board.queryByRole("button", { name: /^T-KQ1\D/ })).toBeNull();
-  expect(screen.getByText("0 of 1 done")).toBeTruthy();
 });
 
 test("archiving a Plan on Board preserves ticket editing and restricts Plan membership until reactivation", async () => {
@@ -377,23 +379,27 @@ function chooseView(name: string) {
   );
 }
 
-test("Plans remember List and Board independently of Flow while preserving their header and context", async () => {
+test("Plans keep their header and remember List or Board without repeating the Overview", async () => {
   render(<App />);
   await settle();
   await openPlan();
   expect(
-    screen.getByRole("radio", { name: "List" }).getAttribute("aria-checked"),
+    screen
+      .getByRole("radio", { name: "Overview" })
+      .getAttribute("aria-checked"),
   ).toBe("true");
-  chooseView("Board");
-  await settle();
-  expect(
-    screen.getByRole("region", { name: "Ticket status board" }),
-  ).toBeTruthy();
   expect(screen.getByText("Ship across projects")).toBeTruthy();
   expect(
     screen.getByRole("button", { name: "Spec: Release specification" }),
   ).toBeTruthy();
   expect(screen.getByText("1 of 2 done")).toBeTruthy();
+  chooseView("Board");
+  await settle();
+  expect(
+    screen.getByRole("region", { name: "Ticket status board" }),
+  ).toBeTruthy();
+  expect(screen.queryByText("Ship across projects")).toBeNull();
+  expect(screen.queryByText("1 of 2 done")).toBeNull();
   expect(screen.getByRole("button", { name: "Add tickets" })).toBeTruthy();
   chooseView("Flow");
   await settle();
@@ -403,21 +409,18 @@ test("Plans remember List and Board independently of Flow while preserving their
   expect(
     JSON.parse(localStorage.getItem("ticketd.preferences")!).ticketLayout,
   ).toBe("board");
-  chooseView("Board");
-  await settle();
-  expect(
-    screen.getByRole("radio", { name: "Board" }).getAttribute("aria-checked"),
-  ).toBe("true");
-  chooseView("Flow");
-  await settle();
   await openPlan("Next release");
   expect(
-    screen.getByRole("radio", { name: "Board" }).getAttribute("aria-checked"),
+    screen
+      .getByRole("radio", { name: "Overview" })
+      .getAttribute("aria-checked"),
   ).toBe("true");
+  chooseView("Board");
+  await settle();
   expect(screen.getByRole("button", { name: /T-KQ3.*Ticket 3/ })).toBeTruthy();
 });
 
-test("a Plan's chosen ticket layout survives restarting the desktop", async () => {
+test("the remembered List or Board preference survives a restart while Plans open on Overview", async () => {
   const first = render(<App />);
   await settle();
   await openPlan();
@@ -430,8 +433,13 @@ test("a Plan's chosen ticket layout survives restarting the desktop", async () =
   await settle();
   await openPlan();
   expect(
-    screen.getByRole("radio", { name: "Board" }).getAttribute("aria-checked"),
+    screen
+      .getByRole("radio", { name: "Overview" })
+      .getAttribute("aria-checked"),
   ).toBe("true");
+  expect(
+    JSON.parse(localStorage.getItem("ticketd.preferences")!).ticketLayout,
+  ).toBe("board");
   chooseView("List");
   await settle();
   chooseView("Flow");
@@ -502,6 +510,7 @@ test("a cross-project Plan includes parent and subticket cards, pages columns in
       "0 matching tickets",
     ),
   ).toBeTruthy();
+  chooseView("Overview");
   expect(screen.getByText("1 of 56 done")).toBeTruthy();
   chooseView("List");
   await settle();
@@ -510,5 +519,9 @@ test("a cross-project Plan includes parent and subticket cards, pages columns in
   expect(
     screen.getByRole("button", { name: "Remove Status filter" }),
   ).toBeTruthy();
-  expect(todo.getByLabelText("55 matching tickets")).toBeTruthy();
+  expect(
+    within(screen.getByRole("region", { name: "Todo column" })).getByLabelText(
+      "55 matching tickets",
+    ),
+  ).toBeTruthy();
 });

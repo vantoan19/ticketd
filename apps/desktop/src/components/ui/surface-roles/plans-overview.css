@@ -8,6 +8,10 @@
 .plan-overview-progress-line time {
   color: var(--muted-foreground);
 }
+.plan-overview-purpose {
+  font-size: var(--text-reading);
+  line-height: var(--text-doc-line);
+}
 .plan-overview-purpose-edit {
   text-align: start;
 }

@@ -153,7 +153,7 @@ test("a Document opens, can be set as the spec, and can be removed with Undo", a
       open={open}
     />,
   );
-  fireEvent.click(screen.getByRole("button", { name: "Proposal Spec" }));
+  fireEvent.click(screen.getByRole("button", { name: "Proposal, Spec" }));
   expect(open).toHaveBeenCalledWith("doc", "Back to Plan");
 
   fireEvent.click(await chooseDocumentAction("Proposal", "Remove from Plan"));

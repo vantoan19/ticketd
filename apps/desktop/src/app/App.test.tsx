@@ -5534,7 +5534,7 @@ test("Plans with no Ready work keep canceled-only progress explicit without inve
   ).toBeTruthy();
 });
 
-test("Plan page keeps its view switch in the header and summarizes all members", async () => {
+test("Plan keeps its view switch in the header and summarizes all members on Overview", async () => {
   const plan = {
     id: "P-page",
     name: "Board polish",
@@ -5578,15 +5578,10 @@ test("Plan page keeps its view switch in the header and summarizes all members",
   render(<App />);
   fireEvent.click(await screen.findByRole("button", { name: /^Board polish/ }));
   expect(await screen.findByText("1 of 6 done")).toBeTruthy();
-  const summary = screen.getByRole("group", { name: "Plan context" });
-  expect(
-    within(summary).getByText("2 in progress · 3 to do, 2 ready"),
-  ).toBeTruthy();
-  expect(
-    within(summary).getByRole("img", {
-      name: "Board polish, 1 of 6 done, 2 moving",
-    }),
-  ).toBeTruthy();
+  const overview = screen.getByRole("region", { name: "Board polish" });
+  expect(within(overview).getByText("2 in progress")).toBeTruthy();
+  expect(within(overview).getByText("2 ready")).toBeTruthy();
+  expect(within(overview).queryByText("0 blocked")).toBeNull();
   const switcher = screen.getByRole("radiogroup", { name: "Plan view" });
   const header = switcher.closest("header");
   expect(
@@ -5598,9 +5593,10 @@ test("Plan page keeps its view switch in the header and summarizes all members",
       switcher,
     );
     expect(switcher.closest("header")).toBe(header);
+    expect(screen.queryByText("1 of 6 done")).toBeNull();
   }
   const row = screen.getByRole("button", { name: /First/ });
-  expect(row.closest("li")?.textContent).toContain("Desktop app");
+  expect(row.closest("li")?.textContent).not.toContain("Desktop app");
   expect(row.closest("li")?.textContent).not.toContain("Board polish");
 });
 
@@ -6277,13 +6273,13 @@ test("Plan Flow uses all members, selects only incident edges, opens tickets and
   fireEvent.click(await screen.findByRole("button", { name: /^Flow example/ }));
   fireEvent.click(screen.getByRole("radio", { name: "Flow" }));
   const flow = await screen.findByRole("region", { name: "Plan Flow" });
-  const now = within(flow).getByRole("region", { name: "Now" });
+  const now = within(flow).getByRole("region", { name: "Can start" });
   expect(
     (await within(now).findAllByRole("button")).map((button) =>
       button.getAttribute("aria-label"),
     ),
   ).toEqual(["T-KQ15 Drop indicator", "T-KQ14 Draggable ghost"]);
-  const next = within(flow).getByRole("region", { name: "Next" });
+  const next = within(flow).getByRole("region", { name: "After one step" });
   const selected = within(next).getByRole("button", {
     name: /T-KQ1 Stable columns/,
   });
@@ -6471,16 +6467,14 @@ test("Flow loads members beyond the first page before deriving blocking depth", 
   fireEvent.click(screen.getByRole("radio", { name: "Flow" }));
   const flow = await screen.findByRole("region", { name: "Plan Flow" });
   expect(
-    await within(within(flow).getByRole("region", { name: "Now" })).findByRole(
-      "button",
-      { name: "T-KQ52 Flow member 52" },
-    ),
+    await within(
+      within(flow).getByRole("region", { name: "Can start" }),
+    ).findByRole("button", { name: "T-KQ52 Flow member 52" }),
   ).toBeTruthy();
   expect(
-    within(within(flow).getByRole("region", { name: "Next" })).getByRole(
-      "button",
-      { name: "T-KQ1 Flow member 1" },
-    ),
+    within(
+      within(flow).getByRole("region", { name: "After one step" }),
+    ).getByRole("button", { name: "T-KQ1 Flow member 1" }),
   ).toBeTruthy();
   expect(within(flow).getByText("Waits on T-KQ52")).toBeTruthy();
 });
@@ -7426,6 +7420,11 @@ test("palette opens a named active Plan through the workspace navigation", async
     }),
   );
   expect(screen.queryByRole("dialog", { name: "Go anywhere" })).toBeNull();
+  expect(
+    screen
+      .getByRole("radio", { name: "Overview" })
+      .getAttribute("aria-checked"),
+  ).toBe("true");
 });
 
 test.each(["All tickets", "Plan"])(

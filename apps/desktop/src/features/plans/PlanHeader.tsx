@@ -53,6 +53,7 @@ export function PlanHeader({
   state,
   mode,
   onModeChange,
+  onShowTicketView,
   controls,
 }: {
   plan: Plan;
@@ -60,6 +61,7 @@ export function PlanHeader({
   state: PlanViewState;
   mode: PlanMode;
   onModeChange: (mode: PlanMode) => void;
+  onShowTicketView: () => void;
   /** Filter and Display controls, reached through More. */
   controls?: ReactNode;
 }) {
@@ -299,6 +301,7 @@ export function PlanHeader({
                       <DropdownMenuItem
                         onSelect={() => {
                           afterMenu.current = "options";
+                          onShowTicketView();
                           setOptionsOpen(true);
                         }}
                       >

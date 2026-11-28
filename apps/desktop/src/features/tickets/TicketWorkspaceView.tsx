@@ -110,12 +110,8 @@ export function TicketWorkspaceView({
   const [planView, setPlanView] = useState<
     "overview" | "tickets" | "dependencies"
   >("overview");
-  const [shownNavigation, setShownNavigation] = useState(workspace.navigation);
-  if (shownNavigation !== workspace.navigation) {
-    setShownNavigation(workspace.navigation);
-    setPlanView("overview");
-  }
   useEffect(() => {
+    if (!workspace.navigation.plan) return;
     // A new Plan opens with its title in view, not where the last one scrolled.
     for (
       let node: HTMLElement | null = listRef.current;
@@ -324,6 +320,7 @@ export function TicketWorkspaceView({
   );
   if (previousNavigation !== workspace.navigation) {
     setPreviousNavigation(workspace.navigation);
+    setPlanView("overview");
     setNarrowDetail(false);
   }
   return (
@@ -348,6 +345,7 @@ export function TicketWorkspaceView({
                   : workspace.layout
             }
             onModeChange={setPlanMode}
+            onShowTicketView={() => setPlanView("tickets")}
             controls={
               <PlanListControls
                 workspace={workspace}

@@ -72,6 +72,13 @@ export function PlanDocuments({ view, state }: { view: View; state: Actions }) {
             <RecordLink
               variant="row"
               className="plan-overview-document"
+              aria-label={[
+                doc.heading,
+                doc.id === specId && "Spec",
+                doc.trashed && "In Trash",
+              ]
+                .filter(Boolean)
+                .join(", ")}
               onClick={() => openDocument?.(doc.id, `Back to ${planName}`)}
             >
               <FileText size={16} aria-hidden="true" />
