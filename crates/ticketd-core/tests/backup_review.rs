@@ -141,7 +141,11 @@ fn attachment_preview_backups_inspect_and_restore_with_their_chat_data() {
         std::fs::copy(&source, &backup).unwrap();
         let fixture = Connection::open(&backup).unwrap();
         fixture
-            .execute_batch("ALTER TABLE documents DROP COLUMN summary")
+            .execute_batch(
+                "DROP TRIGGER backlink_passages_activity_delete;
+                 DROP TABLE backlink_passages;
+                 ALTER TABLE documents DROP COLUMN summary;",
+            )
             .unwrap();
         if version < 103 {
             fixture
