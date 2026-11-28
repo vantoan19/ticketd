@@ -325,27 +325,30 @@ test("J and K move between visible rows, Enter opens beside the Plan, and closin
   expect(review.hasAttribute("aria-current")).toBe(false);
 });
 
-test("closing a ticket opened from the strip focuses its work row", async () => {
+test("closing a ticket returns to its strip segment when the work row is folded", async () => {
   const { overview } = await openPlan([
     member(11, "Review copy", "In review"),
-    member(12, "Build package", "Todo", "Ready"),
+    member(13, "Write release notes", "Done"),
   ]);
   const toolbar = within(overview).getByRole("toolbar", {
     name: "Plan progress",
   });
-  const section = within(overview).getByRole("region", { name: "Needs you" });
-  const row = within(section).getByRole("button", { name: /T-11 Review copy/ });
+  const segment = within(toolbar).getByRole("button", {
+    name: /T-13 Write release notes/,
+  });
+  const fold = within(overview).getByRole("button", { name: "Done 1" });
   const user = userEvent.setup();
 
-  await user.click(
-    within(toolbar).getByRole("button", { name: /T-11 Review copy/ }),
-  );
+  await user.click(segment);
   const close = await screen.findByRole("button", {
     name: "Close ticket details",
   });
+  expect(fold.getAttribute("aria-expanded")).toBe("true");
+  await user.click(fold);
+  expect(fold.getAttribute("aria-expanded")).toBe("false");
   await user.click(close);
 
-  await waitFor(() => expect(document.activeElement).toBe(row));
+  await waitFor(() => expect(document.activeElement).toBe(segment));
 });
 
 test("Start in Chat opens an unsent draft about the Ready ticket", async () => {
