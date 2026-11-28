@@ -2027,6 +2027,7 @@ export function MarkdownEditor({
               {...(placeholder && empty
                 ? {
                     "data-empty": "",
+                    "aria-placeholder": placeholder,
                     style: {
                       "--editor-placeholder": JSON.stringify(placeholder),
                     } as CSSProperties,

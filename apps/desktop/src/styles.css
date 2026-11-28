@@ -100,6 +100,8 @@
   --scrollbar-size: 10px;
   --text-doc: 15px;
   --text-doc-line: 24px;
+  --text-ticket-title: 26px;
+  --text-ticket-title-line: 34px;
   --text-doc-title: 28px;
   --text-doc-title-line: 36px;
   --text-doc-title-tracking: -0.84px;
@@ -2653,9 +2655,9 @@ html[data-hover-held] .sidebar-nav button:hover:not([data-active="true"]) {
   border-radius: 0;
   box-shadow: none;
   color: var(--foreground);
-  font-size: var(--text-doc-title);
+  font-size: var(--text-ticket-title);
   font-weight: 600;
-  line-height: var(--text-doc-title-line);
+  line-height: var(--text-ticket-title-line);
   letter-spacing: var(--text-doc-title-tracking);
   text-wrap: balance;
 }
@@ -2676,9 +2678,9 @@ html[data-hover-held] .sidebar-nav button:hover:not([data-active="true"]) {
 }
 .detail-document > .detail-title {
   margin: 0;
-  font-size: var(--text-doc-title);
+  font-size: var(--text-ticket-title);
   font-weight: 600;
-  line-height: var(--text-doc-title-line);
+  line-height: var(--text-ticket-title-line);
   letter-spacing: var(--text-doc-title-tracking);
   text-wrap: balance;
 }
@@ -2972,26 +2974,15 @@ html[data-hover-held] .sidebar-nav button:hover:not([data-active="true"]) {
   align-items: center;
   gap: 2px;
 }
-/* A read-only checklist box: drawn, never a disabled control (detA DS-08). */
 .markdown-check {
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  width: 16px;
-  height: 16px;
-  margin-right: 8px;
-  vertical-align: -3px;
-  border-radius: var(--radius-segment);
-  box-shadow: inset 0 0 0 1px var(--control-boundary);
   color: var(--foreground);
 }
 .markdown-check[data-checked] {
   background: var(--recessed);
-  box-shadow: inset 0 0 0 1px var(--border);
-  /* Only checking moves: the box fills over time, unchecking is at once. */
-  transition:
-    background-color var(--dur-enter) var(--ease-out),
-    box-shadow var(--dur-enter) var(--ease-out);
+  transition: background-color var(--dur-enter) var(--ease-out);
 }
 /* The tick is always drawn and an empty box hides it, so checking pops it in. */
 .markdown-check svg {
@@ -3017,9 +3008,7 @@ html[data-hover-held] .sidebar-nav button:hover:not([data-active="true"]) {
   appearance: none;
   display: grid;
   place-items: center;
-  border-radius: var(--radius-segment);
   background: transparent;
-  box-shadow: inset 0 0 0 1px var(--control-boundary);
   cursor: pointer;
 }
 .rich-document li > input[type="checkbox"]:disabled {
@@ -3031,10 +3020,7 @@ html[data-hover-held] .sidebar-nav button:hover:not([data-active="true"]) {
 }
 .rich-document li > input[type="checkbox"]:checked {
   background: var(--recessed);
-  box-shadow: inset 0 0 0 1px var(--border);
-  transition:
-    background-color var(--dur-enter) var(--ease-out),
-    box-shadow var(--dur-enter) var(--ease-out);
+  transition: background-color var(--dur-enter) var(--ease-out);
 }
 .rich-document li > input[type="checkbox"]::after {
   content: "";
@@ -3052,6 +3038,14 @@ html[data-hover-held] .sidebar-nav button:hover:not([data-active="true"]) {
   transition:
     opacity var(--dur-enter) var(--ease-out),
     transform var(--spring-glide-t) var(--spring-glide);
+}
+/* Editable and read-only checklists share the same drawing. */
+.markdown-check,
+.rich-document li > input[type="checkbox"] {
+  width: 18px;
+  height: 18px;
+  border-radius: var(--radius-segment);
+  box-shadow: inset 0 0 0 1.5px var(--control-boundary);
 }
 /* Forced colours drop backgrounds and box shadows, and the tick's mask takes its
    colour from a background: the box would vanish. Like .ui-progress, the box
@@ -3898,13 +3892,6 @@ kbd,
   box-shadow: var(--shadow-card);
 }
 
-.ticket-detail[data-expanded] .editor-title textarea,
-.ticket-detail[data-expanded] .detail-title {
-  font-size: var(--text-section);
-  line-height: var(--text-section-line);
-  letter-spacing: var(--text-section-tracking);
-}
-
 /* Shared in-place editing chrome: outside the prose and anchored to its pane. */
 .ticket-detail,
 .context-view-wrapper {
@@ -3984,35 +3971,54 @@ kbd,
   outline-offset: 0;
 }
 
-.ticket-detail
-  .description-document
-  .markdown-document
-  :is(h2, h3, h4, h5, h6) {
+.ticket-detail .editor-body :is(.markdown-document, .rich-document) {
   font-size: var(--text-doc);
   line-height: var(--text-doc-line);
+}
+.ticket-detail
+  .editor-body
+  :is(.markdown-document, .rich-document)
+  :is(h1, h2, h3, h4, h5, h6, p[data-bold-only]) {
+  font-size: var(--text-doc);
+  line-height: var(--text-doc-line);
+  letter-spacing: normal;
   font-weight: 600;
 }
-.ticket-detail[data-expanded]
-  .description-document
-  :is(.markdown-document, p, li, h2, h3, h4, h5, h6),
-.ticket-detail[data-expanded] .editor-body [role="textbox"] {
-  font-size: var(--text-reading);
-  line-height: var(--text-reading-line);
-}
-.ticket-detail[data-expanded]
-  :is(.description-document, .editor-body)
+.ticket-detail
+  .editor-body
   :is(.markdown-document, .rich-document)
-  :is(h2, h3, h4, h5, h6) {
-  font-size: var(--text-reading-heading);
-  line-height: var(--text-reading-heading-line);
-  letter-spacing: var(--text-reading-heading-tracking);
-  font-weight: 600;
+  :is(h1, h2) {
+  font-size: var(--text-reading-subsection);
+  line-height: var(--text-reading-subsection-line);
+  letter-spacing: var(--text-reading-subsection-tracking);
 }
-.ticket-detail[data-expanded]
-  :is(.description-document, .editor-body)
-  :is(.markdown-document, .rich-document)
-  > :is(h2, h3, h4, h5, h6):not(:first-child) {
+.ticket-detail
+  .editor-body
+  :is(.markdown-document, .rich-document, .ticket-description-fold-content)
+  > :is(h1, h2)
+  + * {
+  margin-top: 6px;
+}
+.ticket-detail
+  .editor-body
+  :is(.markdown-document, .rich-document, .ticket-description-fold-content)
+  > *
+  + :is(h1, h2) {
   margin-top: 32px;
+}
+.ticket-detail
+  .editor-body
+  :is(.markdown-document, .rich-document, .ticket-description-fold-content)
+  > *
+  + :is(h3, h4, h5, h6, p[data-bold-only]) {
+  margin-top: 24px;
+}
+.ticket-detail .editor-body :is(.markdown-document, .rich-document) li + li {
+  margin-top: 6px;
+}
+.ticket-description li.task-list-item {
+  min-height: 30px;
+  padding-block: 3px;
 }
 .description-add {
   height: 48px;
@@ -4030,16 +4036,30 @@ kbd,
 .rich-document li:has(> input[type="checkbox"]) {
   position: relative;
   margin-left: -20px;
-  padding-left: 24px;
+  padding-inline-start: 26px;
 }
 .markdown-document li.task-list-item > .markdown-check,
+.markdown-document li.task-list-item > p:first-child > .markdown-check,
 .rich-document li > input[type="checkbox"] {
   position: absolute;
-  left: 0;
-  top: 5px;
-  width: 14px;
-  height: 14px;
+  inset-inline-start: 0;
+  inset-block-start: 3px;
+  inset-block-start: calc((1lh - 18px) / 2);
   margin: 0;
+}
+.ticket-description li.task-list-item > .markdown-check,
+.ticket-description li.task-list-item > p:first-child > .markdown-check {
+  inset-block-start: 6px;
+}
+.markdown-document li[data-task-editable] {
+  cursor: pointer;
+}
+.markdown-document li[data-task-editable] :is(ul, ol) {
+  cursor: auto;
+}
+.markdown-check:focus-visible {
+  outline: 2px solid var(--ring);
+  outline-offset: 2px;
 }
 
 .markdown-editor[data-chrome="floating"] .markdown-document,

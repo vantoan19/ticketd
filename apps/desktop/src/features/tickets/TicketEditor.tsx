@@ -4,6 +4,7 @@ import { TITLE_MAX_LENGTH } from "@/lib/limits";
 import { Tooltip } from "@/components/ui/tooltip";
 import { editingBlockedReason, useWorkspaceState } from "@/lib/workspace-state";
 import { EmptyState } from "@/components/ui/empty-state";
+import { Kbd } from "@/components/ui/kbd";
 import { Alert, AlertActions, AlertDescription } from "@/components/ui/alert";
 import "./description.css";
 import { TicketDescription } from "./TicketDescription";
@@ -815,7 +816,7 @@ function RecoveredTicketEditor({
           </div>
         )}
         {!editingBody &&
-          (draft.body ? (
+          (rendered.trim() ? (
             <Tooltip content={blockedReason ?? "Edit description"} shortcut="E">
               <div
                 className="description-reading"
@@ -880,7 +881,10 @@ function RecoveredTicketEditor({
             </Tooltip>
           ) : (
             // One quiet line that becomes the editor in place (detA DS-06).
-            <Tooltip content={blockedReason ?? "Edit description (E)"}>
+            <Tooltip
+              content={blockedReason ?? "Edit description"}
+              {...(!blockedReason && { shortcut: "E" })}
+            >
               <span
                 className="description-edit-control"
                 tabIndex={blockedReason ? 0 : undefined}
@@ -893,10 +897,11 @@ function RecoveredTicketEditor({
                     editButton.current = element;
                   }}
                   className="description-add"
-                  aria-keyshortcuts="E"
+                  aria-keyshortcuts={blockedReason ? undefined : "E"}
                   onClick={() => setBodyMode("editing")}
                 >
-                  Add a description…
+                  Add a description
+                  {!blockedReason && <Kbd aria-hidden="true">E</Kbd>}
                 </button>
               </span>
             </Tooltip>

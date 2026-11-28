@@ -10,7 +10,11 @@ import {
   within,
 } from "@testing-library/react";
 import { afterEach, expect, test, vi } from "vitest";
-import { type Ticket, type TicketSource } from "@/lib/api/client";
+import {
+  type ConversationEntry,
+  type Ticket,
+  type TicketSource,
+} from "@/lib/api/client";
 import { SourceFilter } from "./SourceFilter";
 import { SourceDescription } from "./ReadOnlySource";
 import { TicketDetails } from "./TicketDetails";
@@ -401,15 +405,124 @@ test("an externally owned description is a read-only source card without editing
   expect(
     screen.getByRole("link", { name: /acme.*api.*#98/ }).getAttribute("href"),
   ).toBe("https://github.com/acme/api/issues/98");
-  expect(
-    screen.getByText(/Only in ticketd · never sent to GitHub/),
-  ).toBeTruthy();
   fireEvent.click(screen.getByRole("button", { name: ticket().title }));
   expect(screen.getByText("GitHub owns this title.")).toBeTruthy();
   fireEvent.keyDown(document, { key: "Escape" });
   fireEvent.click(within(card).getByText("Described on GitHub"));
   expect(screen.getByText("GitHub owns this description.")).toBeTruthy();
 });
+
+test.each([3, 4])(
+  "a GitHub conversation with %i comments keeps its source order when read",
+  async (count) => {
+    const comments: ConversationEntry[] = Array.from(
+      { length: count },
+      (_, index) => ({
+        type: "comment",
+        id: String(index + 1),
+        author: "alice",
+        body: `Comment ${index + 1} body`,
+        url: `https://github.com/acme/api/issues/98#issuecomment-${index + 1}`,
+        created_at: `2026-01-0${index + 1}T00:00:00Z`,
+        edited_at: null,
+      }),
+    );
+    const assigned: ConversationEntry = {
+      type: "event",
+      id: "assigned",
+      event: "assigned",
+      actor: "bob",
+      subject: "carol",
+      created_at: "2026-01-02T12:00:00Z",
+    };
+    bridge.invoke.mockImplementation(async (command: string) =>
+      command === "source_conversation"
+        ? [...comments.slice(0, 2), assigned, ...comments.slice(2)]
+        : [],
+    );
+    render(<DetailsFixture value={ticket()} />);
+    const conversation = within(
+      await screen.findByRole("region", { name: "Conversation on GitHub" }),
+    );
+    await conversation.findByRole("heading", {
+      name: `GitHub conversation ${count}`,
+    });
+    expect(conversation.getByText("Comment 1 body")).toBeTruthy();
+    expect(conversation.getByText(`Comment ${count} body`)).toBeTruthy();
+    expect(conversation.getByText(/assigned carol on GitHub/)).toBeTruthy();
+
+    if (count === 4) {
+      expect(conversation.queryByText("Comment 2 body")).toBeNull();
+      expect(conversation.queryByText("Comment 3 body")).toBeNull();
+      const fold = conversation.getByRole("button", {
+        name: "2 more comments",
+        expanded: false,
+      });
+      fireEvent.click(fold);
+      expect(
+        conversation.getByRole("button", {
+          name: "2 more comments",
+          expanded: true,
+        }),
+      ).toBe(fold);
+    } else {
+      expect(
+        conversation.queryByRole("button", { name: /more comments/ }),
+      ).toBeNull();
+    }
+
+    const second = conversation.getByText("Comment 2 body");
+    const third = conversation.getByText("Comment 3 body");
+    const assignedText = conversation.getByText(/assigned carol on GitHub/);
+    expect(
+      second.compareDocumentPosition(assignedText) &
+        Node.DOCUMENT_POSITION_FOLLOWING,
+    ).toBeTruthy();
+    expect(
+      assignedText.compareDocumentPosition(third) &
+        Node.DOCUMENT_POSITION_FOLLOWING,
+    ).toBeTruthy();
+  },
+);
+
+test.each([
+  {
+    owner: "GitHub",
+    ticketSource: source(),
+    prompt: "Write an update · not posted to GitHub",
+  },
+  { owner: "Local", ticketSource: null, prompt: "Write an update…" },
+])(
+  "$owner ticket shows where an Activity update goes in the composer",
+  async ({ ticketSource, prompt }) => {
+    bridge.invoke.mockImplementation(async (command: string) =>
+      command === "activity_feed"
+        ? [
+            {
+              type: "authored",
+              activity: {
+                id: "existing",
+                ticket_id: "1",
+                brief: "An existing update",
+                reported_at: "2026-01-04T00:00:00Z",
+                updated_at: "2026-01-04T00:00:00Z",
+                editing_agent: null,
+                supporting_document_id: null,
+              },
+            },
+          ]
+        : [],
+    );
+    render(<DetailsFixture value={ticket({ source: ticketSource })} />);
+    await screen.findByText("An existing update");
+    const activity = within(screen.getByRole("region", { name: "Activity" }));
+    fireEvent.click(activity.getByRole("button", { name: prompt }));
+    const editor = await activity.findByRole("textbox", {
+      name: "New update rich text",
+    });
+    expect(editor.getAttribute("aria-placeholder")).toBe(prompt);
+  },
+);
 
 test("the source description names who opened the issue and when", () => {
   bridge.invoke.mockResolvedValue([]);
@@ -700,5 +813,12 @@ test("a long source description opens its named fold without making the field ed
   expect(fold.getAttribute("aria-expanded")).toBe("true");
   expect(screen.getByRole("heading", { name: "Scope" })).toBeTruthy();
   expect(screen.queryByRole("textbox")).toBeNull();
+  fireEvent.click(screen.getByText("Verify"));
+  expect(screen.getByRole("img", { name: "Not done" })).toBeTruthy();
+  expect(screen.queryByRole("checkbox")).toBeNull();
+  expect(bridge.invoke).not.toHaveBeenCalledWith(
+    "change_ticket",
+    expect.anything(),
+  );
   fireEvent.click(fold);
 });
