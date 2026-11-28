@@ -3715,3 +3715,44 @@ fn refresh_batches_empty_conversations_and_reads_existing_events_with_their_rest
     assert!(!event(&refresh.imported[0]));
     assert!(event(&refresh.imported[1]));
 }
+
+#[test]
+fn the_github_cli_confirms_each_permanent_hop_of_a_transferred_issue() {
+    let gh = gh::GhApi::new(|args, _, _, _| {
+        let endpoint = *args.last().unwrap();
+        if endpoint == "repos/o/one/issues/7" {
+            return Ok(recorded_gh(200, &public_issue(785, 10, "o/two")));
+        }
+        assert_eq!(endpoint, "https://api.github.com/repos/o/one/issues/7");
+        assert!(args.windows(2).any(|pair| pair == ["--method", "HEAD"]));
+        Ok(gh::Output {
+            success: true,
+            stdout: b"< HTTP/2.0 301 Moved Permanently\n< Location: /repos/o/renamed/issues/7\n\n< HTTP/2.0 308 Permanent Redirect\n< Location: /repos/o/two/issues/10\n\n< HTTP/2.0 200 OK\n\n".to_vec(),
+            stderr: Vec::new(),
+        })
+    });
+    let mut engine = Engine::new();
+    engine
+        .register(Box::new(GithubConnector::using_gh(
+            DEFAULT_API_URL.into(),
+            gh,
+        )))
+        .unwrap();
+    let original = ExternalRef {
+        identity: ExternalIdentity {
+            provider: PROVIDER.into(),
+            id: "700".into(),
+        },
+        locator: "o/one#7".into(),
+        partition: "o/one".into(),
+    };
+    let found = engine
+        .fetch_tracked(
+            PROVIDER,
+            &config(json!({"repositories": ["o/one"]})),
+            &original,
+        )
+        .unwrap();
+    assert_eq!(found.transferred_from, Some(original));
+    assert_eq!(found.issue.reference.identity.id, "785");
+}

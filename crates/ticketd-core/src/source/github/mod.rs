@@ -147,9 +147,14 @@ impl GithubConnector {
             ]));
         }
         if let Some(gh) = &self.gh {
+            let endpoint = self.gh_endpoint(url)?;
             return gh.request(
                 self.gh_host()?,
-                self.gh_endpoint(url)?,
+                if operation == Operation::VerifyRedirect {
+                    url
+                } else {
+                    endpoint
+                },
                 operation,
                 body,
                 deadline,
@@ -1225,11 +1230,7 @@ impl GithubConnector {
             let head = self
                 .raw_request(Operation::VerifyRedirect, &url, None, None)
                 .ok()?;
-            let location = url::Url::parse(&url)
-                .ok()?
-                .join(head.header("location")?)
-                .ok()?;
-            (location.as_str() == proposed).then(|| proposed.to_owned())
+            (head.header("location")? == proposed).then(|| proposed.to_owned())
         });
         let transferred_from = target
             .filter(|target| {

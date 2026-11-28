@@ -304,7 +304,7 @@ impl GhApi {
             }
             let result = (api.run)(&args, body, auth, timeout);
             let response = match result {
-                Ok(output) => api.read_output(output, operation),
+                Ok(output) => api.read_output(output, operation, endpoint),
                 Err(error) => Err(error),
             };
             let retry = match &response {
@@ -361,10 +361,11 @@ impl GhApi {
         &self,
         output: Output,
         operation: Operation,
+        endpoint: &str,
     ) -> Result<HttpResponse, SourceError> {
         if operation == Operation::VerifyRedirect {
             // HEAD has no response body, so only actual response headers are read.
-            return parse_redirect_trace(&output.stdout);
+            return parse_redirect_trace(&output.stdout, endpoint);
         }
         if let Some(response) = parse_response(output.stdout)
             && (output.success || response.status >= 300 || operation == Operation::GraphQl)
@@ -441,7 +442,9 @@ fn graphql_rate_limit(response: &HttpResponse, operation: Operation) -> bool {
             .unwrap_or(false)
 }
 
-fn parse_redirect_trace(stdout: &[u8]) -> Result<HttpResponse, SourceError> {
+fn parse_redirect_trace(stdout: &[u8], endpoint: &str) -> Result<HttpResponse, SourceError> {
+    let error =
+        || SourceError::Protocol("GitHub did not confirm a permanent issue redirect".into());
     let trace = String::from_utf8_lossy(stdout);
     let mut responses = trace.split("\n\n").filter_map(|segment| {
         let lines = segment.lines().filter_map(|line| line.strip_prefix("< "));
@@ -451,20 +454,36 @@ fn parse_redirect_trace(stdout: &[u8]) -> Result<HttpResponse, SourceError> {
         }
         parse_response(format!("{headers}\n\n").into_bytes())
     });
-    let first = responses.next().ok_or_else(|| {
-        SourceError::Protocol("the GitHub CLI did not report the issue response headers".into())
-    })?;
-    // The existing identity rule requires a permanent redirect to the exact
-    // issue path. A fresh REST GET corroborates the destination and identity.
-    if matches!(first.status, 301 | 308)
-        && responses.next().is_some_and(|last| last.status == 200)
-        && responses.next().is_none()
-    {
-        return Ok(first);
+    let mut url = url::Url::parse(endpoint).map_err(|_| error())?;
+    let api_path = url.path().rsplitn(6, '/').last().ok_or_else(error)?;
+    let api_root = format!("{}{api_path}/repos/", url.origin().ascii_serialization());
+
+    // Preserve the issue transfer rule across gh's automatic redirects:
+    // every hop must be permanent and point to an issue on this API.
+    for index in 0..=super::MAX_REDIRECTS {
+        let mut response = responses.next().ok_or_else(error)?;
+        if index > 0 && response.status == 200 && responses.next().is_none() {
+            response.headers.insert("location".into(), url.to_string());
+            return Ok(response);
+        }
+        if !matches!(response.status, 301 | 308) {
+            return Err(error());
+        }
+        url = url
+            .join(response.header("location").ok_or_else(error)?)
+            .map_err(|_| error())?;
+        let (repository, number) = url
+            .as_str()
+            .strip_prefix(&api_root)
+            .and_then(|path| path.rsplit_once("/issues/"))
+            .ok_or_else(error)?;
+        if super::split_locator(&format!("{repository}#{number}")).is_err()
+            || number.parse::<u64>().ok().is_none_or(|number| number == 0)
+        {
+            return Err(error());
+        }
     }
-    Err(SourceError::Protocol(
-        "GitHub did not confirm a permanent issue redirect".into(),
-    ))
+    Err(error())
 }
 
 fn parse_response(mut stdout: Vec<u8>) -> Option<HttpResponse> {
