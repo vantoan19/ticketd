@@ -32,7 +32,6 @@ export function PlanEmptyState({
   }
   return (
     <EmptyState
-      className="plan-empty-state"
       icon={<Layers />}
       title={copy.title}
       description={copy.sentence}
