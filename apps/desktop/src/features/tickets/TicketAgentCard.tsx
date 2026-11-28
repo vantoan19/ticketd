@@ -296,6 +296,12 @@ function ApprovalChoices({
     if (!option) return;
     event.preventDefault();
     event.stopPropagation();
+    if (inFlight.current) return;
+    event.currentTarget
+      .querySelector<HTMLButtonElement>(
+        `button[aria-keyshortcuts="${event.key}"]`,
+      )
+      ?.focus();
     pick(option.id);
   };
   return (
@@ -318,7 +324,7 @@ function ApprovalChoices({
                 type="button"
                 size="compact"
                 variant="outline"
-                disabled={picked !== null}
+                disabled={picked !== null && picked !== option.id}
                 busy={picked === option.id}
                 onClick={() => pick(option.id)}
                 aria-keyshortcuts={index < 3 ? String(index + 1) : undefined}

@@ -110,14 +110,19 @@ function followCardHeight(card: HTMLElement, scroller: HTMLElement) {
     const change = rect.height - height;
     height = rect.height;
     const top = scroller.scrollTop;
+    // If shrinking clamped the scroll, use the old offset for both the
+    // previous position of the card and the compensated scroll target.
+    const clamped =
+      change < 0 &&
+      top < scrollTop &&
+      top + scroller.clientHeight >= scroller.scrollHeight;
+    const beforeClamp = clamped ? scrollTop : top;
     const wasAbove =
-      rect.bottom - change <= scroller.getBoundingClientRect().top;
+      rect.bottom - change + (top - beforeClamp) <=
+      scroller.getBoundingClientRect().top;
     if (!height || !wasAbove) {
       remainder = 0;
     } else if (change) {
-      // Shrinking can clamp the offset at the end before this frame runs.
-      const atEnd = top + scroller.clientHeight >= scroller.scrollHeight;
-      const beforeClamp = change < 0 && atEnd ? Math.max(top, scrollTop) : top;
       const expected = beforeClamp + change + remainder;
       scroller.scrollTop = expected;
       // Some webviews round scrollTop to whole pixels on each frame.
