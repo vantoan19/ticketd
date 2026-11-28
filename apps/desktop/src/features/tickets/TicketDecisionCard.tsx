@@ -18,6 +18,7 @@ import {
 } from "@/lib/shortcuts";
 import type { LatestUpdate } from "@/lib/api/progress";
 import { client } from "@/lib/api/client";
+import { toFailure } from "@/lib/api/bridge-failure";
 import {
   describeFailure,
   type FailureDescription,
@@ -28,7 +29,10 @@ import { TicketReviewProof } from "./TicketReviewProof";
 import { TicketReply } from "./TicketReply";
 import { TicketSendBackForm } from "./TicketSendBackForm";
 import { DraftRecoveryGate } from "@/lib/draft-recovery-context";
-import type { TicketReviewDecision } from "./use-ticket-review-decision";
+import type {
+  NextReview,
+  TicketReviewDecision,
+} from "./use-ticket-review-decision";
 import { SourceLink } from "./SourceLink";
 import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
@@ -48,8 +52,6 @@ import { DecisionCardContent } from "./decision-card-motion";
 import { NewUpdateDot } from "./NewUpdateDot";
 import { isNewUpdate } from "./ticket-seen-time";
 import "./ticket-decision-card.css";
-
-export type { ReviewQueue } from "./use-ticket-review-decision";
 
 export type DecisionFocus = { element: Element | null; moved: boolean };
 
@@ -98,6 +100,7 @@ export function TicketDecisionCard({
     moveToDone,
     openSendBack,
     pending,
+    replaceNextReview,
     reviewVisible,
     sendBack,
     updateDraft,
@@ -117,9 +120,6 @@ export function TicketDecisionCard({
     !ticket.trashed &&
     ((ticket.status === "Done" && decision?.kind === "done") ||
       (ticket.status === "In progress" && decision?.kind === "sent back"));
-  const nextReview = decision?.nextReview;
-  const nextReference =
-    nextReview?.kind === "next" ? nextReview.reference : undefined;
   const writingBack = draft !== null;
   const resultShown = decided && agentState?.kind !== "request";
 
@@ -223,23 +223,13 @@ export function TicketDecisionCard({
             {decision.brief}
           </blockquote>
         )}
-        {nextReference ? (
-          <NextReviewLink
-            reference={nextReference}
-            anchor={next}
-            select={select}
-          />
-        ) : (
-          <p
-            ref={queueMessage}
-            tabIndex={-1}
-            className="ticket-decision-byline ticket-review-focus"
-          >
-            {nextReview?.kind === "unavailable"
-              ? "Couldn't check what else is in review"
-              : "Nothing else in review"}
-          </p>
-        )}
+        <NextReviewAction
+          review={decision.nextReview}
+          anchor={next}
+          message={queueMessage}
+          replaceNextReview={replaceNextReview}
+          select={select}
+        />
       </DecisionPanel>
     );
   } else if (agentState) {
@@ -348,48 +338,73 @@ export function TicketDecisionCard({
   );
 }
 
-function NextReviewLink({
-  reference,
+function NextReviewAction({
+  review,
   anchor,
+  message,
+  replaceNextReview,
   select,
 }: {
-  reference: string;
+  review: NextReview;
   anchor: RefObject<HTMLAnchorElement | null>;
+  message: RefObject<HTMLParagraphElement | null>;
+  replaceNextReview: TicketReviewDecision["replaceNextReview"];
   select: (reference: string) => void;
 }) {
   const checking = useRef(false);
   const [busy, setBusy] = useState(false);
   const [failure, setFailure] = useState<FailureDescription | null>(null);
-  const [leftReview, setLeftReview] = useState(false);
   const focusMessage = useRef(false);
-  const message = useRef<HTMLParagraphElement>(null);
   useLayoutEffect(() => {
-    if (leftReview && focusMessage.current) message.current?.focus();
-  }, [leftReview]);
+    if (review.kind === "empty" && focusMessage.current)
+      message.current?.focus();
+    focusMessage.current = false;
+  }, [message, review]);
 
   async function openNext() {
     const link = anchor.current;
-    if (checking.current || !link) return;
+    if (review.kind !== "next" || checking.current || !link) return;
+    const { reference } = review;
+    const visible = () =>
+      link === anchor.current &&
+      link.isConnected &&
+      !link.closest("[hidden], [inert]");
+    if (!visible()) return;
     checking.current = true;
     setBusy(true);
+    setFailure(null);
+    let action = `check ${reference} for review`;
     try {
-      const candidate = await client.showTicket(reference);
-      if (!link.isConnected || link.closest("[hidden], [inert]")) return;
-      if (candidate.status === "In review" && !candidate.trashed) {
+      const candidate = await client
+        .showTicket(reference)
+        .catch((reason: unknown) => {
+          if (toFailure(reason).kind !== "not_found") throw reason;
+          return null;
+        });
+      if (!visible()) return;
+      if (
+        candidate?.reference === reference &&
+        candidate.status === "In review" &&
+        !candidate.trashed
+      ) {
         select(reference);
-      } else {
-        focusMessage.current = document.activeElement === link;
-        setLeftReview(true);
+        return;
       }
+      action = "check what else is in review";
+      await replaceNextReview(review, () => {
+        if (!visible()) return false;
+        focusMessage.current = document.activeElement === link;
+        return true;
+      });
     } catch (reason) {
-      setFailure(describeFailure(reason, `check ${reference} for review`));
+      if (visible()) setFailure(describeFailure(reason, action));
     } finally {
       checking.current = false;
       setBusy(false);
     }
   }
 
-  if (leftReview) {
+  if (review.kind !== "next") {
     return (
       <p
         ref={message}
@@ -397,10 +412,15 @@ function NextReviewLink({
         role="status"
         className="ticket-decision-byline ticket-review-focus"
       >
-        {reference} is no longer in review
+        {review.kind === "unavailable"
+          ? "Couldn't check what else is in review"
+          : review.staleReference
+            ? `${review.staleReference} is no longer in review`
+            : "Nothing else in review"}
       </p>
     );
   }
+  const { reference } = review;
   return (
     <>
       <div className="ticket-decision-row">
@@ -513,6 +533,16 @@ function TicketReport({
                 select={select}
               />
             </Clamp>
+            {full.failure && (
+              <FailureState
+                size="inline"
+                failure={{
+                  ...full.failure,
+                  title: "Couldn't load the full report",
+                }}
+                onRetry={full.retry}
+              />
+            )}
           </div>
         </>
       ) : (

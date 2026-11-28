@@ -47,7 +47,7 @@ import { useOpenTicket } from "./open-ticket";
 import { TicketDecisionCard, type DecisionFocus } from "./TicketDecisionCard";
 import {
   useTicketReviewDecision,
-  type ReviewQueue,
+  type ReadReviewQueue,
 } from "./use-ticket-review-decision";
 import { useTicketSeenTime } from "./ticket-seen-time";
 import { revealTicketDescription } from "./description-navigation";
@@ -86,7 +86,7 @@ export function TicketPage({
   /** Not the open ticket any more, kept on screen for one exit while it fades out. */
   leaving?: boolean;
   reading?: boolean;
-  readReviewQueue?: (() => Promise<ReviewQueue>) | undefined;
+  readReviewQueue?: ReadReviewQueue | undefined;
   projects: Project[];
   plans: Plan[];
   select: (reference: string | null) => void;

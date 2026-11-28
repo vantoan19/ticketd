@@ -246,6 +246,52 @@ test("a report read failure offers Retry without claiming there is no report", a
   expect(await card.findByText("Implemented the rail.")).toBeTruthy();
 });
 
+test("a truncated report stays readable while Retry loads its full text", async () => {
+  const report = update("Implemented the rail.");
+  latest = {
+    ...report,
+    brief: { text: "Implemented the rail.", truncated: true },
+  };
+  const invoke = bridge.invoke.getMockImplementation()!;
+  const readFullReport = vi
+    .fn()
+    .mockRejectedValueOnce({
+      code: "failed",
+      message: "Cannot read the full report.",
+    })
+    .mockResolvedValue({
+      id: report.activity_id,
+      ticket_id: ticket.id,
+      brief: "Implemented the rail. Verified keyboard navigation.",
+      reported_at: report.reported_at,
+      updated_at: report.updated_at,
+      editing_agent: report.editing_agent,
+      supporting_document_id: null,
+    });
+  bridge.invoke.mockImplementation((command: string, args?: object) =>
+    command === "get_activity" ? readFullReport(args) : invoke(command, args),
+  );
+
+  open();
+  const card = within(
+    await screen.findByRole("region", { name: "Ready for review" }),
+  );
+  const error = await card.findByRole("alert");
+  expect(error.textContent).toContain("Couldn't load the full report");
+  expect(card.getByText("Implemented the rail.")).toBeTruthy();
+  fireEvent.click(within(error).getByRole("button", { name: "Retry" }));
+  expect(
+    await card.findByText(
+      "Implemented the rail. Verified keyboard navigation.",
+    ),
+  ).toBeTruthy();
+  expect(card.queryByRole("alert")).toBeNull();
+  expect(readFullReport.mock.calls).toEqual([
+    [{ reference: ticket.reference, id: report.activity_id }],
+    [{ reference: ticket.reference, id: report.activity_id }],
+  ]);
+});
+
 test("a reviewer reads the latest report and jumps to the acceptance checklist", async () => {
   open();
   const card = within(
@@ -491,16 +537,57 @@ test("a successful decision suggests the next In review ticket, wrapping at the 
 
 test("Next to review checks the suggested ticket again before opening it", async () => {
   const select = vi.fn();
-  open(select, [review, { ...review, reference: "T-KQ2" }]);
+  const suggested = { ...review, reference: "T-KQ2" };
+  const readQueue = vi
+    .fn()
+    .mockResolvedValueOnce([review, suggested])
+    .mockResolvedValueOnce([]);
+  render(ticketView(select, [review, suggested], readQueue));
   fireEvent.click(await screen.findByRole("button", { name: "Move to Done" }));
   const next = await screen.findByRole("link", { name: "Next to review" });
-  candidates = [{ ...review, reference: "T-KQ2", status: "Done" }];
+  candidates = [{ ...suggested, status: "Done" }];
   next.focus();
   fireEvent.click(next);
   const stale = await screen.findByText("T-KQ2 is no longer in review");
   expect(document.activeElement).toBe(stale);
   expect(select).not.toHaveBeenCalled();
   expect(screen.queryByRole("link", { name: "Next to review" })).toBeNull();
+});
+
+test("Next to review offers the next eligible ticket and checks it on its own click", async () => {
+  const select = vi.fn();
+  const suggested = { ...review, reference: "T-KQ2" };
+  const later = { ...review, reference: "T-KQ3" };
+  const earlier = { ...review, reference: "T-KQ4" };
+  const newReview = { ...review, reference: "T-KQ5" };
+  const originalQueue = [earlier, review, suggested, later];
+  const readQueue = vi
+    .fn()
+    .mockResolvedValueOnce(originalQueue)
+    .mockResolvedValueOnce([earlier, newReview, later])
+    .mockResolvedValueOnce([newReview]);
+  render(ticketView(select, originalQueue, readQueue));
+  fireEvent.click(await screen.findByRole("button", { name: "Move to Done" }));
+
+  const next = await screen.findByRole("link", { name: "Next to review" });
+  expect(next.getAttribute("href")).toBe("ticketd://ticket/T-KQ2");
+  candidates = [{ ...suggested, status: "Done" }, later, earlier, newReview];
+  fireEvent.click(next);
+  await waitFor(() =>
+    expect(next.getAttribute("href")).toBe("ticketd://ticket/T-KQ3"),
+  );
+  expect(document.activeElement).toBe(next);
+  expect(select).not.toHaveBeenCalled();
+
+  candidates = [{ ...later, trashed: true }, newReview];
+  fireEvent.click(next);
+  await waitFor(() =>
+    expect(next.getAttribute("href")).toBe("ticketd://ticket/T-KQ5"),
+  );
+  expect(select).not.toHaveBeenCalled();
+  fireEvent.click(next);
+  await waitFor(() => expect(select).toHaveBeenCalledExactlyOnceWith("T-KQ5"));
+  expect(readQueue).toHaveBeenCalledTimes(3);
 });
 
 test("a pending review decision preserves focus moved to another control", async () => {
@@ -841,6 +928,50 @@ test("Retry sends the edited Send back draft with a new request ID", async () =>
   expect(writes[1]?.[1].requestId).not.toBe(writes[0]?.[1].requestId);
 });
 
+test("Retry does not send the older saved Send back note when the edited draft cannot be saved", async () => {
+  writeFailure = "failed";
+  open();
+  fireEvent.click(await screen.findByRole("button", { name: "Send back" }));
+  const field = screen.getByRole<HTMLTextAreaElement>("textbox", {
+    name: "What needs to change?",
+  });
+  fireEvent.change(field, { target: { value: "First reason" } });
+  fireEvent.click(screen.getByRole("button", { name: "Send back" }));
+  const retry = await screen.findByRole("button", { name: "Retry" });
+
+  const storage = vi
+    .spyOn(Storage.prototype, "setItem")
+    .mockImplementation(() => {
+      throw new DOMException("Storage is full", "QuotaExceededError");
+    });
+  try {
+    fireEvent.change(field, { target: { value: "Revised reason" } });
+    writeFailure = null;
+    fireEvent.click(retry);
+    expect(
+      await screen.findByText(/Couldn't save the Send back note/),
+    ).toBeTruthy();
+    expect(field.value).toBe("Revised reason");
+    expect(ticket.status).toBe("In review");
+    expect(
+      bridge.invoke.mock.calls.filter(([command]) => command === "send_back"),
+    ).toHaveLength(1);
+  } finally {
+    storage.mockRestore();
+  }
+  fireEvent.click(screen.getByRole("button", { name: "Retry" }));
+  const decision = within(
+    await screen.findByRole("region", { name: "Sent back" }),
+  );
+  expect(decision.getByText("Revised reason")).toBeTruthy();
+  const writes = bridge.invoke.mock.calls.filter(
+    ([command]) => command === "send_back",
+  );
+  expect(writes).toHaveLength(2);
+  expect(writes[1]?.[1]).toMatchObject({ brief: "Revised reason" });
+  expect(writes[1]?.[1].requestId).not.toBe(writes[0]?.[1].requestId);
+});
+
 test("Send back refreshes a ticket that left review without posting its draft", async () => {
   open();
   fireEvent.click(await screen.findByRole("button", { name: "Send back" }));
@@ -902,11 +1033,17 @@ test("a saved Send back note can be submitted in a new review with a new request
 
 test("Retry does not show an older Send back as a decision in the current review", async () => {
   const invoke = bridge.invoke.getMockImplementation()!;
-  let outcome: Ticket | undefined;
+  const replay = vi.fn();
+  const receipts = new Map<string, Ticket>();
   bridge.invoke.mockImplementation(async (command: string, args?: object) => {
     if (command !== "send_back") return invoke(command, args);
-    if (outcome) return outcome;
-    outcome = await invoke(command, args);
+    const key = JSON.stringify(args);
+    const receipt = receipts.get(key);
+    if (receipt) {
+      replay(args);
+      return receipt;
+    }
+    receipts.set(key, await invoke(command, args));
     ticket = { ...review, status_history_number: 10 };
     throw { code: "failed", message: "Reply interrupted after commit." };
   });
@@ -919,6 +1056,18 @@ test("Retry does not show an older Send back as a decision in the current review
   fireEvent.click(screen.getByRole("button", { name: "Send back" }));
   fireEvent.click(await screen.findByRole("button", { name: "Retry" }));
   expect(await screen.findByText(/It changed elsewhere/)).toBeTruthy();
+  const writes = bridge.invoke.mock.calls.filter(
+    ([command]) => command === "send_back",
+  );
+  expect(writes).toHaveLength(2);
+  expect(writes[0]?.[1]).toEqual({
+    reference: "T-KQ1",
+    brief: "Feedback for the previous review.",
+    expectedStatusHistoryNumber: 7,
+    requestId: expect.any(String),
+  });
+  expect(writes[1]).toEqual(writes[0]);
+  expect(replay).toHaveBeenCalledExactlyOnceWith(writes[0]?.[1]);
   expect(screen.queryByText("Sent T-KQ1 back to In progress")).toBeNull();
   expect(screen.queryByRole("region", { name: "Sent back" })).toBeNull();
   expect(ticket.status).toBe("In review");

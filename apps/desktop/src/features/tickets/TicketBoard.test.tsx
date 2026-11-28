@@ -608,6 +608,45 @@ test("a pending decision and its next review survive expanding the board peek", 
   expect(screen.getByRole("button", { name: "Undo" })).toBeTruthy();
 });
 
+test("a stale next review refreshes the board queue and offers a newly eligible ticket", async () => {
+  vi.spyOn(HTMLElement.prototype, "offsetWidth", "get").mockReturnValue(1000);
+  const first = ticket(2, "In review");
+  const suggested = ticket(3, "In review");
+  const replacement = ticket(4, "In progress");
+  saved = [first, suggested, replacement];
+  render(<App />);
+  await settle();
+  await showBoard();
+  fireEvent.click(
+    screen.getByRole("button", { name: /T-KQ2 In review.*Ticket 2/ }),
+  );
+  await settle();
+  fireEvent.click(screen.getByRole("button", { name: "Move to Done" }));
+  await settle();
+  const next = screen.getByRole("link", { name: "Next to review" });
+  expect(next.getAttribute("href")).toBe("ticketd://ticket/T-KQ3");
+
+  saved = [
+    { ...first, status: "Done" },
+    { ...suggested, status: "Done" },
+    { ...replacement, status: "In review" },
+  ];
+  // The saved tickets changed before the board's next refresh.
+  expect(
+    screen.queryByRole("button", { name: /T-KQ4 In review.*Ticket 4/ }),
+  ).toBeNull();
+  fireEvent.click(next);
+  await settle();
+  expect(next.getAttribute("href")).toBe("ticketd://ticket/T-KQ4");
+  expect(screen.getByRole("region", { name: "Done" })).toBeTruthy();
+  fireEvent.click(next);
+  await settle();
+  expect(screen.getByRole("region", { name: "Ready for review" })).toBeTruthy();
+  expect(
+    screen.getByRole("heading", { name: "Ticket 4", level: 1 }),
+  ).toBeTruthy();
+});
+
 test("the board peek shows complete section counts even when their lists are paged", async () => {
   vi.spyOn(HTMLElement.prototype, "offsetWidth", "get").mockReturnValue(1000);
   const fallback = bridge.invoke.getMockImplementation()!;

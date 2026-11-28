@@ -20,7 +20,7 @@ import type {
 } from "@/features/tickets/useTicketWorkspace";
 import type { Plan } from "@/lib/api/plans";
 import { TicketPage } from "@/features/tickets/TicketPage";
-import type { ReviewQueue } from "./TicketDecisionCard";
+import type { ReadReviewQueue } from "./use-ticket-review-decision";
 import { usePageSwap } from "./use-page-swap";
 import { useNarrowPane } from "./useNarrowPane";
 type NoteTarget = { id: string; key: number };
@@ -64,7 +64,7 @@ export function TicketDetails({
   peek = false,
 }: {
   outsideResults?: boolean;
-  readReviewQueue?: (() => Promise<ReviewQueue>) | undefined;
+  readReviewQueue?: ReadReviewQueue | undefined;
   /** The pane is fading out after the ticket closed: it takes no input. */
   leaving?: boolean;
   peek?: boolean;
@@ -308,7 +308,7 @@ const OpenedPage = memo(function OpenedPage({
   seed: Ticket | undefined;
   projects: Project[];
   plans: Plan[];
-  readReviewQueue: (() => Promise<ReviewQueue>) | undefined;
+  readReviewQueue: ReadReviewQueue | undefined;
   /** The Inbox note to show, when it is on this page. */
   inboxTarget: InboxTarget | null;
   /** The mention being followed, when it is on this page. */
