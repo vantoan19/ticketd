@@ -52,7 +52,9 @@ pub use location::{
     workspace_health,
 };
 
+mod plan_activity;
 mod plans;
+pub use plan_activity::{PlanActivity, PlanActivityChange};
 mod retry;
 pub mod source;
 pub mod sync;

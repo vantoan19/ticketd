@@ -198,7 +198,8 @@ opens the graph to understand dependency chains.
 - **Plans.** Two-line rows show progress, current status words, and the latest
   member change. Plans with reviews come first, then newest changes, with the
   order held while the page is open. An orange dot marks reviews or a Plan
-  ready to wrap up. The sidebar also marks Plans with reviews. Archived rows
+  ready to wrap up. Otherwise a blue dot marks Plans that moved since the last
+  look on this computer. The sidebar also marks Plans with reviews. Archived rows
   show how much work is left and offer Reactivate with Undo.
 - **Editor.** Descriptions, Activities, and Documents edit in place with Markdown
   shortcuts, slash commands, checklists, fenced code, simple GFM tables, and offline
@@ -345,6 +346,13 @@ copying it. Creating a ticket from inside a Plan makes it a member. Flow shows o
 tickets in Can start, After one step, and Later. Later appears when it has tickets.
 Outside blockers are named on the tickets that wait on them. The CLI's `plan`
 command group includes `spec`, `document`, and `context`.
+
+On an active Plan's Overview, Since you last looked shows the latest change
+for up to five tickets. It includes status changes, tickets joining the Plan,
+and the first sentence of authored updates. Each entry opens its ticket.
+The last look is saved on this computer when leaving the Plan and stays fixed
+during each visit. The section appears after the first visit when there are new
+changes.
 
 ### Context graph
 
