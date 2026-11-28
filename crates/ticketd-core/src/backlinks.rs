@@ -1,4 +1,4 @@
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 
 use pulldown_cmark::{Event, Parser, Tag, TagEnd};
 use rusqlite::Connection;
@@ -175,6 +175,16 @@ impl Workspace {
             })
         })
     }
+}
+
+/// Count the sources of mentions without assembling passages for a page.
+pub(crate) fn mentioning_ticket_count(tx: &Connection, reference: &str) -> Result<usize, Error> {
+    let mut seen = HashSet::new();
+    scan(tx, reference, "", |_, source| {
+        seen.insert(source.reference);
+        Ok(true)
+    })?;
+    Ok(seen.len())
 }
 
 pub(crate) fn query(

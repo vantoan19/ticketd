@@ -1320,6 +1320,13 @@ fn take_ownership(reference: String, request_id: String) -> Result<Ticket, Bridg
 }
 
 #[tauri::command(async)]
+fn ticket_peek_counts(reference: String) -> Result<ticketd_core::TicketPeekCounts, BridgeFailure> {
+    open_workspace()
+        .and_then(|workspace| workspace.ticket_peek_counts(&reference))
+        .map_err(BridgeFailure::from)
+}
+
+#[tauri::command(async)]
 fn contextual_relationships(
     reference: String,
     offset: u32,
@@ -2756,6 +2763,7 @@ pub fn run() -> Result<(), tauri::Error> {
             mark_duplicate_reviewed,
             edit_dependencies_reviewed,
             remove_duplicate,
+            ticket_peek_counts,
             contextual_relationships,
             change_contextual_relationship,
             add_dependency,
