@@ -1723,12 +1723,13 @@ function AppContent() {
                                       </div>
                                     )}
                                     <TicketCommandContext.Provider
-                                      value={(scope, reference) => {
+                                      value={(scope, reference, origin) => {
                                         paletteReturn.current =
-                                          document.activeElement instanceof
+                                          origin ??
+                                          (document.activeElement instanceof
                                           HTMLElement
                                             ? document.activeElement
-                                            : null;
+                                            : null);
                                         setPaletteReference(reference);
                                         setPaletteScope(scope);
                                         setPaletteOpen(true);

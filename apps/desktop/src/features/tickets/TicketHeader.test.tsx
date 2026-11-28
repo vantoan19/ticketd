@@ -58,6 +58,8 @@ beforeEach(() => {
   });
   bridge.invoke.mockImplementation(async (command: string, args: object) => {
     if (command === "reminder") return reminder;
+    if (command === "ticket_export_markdown")
+      return "# T-KQ1 · Ticket\n\n**Acceptance criteria**";
     if (command === "is_following") return following;
     if (command === "set_following")
       following = (args as { following: boolean }).following;
@@ -88,7 +90,7 @@ function header(
   };
   const listed = vi.fn();
   render(
-    <TestReads>
+    <TestReads primed={props.ticket ? { ticket: props.ticket } : {}}>
       <TicketListSync value={listed}>
         <StatusLineRegion>
           {requestChat ? (
@@ -114,14 +116,14 @@ function header(
   );
   return { ...props, listed };
 }
+function openActions() {
+  fireEvent.keyDown(screen.getByRole("button", { name: "Ticket actions" }), {
+    key: "Enter",
+  });
+}
+
 async function chooseAction(name: string) {
-  fireEvent.pointerDown(
-    screen.getByRole("button", { name: "Ticket actions" }),
-    {
-      button: 0,
-      ctrlKey: false,
-    },
-  );
+  openActions();
   fireEvent.click(await screen.findByRole("menuitem", { name }));
 }
 
@@ -162,18 +164,126 @@ test("leads with the reference and no repeated Ticket details heading", () => {
   header();
   expect(screen.getByRole("heading", { name: "T-KQ1" })).toBeTruthy();
   expect(screen.queryByText("Ticket details")).toBeNull();
+  expect(within(screen.getByRole("banner")).queryByText("Ticket")).toBeNull();
 });
 
-test("copies the reference from the header and the context command from the menu", async () => {
+test("shows the title after the reference when scrolled", () => {
+  header({
+    scrolled: true,
+    ticket: { ...ticket, title: "A long ticket title" },
+  });
+  const banner = screen.getByRole("banner");
+  const reference = within(banner).getByRole("heading", { name: "T-KQ1" });
+  const title = within(banner).getByText("A long ticket title");
+  expect(
+    reference.compareDocumentPosition(title) & Node.DOCUMENT_POSITION_FOLLOWING,
+  ).toBeTruthy();
+});
+
+test("keeps the source link accessible and copies its URL from the menu", async () => {
+  const url = "https://github.com/acme/api/issues/98";
+  header({
+    ticket: {
+      ...ticket,
+      source: {
+        provider: "github",
+        provider_name: "GitHub",
+        place: "acme/api",
+        place_label: "acme / api",
+        number: "#98",
+        status_choices: ["Todo", "In progress", "In review"],
+        id: "42",
+        locator: "acme/api#98",
+        display: "acme/api#98",
+        url,
+        origin: "imported",
+        ownership: "external",
+        state: { category: "open", name: "Open" },
+        closure_unrecognized: false,
+        last_refreshed_at: null,
+        last_attempt_at: null,
+        last_error: null,
+        content_locked: true,
+        status_locked: false,
+        duplicate_target: null,
+      },
+    },
+  });
+  expect(
+    screen
+      .getByRole("link", { name: "Open on GitHub: acme / api #98" })
+      .getAttribute("href"),
+  ).toBe(url);
+  await chooseAction("Copy link");
+  await waitFor(() => expect(writeText).toHaveBeenCalledWith(url));
+});
+
+test("copies the reference, the export Markdown and the agent context command", async () => {
   header();
   fireEvent.click(screen.getByRole("button", { name: "Copy reference" }));
   await waitFor(() => expect(writeText).toHaveBeenCalledWith("T-KQ1"));
-  await chooseAction("Copy context command");
+  await chooseAction("Copy as Markdown");
+  await waitFor(() =>
+    expect(writeText).toHaveBeenLastCalledWith(
+      "# T-KQ1 · Ticket\n\n**Acceptance criteria**",
+    ),
+  );
+  expect(bridge.invoke).toHaveBeenCalledWith("ticket_export_markdown", {
+    reference: "T-KQ1",
+  });
+  await chooseAction("Copy for an agent");
   await waitFor(() =>
     expect(writeText).toHaveBeenLastCalledWith(
       "ticketd context T-KQ1 --relationships --activities --evidence",
     ),
   );
+});
+
+test("the actions menu captions the update and orders the available actions", async () => {
+  following = true;
+  header({ ticket: { ...ticket, updated_at: "2025-01-01T12:00:00Z" } });
+  expect(screen.queryByText(/^Updated /)).toBeNull();
+  openActions();
+  const menu = await screen.findByRole("menu");
+  expect(within(menu).getByText(/^Updated /)).toBeTruthy();
+  expect(
+    ["menuitem", "menuitemcheckbox", "separator"]
+      .flatMap((role) => within(menu).getAllByRole(role))
+      .sort((a, b) =>
+        a.compareDocumentPosition(b) & Node.DOCUMENT_POSITION_FOLLOWING
+          ? -1
+          : 1,
+      )
+      .map(
+        (row) =>
+          row.getAttribute("aria-label") ?? row.textContent?.trim() ?? "",
+      ),
+  ).toEqual([
+    "Copy reference",
+    "Copy as Markdown",
+    "Copy for an agent",
+    "",
+    "Follow",
+    "Remind me…",
+    "Open in graph",
+    "History…",
+    "Export Markdown with files…",
+    "Mark as duplicate…",
+    "",
+    "Move to Trash",
+  ]);
+  expect(
+    within(menu).getByText(
+      "ticketd context T-KQ1 --relationships --activities --evidence",
+    ),
+  ).toBeTruthy();
+  expect(
+    within(menu).getByText("Updates and approvals reach your Inbox"),
+  ).toBeTruthy();
+  await within(menu).findByRole("menuitemcheckbox", {
+    name: "Follow",
+    checked: true,
+  });
 });
 
 // The summary follows the locale's time format, so expectations use it too.
@@ -204,7 +314,7 @@ test("a reminder whose time has passed says it is due, not scheduled", () => {
 
 test("the actions menu opens the graph, the duplicate dialog, and trash", async () => {
   const props = header();
-  await chooseAction("Open graph");
+  await chooseAction("Open in graph");
   expect(props.onOpenGraph).toHaveBeenCalled();
   await chooseAction("Mark as duplicate…");
   expect(
@@ -258,13 +368,13 @@ test("a trashed ticket offers Restore without graph or duplicate actions", async
   );
   expect(await screen.findByRole("menuitem", { name: "Restore" })).toBeTruthy();
   expect(screen.queryByRole("menuitem", { name: "Move to Trash" })).toBeNull();
-  expect(screen.queryByRole("menuitem", { name: "Open graph" })).toBeNull();
+  expect(screen.queryByRole("menuitem", { name: "Open in graph" })).toBeNull();
 });
 
 test("shows the position in the list and moves to the neighboring ticket", () => {
   const onAdjacent = vi.fn();
   header({ position: { index: 1, total: 11 }, onAdjacent });
-  expect(screen.getByText("1 of 11")).toBeTruthy();
+  expect(screen.getByText("1 of 11 todo")).toBeTruthy();
   // The first ticket has nothing before it.
   expect(
     (
@@ -278,8 +388,10 @@ test("shows the position in the list and moves to the neighboring ticket", () =>
 });
 
 test("a ticket outside the list keeps the position slot, so the icons never move", () => {
-  header({ position: null, onAdjacent: vi.fn() });
-  expect(screen.getByText("–")).toBeTruthy();
+  header({ position: null, outsideResults: true, onAdjacent: vi.fn() });
+  expect(screen.getByLabelText("Not in the current results").textContent).toBe(
+    "–",
+  );
   for (const name of ["Previous ticket", "Next ticket"])
     expect(screen.getByRole("button", { name })).toHaveProperty(
       "disabled",

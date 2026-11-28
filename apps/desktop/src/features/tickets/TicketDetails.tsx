@@ -2,7 +2,7 @@ import { useInboxTriage } from "./inbox-triage-context";
 import { InboxTriageCard } from "./InboxTriageCard";
 import { TicketAgentSession } from "./TicketAgent";
 import { OverlayBoundary } from "@/components/ui/overlay-boundary";
-import { memo, useRef, useState } from "react";
+import { memo, useCallback, useRef, useState } from "react";
 import { EmptyState } from "@/components/ui/empty-state";
 import { Kbd } from "@/components/ui/kbd";
 import { TicketHeader } from "@/features/tickets/TicketHeader";
@@ -14,16 +14,22 @@ import { hasTicketDraft } from "./ticket-draft";
 import { useDraftRecovery } from "@/lib/draft-recovery-context";
 import { useMentionReadiness } from "./use-mention-readiness";
 import type { MentionTarget } from "@/features/tickets/Backlinks";
-import type { FollowedMention } from "@/features/tickets/useTicketWorkspace";
+import type {
+  FollowedMention,
+  TicketListPosition,
+} from "@/features/tickets/useTicketWorkspace";
 import type { Plan } from "@/lib/api/plans";
 import { TicketPage } from "@/features/tickets/TicketPage";
 import type { ReviewQueue } from "./TicketDecisionCard";
 import { usePageSwap } from "./use-page-swap";
+import { useNarrowPane } from "./useNarrowPane";
 type NoteTarget = { id: string; key: number };
 type InboxTarget = { reference: string; id: string; key: number };
 
 /** Hidden pages kept besides the selected one; any page holding a draft is kept too. */
 const RECENT_PAGES = 3;
+// The 680px column, 32px gap, 248px rail, and two 32px gutters.
+const TICKET_RAIL_MIN_WIDTH = 1024;
 
 /** Two ways to arrive at a note (the Inbox, a backlink); the later one wins. */
 function newest(
@@ -62,7 +68,7 @@ export function TicketDetails({
   leaving?: boolean;
   hidden?: boolean;
   /** The selected ticket's place in the visible list, across pages. */
-  position?: { index: number; total: number } | null;
+  position?: TicketListPosition | null;
   /** The list's name, for the expanded view's return crumb. */
   returnLabel?: string;
   /** Open the ticket before (-1) or after (1) the selected one in the list. */
@@ -103,6 +109,14 @@ export function TicketDetails({
     }
   }, [selected]);
   const [boundary, setBoundary] = useState<HTMLElement | null>(null);
+  const pane = useRef<HTMLElement>(null);
+  const setPane = useCallback((node: HTMLElement | null) => {
+    pane.current = node;
+    setBoundary(node);
+  }, []);
+  const narrowHeader = useNarrowPane(pane, 560);
+  const scroller = useRef<HTMLDivElement>(null);
+  const narrow = useNarrowPane(scroller, TICKET_RAIL_MIN_WIDTH, true);
   const [scrolledReference, setScrolledReference] = useState<string | null>(
     null,
   );
@@ -148,7 +162,7 @@ export function TicketDetails({
   }));
   return (
     <section
-      ref={setBoundary}
+      ref={setPane}
       className="ticket-detail"
       hidden={hidden}
       inert={leaving}
@@ -164,6 +178,7 @@ export function TicketDetails({
                 selected={selected}
                 ticket={ticket}
                 scrolled={selected !== null && scrolledReference === selected}
+                narrow={narrowHeader}
                 expanded={expanded}
                 onExpand={onExpand}
                 onReturn={onReturn}
@@ -176,6 +191,7 @@ export function TicketDetails({
                 {...(onAdjacent && { onAdjacent })}
               />
               <div
+                ref={scroller}
                 className="detail-scroll"
                 onScroll={(event) => {
                   const scroller = event.currentTarget;
@@ -221,6 +237,7 @@ export function TicketDetails({
                     active={reference === selected}
                     reading={reference === selected && !hidden && !leaving}
                     expanded={expanded}
+                    rail={expanded && !narrow}
                     hidden={hidden || reference !== selected}
                     swap={swap.swapped && reference === selected}
                     leaving={reference === swap.leaving}
@@ -260,6 +277,7 @@ const OpenedPage = memo(function OpenedPage({
   active,
   reading,
   expanded,
+  rail,
   hidden,
   swap,
   leaving,
@@ -275,6 +293,7 @@ const OpenedPage = memo(function OpenedPage({
   active: boolean;
   reading: boolean;
   expanded: boolean;
+  rail: boolean;
   hidden: boolean;
   swap: boolean;
   leaving: boolean;
@@ -294,6 +313,7 @@ const OpenedPage = memo(function OpenedPage({
         active={active}
         reading={reading}
         expanded={expanded}
+        rail={rail}
         swap={swap}
         leaving={leaving}
         projects={projects}

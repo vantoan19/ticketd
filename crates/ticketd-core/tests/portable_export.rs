@@ -119,6 +119,13 @@ fn ticket_exports_direct_and_inline_colliding_names_without_flattening_linked_do
     workspace
         .set_ticket_document(&ticket.reference, &document.id, true)
         .unwrap();
+    assert_eq!(
+        workspace.ticket_export_markdown(&ticket.reference).unwrap(),
+        format!(
+            "# {} · Share evidence\n\nSee [inline]({a_uri}).",
+            ticket.reference
+        )
+    );
     let export = workspace
         .export_markdown_with_files(
             MarkdownExportSource::Ticket {

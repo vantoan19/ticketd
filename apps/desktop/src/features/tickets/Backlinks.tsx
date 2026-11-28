@@ -32,10 +32,12 @@ export function Backlinks({
   select,
   mentions,
   documentLinks,
+  rail = false,
 }: {
   select: (target: MentionTarget) => void;
   mentions: PartState<"backlinks">;
   documentLinks: DocumentLink[];
+  rail?: boolean;
 }) {
   const { record, reference } = useOpenTicket();
   const openDocument = useContext(DocumentNavigation);
@@ -43,17 +45,24 @@ export function Backlinks({
   const { value, failure, retry, loadingMore, showMore } = mentions;
   const count = value?.total ?? 0;
   const links = value?.items ?? [];
+  const total = count + documentLinks.length;
   if (!failure && count === 0 && documentLinks.length === 0) return null;
   return (
     <div className="linked-work-disclosure">
       <Disclosure
         label={
-          <>
-            Mentioned in{" "}
-            <span className="linked-work-note">{plural(count, "ticket")}</span>
-          </>
+          rail ? (
+            plural(total, "mention")
+          ) : (
+            <>
+              Mentioned in{" "}
+              <span className="linked-work-note">
+                {plural(count, "ticket")}
+              </span>
+            </>
+          )
         }
-        count={count + documentLinks.length}
+        {...(!rail && { count: total })}
         open={open}
         onOpenChange={setOpen}
       >

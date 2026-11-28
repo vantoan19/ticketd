@@ -51,6 +51,26 @@
 .ticket-follow-feedback {
   white-space: nowrap;
 }
+.ticket-rail-label,
+.ticket-rail-heading,
+.ticket-detail-rail .linked-work .ui-section-header > h2 {
+  color: var(--muted-foreground);
+  font-size: var(--text-caption);
+  font-weight: 500;
+}
+.ticket-outline ul {
+  border-inline-start: 1px solid var(--group-hairline);
+}
+.ticket-outline .ui-button {
+  color: var(--muted-foreground);
+  font-size: var(--text-preview);
+  line-height: var(--text-preview-line);
+}
+.ticket-outline .ui-button[aria-current] {
+  box-shadow: -2px 0 0 var(--foreground);
+  color: var(--foreground);
+  font-weight: 500;
+}
 .list-position-text {
   text-align: end;
   font-size: var(--text-caption);

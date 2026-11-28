@@ -8,9 +8,16 @@ import {
   type Ref,
 } from "react";
 import { Progress } from "@/components/ui/progress";
-import { X } from "lucide-react";
+import { MoreHorizontal, X } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Disclosure } from "@/components/ui/disclosure";
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuGroup,
+  DropdownMenuItem,
+  DropdownMenuTrigger,
+} from "@/components/ui/dropdown-menu";
 import { IconButton } from "@/components/ui/icon-button";
 import { FailureAlert, FailureState } from "@/components/ui/failure-alert";
 import { RecordLink } from "@/components/ui/record-link";
@@ -29,6 +36,7 @@ import {
 import { Duplicates } from "@/features/tickets/Duplicates";
 import { LinkTicketDialog } from "@/features/tickets/LinkTicketDialog";
 import type { DuplicateTarget } from "@/lib/api/client";
+import { ofTotal } from "@/lib/format";
 import { linkLabel, type LinkKind, type LinkRow } from "./linked-work";
 import { useLinkedGroup } from "./linked-group";
 import { Backlinks, type MentionTarget } from "./Backlinks";
@@ -91,17 +99,57 @@ const relatedKinds: LinkKind[] = ["related", "discovered_while", "discoveries"];
 const openLimit = 7;
 const activeStatuses = ["In review", "In progress", "Todo"];
 
+function BlockingSubticketActions({
+  row,
+  blocker,
+  disabled,
+  onRemove,
+}: {
+  row: LinkRow;
+  blocker: LinkRow;
+  disabled: boolean;
+  onRemove: (row: LinkRow) => void;
+}) {
+  return (
+    <DropdownMenu>
+      <DropdownMenuTrigger asChild>
+        <IconButton
+          size="icon-xs"
+          label={`Actions for linked ${row.reference}`}
+        >
+          <MoreHorizontal aria-hidden="true" />
+        </IconButton>
+      </DropdownMenuTrigger>
+      <DropdownMenuContent align="end">
+        <DropdownMenuGroup>
+          <DropdownMenuItem disabled={disabled} onSelect={() => onRemove(row)}>
+            Remove subticket
+          </DropdownMenuItem>
+          <DropdownMenuItem
+            disabled={disabled}
+            onSelect={() => onRemove(blocker)}
+          >
+            Remove blocker
+          </DropdownMenuItem>
+        </DropdownMenuGroup>
+      </DropdownMenuContent>
+    </DropdownMenu>
+  );
+}
+
 export type LinkedWorkHandle = { openSubtickets(): void };
 
 export function LinkedWork({
   work,
   select,
   onMention,
+  railLead,
   ref,
 }: {
   work: LinkedWorkState;
   select: (reference: string) => void;
   onMention: (target: MentionTarget) => void;
+  railLead?: (subtickets: ReactNode) => ReactNode;
   ref?: Ref<LinkedWorkHandle>;
 }) {
   const { ticket, reference, current, pending } = work;
@@ -110,14 +158,28 @@ export function LinkedWork({
   const documentLinks = useOpenTicket("documentBacklinks");
   const placement = use(RailPlacement);
   const density = placement === "column" ? "list" : "rail";
+  const rail = railLead !== undefined;
   const readOnly = ticket.trashed;
   const links = current?.links;
   const related = work.rows.filter((row) => relatedKinds.includes(row.kind));
   const subtickets = work.rows.filter((row) => row.kind === "subticket");
-  const blockers = work.rows.filter((row) => row.kind === "blocked_by");
+  const subticketReferences = new Set(subtickets.map((row) => row.reference));
+  const blockersByReference = new Map(
+    work.rows
+      .filter((row) => row.kind === "blocked_by")
+      .map((row) => [row.reference, row]),
+  );
+  const blockers = [...blockersByReference.values()].filter(
+    (row) => !subticketReferences.has(row.reference),
+  );
   const blocking = work.rows.filter((row) => row.kind === "blocks");
+  const parent = work.rows.filter((row) => row.kind === "parent");
   const duplicates = work.rows.filter((row) => isDuplicateKind(row.kind));
-  const allBlockers = links ? orderBlockers(work) : [];
+  const allBlockers = links
+    ? orderBlockers(work).filter(
+        (row) => !subticketReferences.has(row.reference),
+      )
+    : [];
   const subticketPartial = links?.children.next_offset != null;
   const total = subticketPartial
     ? (links?.children_progress.total ?? 0)
@@ -170,17 +232,22 @@ export function LinkedWork({
   const [subticketsOpen, setSubticketsOpen] = useLinkedGroup(
     ticket.id,
     "subticket",
-    (groups[1].openTotal ?? subtickets.filter(isOpen).length) > 0,
+    !rail && (groups[1].openTotal ?? subtickets.filter(isOpen).length) > 0,
+  );
+  const [parentOpen, setParentOpen] = useLinkedGroup(
+    ticket.id,
+    "parent",
+    false,
   );
   const [blockingOpen, setBlockingOpen] = useLinkedGroup(
     ticket.id,
     "blocks",
-    blocking.some(isOpen),
+    !rail && blocking.some(isOpen),
   );
   const [relatedOpen, setRelatedOpen] = useLinkedGroup(
     ticket.id,
     "related",
-    related.some(isOpen),
+    !rail && related.some(isOpen),
   );
   const disclosures = [
     [blockersOpen, setBlockersOpen],
@@ -200,6 +267,7 @@ export function LinkedWork({
   const needsPage =
     groups.some(
       (group, index) =>
+        (!rail || group.kind !== "blocked_by") &&
         group.partial &&
         (disclosures[index]?.[0] ||
           (!("openTotal" in group) && !group.rows.some(isOpen))),
@@ -211,65 +279,101 @@ export function LinkedWork({
   const external = externalDuplicateTarget(ticket);
   const isGitHubOwned = externalSource(ticket)?.provider === "github";
   const order = work.rows.map((row) => `${row.kind}-${row.reference}`).join();
-  const renderRow = (row: LinkRow) => (
-    <ReferenceRow
-      key={`${row.kind}-${row.reference}`}
-      kind={row.kind}
-      animated
-      layoutDependency={order}
-      density={density}
-      reference={row.reference}
-      title={row.title}
-      status={row.status}
-      statusLabel={statusText(row)}
-      caption={statusText(row)}
-      onOpen={() => select(row.reference)}
-      action={
-        readOnly ? undefined : isDuplicateKind(row.kind) ? (
-          externalSource(work.ticket)?.status_locked ? undefined : (
-            <RemoveDuplicate
+  function renderRow(row: LinkRow) {
+    const blocker =
+      row.kind === "subticket"
+        ? blockersByReference.get(row.reference)
+        : undefined;
+    const caption = blocker
+      ? `${statusText(row)} · blocks this`
+      : statusText(row);
+    return (
+      <ReferenceRow
+        key={`${row.kind}-${row.reference}`}
+        kind={row.kind}
+        animated
+        layoutDependency={order}
+        density={density}
+        reference={row.reference}
+        title={row.title}
+        status={row.status}
+        statusLabel={statusText(row)}
+        caption={caption}
+        onOpen={() => select(row.reference)}
+        action={
+          readOnly ? undefined : isDuplicateKind(row.kind) ? (
+            externalSource(work.ticket)?.status_locked ? undefined : (
+              <RemoveDuplicate
+                row={row}
+                ticket={reference}
+                disabled={pending}
+                onRemove={() => void work.remove(row)}
+              />
+            )
+          ) : blocker ? (
+            <BlockingSubticketActions
               row={row}
-              ticket={reference}
+              blocker={blocker}
               disabled={pending}
-              onRemove={() => void work.remove(row)}
+              onRemove={(link) => void work.remove(link)}
             />
+          ) : (
+            <IconButton
+              label={`Remove ${row.reference} from ${linkLabel(row.kind)}`}
+              size="icon-xs"
+              tooltipSide="top"
+              disabled={pending}
+              onClick={() => void work.remove(row)}
+            >
+              <X aria-hidden="true" />
+            </IconButton>
           )
-        ) : (
-          <IconButton
-            label={`Remove ${row.reference} from ${linkLabel(row.kind)}`}
-            size="icon-xs"
-            tooltipSide="top"
-            disabled={pending}
-            onClick={() => void work.remove(row)}
-          >
-            <X aria-hidden="true" />
-          </IconButton>
-        )
-      }
-    />
-  );
+        }
+      />
+    );
+  }
   const hasRelationships =
     !current ||
     current.failure ||
     work.error ||
     external ||
     duplicates.length > 0 ||
-    groups.some((group) => group.total > 0);
-  if (
-    !hasRelationships &&
-    !mentions.value?.total &&
-    !mentions.failure &&
-    !documentLinks.length
-  )
-    return null;
-  return (
+    (rail && parent.length > 0) ||
+    groups.some(
+      (group) =>
+        (!rail ||
+          (group.kind !== "blocked_by" && group.kind !== "subticket")) &&
+        (group.total > 0 || group.partial),
+    );
+  const railBeforeLinked = railLead?.(
+    total > 0 || subticketPartial ? (
+      <RelationshipGroup
+        {...groups[1]}
+        triggerLabel={
+          <>
+            <span className="sr-only">Subtickets {ofTotal(done, total)}</span>
+            <span aria-hidden="true">{ofTotal(done, total)}</span>
+          </>
+        }
+        open={subticketsOpen}
+        onOpenChange={setSubticketsOpen}
+        renderRow={renderRow}
+        note={
+          isGitHubOwned
+            ? "Subtickets stay local; publishing never includes them."
+            : undefined
+        }
+      />
+    ) : null,
+  );
+  const linkedSection = (
     <section
       className="linked-work"
       id={`linked-work-${reference}`}
       aria-labelledby={titleId}
     >
       <SectionHeader title="Linked" titleId={titleId} level={2}>
-        {total > 0 && (
+        {!rail && total > 0 && (
           <div className="linked-work-progress">
             <Progress
               aria-label="Subticket progress"
@@ -302,9 +406,27 @@ export function LinkedWork({
           onRetry={work.retry}
         />
       )}
+      {rail && parent.length > 0 && (
+        <RelationshipGroup
+          kind="parent"
+          label="Parent"
+          rows={parent}
+          total={parent.length}
+          partial={false}
+          triggerLabel="Parent"
+          open={parentOpen}
+          onOpenChange={setParentOpen}
+          renderRow={renderRow}
+        />
+      )}
       {groups.map((group, index) => {
         const disclosure = disclosures[index];
-        if (!disclosure || (group.total === 0 && !group.partial)) return null;
+        if (
+          !disclosure ||
+          (group.total === 0 && !group.partial) ||
+          (rail && (group.kind === "subticket" || group.kind === "blocked_by"))
+        )
+          return null;
         const [open, setOpen] = disclosure;
         return (
           <RelationshipGroup
@@ -325,6 +447,7 @@ export function LinkedWork({
         mentions={mentions}
         documentLinks={documentLinks}
         select={onMention}
+        rail={rail}
       />
       {(["duplicate_of", "duplicates"] as const).map((kind) => {
         const rows = duplicates.filter((row) => row.kind === kind);
@@ -369,6 +492,17 @@ export function LinkedWork({
       {work.error && <FailureAlert size="compact" failure={work.error} />}
     </section>
   );
+  const showLinked =
+    hasRelationships ||
+    mentions.value?.total ||
+    mentions.failure ||
+    documentLinks.length;
+  return (
+    <>
+      {railBeforeLinked}
+      {showLinked ? linkedSection : null}
+    </>
+  );
 }
 
 function isOpen(row: LinkRow) {
@@ -380,6 +514,7 @@ function isOpen(row: LinkRow) {
 function RelationshipGroup({
   kind,
   label,
+  triggerLabel,
   rows,
   partial,
   total,
@@ -392,6 +527,7 @@ function RelationshipGroup({
 }: {
   kind: string;
   label: string;
+  triggerLabel?: ReactNode;
   rows: LinkRow[];
   partial: boolean;
   total: number;
@@ -400,18 +536,19 @@ function RelationshipGroup({
   open: boolean;
   onOpenChange: (open: boolean) => void;
   renderRow: (row: LinkRow) => ReactNode;
-  note: string | undefined;
+  note?: string | undefined;
 }) {
-  const openRows = rows.filter(isOpen).sort((a, b) => {
+  const active = (row: LinkRow) => kind === "parent" || isOpen(row);
+  const openRows = rows.filter(active).sort((a, b) => {
     const rank = (status: string) => {
       const index = activeStatuses.indexOf(status);
       return index === -1 ? activeStatuses.length : index;
     };
     return rank(a.status) - rank(b.status);
   });
-  const doneRows = rows.filter((row) => !isOpen(row) && row.status === "Done");
+  const doneRows = rows.filter((row) => !active(row) && row.status === "Done");
   const otherFinished = rows.filter(
-    (row) => !isOpen(row) && row.status !== "Done",
+    (row) => !active(row) && row.status !== "Done",
   );
   const openCount = openTotal ?? openRows.length;
   const doneCount = doneTotal ?? doneRows.length;
@@ -431,11 +568,13 @@ function RelationshipGroup({
     <div className="linked-work-disclosure">
       <Disclosure
         label={
-          <>
-            {label} <span className="linked-work-note">{summary}</span>
-          </>
+          triggerLabel ?? (
+            <>
+              {label} <span className="linked-work-note">{summary}</span>
+            </>
+          )
         }
-        count={unknownTotal ? `${total}+` : total}
+        {...(!triggerLabel && { count: unknownTotal ? `${total}+` : total })}
         open={open}
         onOpenChange={onOpenChange}
       >

@@ -1,5 +1,6 @@
 // @vitest-environment jsdom
 import {
+  act,
   cleanup,
   fireEvent,
   render,
@@ -16,12 +17,35 @@ import { bridgeDefault, unknownCommands } from "@/test/bridge-defaults";
 const bridge = vi.hoisted(() => ({ invoke: vi.fn() }));
 vi.mock("@tauri-apps/api/core", () => bridge);
 vi.mock("@uiw/react-codemirror", () => ({ default: () => null }));
+const observers = new Map<ResizeObserverCallback, Set<Element>>();
 window.ResizeObserver = class {
-  observe() {}
-  unobserve() {}
-  disconnect() {}
+  constructor(private callback: ResizeObserverCallback) {
+    observers.set(callback, new Set());
+  }
+  observe(target: Element) {
+    observers.get(this.callback)?.add(target);
+  }
+  unobserve(target: Element) {
+    observers.get(this.callback)?.delete(target);
+  }
+  disconnect() {
+    observers.delete(this.callback);
+  }
 };
 Element.prototype.scrollIntoView = () => {};
+
+function resizePane(width: number) {
+  act(() => {
+    for (const [callback, targets] of observers)
+      callback(
+        [...targets].map(
+          (target) =>
+            ({ target, contentRect: { width } }) as ResizeObserverEntry,
+        ),
+        {} as ResizeObserver,
+      );
+  });
+}
 
 const page = (items: object[] = []) => ({ items, next_offset: null });
 let following = false;
@@ -29,6 +53,9 @@ let reminder: string | null = null;
 let children: object[] = [];
 let prerequisites: object[] = [];
 let parent: object | null = null;
+let blocking: object[] = [];
+let related: object[] = [];
+let mentions: object[] = [];
 let history: object[] = [];
 let evidence: object[] = [];
 let current: Ticket;
@@ -39,6 +66,9 @@ beforeEach(() => {
   children = [];
   prerequisites = [];
   parent = null;
+  blocking = [];
+  related = [];
+  mentions = [];
   history = [];
   evidence = [];
   select.mockReset();
@@ -46,6 +76,8 @@ beforeEach(() => {
     // A reported change reads the open Ticket again.
     if (command === "show_ticket") return current;
     if (command === "ticket_history") return history;
+    if (command === "ticket_backlinks")
+      return { items: mentions, total: mentions.length };
     if (command === "ticket_evidence_page")
       return { items: evidence, total: evidence.length };
     if (command === "search_tickets")
@@ -63,6 +95,8 @@ beforeEach(() => {
         relationships: {
           ...base.relationships,
           parent,
+          blocking: page(blocking),
+          related: page(related),
           children: page(children),
           prerequisites: page(prerequisites),
           children_progress: {
@@ -99,14 +133,14 @@ const ticket: Ticket = {
   children: [],
   prerequisites: [],
 };
-function renderDetails(item: Ticket = ticket) {
+function renderDetails(item: Ticket = ticket, expanded = false) {
   current = item;
-  render(
+  return render(
     <TestReads primed={{ ticket: item }}>
       <TicketDetails
         mention={null}
         selected={item.reference}
-        expanded={false}
+        expanded={expanded}
         onExpand={vi.fn()}
         onReturn={vi.fn()}
         setSelected={select}
@@ -128,6 +162,166 @@ function renderDetails(item: Ticket = ticket) {
     </TestReads>,
   );
 }
+
+test("full width shows one set of labelled properties and returns them to the column when it narrows", async () => {
+  reminder = "2030-01-01T12:00:00Z";
+  renderDetails({ ...ticket, project_id: "project", plan_id: "plan" }, true);
+  resizePane(1100);
+  const rail = await screen.findByRole("complementary", {
+    name: "Ticket details",
+  });
+  for (const label of ["Status", "Project", "Plan", "Reminder"])
+    expect(within(rail).getByText(label)).toBeTruthy();
+  expect(
+    within(rail).getByRole("button", { name: "Project: Web portal" }),
+  ).toBeTruthy();
+  expect(
+    within(rail).getByRole("button", { name: "Plan: Launch" }),
+  ).toBeTruthy();
+  expect(screen.getAllByRole("button", { name: "Status: Todo" })).toHaveLength(
+    1,
+  );
+  fireEvent.keyDown(
+    within(rail).getByRole("button", { name: "Add property" }),
+    { key: "Enter" },
+  );
+  expect(await screen.findByRole("menuitem", { name: "Tags" })).toBeTruthy();
+  expect(screen.queryByRole("menuitem", { name: "Plan" })).toBeNull();
+  fireEvent.keyDown(screen.getByRole("menu", { name: "Add property" }), {
+    key: "Escape",
+  });
+
+  resizePane(900);
+  expect(
+    screen.queryByRole("complementary", { name: "Ticket details" }),
+  ).toBeNull();
+  const context = screen.getByRole("group", { name: "Ticket properties" });
+  expect(
+    within(context).getByRole("button", {
+      name: "Project / Plan: Web portal / Launch",
+    }),
+  ).toBeTruthy();
+});
+
+test("wide ticket relationships open from their rail rows and return to Linked below the description at one column", async () => {
+  const row = (reference: string, title: string) => ({
+    reference,
+    title: { text: title },
+    status: "Todo",
+    trashed: false,
+    unresolved: true,
+  });
+  parent = row("T-KQ2", "Parent ticket");
+  prerequisites = [row("T-KQ3", "Prerequisite")];
+  children = [row("T-KQ4", "Child ticket")];
+  blocking = [row("T-KQ5", "Dependent ticket")];
+  related = [row("T-KQ6", "Related ticket")];
+  mentions = [
+    {
+      reference: "T-KQ7",
+      title: "Mentioning ticket",
+      status: "Todo",
+      mentioned_at: "2026-01-01T00:00:00Z",
+      passages: [
+        {
+          activity_id: null,
+          mention_start: 0,
+          mention_end: 5,
+          passage: "T-KQ1 came up in planning.",
+        },
+      ],
+    },
+  ];
+  renderDetails(ticket, true);
+  resizePane(1100);
+  const rail = within(
+    screen.getByRole("complementary", { name: "Ticket details" }),
+  );
+  const properties = rail.getByRole("group", { name: "Ticket properties" });
+  const subtickets = await within(properties).findByRole("button", {
+    name: "Subtickets 0 of 1",
+    expanded: false,
+  });
+  fireEvent.click(subtickets);
+  expect(
+    within(properties).getByRole("button", { name: /Child ticket/ }),
+  ).toBeTruthy();
+  fireEvent.click(rail.getByRole("button", { name: "Blocked by T-KQ3" }));
+  const blockers = screen.getByRole("dialog", { name: "Blockers" });
+  expect(
+    within(blockers).getByRole("button", { name: /Prerequisite/ }),
+  ).toBeTruthy();
+  fireEvent.keyDown(blockers, { key: "Escape" });
+
+  const linked = within(rail.getByRole("region", { name: "Linked" }));
+  for (const [name, text] of [
+    [/^Parent/, "Parent ticket"],
+    [/^Blocks/, "Dependent ticket"],
+    [/^Related/, "Related ticket"],
+    [/^1 mention$/, "Mentioning ticket"],
+  ] as const) {
+    fireEvent.click(linked.getByRole("button", { name, expanded: false }));
+    expect(linked.getByText(text)).toBeTruthy();
+  }
+  expect(screen.getAllByRole("heading", { name: "Linked" })).toHaveLength(1);
+
+  resizePane(900);
+  const columnLinks = screen.getByRole("region", { name: "Linked" });
+  expect(
+    within(columnLinks).getByRole("button", {
+      name: /Subtickets/,
+      expanded: true,
+    }),
+  ).toBeTruthy();
+  expect(
+    screen
+      .getByText("A description to read.")
+      .compareDocumentPosition(columnLinks) & Node.DOCUMENT_POSITION_FOLLOWING,
+  ).toBeTruthy();
+});
+
+test("the full-width outline starts at three headings and can jump into a folded section", async () => {
+  const twoHeadings = renderDetails(
+    { ...ticket, body: "## Goal\n\n## Plan" },
+    true,
+  );
+  resizePane(1100);
+  expect(screen.queryByRole("navigation", { name: "On this page" })).toBeNull();
+  twoHeadings.unmount();
+
+  renderDetails(
+    {
+      ...ticket,
+      body: [
+        "## Goal",
+        "A short opening.".repeat(65),
+        "## Plan",
+        "Folded details.".repeat(125),
+        "## Acceptance criteria",
+        "- [ ] Ready",
+      ].join("\n\n"),
+    },
+    true,
+  );
+  resizePane(1100);
+  const outline = within(
+    screen.getByRole("navigation", { name: "On this page" }),
+  );
+  expect(
+    outline.getByRole("button", { name: "Goal", current: "location" }),
+  ).toBeTruthy();
+  expect(screen.queryByRole("heading", { name: "Plan" })).toBeNull();
+
+  fireEvent.click(outline.getByRole("button", { name: "Plan" }));
+  const heading = await screen.findByRole("heading", { name: "Plan" });
+  expect(document.activeElement).toBe(heading);
+  expect(
+    outline.getByRole("button", { name: "Plan", current: "location" }),
+  ).toBeTruthy();
+  expect(
+    outline.getByRole("button", { name: "Acceptance criteria" }),
+  ).toBeTruthy();
+});
 
 test("all property chips stay above the description and linked context stays below it", async () => {
   children = [
@@ -184,40 +378,44 @@ test("the local reading column runs title, description, then Linked without a du
   expect(rail.contains(title)).toBe(false);
 });
 
-test("Follow lives in the header while a scheduled reminder stays in the context line", async () => {
+test("F follows the ticket while a scheduled reminder stays in the context line", async () => {
   reminder = "2030-01-01T12:00:00Z";
   renderDetails();
   const rail = await screen.findByRole("group", {
     name: "Ticket properties",
   });
-  const header = document.querySelector(".detail-header") as HTMLElement;
-  const follow = await within(header).findByRole("button", { name: "Follow" });
-  expect(follow.getAttribute("aria-pressed")).toBe("false");
-  fireEvent.click(follow);
-  await waitFor(() =>
-    expect(
-      within(header)
-        .getByRole("button", { name: "Follow" })
-        .getAttribute("aria-pressed"),
-    ).toBe("true"),
+  fireEvent.keyDown(screen.getByRole("heading", { name: "T-KQ1" }), {
+    key: "f",
+  });
+  expect(bridge.invoke).toHaveBeenCalledWith(
+    "set_following",
+    expect.objectContaining({ reference: "T-KQ1", following: true }),
   );
-  // Visible words follow the state; the name stays "Follow".
-  expect(follow.getAttribute("aria-pressed")).toBe("true");
   expect(
     await within(rail).findByRole("button", {
       name: /^Manage reminder, scheduled/,
     }),
   ).toBeTruthy();
   expect(within(rail).queryByRole("button", { name: /Follow/ })).toBeNull();
+  fireEvent.keyDown(screen.getByRole("button", { name: "Ticket actions" }), {
+    key: "Enter",
+  });
   expect(
-    within(header).queryByRole("button", { name: /Manage reminder/ }),
-  ).toBeNull();
+    await screen.findByRole(
+      "menuitemcheckbox",
+      {
+        name: "Follow",
+        checked: true,
+      },
+      { timeout: 1500 },
+    ),
+  ).toBeTruthy();
 });
 
 test("the header shows the list position with Previous and Next", async () => {
   renderDetails();
-  const header = document.querySelector(".detail-header") as HTMLElement;
-  expect(within(header).getByText("2 of 11")).toBeTruthy();
+  const header = screen.getByRole("banner");
+  expect(within(header).getByText("2 of 11 todo")).toBeTruthy();
   expect(
     (
       within(header).getByRole("button", {

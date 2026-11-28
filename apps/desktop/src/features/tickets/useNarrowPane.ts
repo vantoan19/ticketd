@@ -23,8 +23,9 @@ const SETTLE_MS = 120;
 export function useNarrowPane(
   ref: RefObject<HTMLElement | null>,
   minWidth = RAIL_MIN_WIDTH,
+  initiallyNarrow = false,
 ) {
-  const [narrow, setNarrow] = useState(false);
+  const [narrow, setNarrow] = useState(initiallyNarrow);
   // The sidebar folds or unfolds on its width spring; that is the only motion
   // of the panel's width the layout waits out.
   const { sidebarCollapsed } = usePreferences();
