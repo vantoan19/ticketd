@@ -64,8 +64,10 @@ and `linked_tickets`. If several connections match, pass `--connection ID` for
 preview and confirmation. If the effect changed, get a new preview. An
 unconfigured preview gives the `provider` and `repository` to use with
 `ticketd source add PROVIDER --set repositories=OWNER/NAME` before previewing again.
-For GitHub Enterprise Server, set `TICKETD_GITHUB_API_URL` to your API address
-(for example `https://git.example.com/api/v3`) before adding and using the connection.
+For GitHub Enterprise, sign in through `gh auth login --hostname HOST` and set
+`GH_HOST=HOST` before adding and using the connection. Existing
+`TICKETD_GITHUB_API_URL` settings continue to select the original Enterprise
+site, including a custom port.
 
 If you selected a GitHub CLI account and its login changes, sign in to `gh` with
 the new login and run `ticketd source CONNECTION edit --set account=NEW_LOGIN`.

@@ -476,6 +476,13 @@ pub trait Connector: Send + Sync {
         Err(SourceError::Unsupported("comments"))
     }
 
+    /// A built-in connector can prove that selected conversations are empty
+    /// in a single request. The default keeps the existing per-issue read.
+    #[doc(hidden)]
+    fn empty_conversations(&self, _references: &[&ExternalRef]) -> Vec<ExternalIdentity> {
+        Vec::new()
+    }
+
     /// Provides all three publication operations when the descriptor declares
     /// [`Capability::Publish`]. This method does no provider work.
     fn publication(&self) -> Option<&dyn Publication> {

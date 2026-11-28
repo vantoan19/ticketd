@@ -40,8 +40,8 @@ Source extensions keep their connections. A separate Workspace migration will
 consolidate the saved GitHub connections while preserving external identities,
 repository rules and publication records.
 
-The first transport change moves the repository picker through `gh` for the
-active github.com login. Existing named accounts, token overrides and custom
-API endpoints keep their established behavior during the transition. Account
-checks and the requests they authorize must migrate together so the same
-verified login is used for an entire workflow.
+The repository picker, issue import, refresh, publication and recovery all
+use the GitHub CLI. The transport transition leaves the Workspace's existing
+GitHub connection and external identity records in place for the separate
+migration. The GitHub CLI supplies the login for each workflow, whose account
+check and authorized requests use that same credential.

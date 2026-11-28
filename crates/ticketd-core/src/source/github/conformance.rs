@@ -1,8 +1,8 @@
-//! GitHub's driver translates the shared scenarios into HTTP fixture responses.
+//! GitHub's driver translates the shared scenarios into recorded GitHub CLI responses.
 
 use super::{
-    API, Cursor, Fixture as TransportFixture, TOKEN, TransportError, config, connector, created,
-    gh_comment, issue, json, ok, ok_with, status,
+    API, Cursor, Fixture as TransportFixture, GithubConnector, TOKEN, TransportError, config,
+    created, gh, gh_comment, issue, json, ok, ok_with, status,
 };
 use crate::source::{
     ExternalIdentity, ExternalRef, PublicationSearch, PublishRequest,
@@ -73,10 +73,12 @@ impl Driver for GitHubDriver {
             &format!("{API}/repos/o/r/issues/5"),
             status(404, json!({}), &[]),
         );
-        transport.respond(
-            &format!("{API}/repos/o/r/issues/6"),
-            status(503, json!({}), &[]),
-        );
+        for _ in 0..3 {
+            transport.respond(
+                &format!("{API}/repos/o/r/issues/6"),
+                status(503, json!({}), &[]),
+            );
+        }
         let probes = ClosureProbes {
             open: reference(4, 1004),
             completed: add(1, json!("completed")),
@@ -174,7 +176,74 @@ impl Driver for GitHubDriver {
 
 fn github_fixture<T>(transport: &Arc<TransportFixture>, data: T) -> Fixture<T> {
     Fixture {
-        connector: Box::new(connector(transport, Some(TOKEN))),
+        connector: Box::new(GithubConnector::using_gh(
+            API.into(),
+            gh::GhApi::new({
+                let transport = transport.clone();
+                move |args, body, auth, _| {
+                    if args[0] == "auth" {
+                        assert_eq!(args, ["auth", "token", "--hostname", "api.example.test"]);
+                        return Ok(gh::Output {
+                            success: true,
+                            stdout: TOKEN.as_bytes().to_vec(),
+                            stderr: Vec::new(),
+                        });
+                    }
+                    assert_eq!(
+                        &args[..4],
+                        ["api", "--hostname", "api.example.test", "--include"]
+                    );
+                    assert!(!args.iter().any(|arg| arg.contains(TOKEN)));
+                    let url = args.last().unwrap().to_string();
+                    let request = super::HttpRequest {
+                        method: if body.is_some() {
+                            super::Method::Post
+                        } else {
+                            super::Method::Get
+                        },
+                        url,
+                        body: body.map(<[u8]>::to_vec),
+                        headers: Vec::new(),
+                    };
+                    if body.is_some() {
+                        assert!(args.windows(2).any(|pair| pair == ["--input", "-"]));
+                        assert!(matches!(
+                            auth,
+                            gh::Authentication::Scoped(TOKEN) | gh::Authentication::Ambient
+                        ));
+                    }
+                    let response = match super::HttpTransport::send(
+                        &super::Shared(transport.clone()),
+                        &request,
+                    ) {
+                        Ok(response) => response,
+                        Err(error) => {
+                            return Ok(gh::Output {
+                                success: false,
+                                stdout: Vec::new(),
+                                stderr: if error.before_send {
+                                    b"dial tcp: connect: connection refused".to_vec()
+                                } else {
+                                    b"connection reset after request dispatch".to_vec()
+                                },
+                            });
+                        }
+                    };
+                    let mut stdout =
+                        format!("HTTP/2.0 {} status\r\n", response.status).into_bytes();
+                    for (name, value) in response.headers {
+                        stdout.extend_from_slice(format!("{name}: {value}\r\n").as_bytes());
+                    }
+                    stdout.extend_from_slice(b"\r\n");
+                    stdout.extend_from_slice(&response.body);
+                    Ok(gh::Output {
+                        success: response.status < 300,
+                        stdout,
+                        stderr: Vec::new(),
+                    })
+                }
+            }),
+        )),
         config: config(json!({"repositories": ["o/r"]})),
         data,
     }

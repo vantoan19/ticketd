@@ -1160,16 +1160,15 @@ The code lives in `ticketd_core::source`, from the inside out:
 - **Engine** (`engine.rs`): the only caller of connectors. It validates
   configuration, walks pages with a progress guard, de-duplicates by external
   identity, bounds previews, and holds no database handle.
-- **Connectors** translate tracker data. The built-in GitHub connector uses a
-  `gh` process seam for repository picker results with the active github.com
-  login. Operations and configurations still being migrated use the
-  `HttpTransport` seam. Both have deterministic fixtures.
+- **Connectors** translate tracker data. The built-in GitHub connector uses
+  a bounded, non-interactive `gh` process for each GitHub request. It shares a
+  bounded conditional REST cache scoped to the verified credential, batches
+  issue conversation probes with GraphQL, and pauses a rate-limited host and
+  API bucket until reset. Issue publication is dispatched once.
   [ADR 0028](adr/0028-github-goes-through-the-github-cli.md) describes the move
   to one GitHub integration through the GitHub CLI. Linear implements the
   Rust SDK's `Extension` trait and uses the same process adapter as locally
-  installed or linked extensions. GitHub uses the person's own credential
-  (environment token or `gh auth token`), which is never stored, exported,
-  backed up, logged, or sent to any host other than the API.
+  installed or linked extensions.
 - **Workflows** (`source/tracking.rs`, `publication.rs`, `takeover.rs`,
   `conversation.rs`, `freshness.rs`, `connect_source.rs`, and `mod.rs` for saved configuration):
   methods on `Workspace` that call the engine first and then write in one short
@@ -1186,9 +1185,11 @@ Each device stores its named source connections in `source_connections`. The
 verified account and site are unique per provider. A connection check returns
 the account, site, discovery parts, filters, and publication destinations. The
 core caches successful answers for offline routing and previews. GitHub can
-use the active GitHub CLI account, a named account already signed in with it,
-or a connection-specific token override such as `TICKETD_SOURCE_GITHUB_2_TOKEN`.
-GitHub binds a checked connection to the authenticated account's numeric ID.
+use the active GitHub CLI account or a named login already signed in through
+it. Account checks and the requests they authorize share a credential scoped
+to that workflow's `gh` child processes. Ticketd keeps credentials out of
+storage, exports, backups, logs and diagnostics. GitHub binds a checked
+connection to the authenticated account's numeric ID.
 A same-site authenticated check for the saved login upgrades an older binding.
 Each request that can change authority checks the saved account and site first.
 When upgrading a pre-connection Workspace that used GitHub Enterprise, keep its

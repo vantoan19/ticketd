@@ -2289,6 +2289,7 @@ fn gather_conversations(
     // Another connection's batch may be discarded before apply. Each eligible
     // batch needs a conversation from its own account.
     let mut seen = HashSet::new();
+    let mut eligible = Vec::new();
     for issue in &gathered.issues {
         engine.check_refresh_canceled()?;
         let identity = &issue.reference.identity;
@@ -2318,7 +2319,26 @@ fn gather_conversations(
         )? {
             continue;
         }
-        match engine.conversation(&identity.provider, &source.saved.config, &issue.reference) {
+        eligible.push(issue);
+    }
+
+    let empty = engine.empty_conversations(
+        &source.saved.provider,
+        &eligible
+            .iter()
+            .map(|issue| &issue.reference)
+            .collect::<Vec<_>>(),
+    )?;
+    for issue in eligible {
+        engine.check_refresh_canceled()?;
+        let identity = &issue.reference.identity;
+        let key = (identity.provider.clone(), identity.id.clone());
+        let read = if empty.contains(identity) {
+            Ok(Some(super::Conversation::default()))
+        } else {
+            engine.conversation(&identity.provider, &source.saved.config, &issue.reference)
+        };
+        match read {
             Ok(Some(mut read)) => {
                 // REST timeline closes may omit a reason. Only the latest
                 // state event can borrow the issue's currently observed closure.

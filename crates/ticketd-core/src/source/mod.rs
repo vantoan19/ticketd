@@ -5,7 +5,7 @@
 //! - [`contract`]: provider-neutral types and the [`Connector`] trait.
 //! - [`schema`]: configuration fields, selectors and validation.
 //! - [`engine`]: runs connectors, pages, bounds and de-duplicates.
-//! - [`github`]: the built-in connector and its HTTP transport.
+//! - [`github`]: the built-in connector and its GitHub CLI transport.
 //! - this module: `Workspace` workflows that persist configuration. They call
 //!   the engine first and write in one short transaction afterwards, so no
 //!   network I/O ever happens while the database is locked.

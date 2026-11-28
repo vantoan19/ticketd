@@ -1,4 +1,4 @@
-//! `ticketd source` against a loopback server standing in for GitHub's API.
+//! `ticketd source` through `gh` against a loopback GitHub API fixture.
 //! The desktop is never involved, and nothing here reaches the real network.
 // Clippy exempts #[test] functions but not the fake connector and fixture helpers they
 // share; those unwrap so a broken setup fails the test loudly.
@@ -45,7 +45,7 @@ fn migrates_the_site_of_a_legacy_enterprise_connection() {
             .env("TICKETD_TEST_WORKSPACE", &workspace)
             .env("TICKETD_SOURCE_EXTENSIONS_DIR", &registry)
             .env("TICKETD_GITHUB_API_URL", api)
-            .env("TICKETD_SOURCE_GITHUB_TOKEN", TOKEN)
+            .env("GH_ENTERPRISE_TOKEN", TOKEN)
             .env("HTTPS_PROXY", &proxy_url)
             .env("https_proxy", &proxy_url)
             .env("ALL_PROXY", &proxy_url)
@@ -60,15 +60,15 @@ fn migrates_the_site_of_a_legacy_enterprise_connection() {
         let deadline = std::time::Instant::now() + std::time::Duration::from_secs(5);
         let mut intercepted = None;
         while child.try_wait().unwrap().is_none() {
-            if let Ok((stream, _)) = proxy.accept() {
+            if let Ok((mut stream, _)) = proxy.accept() {
                 stream.set_nonblocking(false).unwrap();
                 stream
                     .set_read_timeout(Some(std::time::Duration::from_secs(1)))
                     .unwrap();
                 let mut request = String::new();
                 BufReader::new(&stream).read_line(&mut request).unwrap();
-                intercepted = Some(request);
-                break;
+                intercepted.get_or_insert(request);
+                let _ = stream.write_all(b"HTTP/1.1 407 Proxy Authentication Required\r\nContent-Length: 0\r\nConnection: close\r\n\r\n");
             }
             if std::time::Instant::now() >= deadline {
                 child.kill().unwrap();
@@ -209,10 +209,10 @@ fn serve_site_with_login(
             let path = request.split_whitespace().nth(1).unwrap_or("").to_owned();
             let request_headers = request.to_lowercase();
             let second = request_headers
-                .contains(&format!("authorization: bearer {SECOND_TOKEN}").to_lowercase());
+                .contains(&format!("authorization: token {SECOND_TOKEN}").to_lowercase());
             let authorized = second
                 || request_headers
-                    .contains(&format!("authorization: bearer {TOKEN}").to_lowercase());
+                    .contains(&format!("authorization: token {TOKEN}").to_lowercase());
             let (status, body) = if !authorized {
                 ("401 Unauthorized", json!({"message": "Bad credentials"}))
             } else if request.starts_with("POST ") && path == "/repos/o/r/issues" {
@@ -335,11 +335,8 @@ impl Cli {
         second: Option<&str>,
     ) -> Output {
         let mut command = self.process(args);
-        if let Some(token) = token {
-            command.env("TICKETD_GITHUB_TOKEN", token);
-        }
-        if let Some(second) = second {
-            command.env("TICKETD_SOURCE_GITHUB_2_TOKEN", second);
+        if let Some(token) = second.or(token) {
+            command.env("GH_ENTERPRISE_TOKEN", token);
         }
         command.output().unwrap()
     }
@@ -350,6 +347,7 @@ impl Cli {
             .args(args)
             .env("HOME", self.dir.path())
             .env("XDG_DATA_HOME", self.dir.path())
+            .env("GH_CONFIG_DIR", self.dir.path().join("gh-config"))
             .env(
                 "TICKETD_TEST_WORKSPACE",
                 self.dir.path().join("workspace.sqlite3"),
@@ -358,9 +356,9 @@ impl Cli {
             .env("TICKETD_LOG", "ticketd_core::source=debug")
             .env_remove("GH_TOKEN")
             .env_remove("GITHUB_TOKEN")
-            .env_remove("TICKETD_GITHUB_TOKEN")
-            .env_remove("TICKETD_SOURCE_GITHUB_TOKEN")
-            .env_remove("TICKETD_SOURCE_GITHUB_2_TOKEN");
+            .env_remove("GH_ENTERPRISE_TOKEN")
+            .env_remove("GITHUB_ENTERPRISE_TOKEN")
+            .env_remove("GH_HOST");
         command
     }
 
@@ -402,7 +400,7 @@ fn list_describes_the_github_connector_and_its_schema() {
         presentation["sign_in"]["terminal_hint"]
             .as_str()
             .unwrap()
-            .contains("TICKETD_GITHUB_TOKEN")
+            .contains("GH_ENTERPRISE_TOKEN")
     );
     assert_eq!(github["saved"], Value::Null);
     let fields: Vec<_> = github["connector"]["schema"]["fields"]
@@ -557,17 +555,30 @@ fn test_names_the_account_and_a_bad_credential_is_explained_without_echoing_it()
     // The cause and the script hint are separate sentences, and a terminal is
     // never sent to a desktop Settings button.
     assert!(
-        stderr.contains("to sign in. From a script, set TICKETD_GITHUB_TOKEN"),
+        stderr.contains("to sign in. For scripts, the GitHub CLI reads GH_TOKEN"),
         "{stderr}"
     );
     assert!(!stderr.contains("Settings"), "{stderr}");
 }
 
+fn gh_accounts(directory: &std::path::Path, accounts: &[(&str, &str)]) {
+    let config = directory.join("gh-config");
+    std::fs::create_dir_all(&config).unwrap();
+    let mut hosts = String::from("127.0.0.1:\n    users:\n");
+    for (account, token) in accounts {
+        hosts.push_str(&format!(
+            "        {account}:\n            oauth_token: {token}\n"
+        ));
+    }
+    std::fs::write(config.join("hosts.yml"), hosts).unwrap();
+}
+
 #[test]
-fn a_named_github_account_gets_connection_specific_sign_in_guidance() {
+fn a_named_github_account_uses_its_gh_login_and_fails_closed() {
     let cli = Cli::new();
     cli.run(&["source", "add", "github", "--set", "repositories=o/r"]);
-    let named = cli.command_with_second(
+    gh_accounts(cli.dir.path(), &[("other", SECOND_TOKEN)]);
+    let named = cli.command(
         &[
             "source",
             "add",
@@ -578,22 +589,19 @@ fn a_named_github_account_gets_connection_specific_sign_in_guidance() {
             "account=other",
         ],
         Some(TOKEN),
-        Some(SECOND_TOKEN),
     );
     assert!(named.status.success(), "{:?}", named.stderr);
+    gh_accounts(cli.dir.path(), &[("octo", TOKEN)]);
     let failure = cli.fail(&["source", "github-2", "test"], Some(TOKEN));
     assert!(
-        failure.contains("TICKETD_SOURCE_GITHUB_2_TOKEN"),
+        failure.contains("The GitHub CLI login other is unavailable"),
         "{failure}"
     );
-    assert!(!failure.contains("set TICKETD_GITHUB_TOKEN"), "{failure}");
+    assert!(!failure.contains(TOKEN), "{failure}");
 }
 
-#[cfg(unix)]
 #[test]
 fn a_renamed_pinned_github_account_can_change_its_cli_selector_in_place() {
-    use std::os::unix::fs::PermissionsExt;
-
     let directory = tempfile::tempdir().unwrap();
     let renamed = directory.path().join("renamed");
     let marker = renamed.clone();
@@ -604,41 +612,12 @@ fn a_renamed_pinned_github_account_can_change_its_cli_selector_in_place() {
             "octo"
         }
     });
-    let command = directory.path().join("gh");
-    std::fs::write(
-        &command,
-        format!(
-            r#"#!/bin/sh
-[ "$1 $2" = "auth token" ] && [ "$3" = "--hostname" ] && [ "$5" = "--user" ] || exit 1
-case "$6" in
-  octo) [ ! -f "$TICKETD_GH_RENAMED" ] && printf '%s\n' '{TOKEN}' ;;
-  octo-renamed) [ -f "$TICKETD_GH_RENAMED" ] && printf '%s\n' '{TOKEN}' ;;
-  other) printf '%s\n' '{SECOND_TOKEN}' ;;
-  *) exit 1 ;;
-esac
-"#
-        ),
-    )
-    .unwrap();
-    std::fs::set_permissions(command, std::fs::Permissions::from_mode(0o700)).unwrap();
-
-    let run = |args: &[&str]| -> Output {
-        Command::new(env!("CARGO_BIN_EXE_ticketd"))
-            .args(args)
-            .env_clear()
-            .env("PATH", directory.path())
-            .env("HOME", directory.path())
-            .env("XDG_DATA_HOME", directory.path())
-            .env("GH_CONFIG_DIR", directory.path().join("gh-config"))
-            .env("TICKETD_GH_RENAMED", &renamed)
-            .env(
-                "TICKETD_TEST_WORKSPACE",
-                directory.path().join("workspace.sqlite3"),
-            )
-            .env("TICKETD_GITHUB_API_URL", &api)
-            .output()
-            .unwrap()
+    let cli = Cli {
+        dir: directory,
+        api,
     };
+    gh_accounts(cli.dir.path(), &[("octo", TOKEN), ("other", SECOND_TOKEN)]);
+    let run = |args: &[&str]| cli.command(args, None);
     let checked = |output: Output| -> Value {
         assert!(
             output.status.success(),
@@ -659,6 +638,10 @@ esac
     ]));
     assert_eq!(added["source"]["id"], "github");
     std::fs::write(&renamed, "").unwrap();
+    gh_accounts(
+        cli.dir.path(),
+        &[("octo-renamed", TOKEN), ("other", SECOND_TOKEN)],
+    );
     assert!(!run(&["source", "github", "test"]).status.success());
     let wrong = run(&["source", "github", "edit", "--set", "account=other"]);
     assert!(!wrong.status.success());

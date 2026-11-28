@@ -3,8 +3,6 @@
 
 use std::{
     collections::{BTreeMap, VecDeque},
-    io::{Read, Write},
-    net::TcpListener,
     ops::ControlFlow,
     sync::{Arc, Mutex},
 };
@@ -119,10 +117,6 @@ fn setup_at(api: &str, token: Option<&'static str>) -> (Arc<Fixture>, Engine) {
     (fixture, engine)
 }
 
-fn connector(fixture: &Arc<Fixture>, token: Option<&'static str>) -> GithubConnector {
-    connector_at(API, fixture, token)
-}
-
 fn connector_at(api: &str, fixture: &Arc<Fixture>, token: Option<&'static str>) -> GithubConnector {
     GithubConnector::new(
         api,
@@ -172,17 +166,14 @@ fn issue(id: u64, number: u64, repo: &str) -> Value {
 fn repository_picker_filters_paginated_results_from_the_github_cli() {
     let http = Arc::new(Fixture::default());
     let mut connector = connector_at(DEFAULT_API_URL, &http, None);
-    connector.repository_options_gh = Some(gh::GhApi::new(|args| {
-        let [api, hostname, host, include, endpoint] = args else {
-            panic!("unexpected GitHub CLI arguments: {args:?}");
-        };
-        assert_eq!(
-            [*api, *hostname, *host, *include],
-            ["api", "--hostname", "github.com", "--include"]
-        );
+    connector.gh = Some(gh::GhApi::new(|args, body, auth, _| {
+        assert_eq!(&args[..4], ["api", "--hostname", "github.com", "--include"]);
+        assert!(matches!(auth, gh::Authentication::Ambient));
+        assert!(body.is_none());
+        let endpoint = *args.last().unwrap();
         let first = "user/repos?per_page=100&sort=pushed&affiliation=owner,collaborator,organization_member";
         let next = "user/repos?affiliation=owner%2Ccollaborator%2Corganization_member&page=2&per_page=100&sort=pushed";
-        let (page, link) = match *endpoint {
+        let (page, link) = match endpoint {
             endpoint if endpoint == first => (
                 json!([{"full_name": "acme/gizmo", "private": false}]),
                 format!("Link: <https://api.github.com/{next}>; rel=\"next\"\r\n"),
@@ -608,14 +599,6 @@ fn enterprise_issue_scopes_keep_nondefault_ports_separate() {
         .unwrap();
     assert_eq!(backfill.linked_tickets, ["T-KQ8"]);
     assert!(workspace.show_ticket("T-KQ9").unwrap().project_id.is_none());
-}
-
-#[test]
-fn a_pinned_github_connection_names_its_script_token() {
-    let connector = GithubConnector::ambient_for(Some("github-2"), Some("octo"));
-    let hint = connector.presentation().sign_in.terminal_hint.unwrap();
-    assert!(hint.contains("TICKETD_SOURCE_GITHUB_2_TOKEN"));
-    assert!(!hint.contains("TICKETD_GITHUB_TOKEN"));
 }
 
 #[test]
@@ -2557,54 +2540,6 @@ fn label_options_come_from_the_selected_repositories() {
 }
 
 #[test]
-fn the_real_transport_pages_over_http_and_sends_the_credential() {
-    let listener = TcpListener::bind("127.0.0.1:0").unwrap();
-    let base = format!("http://{}", listener.local_addr().unwrap());
-    let server_base = base.clone();
-    let server = std::thread::spawn(move || {
-        let mut seen = Vec::new();
-        for _ in 0..2 {
-            let (mut stream, _) = listener.accept().unwrap();
-            let mut buffer = [0u8; 4096];
-            let read = stream.read(&mut buffer).unwrap();
-            let request = String::from_utf8_lossy(&buffer[..read]).to_string();
-            let path = request.split_whitespace().nth(1).unwrap().to_owned();
-            let (body, link) = if path.contains("page=2") {
-                (json!([issue(2, 2, "o/one")]).to_string(), String::new())
-            } else {
-                (
-                    json!([issue(1, 1, "o/one")]).to_string(),
-                    format!("Link: <{server_base}/repos/o/one/issues?page=2>; rel=\"next\"\r\n"),
-                )
-            };
-            let response = format!(
-                "HTTP/1.1 200 OK\r\nContent-Type: application/json\r\n{link}Content-Length: {}\r\nConnection: close\r\n\r\n{body}",
-                body.len()
-            );
-            stream.write_all(response.as_bytes()).unwrap();
-            seen.push(request);
-        }
-        seen
-    });
-
-    let connector = GithubConnector::new(
-        base,
-        Box::new(UreqTransport::new()),
-        Box::new(Token(Some(TOKEN))),
-    );
-    let mut engine = Engine::new();
-    engine.register(Box::new(connector)).unwrap();
-    let issues = discover_all(&engine, &config(json!({"repositories": ["o/one"]}))).unwrap();
-    assert_eq!(issues.len(), 2);
-    let requests = server.join().unwrap();
-    for request in &requests {
-        let lower = request.to_lowercase();
-        assert!(lower.contains(&format!("authorization: bearer {TOKEN}").to_lowercase()));
-        assert!(lower.contains("user-agent: ticketd"));
-    }
-}
-
-#[test]
 fn secrets_and_requests_never_debug_print_the_credential() {
     let secret = Secret::new(TOKEN);
     assert!(!format!("{secret:?}").contains(TOKEN));
@@ -3486,9 +3421,8 @@ fn credential_failures_end_in_a_sentence_and_take_the_hint_of_their_surface() {
     for error in [&missing, &rejected] {
         let terminal = error.message_for(Surface::Terminal);
         assert!(
-            terminal.ends_with(
-                ". From a script, set TICKETD_GITHUB_TOKEN to a token that can read and create issues instead."
-            ),
+            terminal
+                .ends_with(". For scripts, the GitHub CLI reads GH_TOKEN or GH_ENTERPRISE_TOKEN."),
             "{terminal}"
         );
         assert!(!terminal.contains("Settings"), "{terminal}");
@@ -3497,7 +3431,7 @@ fn credential_failures_end_in_a_sentence_and_take_the_hint_of_their_surface() {
             desktop.ends_with(". Then choose Check connection in Settings › Ticket sources."),
             "{desktop}"
         );
-        assert!(!desktop.contains("TICKETD_GITHUB_TOKEN"), "{desktop}");
+        assert!(!desktop.contains("GH_TOKEN"), "{desktop}");
     }
     // Other failures read the same everywhere.
     let other = SourceError::Unavailable("GitHub is unavailable".into());
@@ -3569,4 +3503,215 @@ fn github_describes_how_to_present_its_configuration() {
             .collect::<String>(),
         "Imports open issues from example/api that have the labels bug and help, assigned to someone."
     );
+}
+
+#[test]
+fn publication_keeps_its_verified_login_and_recovers_a_lost_answer_without_repeating_the_write() {
+    use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
+
+    use crate::source::{PublicationError, PublishOptions, Resolution, ResolveOptions};
+
+    let active_changed = Arc::new(AtomicBool::new(false));
+    let armed = Arc::new(AtomicBool::new(false));
+    let writes = Arc::new(AtomicUsize::new(0));
+    let gh = gh::GhApi::new({
+        let active_changed = active_changed.clone();
+        let armed = armed.clone();
+        let writes = writes.clone();
+        move |args, input, auth, _| {
+            if args[0] == "auth" {
+                assert!(matches!(auth, gh::Authentication::Ambient));
+                let token = if active_changed.load(Ordering::Acquire) {
+                    "different-credential"
+                } else {
+                    "first-credential"
+                };
+                return Ok(gh::Output {
+                    success: true,
+                    stdout: token.as_bytes().to_vec(),
+                    stderr: Vec::new(),
+                });
+            }
+            let endpoint = *args.last().unwrap();
+            let body = match endpoint {
+                "user" => {
+                    assert!(matches!(
+                        auth,
+                        gh::Authentication::Scoped("first-credential")
+                    ));
+                    if armed.load(Ordering::Acquire) {
+                        active_changed.store(true, Ordering::Release);
+                    }
+                    json!({"id": 1, "login": "octo"})
+                }
+                "repos/o/r/issues?state=open&per_page=100" => json!([]),
+                "repos/o/r/issues" => {
+                    assert!(matches!(
+                        auth,
+                        gh::Authentication::Scoped("first-credential")
+                    ));
+                    writes.fetch_add(1, Ordering::AcqRel);
+                    let body: Value = serde_json::from_slice(input.unwrap()).unwrap();
+                    assert_eq!(body["title"], "Publish this ticket");
+                    return Ok(gh::Output {
+                        success: false,
+                        stdout: Vec::new(),
+                        stderr: b"connection reset after sending".to_vec(),
+                    });
+                }
+                "repos/o/r/issues/7" => {
+                    assert!(matches!(
+                        auth,
+                        gh::Authentication::Scoped("first-credential")
+                    ));
+                    let mut remote = public_issue(107, 7, "o/r");
+                    remote["title"] = json!("Publish this ticket");
+                    remote["body"] = json!("");
+                    remote["user"] = json!({"id": 1, "login": "octo"});
+                    remote["created_at"] = json!("2026-01-02T00:00:00Z");
+                    remote
+                }
+                _ => panic!("unexpected GitHub endpoint: {endpoint}"),
+            };
+            Ok(recorded_gh(200, &body))
+        }
+    });
+    let mut engine = Engine::new();
+    engine
+        .register(Box::new(GithubConnector::using_gh(
+            DEFAULT_API_URL.into(),
+            gh,
+        )))
+        .unwrap();
+    let directory = tempfile::tempdir().unwrap();
+    let mut workspace = crate::Workspace::open(directory.path().join("workspace.sqlite3")).unwrap();
+    workspace
+        .add_source_connection(
+            &engine,
+            PROVIDER,
+            None,
+            None,
+            &config(json!({"repositories": ["o/r"]})),
+        )
+        .unwrap();
+    let ticket = workspace.create_ticket("Publish this ticket").unwrap();
+
+    armed.store(true, Ordering::Release);
+    let error = workspace
+        .publish_ticket(&engine, &ticket.reference, &PublishOptions::default())
+        .unwrap_err();
+    assert!(matches!(
+        error,
+        crate::Error::Publication(PublicationError::Unresolved { .. })
+    ));
+    assert_eq!(writes.load(Ordering::Acquire), 1);
+
+    armed.store(false, Ordering::Release);
+    active_changed.store(false, Ordering::Release);
+    let resolved = workspace
+        .resolve_publication(
+            &engine,
+            &ticket.reference,
+            &ResolveOptions {
+                resolution: Resolution::Attach {
+                    issue: Some("7".into()),
+                },
+                now: None,
+                agent: None,
+                accept_different_content: false,
+            },
+        )
+        .unwrap();
+    assert_eq!(resolved.ticket.source.unwrap().id, "107");
+    assert_eq!(writes.load(Ordering::Acquire), 1);
+}
+
+fn recorded_gh(status: u16, body: &Value) -> gh::Output {
+    gh::Output {
+        success: (200..300).contains(&status),
+        stdout: format!(
+            "HTTP/2.0 {status} recorded\r\nDate: Thu, 01 Jan 2026 00:00:00 GMT\r\nContent-Type: application/json\r\n\r\n{body}"
+        ).into_bytes(),
+        stderr: Vec::new(),
+    }
+}
+
+#[test]
+fn refresh_batches_empty_conversations_and_reads_existing_events_with_their_rest_ids() {
+    let gh = gh::GhApi::new(|args, input, _, _| {
+        if args[0] == "auth" {
+            return Ok(gh::Output {
+                success: true,
+                stdout: b"fixture".to_vec(),
+                stderr: Vec::new(),
+            });
+        }
+        let body = match *args.last().unwrap() {
+            "user" => json!({"id": 1, "login": "octo"}),
+            "repos/o/r/issues?state=open&per_page=100" => {
+                json!([public_issue(107, 7, "o/r"), public_issue(108, 8, "o/r"),])
+            }
+            "graphql" => {
+                let body: Value = serde_json::from_slice(input.unwrap()).unwrap();
+                let query = body["query"].as_str().unwrap();
+                assert!(query.contains("i0:"));
+                assert!(query.contains("i1:"));
+                json!({"data": {
+                    "i0": {"issue": {
+                        "databaseId": 107,
+                        "comments": {"totalCount": 0},
+                        "timelineItems": {"nodes": [], "pageInfo": {"hasNextPage": false}}
+                    }},
+                    "i1": {"issue": {
+                        "databaseId": 108,
+                        "comments": {"totalCount": 0},
+                        "timelineItems": {"nodes": [{"__typename": "AssignedEvent"}], "pageInfo": {"hasNextPage": false}}
+                    }}
+                }})
+            }
+            "repos/o/r/issues/8/comments?per_page=100" => json!([]),
+            "repos/o/r/issues/8/events?per_page=100" => json!([{
+                "id": 901, "event": "assigned", "assignee": {"login": "octo"}, "created_at": "2026-01-01T00:00:00Z"
+            }]),
+            endpoint => panic!("unexpected GitHub endpoint: {endpoint}"),
+        };
+        Ok(recorded_gh(200, &body))
+    });
+    let mut engine = Engine::new();
+    engine
+        .register(Box::new(GithubConnector::using_gh(
+            DEFAULT_API_URL.into(),
+            gh,
+        )))
+        .unwrap();
+    let directory = tempfile::tempdir().unwrap();
+    let mut workspace = crate::Workspace::open(directory.path().join("workspace.sqlite3")).unwrap();
+    workspace
+        .add_source_connection(
+            &engine,
+            PROVIDER,
+            None,
+            None,
+            &config(json!({"repositories": ["o/r"]})),
+        )
+        .unwrap();
+
+    let refresh = workspace
+        .refresh_connection(&engine, PROVIDER, &Default::default())
+        .unwrap();
+    assert!(refresh.failures.is_empty());
+    assert_eq!(refresh.imported.len(), 2);
+    let event = |reference| {
+        workspace
+            .source_conversation(reference)
+            .unwrap()
+            .iter()
+            .any(|entry| {
+                matches!(
+                    entry, crate::source::ConversationEntry::Event { id, .. } if id == "901"
+                )
+            })
+    };
+    assert!(!event(&refresh.imported[0]));
+    assert!(event(&refresh.imported[1]));
 }

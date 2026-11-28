@@ -622,6 +622,21 @@ impl Engine {
         Ok(found)
     }
 
+    pub(super) fn empty_conversations(
+        &self,
+        provider: &str,
+        references: &[&ExternalRef],
+    ) -> Result<HashSet<ExternalIdentity>, SourceError> {
+        const BATCH_SIZE: usize = 25;
+        let connector = self.connector(provider)?;
+        let mut empty = HashSet::new();
+        for chunk in references.chunks(BATCH_SIZE) {
+            self.check_refresh_canceled()?;
+            empty.extend(connector.empty_conversations(chunk));
+        }
+        Ok(empty)
+    }
+
     /// Reads an issue's conversation with repeated ids dropped, and the comments and
     /// the events each sorted chronologically (they are separate lists; interleaving
     /// them is the reader's job). `None` when the connector does not declare
