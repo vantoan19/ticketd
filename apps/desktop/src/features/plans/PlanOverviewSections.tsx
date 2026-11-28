@@ -274,13 +274,15 @@ function PlanOverviewRow({
           type="button"
           variant="ghost"
           size="card"
-          className="min-h-6 min-w-8 gap-1 px-1"
+          className="min-h-6 min-w-8"
           data-overview-files=""
           aria-label={`${files.files.length} ${files.files.length === 1 ? "file" : "files"} for ${ticket.reference}`}
           onClick={() => onOpenFiles(files)}
         >
-          <Paperclip data-icon="inline-start" aria-hidden="true" />
-          <Count>{files.files.length}</Count>
+          <span className="inline-flex items-center gap-1 px-1">
+            <Paperclip data-icon="inline-start" aria-hidden="true" />
+            <Count>{files.files.length}</Count>
+          </span>
         </Button>
       )}
       {chat && (

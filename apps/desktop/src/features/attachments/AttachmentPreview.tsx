@@ -1465,8 +1465,8 @@ export function AttachmentPreview({
    * the target is not one of them, there is nothing to walk.
    */
   browse?: Browse;
-  /** Optional context for the current file, with a way to exit the viewer. */
-  source?: (close: () => void) => ReactNode;
+  /** Optional context for the current file, with an action that closes the viewer. */
+  source?: { content: ReactNode; actionLabel: string; onAction: () => void };
   onReplace?: ReferenceReplacement | undefined;
   /** Actions of the place that opened it, after a separator in "…" (Detach from ticket). */
   menuItems?: ReactNode;
@@ -1675,7 +1675,22 @@ export function AttachmentPreview({
             <div aria-live="polite" className="sr-only">
               {announcement}
             </div>
-            {source?.(close)}
+            {source && (
+              <div className="attachment-preview-source text-sm">
+                {source.content}
+                <Button
+                  variant="ghost"
+                  size="compact"
+                  className="ms-auto"
+                  onClick={() => {
+                    source.onAction();
+                    close();
+                  }}
+                >
+                  {source.actionLabel}
+                </Button>
+              </div>
+            )}
             <div className="attachment-preview-body">
               <div className="attachment-preview-main">
                 {notice && (
