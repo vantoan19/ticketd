@@ -2,7 +2,7 @@ import { useInboxTriage } from "./inbox-triage-context";
 import { InboxTriageCard } from "./InboxTriageCard";
 import { TicketAgentSession } from "./TicketAgent";
 import { OverlayBoundary } from "@/components/ui/overlay-boundary";
-import { memo, useRef, useState } from "react";
+import { memo, useCallback, useRef, useState } from "react";
 import { EmptyState } from "@/components/ui/empty-state";
 import { Kbd } from "@/components/ui/kbd";
 import { TicketHeader } from "@/features/tickets/TicketHeader";
@@ -14,7 +14,10 @@ import { hasTicketDraft } from "./ticket-draft";
 import { useDraftRecovery } from "@/lib/draft-recovery-context";
 import { useMentionReadiness } from "./use-mention-readiness";
 import type { MentionTarget } from "@/features/tickets/Backlinks";
-import type { FollowedMention } from "@/features/tickets/useTicketWorkspace";
+import type {
+  FollowedMention,
+  TicketListPosition,
+} from "@/features/tickets/useTicketWorkspace";
 import type { Plan } from "@/lib/api/plans";
 import { TicketPage } from "@/features/tickets/TicketPage";
 import type { ReviewQueue } from "./TicketDecisionCard";
@@ -65,7 +68,7 @@ export function TicketDetails({
   leaving?: boolean;
   hidden?: boolean;
   /** The selected ticket's place in the visible list, across pages. */
-  position?: { index: number; total: number } | null;
+  position?: TicketListPosition | null;
   /** The list's name, for the expanded view's return crumb. */
   returnLabel?: string;
   /** Open the ticket before (-1) or after (1) the selected one in the list. */
@@ -106,6 +109,12 @@ export function TicketDetails({
     }
   }, [selected]);
   const [boundary, setBoundary] = useState<HTMLElement | null>(null);
+  const pane = useRef<HTMLElement>(null);
+  const setPane = useCallback((node: HTMLElement | null) => {
+    pane.current = node;
+    setBoundary(node);
+  }, []);
+  const narrowHeader = useNarrowPane(pane, 560);
   const scroller = useRef<HTMLDivElement>(null);
   const narrow = useNarrowPane(scroller, TICKET_RAIL_MIN_WIDTH, true);
   const [scrolledReference, setScrolledReference] = useState<string | null>(
@@ -153,7 +162,7 @@ export function TicketDetails({
   }));
   return (
     <section
-      ref={setBoundary}
+      ref={setPane}
       className="ticket-detail"
       hidden={hidden}
       inert={leaving}
@@ -169,6 +178,7 @@ export function TicketDetails({
                 selected={selected}
                 ticket={ticket}
                 scrolled={selected !== null && scrolledReference === selected}
+                narrow={narrowHeader}
                 expanded={expanded}
                 onExpand={onExpand}
                 onReturn={onReturn}

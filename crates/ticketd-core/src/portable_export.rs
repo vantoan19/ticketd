@@ -83,7 +83,22 @@ fn with_summary(body: &str, summary: Option<&str>) -> String {
     format!("{summary}\n\n{body}")
 }
 
+fn ticket_markdown(ticket: &crate::Ticket) -> String {
+    format!(
+        "# {} · {}\n\n{}",
+        ticket.reference,
+        markdown_text(&ticket.title),
+        ticket.body
+    )
+}
+
 impl Workspace {
+    /// The saved ticket's export Markdown, with its original file references.
+    pub fn ticket_export_markdown(&self, reference: &str) -> Result<String, Error> {
+        self.show_ticket(reference)
+            .map(|ticket| ticket_markdown(&ticket))
+    }
+
     /// Create a fresh bundle in an existing output folder. No existing file is
     /// replaced; failed output is removed and missing inputs become manifest omissions.
     pub fn export_markdown_with_files(
@@ -126,15 +141,7 @@ impl Workspace {
                 let ids = query
                     .query_map([&ticket.id], |row| row.get::<_, String>(0))?
                     .collect::<Result<Vec<_>, _>>()?;
-                (
-                    format!(
-                        "# {} · {}\n\n{}",
-                        ticket.reference,
-                        markdown_text(&ticket.title),
-                        ticket.body
-                    ),
-                    ids,
-                )
+                (ticket_markdown(&ticket), ids)
             }
         };
         let stage = tempfile::Builder::new()

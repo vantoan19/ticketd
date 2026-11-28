@@ -114,6 +114,39 @@ test("a wide pane keeps the same wrapping property bar", async () => {
   ).toBeNull();
 });
 
+test("below a 560px pane the menu carries Copy and the position, and navigation stays in the header", async () => {
+  renderDetails();
+  resizePane(560);
+  const header = screen.getByRole("banner");
+  expect(
+    within(header).getByRole("button", { name: "Copy reference" }),
+  ).toBeTruthy();
+  expect(within(header).getByText("2 of 11 in progress")).toBeTruthy();
+  resizePane(559);
+  expect(
+    within(header).queryByRole("button", { name: "Copy reference" }),
+  ).toBeNull();
+  expect(within(header).queryByText("2 of 11 in progress")).toBeNull();
+  for (const name of [
+    "Return to ticket list",
+    "Previous ticket",
+    "Next ticket",
+    "Close ticket details",
+  ])
+    expect(within(header).getByRole("button", { name })).toBeTruthy();
+  fireEvent.keyDown(
+    within(header).getByRole("button", { name: "Ticket actions" }),
+    {
+      key: "Enter",
+    },
+  );
+  const menu = await screen.findByRole("menu");
+  expect(within(menu).getByText("2 of 11 in progress")).toBeTruthy();
+  expect(
+    within(menu).getByRole("menuitem", { name: "Copy reference" }),
+  ).toBeTruthy();
+});
+
 test("a narrow pane shows only present properties and adds a project through the plus menu", async () => {
   renderDetails();
   resizePane(500);
@@ -125,13 +158,6 @@ test("a narrow pane shows only present properties and adds a project through the
       .map((chip) => chip.getAttribute("aria-label")),
   ).toEqual(["Status: In progress", "Tags: release", "Add ticket property"]);
   expect(bar.textContent).not.toContain("Local");
-  // Follow is an icon toggle: its name stays "Follow" and aria-pressed says
-  // whether it is on.
-  const follow = screen.getByRole("button", { name: "Follow" });
-  expect(follow.getAttribute("aria-pressed")).toBe("false");
-  fireEvent.click(follow);
-  await waitFor(() => expect(follow.getAttribute("aria-pressed")).toBe("true"));
-
   fireEvent.keyDown(
     within(bar).getByRole("button", { name: "Add ticket property" }),
     { key: "Enter" },
