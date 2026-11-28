@@ -100,7 +100,7 @@ function view(value: TicketSource, revision = 0) {
   );
 }
 
-test("comments and events share one connected timeline in source order, all read-only", async () => {
+test("comments and events share one connected timeline in source order", async () => {
   conversation([
     comment("501", "alice", "Please **take** a look", {
       edited_at: "2026-01-02T05:00:00Z",
@@ -117,9 +117,9 @@ test("comments and events share one connected timeline in source order, all read
   render(view(source()));
 
   const card = await screen.findByRole("article", {
-    name: /Comment by alice on GitHub, read-only/,
+    name: "Comment by alice on GitHub",
   });
-  expect(within(card).getByText("Read-only")).toBeTruthy();
+  expect(within(card).queryByText("Read-only")).toBeNull();
   expect(within(card).getByText("edited")).toBeTruthy();
   expect(within(card).getByText("take").tagName).toBe("STRONG");
   // Nothing in the conversation can be edited, deleted or composed locally.
@@ -141,17 +141,21 @@ test("comments and events share one connected timeline in source order, all read
   expect(text[8]).toContain("bob reopened this");
 });
 
-test("View and Comment link to the source and there is no composer", async () => {
+test("the conversation heading counts comments and only the heading links to GitHub", async () => {
   conversation([comment("501", "alice", "hello")]);
   render(view(source()));
   await screen.findByRole("article");
 
-  fireEvent.click(screen.getByRole("link", { name: "View on GitHub" }));
-  expect(opener.openUrl).toHaveBeenCalledWith(
-    "https://github.com/acme/api/issues/98#issuecomment-501",
+  expect(
+    screen.getByRole("heading", { name: "GitHub conversation 1" }),
+  ).toBeTruthy();
+  expect(screen.queryByRole("link", { name: "View on GitHub" })).toBeNull();
+  const link = screen.getByRole("link", { name: "Comment on GitHub" });
+  expect(link.getAttribute("href")).toBe(
+    "https://github.com/acme/api/issues/98",
   );
-  fireEvent.click(screen.getByRole("link", { name: "Comment on GitHub" }));
-  expect(opener.openUrl).toHaveBeenLastCalledWith(
+  fireEvent.click(link);
+  expect(opener.openUrl).toHaveBeenCalledWith(
     "https://github.com/acme/api/issues/98",
   );
 });
@@ -174,9 +178,7 @@ test("a ticket whose ownership was taken shows retained entries, or nothing", as
   render(view(source({ ownership: "local" })));
   expect(await screen.findByText("kept")).toBeTruthy();
   // Provenance only: it is no longer the source's ticket to comment on.
-  expect(
-    screen.queryByRole("button", { name: "Comment on GitHub" }),
-  ).toBeNull();
+  expect(screen.queryByRole("link", { name: "Comment on GitHub" })).toBeNull();
 });
 
 test("a refresh keeps the cards in place and a failed reload keeps what was retrieved", async () => {
