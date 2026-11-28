@@ -135,6 +135,40 @@ test("zoom steps through levels, leaves Fit, and + - 0 do the same from the stag
   expect(pdf.renders.length).toBe(before);
 });
 
+test("dragging a zoomed PDF page pans both axes and updates the page number", async () => {
+  serve(3);
+  render(<Stage />);
+  const page = await screen.findByRole("img", { name: "Page 1" });
+  const { stage, to } = scrollable();
+  Object.defineProperties(stage, {
+    clientWidth: { value: 800 },
+    scrollWidth: { value: 950 },
+    scrollHeight: { value: 3684 },
+  });
+  Object.defineProperty(page.parentElement, "setPointerCapture", {
+    value: () => {},
+  });
+  fireEvent.click(screen.getByRole("button", { name: "Zoom in" }));
+  expect(screen.getByText("150%")).toBeTruthy();
+  to(900);
+
+  const pointer = { pointerId: 1, pointerType: "mouse", button: 0 };
+  fireEvent.pointerDown(page, { ...pointer, clientX: 300, clientY: 450 });
+  fireEvent.pointerMove(stage, { ...pointer, clientX: 220, clientY: 250 });
+  fireEvent.pointerUp(stage, { ...pointer, clientX: 220, clientY: 250 });
+  fireEvent.scroll(stage);
+
+  expect(stage.scrollLeft).toBe(80);
+  expect(stage.scrollTop).toBe(1100);
+  expect(screen.getByText("150%")).toBeTruthy();
+  await waitFor(() =>
+    expect(screen.getByRole("textbox", { name: "Page" })).toHaveProperty(
+      "value",
+      "2",
+    ),
+  );
+});
+
 test("the page number follows the scroll, and typing a number jumps to that page", async () => {
   serve(12);
   render(<Stage />);

@@ -210,6 +210,7 @@
   width: max-content;
   min-width: 100%;
   padding: 16px 16px 72px;
+  user-select: none;
 }
 /* A page is white paper in both themes, with a soft shadow. */
 .attachment-pdf-page {
@@ -394,10 +395,12 @@
 .attachment-preview-image[data-zoom="out"] {
   cursor: zoom-out;
 }
-.attachment-preview-image[data-pannable] {
+.attachment-preview-image[data-pannable],
+.attachment-pdf[data-pannable] {
   cursor: grab;
 }
-.attachment-preview-image[data-dragging] {
+.attachment-preview-image[data-dragging],
+.attachment-pdf[data-dragging] {
   cursor: grabbing;
 }
 .attachment-preview-canvas video {
