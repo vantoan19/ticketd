@@ -232,16 +232,19 @@ export function ReturnCrumb({
   origin,
   onReturn,
   label = `Back to ${origin}`,
+  arrow = true,
 }: {
   origin: string;
   onReturn: () => void;
   /** The accessible name, when "Back to {origin}" is not the clearest. */
   label?: string;
+  /** Without the arrow, a crumb that continues the path of the one before it. */
+  arrow?: boolean;
 }) {
   return (
     <span data-slot="return-crumb" className="ui-return-crumb">
       <Button variant="ghost" size="sm" aria-label={label} onClick={onReturn}>
-        <ArrowLeft aria-hidden="true" />
+        {arrow && <ArrowLeft aria-hidden="true" />}
         <span className="ui-return-crumb-origin">{origin}</span>
       </Button>
       <span aria-hidden="true">/</span>

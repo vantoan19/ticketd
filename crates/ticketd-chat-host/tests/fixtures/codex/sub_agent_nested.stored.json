@@ -1,0 +1,197 @@
+{
+  "chat": {
+    "id": "00000000-0000-4000-8000-000000000001",
+    "title": null,
+    "harness": "codex",
+    "execution_folder": "/work/chat-1",
+    "folder_managed": false,
+    "archived": false,
+    "trashed": false,
+    "queue_paused": false,
+    "effective_settings": "{\"cliVersion\":\"0.163.0\",\"model\":\"gpt-test\",\"modelProvider\":\"openai\",\"reasoningEffort\":null,\"approvalPolicy\":\"on-request\",\"approvalsReviewer\":\"user\",\"sandbox\":{\"type\":\"workspaceWrite\"},\"cwd\":\"/work/chat-1\",\"instructionSources\":[\"/work/chat-1/AGENTS.md\"],\"own\":{\"approvalPolicy\":\"on-request\",\"sandboxPolicy\":{\"type\":\"workspaceWrite\"}},\"reopen_with\":{\"permission\":\"own\"}}",
+    "native_session_id": "thr_1",
+    "links": [],
+    "active_turn": {
+      "id": "00000000-0000-4000-8000-000000000002:turn_1",
+      "position": 3,
+      "native_turn_id": "turn_1",
+      "state": "active",
+      "detail": null,
+      "problem": null,
+      "problem_resets_at": null,
+      "ending": null,
+      "started_at": "2026-11-27T10:00:00.000Z",
+      "ended_at": null,
+      "origin": null
+    },
+    "seen_through": 0,
+    "read_through": null,
+    "marked_unread": false,
+    "muted": false,
+    "created_at": "2026-11-27T10:00:00.000Z"
+  },
+  "sequence": 16,
+  "items": [
+    {
+      "kind": "message",
+      "value": {
+        "id": "00000000-0000-4000-8000-000000000003",
+        "position": 1,
+        "role": "user",
+        "text": "Review the refund calls with sub-agents",
+        "attachments": [],
+        "complete": true,
+        "turn_id": null,
+        "owner": {
+          "kind": "main"
+        },
+        "queued": false,
+        "editing": false,
+        "requires_link_context": false,
+        "attempts": [
+          {
+            "id": "00000000-0000-4000-8000-000000000004",
+            "intent": "new_turn",
+            "delivery": "acknowledged",
+            "turn_id": "00000000-0000-4000-8000-000000000002:turn_1",
+            "detail": null,
+            "decision": null,
+            "recorded_at": "2026-11-27T10:00:00.000Z"
+          }
+        ],
+        "created_at": "2026-11-27T10:00:00.000Z"
+      }
+    },
+    {
+      "kind": "session",
+      "value": {
+        "id": "00000000-0000-4000-8000-000000000005",
+        "position": 2,
+        "native_session_id": "thr_1",
+        "origin": "new",
+        "started_at": "2026-11-27T10:00:00.000Z"
+      }
+    },
+    {
+      "kind": "turn",
+      "value": {
+        "id": "00000000-0000-4000-8000-000000000002:turn_1",
+        "position": 3,
+        "native_turn_id": "turn_1",
+        "state": "active",
+        "detail": null,
+        "problem": null,
+        "problem_resets_at": null,
+        "ending": null,
+        "started_at": "2026-11-27T10:00:00.000Z",
+        "ended_at": null,
+        "origin": null
+      }
+    },
+    {
+      "kind": "sub_agent_run",
+      "value": {
+        "id": "00000000-0000-4000-8000-000000000001:sub-agent:thr_a:run-1",
+        "position": 4,
+        "sub_agent": "thr_a",
+        "run": 1,
+        "native_run_id": "turn_2",
+        "turn_id": "00000000-0000-4000-8000-000000000002:turn_1",
+        "state": "running",
+        "stopped_by": null,
+        "stop_reason": null,
+        "detail": null,
+        "started_at": "2026-11-27T10:00:00.000Z",
+        "ended_at": null
+      }
+    },
+    {
+      "kind": "sub_agent_run",
+      "value": {
+        "id": "00000000-0000-4000-8000-000000000001:sub-agent:thr_b:run-1",
+        "position": 5,
+        "sub_agent": "thr_b",
+        "run": 1,
+        "native_run_id": "turn_3",
+        "turn_id": "00000000-0000-4000-8000-000000000002:turn_1",
+        "state": "running",
+        "stopped_by": null,
+        "stop_reason": null,
+        "detail": null,
+        "started_at": "2026-11-27T10:00:00.000Z",
+        "ended_at": null
+      }
+    },
+    {
+      "kind": "tool",
+      "value": {
+        "id": "00000000-0000-4000-8000-000000000002:exec_1",
+        "position": 6,
+        "turn_id": "00000000-0000-4000-8000-000000000002:turn_1",
+        "owner": {
+          "kind": "sub_agent",
+          "native_id": "thr_b"
+        },
+        "name": "/bin/zsh -lc 'npm test'",
+        "input": "{\"type\":\"commandExecution\",\"id\":\"exec_1\",\"pluginId\":null,\"scriptPath\":null,\"command\":\"/bin/zsh -lc 'npm test'\",\"cwd\":\"/work/chat-1\",\"processId\":\"1\",\"source\":\"unifiedExecStartup\",\"status\":\"inProgress\",\"commandActions\":[{\"type\":\"unknown\",\"command\":\"/bin/zsh -lc 'npm test'\"}],\"completedAtMs\":null,\"exitCode\":null,\"durationMs\":null,\"startedAtMs\":1}",
+        "state": "running",
+        "output": null,
+        "output_truncated": false,
+        "started_at": "2026-11-27T10:00:00.000Z"
+      }
+    }
+  ],
+  "earlier": false,
+  "sub_agents": [
+    {
+      "id": "00000000-0000-4000-8000-000000000001:sub-agent:thr_a",
+      "native_id": "thr_a",
+      "parent": null,
+      "tool_id": null,
+      "background": true,
+      "payload": "{\"description\":\"Refund calls\",\"agentPath\":\"/root/refund_calls\",\"model\":\"gpt-test\",\"reasoningEffort\":\"low\",\"root_turn\":\"turn_1\"}",
+      "created_at": "2026-11-27T10:00:00.000Z",
+      "runs": [
+        {
+          "id": "00000000-0000-4000-8000-000000000001:sub-agent:thr_a:run-1",
+          "position": 4,
+          "sub_agent": "thr_a",
+          "run": 1,
+          "native_run_id": "turn_2",
+          "turn_id": "00000000-0000-4000-8000-000000000002:turn_1",
+          "state": "running",
+          "stopped_by": null,
+          "stop_reason": null,
+          "detail": null,
+          "started_at": "2026-11-27T10:00:00.000Z",
+          "ended_at": null
+        }
+      ]
+    },
+    {
+      "id": "00000000-0000-4000-8000-000000000001:sub-agent:thr_b",
+      "native_id": "thr_b",
+      "parent": "thr_a",
+      "tool_id": null,
+      "background": true,
+      "payload": "{\"description\":\"Payment tests\",\"agentPath\":\"/root/refund_calls/payment_tests\",\"model\":\"gpt-test\",\"reasoningEffort\":\"low\",\"root_turn\":\"turn_1\"}",
+      "created_at": "2026-11-27T10:00:00.000Z",
+      "runs": [
+        {
+          "id": "00000000-0000-4000-8000-000000000001:sub-agent:thr_b:run-1",
+          "position": 5,
+          "sub_agent": "thr_b",
+          "run": 1,
+          "native_run_id": "turn_3",
+          "turn_id": "00000000-0000-4000-8000-000000000002:turn_1",
+          "state": "running",
+          "stopped_by": null,
+          "stop_reason": null,
+          "detail": null,
+          "started_at": "2026-11-27T10:00:00.000Z",
+          "ended_at": null
+        }
+      ]
+    }
+  ]
+}

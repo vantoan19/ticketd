@@ -9,7 +9,12 @@
 //! legitimately does differently is declared by the provider, not tolerated by the
 //! property: how a harness answers a new turn is [`NewTurn`].
 //!
+//! "Stop leaves nothing running" cannot be told from the adapter's frames alone, so it
+//! runs through the Chat host, one declaration per harness: see `stops`.
+//!
 //! The adapters' own tests keep what is specific to their protocol.
+
+mod stops;
 
 use std::path::PathBuf;
 use std::sync::Arc;
@@ -20,9 +25,10 @@ use async_trait::async_trait;
 use crate::testing::FakeAdapter;
 use crate::{
     ApprovalDecision, DeliveryEvidence, DispatchOutcome, EventKind, EventStream, HarnessAdapter,
-    HarnessRuntime, InteractionAnswer, InteractionResponse, InterruptOutcome, InterruptRequest,
-    NativeRequestId, NativeTurnId, OpenRequest, Refusal, RespondOutcome, RuntimeGeneration,
-    SessionStart, StartSettings, Submission, SubmissionId, SubmissionKind,
+    HarnessRuntime, InteractionAnswer, InteractionResolution, InteractionResponse,
+    InterruptOutcome, InterruptRequest, NativeRequestId, NativeTurnId, OpenRequest, Refusal,
+    RespondOutcome, RuntimeGeneration, SessionStart, StartSettings, Submission, SubmissionId,
+    SubmissionKind,
 };
 
 /// The generation every provider opens its runtime with.
@@ -36,6 +42,36 @@ pub(crate) enum NewTurn {
     /// The harness takes the input without naming a turn. The turn is known when the
     /// harness shows it processing the input (Claude Code).
     WrittenThenProcessing,
+}
+
+/// How a harness shows what a sub-agent does while no turn runs.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum SubAgentFrames {
+    /// The adapter tells a sub-agent's activity apart from the turn's: a sub-agent that
+    /// starts, works and ends while no turn runs opens no turn (Claude Code).
+    Separate,
+    /// A sub-agent exists only inside a prompt and ends with it, and the harness says
+    /// nothing of one at rest (Antigravity): a sub-agent's late frames, with no prompt in
+    /// flight, open and show nothing.
+    EndWithThePrompt,
+    /// The adapter does not model sub-agents (the fake): the property asserts nothing for
+    /// it.
+    NotModelled,
+}
+
+/// Whether the adapter tells a sub-agent's approval apart from the turn it arrives in.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum SubAgentApprovals {
+    /// The request names the sub-agent that asked, belongs to no turn, and goes only when
+    /// that sub-agent's run ends (Claude Code, Codex).
+    Owned,
+    /// The request names the sub-agent that asked, but the harness holds the main agent's
+    /// turn open until its sub-agents finish, so the request cannot outlive that turn and
+    /// goes with it (Antigravity).
+    EndsWithTheTurn,
+    /// The adapter does not model sub-agents' approvals (the fake): the properties assert
+    /// nothing for it.
+    NotModelled,
 }
 
 /// The request every provider opens its runtime with.
@@ -97,6 +133,42 @@ pub(crate) trait Provider: Send {
     fn runtime(&self) -> Arc<dyn HarnessRuntime>;
 
     fn events(&mut self) -> &mut EventStream;
+
+    /// What the adapter does with a sub-agent's frames while no turn runs.
+    fn sub_agent_frames(&self) -> SubAgentFrames {
+        SubAgentFrames::NotModelled
+    }
+
+    /// Plays a sub-agent that starts, runs a tool and ends while no turn runs (for a
+    /// provider that declares [`SubAgentFrames::EndWithThePrompt`]: the frames of a
+    /// sub-agent's tool call, arriving with no prompt in flight). Only called for a
+    /// provider that declares [`SubAgentFrames::Separate`] or `EndWithThePrompt`.
+    async fn play_sub_agent_at_rest(&mut self) {
+        unimplemented!("declared a sub-agent's frames without playing them")
+    }
+
+    /// Whether the adapter keeps a sub-agent's approval apart from the turn it arrived in.
+    fn sub_agent_approvals(&self) -> SubAgentApprovals {
+        SubAgentApprovals::NotModelled
+    }
+
+    /// While the turn the submission `id` started runs, a sub-agent starts and asks for
+    /// approval of a command. Only called for a provider that declares
+    /// [`SubAgentApprovals::Owned`]; returns the request.
+    async fn play_sub_agent_approval(&mut self, _id: &str) -> NativeRequestId {
+        unimplemented!("declared SubAgentApprovals::Owned without playing a request")
+    }
+
+    /// The main agent's turn (the one `play_sub_agent_approval` ran in) ends, and the
+    /// sub-agent goes on.
+    async fn end_parent_turn(&mut self, _id: &str) {
+        unimplemented!("declared SubAgentApprovals::Owned without ending the turn")
+    }
+
+    /// The sub-agent's run ends without its request having been answered.
+    async fn end_sub_agent(&mut self) {
+        unimplemented!("declared SubAgentApprovals::Owned without ending the sub-agent")
+    }
 
     /// Submits a new turn and plays the provider's usual reply to it.
     async fn start_turn(&mut self, id: &str) -> DispatchOutcome;
@@ -296,6 +368,149 @@ async fn a_new_turn_is_acknowledged_as_the_adapter_declares(p: &mut dyn Provider
     p.assert_nothing_else_written().await;
 }
 
+/// A sub-agent's frames never open a turn, whichever harness it is: with no turn running,
+/// a sub-agent that starts, works and ends shows as sub-agent events, and no turn starts
+/// or ends and no text or request is made up for the main agent. Only the main agent's own
+/// output can open a turn.
+async fn a_sub_agents_frames_never_open_a_turn(p: &mut dyn Provider) {
+    if p.sub_agent_frames() == SubAgentFrames::NotModelled {
+        return;
+    }
+    p.play_sub_agent_at_rest().await;
+
+    let shown = drain(p.events()).await;
+    if p.sub_agent_frames() == SubAgentFrames::EndWithThePrompt {
+        // A sub-agent lives only in a prompt: with none in flight there is nothing to show.
+        assert!(
+            shown.is_empty(),
+            "a sub-agent's late frames showed something with no prompt in flight: {shown:?}"
+        );
+        p.assert_nothing_else_written().await;
+        return;
+    }
+    assert!(
+        shown
+            .iter()
+            .any(|event| matches!(event, EventKind::SubAgentStarted(_))),
+        "the sub-agent is shown: {shown:?}"
+    );
+    let opened = shown.iter().find(|event| {
+        matches!(
+            event,
+            EventKind::TurnStarted { .. }
+                | EventKind::TurnEnded { .. }
+                | EventKind::TextDelta { .. }
+                | EventKind::MessageCompleted { .. }
+                | EventKind::ToolUpdated { .. }
+                | EventKind::SubmissionEvidence { .. }
+        )
+    });
+    assert!(
+        opened.is_none(),
+        "a sub-agent's frames opened or ended a turn: {opened:?} in {shown:?}"
+    );
+    p.assert_nothing_else_written().await;
+}
+
+/// Starts a turn and plays a sub-agent's approval in it; returns the request the adapter
+/// reported, which is the sub-agent's and no turn's.
+async fn a_sub_agent_asks_in_a_turn(p: &mut dyn Provider) -> NativeRequestId {
+    let outcome = p.start_turn("s1").await;
+    match (p.new_turn(), outcome) {
+        (NewTurn::Acknowledged, DispatchOutcome::Acknowledged { .. }) => {}
+        (NewTurn::WrittenThenProcessing, DispatchOutcome::Written) => {
+            p.show_processing("s1").await;
+        }
+        (declared, outcome) => panic!("declared {declared:?}, got {outcome:?}"),
+    }
+    drain(p.events()).await;
+    p.play_sub_agent_approval("s1").await
+}
+
+/// A sub-agent's approval is its own: it names the sub-agent, belongs to no turn, and is
+/// still there, and still answerable, after the main agent's turn has ended.
+async fn a_sub_agents_approval_outlives_the_parents_turn(p: &mut dyn Provider) {
+    if p.sub_agent_approvals() == SubAgentApprovals::NotModelled {
+        return;
+    }
+    let request = a_sub_agent_asks_in_a_turn(p).await;
+
+    p.end_parent_turn("s1").await;
+    let ended = drain(p.events()).await;
+    if p.sub_agent_approvals() == SubAgentApprovals::EndsWithTheTurn {
+        // The declared difference: the harness ends the request's asker with the turn.
+        assert!(
+            ended.iter().any(|event| matches!(
+                event,
+                EventKind::InteractionResolved {
+                    request: gone,
+                    resolution: InteractionResolution::Withdrawn,
+                } if *gone == request
+            )),
+            "the request went with the turn it was held in: {ended:?}"
+        );
+        let answered = p.respond(p.approval_answer(&request, GENERATION)).await;
+        assert_eq!(answered, RespondOutcome::NotSent(Refusal::UnknownRequest));
+        p.assert_nothing_else_written().await;
+        return;
+    }
+    assert!(
+        ended
+            .iter()
+            .any(|event| matches!(event, EventKind::TurnEnded { .. })),
+        "the turn ended: {ended:?}"
+    );
+    assert!(
+        !ended
+            .iter()
+            .any(|event| matches!(event, EventKind::InteractionResolved { .. })),
+        "the sub-agent's request went with the turn: {ended:?}"
+    );
+
+    // Still answerable, and the answer is the one the harness reads.
+    let answered = p.respond(p.approval_answer(&request, GENERATION)).await;
+    assert_eq!(answered, RespondOutcome::Sent);
+    p.assert_nothing_else_written().await;
+}
+
+/// The request goes when its asker's run ends, and not before: nothing more can be
+/// answered then.
+async fn a_sub_agents_approval_goes_with_its_asker(p: &mut dyn Provider) {
+    // A harness whose sub-agents end with the turn has no separate end to test.
+    if p.sub_agent_approvals() != SubAgentApprovals::Owned {
+        return;
+    }
+    let request = a_sub_agent_asks_in_a_turn(p).await;
+
+    p.end_sub_agent().await;
+    let ended = drain(p.events()).await;
+    let withdrawn = ended.iter().position(|event| {
+        matches!(
+            event,
+            EventKind::InteractionResolved {
+                request: gone,
+                resolution: InteractionResolution::Withdrawn,
+            } if *gone == request
+        )
+    });
+    let sub_agent_ended = ended
+        .iter()
+        .position(|event| matches!(event, EventKind::SubAgentEnded { .. }));
+    assert!(
+        withdrawn.is_some() && sub_agent_ended.is_some() && withdrawn < sub_agent_ended,
+        "its end withdraws what it asked, first: {ended:?}"
+    );
+    assert!(
+        !ended
+            .iter()
+            .any(|event| matches!(event, EventKind::TurnEnded { .. })),
+        "the sub-agent's end is not the turn's: {ended:?}"
+    );
+    let answered = p.respond(p.approval_answer(&request, GENERATION)).await;
+    assert_eq!(answered, RespondOutcome::NotSent(Refusal::UnknownRequest));
+    p.assert_nothing_else_written().await;
+}
+
 // ---------------------------------------------------------------------------
 // Providers and the suite's cases
 // ---------------------------------------------------------------------------
@@ -348,7 +563,10 @@ impl Provider for FakeProvider {
         let turn = NativeTurnId::new("turn-1");
         assert!(
             self.fake
-                .emit(EventKind::TurnStarted { turn: turn.clone() })
+                .emit(EventKind::TurnStarted {
+                    turn: turn.clone(),
+                    origin: None
+                })
                 .await
         );
         assert!(
@@ -396,6 +614,7 @@ impl Provider for FakeProvider {
                 .emit(EventKind::InteractionRequested(crate::InteractionRequest {
                     request: request.clone(),
                     turn: None,
+                    owner: None,
                     item: None,
                     kind: crate::InteractionKind::Approval {
                         description: "Run cargo test".to_owned(),
@@ -456,6 +675,24 @@ macro_rules! conformance {
             async fn each_request_accepts_one_answer_from_its_own_generation() {
                 let mut p = $provider.await;
                 super::each_request_accepts_one_answer_from_its_own_generation(&mut *p).await;
+            }
+
+            #[tokio::test(start_paused = true)]
+            async fn a_sub_agents_frames_never_open_a_turn() {
+                let mut p = $provider.await;
+                super::a_sub_agents_frames_never_open_a_turn(&mut *p).await;
+            }
+
+            #[tokio::test(start_paused = true)]
+            async fn a_sub_agents_approval_outlives_the_parents_turn() {
+                let mut p = $provider.await;
+                super::a_sub_agents_approval_outlives_the_parents_turn(&mut *p).await;
+            }
+
+            #[tokio::test(start_paused = true)]
+            async fn a_sub_agents_approval_goes_with_its_asker() {
+                let mut p = $provider.await;
+                super::a_sub_agents_approval_goes_with_its_asker(&mut *p).await;
             }
 
             #[tokio::test(start_paused = true)]

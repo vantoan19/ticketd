@@ -1,0 +1,179 @@
+{
+  "chat": {
+    "id": "00000000-0000-4000-8000-000000000001",
+    "title": "Untitled Chat",
+    "harness": {
+      "id": "codex",
+      "name": "Codex",
+      "permissions": "Uses your own Codex settings and permissions. ticketd changes none of them. Codex reported: cliVersion 0.163.0, model gpt-test, modelProvider openai, approvalPolicy on-request, approvalsReviewer user, cwd /work/chat-1."
+    },
+    "folder": {
+      "path": "/work/chat-1",
+      "name": "chat-1",
+      "managed": false,
+      "missing": false,
+      "shared_with": [],
+      "branch": null,
+      "project": null
+    },
+    "retention": "active",
+    "activity": "waiting",
+    "turn_running": false,
+    "problem": null,
+    "doing": null,
+    "opening": null,
+    "catching_up": false,
+    "steering": {
+      "available": false,
+      "images_refused": false,
+      "effect": null
+    },
+    "stopping": false,
+    "links": [],
+    "queue": [],
+    "queue_paused": false,
+    "context": null,
+    "settings": null,
+    "unseen": true,
+    "muted": false,
+    "has_composer": true,
+    "read_through": null,
+    "trashed_links": [],
+    "commands": [],
+    "sub_agents": [
+      {
+        "id": "thr_a",
+        "native_id": "thr_a",
+        "title": "Editor",
+        "model": "gpt-test",
+        "status": "running",
+        "started_at": "2026-11-27T10:00:00.000Z",
+        "runs": 1,
+        "brief": {
+          "source": "main_agent"
+        },
+        "capabilities": {
+          "brief": false,
+          "text": true,
+          "reasoning": false,
+          "model": true,
+          "end": true,
+          "stop": true,
+          "resume": false
+        }
+      }
+    ]
+  },
+  "items": [
+    {
+      "kind": "user",
+      "id": "00000000-0000-4000-8000-000000000002",
+      "at": "2026-11-27T10:00:00.000Z",
+      "text": "Have a sub-agent change a file",
+      "delivery": "delivered",
+      "turn_id": "00000000-0000-4000-8000-000000000004:turn_1",
+      "steer": false
+    },
+    {
+      "kind": "turn",
+      "id": "turn:00000000-0000-4000-8000-000000000004:turn_1",
+      "at": "2026-11-27T10:00:00.000Z",
+      "turn_id": "00000000-0000-4000-8000-000000000004:turn_1",
+      "started_at": "2026-11-27T10:00:00.000Z",
+      "ended_at": "2026-11-27T10:00:00.000Z",
+      "outcome": "completed"
+    },
+    {
+      "kind": "sub_agent",
+      "id": "thr_a:row-1",
+      "at": "2026-11-27T10:00:00.000Z",
+      "turn_id": "00000000-0000-4000-8000-000000000004:turn_1",
+      "sub_agent": "thr_a",
+      "run": 1,
+      "status": "running",
+      "stopped_by": null,
+      "stop_reason": null,
+      "started_at": "2026-11-27T10:00:00.000Z",
+      "ended_at": null
+    },
+    {
+      "kind": "turn",
+      "id": "turn:thr_a:run-1",
+      "at": "2026-11-27T10:00:00.000Z",
+      "turn_id": "thr_a:run-1",
+      "started_at": "2026-11-27T10:00:00.000Z",
+      "ended_at": null,
+      "outcome": "active",
+      "owner": "thr_a"
+    },
+    {
+      "kind": "steps",
+      "id": "00000000-0000-4000-8000-000000000004:exec_1",
+      "at": "",
+      "steps": [
+        {
+          "kind": "run",
+          "variant": null,
+          "target": "touch notes.txt",
+          "targets": [],
+          "command": "touch notes.txt",
+          "exit_code": null,
+          "folder": null,
+          "timed_out": false,
+          "duration_ms": null,
+          "no_matches": false,
+          "state": "running",
+          "result": null,
+          "output": null,
+          "full_output": null,
+          "started_at": "2026-11-27T10:00:00.000Z",
+          "added_lines": null,
+          "removed_lines": null,
+          "decision": null,
+          "ticketd": null,
+          "awaiting": true
+        }
+      ],
+      "turn_id": "thr_a:run-1",
+      "owner": "thr_a"
+    },
+    {
+      "kind": "request",
+      "id": "00000000-0000-4000-8000-000000000004:request:0",
+      "at": "2026-11-27T10:00:00.000Z",
+      "turn_id": "thr_a:run-1",
+      "owner": "thr_a",
+      "request": "approval",
+      "title": "wants to run",
+      "subject": "touch notes.txt",
+      "reason": "Needs approval",
+      "options": [
+        {
+          "id": "allow",
+          "label": "Allow once"
+        },
+        {
+          "id": "deny",
+          "label": "Deny"
+        }
+      ],
+      "free_text": false,
+      "state": "pending",
+      "outcome": null,
+      "answer": null,
+      "folded": false,
+      "resolved_at": null,
+      "command": null,
+      "ticketd": null
+    },
+    {
+      "kind": "response",
+      "id": "00000000-0000-4000-8000-000000000004:msg_2",
+      "at": "2026-11-27T10:00:00.000Z",
+      "text": "Waiting for the sub-agent.",
+      "state": "complete",
+      "turn_id": "00000000-0000-4000-8000-000000000004:turn_1"
+    }
+  ],
+  "cursor": 0
+}

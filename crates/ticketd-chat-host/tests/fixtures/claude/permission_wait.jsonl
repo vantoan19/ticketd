@@ -8,7 +8,7 @@
 {"mark":"a permission is pending while output continues"}
 {"client":{"id":"c5","cmd":"respond","generation":7,"request_id":"7-1","decision":{"kind":"allow"}}}
 {"server":{"v":1,"event":"request_resolved","generation":7,"id":"c5","request_id":"7-1","outcome":"allow"}}
-{"server":{"v":1,"event":"question_request","generation":7,"request_id":"7-2","tool_use_id":"toolu_2","questions":[{"question":"Which scope?","header":"Scope","options":[{"label":"Small","description":"Only this file"},{"label":"Large","description":"The whole folder"}],"multiSelect":false},{"question":"Which files?","header":"Files","options":[{"label":"a.txt","description":"First"},{"label":"b.txt","description":"Second"}],"multiSelect":true}]}}
+{"server":{"v":1,"event":"question_request","generation":7,"request_id":"7-2","tool_use_id":"toolu_2","agent_id":null,"questions":[{"question":"Which scope?","header":"Scope","options":[{"label":"Small","description":"Only this file"},{"label":"Large","description":"The whole folder"}],"multiSelect":false},{"question":"Which files?","header":"Files","options":[{"label":"a.txt","description":"First"},{"label":"b.txt","description":"Second"}],"multiSelect":true}]}}
 {"mark":"the permission was answered and a question asked"}
 {"client":{"id":"c6","cmd":"respond","generation":7,"request_id":"7-2","decision":{"kind":"answer","answers":{"Which scope?":"Small","Which files?":["a.txt","b.txt"]}}}}
 {"server":{"v":1,"event":"request_resolved","generation":7,"id":"c6","request_id":"7-2","outcome":"answer"}}

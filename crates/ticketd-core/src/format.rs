@@ -28,7 +28,7 @@ use crate::{
 
 /// The workspace format version this application reads and writes. The next
 /// format change bumps this and adds one step to [`LADDER`]; nothing else holds the number.
-pub const FORMAT_VERSION: i64 = 104;
+pub const FORMAT_VERSION: i64 = 105;
 
 /// One change to what a Workspace stores. The second argument is the format version
 /// the run started from, `0` for a new Workspace.
@@ -180,6 +180,12 @@ const LADDER: [(i64, Step); FORMAT_VERSION as usize] = [
             "requires_link_context",
             "INTEGER NOT NULL DEFAULT 0",
         )
+    }),
+    // Native sub-agents (#609): Steps and approvals have an owner and an optional turn.
+    (105, |tx, _| {
+        chats::migrate_owner_and_optional_turn(tx)?;
+        chats::sub_agents::migrate(tx)?;
+        chats::migrate_credit(tx)
     }),
 ];
 

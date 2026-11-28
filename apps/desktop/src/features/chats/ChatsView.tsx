@@ -48,7 +48,7 @@ import { useNarrowPane } from "@/features/tickets/useNarrowPane";
 import { useNow } from "@/lib/use-now";
 import type { ChatSummary, Retention } from "@/features/chats/client";
 import { useTakenOverLine } from "@/features/automations/use-taken-over-line";
-import { ChatDetail } from "@/features/chats/ChatDetail";
+import { ChatDetail, type ViewTarget } from "@/features/chats/ChatDetail";
 import { ChatActionsMenu } from "@/features/chats/ChatActionsMenu";
 import { ChatStatus } from "@/features/chats/ChatStatus";
 import { HarnessMark } from "@/features/chats/HarnessMark";
@@ -261,6 +261,8 @@ type Open =
       from?: string;
       /** Opened from a system notification: its pending request takes focus. */
       notified?: boolean;
+      /** Asked from outside: the sub-agent view to open in it (none: the Chat itself); `n` rises with each ask. */
+      target?: ViewTarget;
     }
   | { kind: "new"; start?: TicketStart; n?: number }
   | null;
@@ -315,6 +317,9 @@ export function ChatsView({
       kind: "chat",
       id: openRequest.request.chat_id,
       notified: true,
+      // Always the Chat itself, even when it is already open on a sub-agent's
+      // view: negative, so it never equals a ticket's ask (they count up from 1).
+      target: { agent: null, n: -openRequest.n },
     });
   }
   // A Chat asked for from a ticket: opened with a crumb back, or New Chat about it.
@@ -328,6 +333,7 @@ export function ChatsView({
         kind: "chat",
         id: request.chatId,
         ...(request.from && { from: request.from }),
+        target: { agent: request.subAgent ?? null, n: chatRequest.n },
       });
     } else {
       setScope("active");
@@ -543,6 +549,7 @@ export function ChatsView({
           show(null);
         }}
         {...(open.from && { crumb: <TicketCrumb reference={open.from} /> })}
+        {...(open.target && { target: open.target })}
         focusRequest={Boolean(open.notified)}
       />
     ) : (

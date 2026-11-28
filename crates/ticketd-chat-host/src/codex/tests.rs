@@ -14,7 +14,7 @@ use tokio::time::{sleep, timeout};
 use super::CodexAdapter;
 use super::mapping::Session;
 use super::runtime::{Options, login_state, open_over, probe_login, probe_options, probe_skills};
-use crate::conformance::{NewTurn, Provider};
+use crate::conformance::{NewTurn, Provider, SubAgentApprovals, SubAgentFrames};
 use crate::outcome::read_end;
 use crate::scripted::{Peer, brief, pipes};
 use crate::{
@@ -671,6 +671,8 @@ async fn unknown_traffic_is_reported_and_unknown_requests_are_never_approved() {
             "unknown future/approval/request",
             "unknown item/holoDeck",
             "unknown turn/completed",
+            // Another thread's turn is a sub-agent's, not unknown traffic and not the Chat's turn.
+            "sub-agent-started thr_other run Some(\"turn_x\") parent None tool None background true {\"root_turn\":null}",
             "unknown a line that is not JSON-RPC",
         ]
     );
@@ -1485,6 +1487,205 @@ fn a_command_that_failed_after_a_stop_is_reported_as_such() {
     );
 }
 
+/// F-X5 (live Codex run): Stop on a sub-agent cuts its command off, and Codex reports the
+/// command failed (exit code -1). That is the Stop, not a failure, whichever frame comes
+/// first: the command's completion or its turn's end as interrupted.
+#[test]
+fn a_sub_agents_command_cut_off_by_its_stop_is_not_a_failure_in_either_order() {
+    let command = |status: &str| json!({"threadId": "thr_c", "turnId": "turn_c", "item": {"id": "cmd_c", "type": "commandExecution", "command": "sleep 161", "status": status, "processId": "42", "exitCode": -1}});
+    let ended = json!({"threadId": "thr_c", "turn": {"id": "turn_c", "status": "interrupted", "items": [], "error": null}});
+    for command_first in [true, false] {
+        let mut session = Session::default();
+        session.reply(
+            &super::mapping::Call::OpenThread,
+            &Ok(json!({"thread": {"id": "thr_1"}})),
+            false,
+        );
+        session.notification(
+            "turn/started",
+            &json!({"threadId": "thr_c", "turn": {"id": "turn_c", "rootTurnId": "turn_1"}}),
+        );
+        session.notification("item/started", &command("inProgress"));
+        session.child_interrupt_asked("thr_c", "turn_c").unwrap();
+        let mut events = Vec::new();
+        if command_first {
+            events.extend(session.notification("item/completed", &command("failed")));
+            events.extend(session.notification("turn/completed", &ended));
+        } else {
+            events.extend(session.notification("turn/completed", &ended));
+            events.extend(session.notification("item/completed", &command("failed")));
+        }
+        let statuses: Vec<_> = events
+            .iter()
+            .filter_map(|event| match event {
+                EventKind::SubAgentToolUpdated { status, .. } => Some(*status),
+                _ => None,
+            })
+            .collect();
+        assert_eq!(
+            statuses,
+            [crate::ToolStatus::FailedAfterInterrupt],
+            "command first: {command_first}"
+        );
+    }
+}
+
+fn open_thread(session: &mut Session) {
+    session.reply(
+        &super::mapping::Call::OpenThread,
+        &Ok(json!({"thread": {"id": "thr_1"}})),
+        false,
+    );
+}
+
+/// A grandchild's own frames can arrive before the child that started it announces it.
+/// The announcement then says whose it is: Stop on that child reaches it, and the stored
+/// record gets the parent and the launching Step without a second run.
+#[test]
+fn a_sub_agent_announced_after_its_own_frames_gets_its_parent_and_launch_step() {
+    let mut session = Session::default();
+    open_thread(&mut session);
+    let started = |thread: &str, turn: &str| json!({"threadId": thread, "turn": {"id": turn, "rootTurnId": "turn_1"}});
+    session.notification("turn/started", &started("thr_c", "turn_c"));
+    let first = session.notification("turn/started", &started("thr_g", "turn_g"));
+    let [EventKind::SubAgentStarted(guessed)] = first.as_slice() else {
+        panic!("{first:?}");
+    };
+    assert_eq!(guessed.parent, None);
+    assert_eq!(
+        session.live_child_turns_under("thr_c"),
+        [("thr_c".to_owned(), "turn_c".to_owned())]
+    );
+
+    let spawn = json!({"threadId": "thr_c", "turnId": "turn_c", "item": {
+        "type": "collabAgentToolCall", "id": "call_g", "tool": "spawnAgent",
+        "receiverThreadIds": ["thr_g"], "prompt": "Check the docs"}});
+    let events = session.notification("item/started", &spawn);
+    let started: Vec<_> = events
+        .iter()
+        .filter_map(|event| match event {
+            EventKind::SubAgentStarted(start) if start.sub_agent.0 == "thr_g" => Some(start),
+            _ => None,
+        })
+        .collect();
+    let [start] = started.as_slice() else {
+        panic!("{events:?}");
+    };
+    assert_eq!(
+        start.parent.as_ref().map(|parent| parent.0.as_str()),
+        Some("thr_c")
+    );
+    assert_eq!(
+        start.tool.as_ref().map(|tool| tool.0.as_str()),
+        Some("call_g")
+    );
+    // The run it already has, not another.
+    assert_eq!(start.run.as_deref(), Some("turn_g"));
+    assert_eq!(
+        session.live_child_turns_under("thr_c"),
+        [
+            ("thr_c".to_owned(), "turn_c".to_owned()),
+            ("thr_g".to_owned(), "turn_g".to_owned())
+        ]
+    );
+
+    // Said again, it changes nothing more than its words.
+    let again = session.notification("item/completed", &spawn);
+    assert!(
+        again
+            .iter()
+            .all(|event| !matches!(event, EventKind::SubAgentStarted(_))),
+        "{again:?}"
+    );
+}
+
+/// A late end of an older turn of a sub-agent is history: it leaves the live commands
+/// and the approvals of the turn the sub-agent runs now alone.
+#[test]
+fn a_late_end_of_an_older_turn_leaves_the_current_turns_approvals_and_commands_alone() {
+    let mut session = Session::default();
+    open_thread(&mut session);
+    let started =
+        |turn: &str| json!({"threadId": "thr_c", "turn": {"id": turn, "rootTurnId": "turn_1"}});
+    session.notification("turn/started", &started("turn_a"));
+    session.notification("turn/started", &started("turn_b"));
+    session.notification(
+        "item/started",
+        &json!({"threadId": "thr_c", "turnId": "turn_b", "item": {"id": "cmd_b", "type": "commandExecution", "command": "sleep 9", "status": "inProgress"}}),
+    );
+    let (asked, _) = session.server_request(
+        &json!(7),
+        "item/commandExecution/requestApproval",
+        &json!({"threadId": "thr_c", "turnId": "turn_b", "itemId": "cmd_b", "command": "rm -r build"}),
+    );
+    assert!(
+        asked
+            .iter()
+            .any(|event| matches!(event, EventKind::InteractionRequested { .. })),
+        "{asked:?}"
+    );
+
+    let ended = |turn: &str| json!({"threadId": "thr_c", "turn": {"id": turn, "status": "completed", "items": [], "error": null}});
+    let late = session.notification("turn/completed", &ended("turn_a"));
+    assert!(
+        late.iter().all(|event| !matches!(
+            event,
+            EventKind::InteractionResolved { .. } | EventKind::SubAgentEnded { .. }
+        )),
+        "{late:?}"
+    );
+    assert_eq!(
+        session.live_child_turns_under("thr_c"),
+        [("thr_c".to_owned(), "turn_b".to_owned())]
+    );
+
+    // Its running command keeps its input as it streams output.
+    let output = session.notification(
+        "item/commandExecution/outputDelta",
+        &json!({"threadId": "thr_c", "turnId": "turn_b", "itemId": "cmd_b", "delta": "ok"}),
+    );
+    assert!(
+        output.iter().any(|event| matches!(
+            event,
+            EventKind::SubAgentToolUpdated {
+                detail: Some(_),
+                ..
+            }
+        )),
+        "{output:?}"
+    );
+
+    // The turn it runs now ends: its approval goes with it.
+    let events = session.notification("turn/completed", &ended("turn_b"));
+    assert!(
+        events
+            .iter()
+            .any(|event| matches!(event, EventKind::InteractionResolved { .. })),
+        "{events:?}"
+    );
+    assert!(events.iter().any(|event| matches!(
+        event,
+        EventKind::SubAgentEnded { run: Some(run), .. } if run == "turn_b"
+    )));
+}
+
+/// Terminal cleanup reaches the whole thread: it is refused for a turn the child has
+/// left behind, even when the child's later turn is over too.
+#[test]
+fn terminal_cleanup_is_refused_for_a_turn_a_later_turn_has_replaced_even_when_it_ended() {
+    let mut session = Session::default();
+    open_thread(&mut session);
+    let started =
+        |turn: &str| json!({"threadId": "thr_c", "turn": {"id": turn, "rootTurnId": "turn_1"}});
+    let ended = |turn: &str| json!({"threadId": "thr_c", "turn": {"id": turn, "status": "completed", "items": [], "error": null}});
+    session.notification("turn/started", &started("turn_a"));
+    assert!(session.child_cleanup_asked("thr_c", "turn_a").is_ok());
+    session.notification("turn/started", &started("turn_b"));
+    session.notification("turn/completed", &ended("turn_b"));
+    assert!(session.child_cleanup_asked("thr_c", "turn_a").is_err());
+    assert!(session.child_cleanup_asked("thr_c", "turn_b").is_ok());
+}
+
 fn unattended(edit_files: bool, use_web: bool) -> crate::Unattended {
     crate::Unattended {
         run_id: "run-1".into(),
@@ -1815,11 +2016,14 @@ fn a_ticketd_tool_call_shows_as_the_command_with_its_output() {
     }
 }
 
-/// A person's Chat, taken over or not, declares no tool and opts into nothing.
+/// A person's Chat, taken over or not, declares no tool. It opts into the experimental API
+/// for one thing only: ending the commands of a sub-agent the person stops.
 #[tokio::test(start_paused = true)]
-async fn a_persons_chat_declares_no_tool_and_stays_off_the_experimental_api() {
+async fn a_persons_chat_declares_no_tool_and_opts_into_the_experimental_api_for_stopping_sub_agents()
+ {
     let (_peer, opened) = open_with(fixture!("handshake"), SessionStart::New).await;
-    // The handshake fixture asks for no capabilities, so it fails if any were sent.
+    // The handshake fixture asks for exactly the experimental API and no tool, so it fails
+    // if anything else was sent.
     assert!(opened.is_ok());
 }
 
@@ -2065,7 +2269,9 @@ fn an_unattended_thread_turns_off_what_codex_lets_it_of_the_persons_setup() {
         "features.apps": false,
         "features.hooks": false,
         "features.memories": false,
+        "agents.enabled": false,
         "features.multi_agent": false,
+        "features.multi_agent_v2": false,
         "features.computer_use": false,
         "features.browser_use": false,
         "notify": [],
@@ -2444,6 +2650,65 @@ impl Provider for AppServer {
 
     fn events(&mut self) -> &mut EventStream {
         &mut self.events
+    }
+
+    fn sub_agent_frames(&self) -> SubAgentFrames {
+        SubAgentFrames::Separate
+    }
+
+    async fn play_sub_agent_at_rest(&mut self) {
+        // A child thread starts a turn of its own, says something, runs a command and ends,
+        // while the Chat's thread runs nothing: its frames are the child's, never the Chat's.
+        self.peer.load(
+            r#"{"server":{"method":"turn/started","params":{"threadId":"thr_a","turn":{"id":"turn_2","rootTurnId":"turn_1","items":[],"itemsView":"notLoaded","status":"inProgress","error":null}}}}
+{"server":{"method":"item/completed","params":{"item":{"type":"agentMessage","id":"msg_a","text":"Reading the limiter.","phase":"commentary"},"threadId":"thr_a","turnId":"turn_2"}}}
+{"server":{"method":"item/started","params":{"item":{"type":"commandExecution","id":"exec_a","command":"cat src/limit.ts","cwd":"/work/chat-1","status":"inProgress","commandActions":[]},"threadId":"thr_a","turnId":"turn_2"}}}
+{"server":{"method":"item/completed","params":{"item":{"type":"commandExecution","id":"exec_a","command":"cat src/limit.ts","cwd":"/work/chat-1","status":"completed","commandActions":[],"aggregatedOutput":"export const LIMIT = 5;","exitCode":0},"threadId":"thr_a","turnId":"turn_2"}}}
+{"server":{"method":"turn/completed","params":{"threadId":"thr_a","turn":{"id":"turn_2","status":"completed","items":[],"error":null}}}}"#,
+        );
+        self.peer.play().await;
+    }
+
+    fn sub_agent_approvals(&self) -> SubAgentApprovals {
+        SubAgentApprovals::Owned
+    }
+
+    async fn play_sub_agent_approval(&mut self, _id: &str) -> NativeRequestId {
+        self.peer.load(
+            r#"{"server":{"method":"turn/started","params":{"threadId":"thr_a","turn":{"id":"turn_2","rootTurnId":"turn_1","items":[],"itemsView":"notLoaded","status":"inProgress","error":null}}}}
+{"server":{"id":0,"method":"item/commandExecution/requestApproval","params":{"threadId":"thr_a","turnId":"turn_2","itemId":"exec_1","startedAtMs":1,"command":"touch notes.txt","cwd":"/work/chat-1","reason":"Needs approval"}}}"#,
+        );
+        self.peer.play().await;
+        let shown = drain(&mut self.events).await;
+        shown
+            .into_iter()
+            .find_map(|event| match event {
+                EventKind::InteractionRequested(request) => {
+                    assert_eq!(request.turn, None, "a sub-agent's request has no turn");
+                    assert_eq!(
+                        request.owner,
+                        Some(crate::NativeSubAgentId::new("thr_a")),
+                        "it names the child thread"
+                    );
+                    Some(request.request)
+                }
+                _ => None,
+            })
+            .expect("app-server asked on the child's behalf")
+    }
+
+    async fn end_parent_turn(&mut self, _id: &str) {
+        self.peer.load(
+            r#"{"server":{"method":"turn/completed","params":{"threadId":"thr_1","turn":{"id":"turn_1","status":"completed","items":[],"error":null}}}}"#,
+        );
+        self.peer.play().await;
+    }
+
+    async fn end_sub_agent(&mut self) {
+        self.peer.load(
+            r#"{"server":{"method":"turn/completed","params":{"threadId":"thr_a","turn":{"id":"turn_2","status":"interrupted","items":[],"error":null}}}}"#,
+        );
+        self.peer.play().await;
     }
 
     async fn start_turn(&mut self, id: &str) -> DispatchOutcome {

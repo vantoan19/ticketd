@@ -5,7 +5,7 @@
 //! their own tasks and report back as messages, so runtime events and commands keep
 //! being handled while they are pending. Every durable write goes through the core.
 
-use std::collections::{BTreeMap, HashSet, VecDeque};
+use std::collections::{BTreeMap, HashMap, HashSet, VecDeque};
 use std::future::{Future, pending};
 use std::path::PathBuf;
 use std::sync::Arc;
@@ -14,8 +14,10 @@ use std::time::Duration;
 
 use ticketd_core::{
     Chat, ChatAttachmentContent, ChatInputChange, ChatInputReceipt, ChatInteractionKind,
-    ChatInteractionState, ChatMessage, ChatObservation, ChatSessionOrigin, ChatSubmissionIntent,
-    ChatToolState, ChatTurnReceipt, ChatTurnState, Error, Workspace,
+    ChatInteractionState, ChatMessage, ChatMessageNote, ChatMessageNoteKind, ChatObservation,
+    ChatOwner, ChatRole, ChatSessionOrigin, ChatSubAgent, ChatSubAgentState, ChatSubAgentStopper,
+    ChatSubmissionIntent, ChatToolState, ChatTurnOrigin, ChatTurnReceipt, ChatTurnStarter,
+    ChatTurnState, Error, Workspace,
 };
 use tokio::sync::{mpsc, oneshot};
 use tokio::task::JoinHandle;
@@ -54,10 +56,26 @@ use crate::{
     ApprovalDecision, AutomationPromptAdmission, Capabilities, CloseOutcome, DeliveryEvidence,
     DispatchOutcome, EventKind, HarnessAdapter, HarnessRuntime, InteractionAnswer, InteractionKind,
     InteractionRequest, InteractionResolution, InteractionResponse, InterruptOutcome,
-    InterruptRequest, NativeRequestId, NativeSessionId, NativeTurnId, NoticeKind, OpenRequest,
-    OpenedRuntime, Problem, Refusal, RespondOutcome, RuntimeEvent, RuntimeGeneration, SessionStart,
-    Submission, SubmissionId, SubmissionKind, Subscription, TurnEvidence, TurnOutcome,
+    InterruptRequest, NativeItemId, NativeRequestId, NativeSessionId, NativeSubAgentId,
+    NativeTurnId, NoticeKind, OpenRequest, OpenedRuntime, Problem, ProviderDetail, Refusal,
+    RespondOutcome, RuntimeEvent, RuntimeGeneration, SessionStart, StopSubAgentOutcome,
+    StopSubAgentRequest, SubAgentOutcome, SubAgentStopper, Submission, SubmissionId,
+    SubmissionKind, Subscription, ToolStatus, TurnEvidence, TurnOrigin, TurnOutcome, TurnStarter,
 };
+
+/// How long a Chat whose last sub-agent just finished with no turn running stays working,
+/// for the harness to resume the main agent by itself (Claude Code does, a second or
+/// several after the task ends). It keeps the Chat from going quiet and notifying Done
+/// before the turn that follows, which would notify a second time.
+const WAKE_GRACE: Duration = Duration::from_secs(10);
+
+/// How long ticketd waits after a direct sub-agent finishes at rest before it wakes the
+/// main agent (Codex never resumes by itself), so sub-agents that finish together are
+/// covered by one message.
+const WAKE_SETTLE: Duration = Duration::from_millis(500);
+
+/// The most of a sub-agent's last message that the person's next message carries.
+const FINISHED_REPORT_LIMIT: usize = 1_500;
 
 const QUEUE_READ_RETRY: Duration = Duration::from_millis(250);
 const LINK_CONTEXT_RETRY: Duration = Duration::from_secs(1);
@@ -84,6 +102,11 @@ pub(crate) enum Command {
         reply: Reply<ChatMessage>,
     },
     Stop(Reply<()>),
+    /// The person's Stop for one sub-agent.
+    StopSubAgent {
+        native_id: String,
+        reply: Reply<()>,
+    },
     ResumeQueue(Reply<()>),
     /// The person asked for one queued input to go out now, ahead of the queue.
     SendQueuedNow {
@@ -178,6 +201,8 @@ struct Runtime {
     origin: ChatSessionOrigin,
     turns: HashSet<String>,
     tools: HashSet<String>,
+    /// The shell Steps whose write window is open, by tool id.
+    shell_windows: HashSet<String>,
     /// Harness notices already kept for this session.
     said: HashSet<String>,
     context: Option<ContextReport>,
@@ -206,6 +231,36 @@ struct Dispatch {
     starts_turn: bool,
     early_rejection: Option<String>,
     preamble: Option<String>,
+    /// The sub-agents that finished since the person's last message, which this input
+    /// tells the main agent about: back in `finished` if it is not accepted.
+    finished: Vec<Finished>,
+}
+
+/// A direct sub-agent that finished while the main agent was idle, and has not been told
+/// to it yet.
+#[derive(Clone, Debug, PartialEq, Eq)]
+struct Finished {
+    native: String,
+    failed: bool,
+}
+
+/// What the Chat keeps of a sub-agent of this session, for the words ticketd says about it.
+struct SubAgentNote {
+    /// The sub-agent that started it; `None` when the main agent did.
+    parent: Option<String>,
+    title: String,
+    /// What it said last.
+    report: Option<String>,
+    /// The Chat's turn that was running when it started, if one was. Codex files a
+    /// sub-agent's completion under the turn that started it, so only that turn sees it
+    /// finish.
+    spawned_in: Option<String>,
+}
+
+/// Submissions ticketd itself makes to wake the main agent are named `wake-N`; the
+/// person's messages are named by a UUID.
+fn is_wake(attempt: &str) -> bool {
+    attempt.starts_with("wake-")
 }
 
 struct ContextTransfer {
@@ -256,6 +311,8 @@ enum ContextRefresh {
 struct ActiveTurn {
     turn_id: String,
     native: NativeTurnId,
+    /// Started by the harness or by ticketd, not by the person's message.
+    by_itself: bool,
     /// Open for as long as the Turn is, so every line about it is correlated and its close
     /// records how long it took.
     span: tracing::Span,
@@ -281,7 +338,10 @@ struct ObservedTurnEnd {
 struct LiveRequest {
     generation: RuntimeGeneration,
     request: NativeRequestId,
-    turn_id: String,
+    /// The turn it arrived in; `None` for a sub-agent's, which no turn ends.
+    turn_id: Option<String>,
+    /// The sub-agent that asked, as the Chat stores it.
+    owner: ChatOwner,
     kind: InteractionKind,
     /// The response being written, kept so a harness that confirms the answer before
     /// the write returns does not lose what the person chose.
@@ -296,6 +356,25 @@ struct TextBuffer {
     shown: usize,
     /// Bytes already checkpointed.
     saved: usize,
+}
+
+/// What ticketd tells the harness along with the person's next message when sub-agents lost
+/// contact (a restart): which ones, and for a harness that can, that they can be resumed.
+pub(crate) fn lost_sub_agents_text(titles: &[String], can_resume: bool) -> String {
+    let (these, were, are, them) = if titles.len() == 1 {
+        ("this sub-agent", "was", "is", "it")
+    } else {
+        ("these sub-agents", "were", "are", "them")
+    };
+    let resume = if can_resume {
+        format!(" You can resume {them}.")
+    } else {
+        String::new()
+    };
+    format!(
+        "From ticketd: {these} {were} running when ticketd quit and {are} not running now: {}.{resume}",
+        titles.join(", ")
+    )
 }
 
 /// Numbers supervisors in the order they start; see `Board::report`.
@@ -332,6 +411,40 @@ pub(crate) struct Supervisor {
     /// When an unconfirmed start stops counting as work in progress.
     unconfirmed_deadline: Option<Instant>,
     active: Option<ActiveTurn>,
+    /// The sub-agents running in this runtime, by native ID, and whether each runs in the
+    /// background. One in the foreground ends with its turn.
+    sub_agents: HashMap<String, bool>,
+    /// The run each of them is in, by native ID, for the harness that names runs: a frame of
+    /// an earlier run that arrives after a resume is late.
+    sub_agent_runs: HashMap<String, String>,
+    /// While a sub-agent has just finished with no turn running: until when the main agent
+    /// is still expected to resume by itself, and the Chat stays working.
+    wake_until: Option<Instant>,
+    /// What the Chat remembers of this session's sub-agents, by native ID.
+    sub_agent_notes: HashMap<String, SubAgentNote>,
+    /// Direct sub-agents that finished with no turn running and have not been told to the
+    /// main agent, for a harness that never resumes it by itself.
+    unreported: Vec<Finished>,
+    /// From when ticketd may wake the main agent for them: a moment after the first
+    /// finished, so those finishing together are covered by one message.
+    wake_after: Option<Instant>,
+    /// When `pump` last looked at whether to wake the main agent. A deadline that fell
+    /// due after that look still gets its timer, so the wake is never lost to the gap
+    /// between the look and the next wait; one that fell due before it is not polled
+    /// again, so a wake that is blocked does not spin.
+    wake_polled: Instant,
+    /// Whether the Chat's queue was paused when `pump` last read it. A paused queue keeps
+    /// the wake from being sent, so the results waiting for it are not work in progress.
+    queue_paused: bool,
+    /// Sub-agents the person's Stop at rest is ending: how many ran when it began. The
+    /// Chat records them as stopped by the person once the harness is confirmed closed,
+    /// and not before.
+    stopping_at_rest: Option<usize>,
+    /// The message that wakes the main agent is on its way; the turn it starts is the
+    /// first turn seen next. Names the sub-agent whose finish it follows.
+    wake_sent: Option<Option<NativeSubAgentId>>,
+    /// How many wake messages this Chat has sent, which names the next.
+    wakes: u32,
     /// Input the person sent for immediate dispatch, ahead of the queue.
     direct: VecDeque<(PendingInput, DirectSend)>,
     /// Prepared edits keep their saved rows. The automatic queue waits for the
@@ -506,6 +619,17 @@ impl Supervisor {
             show_text_at: None,
             checkpoint_at: None,
             stop_deadline: None,
+            sub_agents: HashMap::new(),
+            sub_agent_runs: HashMap::new(),
+            wake_until: None,
+            sub_agent_notes: HashMap::new(),
+            unreported: Vec::new(),
+            wake_after: None,
+            wake_polled: Instant::now(),
+            queue_paused: false,
+            stopping_at_rest: None,
+            wake_sent: None,
+            wakes: 0,
             shutting_down: false,
             shut_down_for: None,
             queue_started: false,
@@ -525,17 +649,7 @@ impl Supervisor {
 
     async fn run(mut self) {
         loop {
-            let timer = [
-                self.show_text_at,
-                self.checkpoint_at,
-                self.stop_deadline,
-                self.unconfirmed_deadline,
-                self.queue_read_retry_at,
-                self.context_retry_at(),
-            ]
-            .into_iter()
-            .flatten()
-            .min();
+            let timer = self.next_timer();
             tokio::select! {
                 command = self.commands.recv() => match command {
                     Some(Command::Shutdown(why, reply)) => {
@@ -614,6 +728,23 @@ impl Supervisor {
         }
     }
 
+    /// The earliest moment a timer needs the supervisor.
+    fn next_timer(&self) -> Option<Instant> {
+        [
+            self.show_text_at,
+            self.checkpoint_at,
+            self.stop_deadline,
+            self.unconfirmed_deadline,
+            self.queue_read_retry_at,
+            self.wake_until,
+            self.wake_after.filter(|at| *at > self.wake_polled),
+            self.context_retry_at(),
+        ]
+        .into_iter()
+        .flatten()
+        .min()
+    }
+
     // ------------------------------------------------------------------
     // Core access
     // ------------------------------------------------------------------
@@ -658,7 +789,8 @@ impl Supervisor {
                 buffer.saved = buffer.text.len();
                 batch.push(ChatObservation::AssistantText {
                     message_id: buffer.message_id.clone(),
-                    turn_id: buffer.turn_id.clone(),
+                    turn_id: Some(buffer.turn_id.clone()),
+                    owner: ChatOwner::Main,
                     text: buffer.text.clone(),
                     complete: false,
                 });
@@ -841,7 +973,14 @@ impl Supervisor {
                 let _ = reply.send(Ok(()));
             }
             Command::Stop(reply) => {
-                let _ = reply.send(self.request_stop());
+                let stopped = match self.request_stop() {
+                    Ok(()) => self.stop_sub_agents_at_rest().await,
+                    Err(error) => Err(error),
+                };
+                let _ = reply.send(stopped);
+            }
+            Command::StopSubAgent { native_id, reply } => {
+                let _ = reply.send(self.stop_sub_agent(&native_id).await);
             }
             Command::ResumeQueue(reply) => {
                 let _ = reply.send(self.resume_queue().await);
@@ -1540,13 +1679,42 @@ impl Supervisor {
         .unwrap_or(false)
     }
 
+    /// Whether Stop finds the Chat working at rest: no turn, no input on its way, no
+    /// session opening and nothing unsent in its queue, only sub-agents running or the main
+    /// agent about to be told of one's finish.
+    fn stop_finds_it_working_at_rest(&self) -> bool {
+        let chat = self.chat_id.clone();
+        (!self.sub_agents.is_empty() || self.wake_after.is_some() || self.wake_until.is_some())
+            && self.active.is_none()
+            && self.unconfirmed_start.is_none()
+            && self.dispatching.is_none()
+            && self.opening.is_none()
+            && self.direct.is_empty()
+            && self.resend.is_none()
+            && self
+                .core(|core| Ok(core.chat_queue(&chat)?.is_empty()))
+                // Unreadable: not known to be at rest, so Stop pauses as it always did.
+                .unwrap_or(false)
+    }
+
     /// Stop pauses the queue first, so nothing unsent is dispatched whatever the
-    /// harness then does, and keeps all unsent input.
+    /// harness then does, and keeps all unsent input. Where only sub-agents work there is
+    /// nothing to hold back, and the pause would outlive the Stop: with no turn to end, no
+    /// later wake or message would be dispatched, and the Chat would read as working.
     fn request_stop(&mut self) -> Result<(), HostError> {
         let chat = self.chat_id.clone();
-        self.write(|core| core.set_chat_queue_paused(&chat, true))?;
+        if !self.stop_finds_it_working_at_rest() {
+            self.write(|core| core.set_chat_queue_paused(&chat, true))?;
+        }
         self.clear_direct();
         self.resend = None;
+        // Nothing is to be told to the main agent after a Stop.
+        self.unreported.clear();
+        // Nor what an input on its way carries: it is not told if that input is rejected.
+        if let Some(dispatch) = self.dispatching.as_mut() {
+            dispatch.finished.clear();
+        }
+        self.wake_after = None;
         if self.active.is_some() {
             self.interrupt();
         } else if self.unconfirmed_start.is_some()
@@ -1557,7 +1725,416 @@ impl Supervisor {
             self.stop = Some(StopState::Requested);
             self.stop_deadline = Some(Instant::now() + INTERRUPT_TIMEOUT);
         }
+        // With no turn running, `stop_sub_agents_at_rest` stops what runs on its own.
         Ok(())
+    }
+
+    /// Whether a frame of a sub-agent names a run that sorts before the one it is in: the
+    /// harness orders a task's run IDs by when they opened, and the Chat's history already
+    /// drops such a frame.
+    /// Adds the name the harness gives the model a sub-agent reported (`model_name`), from
+    /// the models this session lists: once ticketd restarted nothing lists them, and the
+    /// screens still name the model by it.
+    fn name_the_model(&self, native: &mut serde_json::Value) {
+        let Some(model) = native.get("model").and_then(serde_json::Value::as_str) else {
+            return;
+        };
+        let Some(model_setting) = self
+            .runtime
+            .as_ref()
+            .and_then(|runtime| runtime.settings.as_ref())
+            .and_then(|settings| settings.model.as_ref())
+        else {
+            return;
+        };
+        if let Some(name) = crate::model_display_name(model, &model_setting.options) {
+            native["model_name"] = serde_json::Value::String(name);
+        }
+    }
+
+    fn late_sub_agent_run(&self, native: &str, run: &Option<String>) -> bool {
+        matches!(
+            (self.sub_agent_runs.get(native), run),
+            (Some(current), Some(run)) if run < current
+        )
+    }
+
+    /// A sub-agent run ended. When it was the last, and no turn runs, the main agent is
+    /// expected to resume by itself, and the Chat stays working until it does.
+    fn sub_agent_ended(&mut self, native: &str, outcome: &SubAgentOutcome) {
+        self.sub_agents.remove(native);
+        if self.wakes_main_agent_for_sub_agents() {
+            // This harness never resumes the main agent by itself, and it files a child's
+            // completion under the turn that started it: only that turn sees the finish.
+            // A direct sub-agent that finished in any other turn, or with none running, is
+            // told to the main agent in one message once no turn runs, a moment from now
+            // (the same message covers those that finish meanwhile). A nested one is its
+            // parent's business.
+            let note = self.sub_agent_notes.get(native);
+            let direct = note.is_none_or(|note| note.parent.is_none());
+            let seen_by_its_turn = self.active.as_ref().is_some_and(|active| {
+                note.and_then(|note| note.spawned_in.as_deref()) == Some(active.turn_id.as_str())
+            });
+            if direct
+                && self.unattended.is_none()
+                && !seen_by_its_turn
+                && matches!(
+                    outcome,
+                    SubAgentOutcome::Completed | SubAgentOutcome::Failed
+                )
+            {
+                let finished = Finished {
+                    native: native.to_owned(),
+                    failed: *outcome == SubAgentOutcome::Failed,
+                };
+                self.unreported.retain(|one| one.native != native);
+                self.unreported.push(finished);
+                self.wake_after
+                    .get_or_insert_with(|| Instant::now() + WAKE_SETTLE);
+            }
+            return;
+        }
+        if self.active.is_none()
+            && self.sub_agents.is_empty()
+            && matches!(
+                outcome,
+                SubAgentOutcome::Completed | SubAgentOutcome::Failed
+            )
+        {
+            self.wake_until = Some(Instant::now() + WAKE_GRACE);
+        }
+    }
+
+    /// The requests a sub-agent asked that nobody answered end with it: the harness says
+    /// so when it can, and this covers the one that does not. `None` is every sub-agent's.
+    /// Returns what to record.
+    fn withdraw_asked_by(&mut self, native: Option<&str>) -> Vec<ChatObservation> {
+        let gone: Vec<String> = self
+            .interactions
+            .iter()
+            .filter(|(_, live)| match (&live.owner, native) {
+                (ChatOwner::Main, _) => false,
+                (ChatOwner::SubAgent { .. }, None) => true,
+                (ChatOwner::SubAgent { native_id }, Some(native)) => native_id == native,
+            })
+            // An answer on its way settles the request as answered, whichever ends first.
+            .filter(|(_, live)| live.answering.is_none())
+            .map(|(id, _)| id.clone())
+            .collect();
+        gone.into_iter()
+            .map(|interaction_id| {
+                self.interactions.remove(&interaction_id);
+                ChatObservation::InteractionResolved {
+                    interaction_id,
+                    state: ChatInteractionState::Expired,
+                    response: None,
+                }
+            })
+            .collect()
+    }
+
+    /// The harness never resumes the main agent when a sub-agent finishes (Codex), so
+    /// ticketd does.
+    fn wakes_main_agent_for_sub_agents(&self) -> bool {
+        self.adapter
+            .as_ref()
+            .is_some_and(|adapter| adapter.harness().sub_agents.wake)
+    }
+
+    /// What a sub-agent is called in what ticketd says to the main agent.
+    fn title_of(&self, native: &str) -> String {
+        self.sub_agent_notes
+            .get(native)
+            .map_or("Sub-agent", |note| note.title.as_str())
+            .to_owned()
+    }
+
+    /// Sends the main agent the one message that tells it which sub-agents finished, when
+    /// there are some, a moment has passed and nothing else is going on. The person's
+    /// own input is always sent first (it carries the same news), so this runs only when
+    /// the pump found none.
+    fn wake_if_due(&mut self, chat: &Chat) {
+        let due = self.wake_after.is_some_and(|at| at <= Instant::now());
+        if !due
+            || self.unreported.is_empty()
+            || chat.queue_paused
+            || self.unattended.is_some()
+            || self.shutting_down
+            || self.active.is_some()
+            || self.dispatching.is_some()
+            || self.opening.is_some()
+            || self.unconfirmed_start.is_some()
+            || self.wake_sent.is_some()
+            || self.problem.is_some()
+            || self.stop.is_some()
+            || !self.direct.is_empty()
+            || self.resend.is_some()
+            || !self.wakes_main_agent_for_sub_agents()
+        {
+            return;
+        }
+        let Some(runtime) = &self.runtime else {
+            return;
+        };
+        let (handle, generation) = (runtime.handle.clone(), runtime.generation);
+        let finished = std::mem::take(&mut self.unreported);
+        self.wake_after = None;
+        self.wakes += 1;
+        let attempt = format!("wake-{}", self.wakes);
+        let text = self.wake_text(&finished);
+        self.wake_sent = Some(
+            finished
+                .first()
+                .map(|finished| NativeSubAgentId::new(&finished.native)),
+        );
+        self.dispatching = Some(Dispatch {
+            attempt: attempt.clone(),
+            generation,
+            starts_turn: true,
+            early_rejection: None,
+            preamble: None,
+            finished: Vec::new(),
+        });
+        let submission = Submission {
+            submission: SubmissionId(attempt),
+            generation,
+            kind: SubmissionKind::StartTurn,
+            text,
+            attachments: Vec::new(),
+        };
+        let done = self.done.clone();
+        tokio::spawn(async move {
+            let outcome = handle.submit_with_admission(submission, None).await;
+            let _ = done.send(Done::Dispatched { outcome });
+        });
+    }
+
+    /// What ticketd says to wake the main agent: which sub-agents finished, and to go on.
+    fn wake_text(&self, finished: &[Finished]) -> String {
+        let name = |finished: &Finished| format!("\"{}\"", self.title_of(&finished.native));
+        match finished {
+            [one] if one.failed => format!("Sub-agent {} failed. Please continue.", name(one)),
+            [one] => format!("Sub-agent {} finished. Please continue.", name(one)),
+            many => {
+                let named: Vec<String> = many
+                    .iter()
+                    .map(|finished| {
+                        if finished.failed {
+                            format!("{} (failed)", name(finished))
+                        } else {
+                            name(finished)
+                        }
+                    })
+                    .collect();
+                format!(
+                    "Sub-agents finished: {}. Please continue.",
+                    named.join(", ")
+                )
+            }
+        }
+    }
+
+    /// What goes ahead of the person's message when sub-agents finished since their last:
+    /// the news and what each said last, so the message does not need ticketd's own to
+    /// follow it.
+    fn finished_note(&self, finished: &[Finished]) -> Option<String> {
+        if finished.is_empty() {
+            return None;
+        }
+        let mut lines = vec!["Sub-agents finished since your last message:".to_owned()];
+        for finished in finished {
+            let verb = if finished.failed {
+                "failed"
+            } else {
+                "finished"
+            };
+            let mut line = format!("- \"{}\" {verb}.", self.title_of(&finished.native));
+            let report = self
+                .sub_agent_notes
+                .get(&finished.native)
+                .and_then(|note| note.report.as_deref())
+                .map(str::trim)
+                .filter(|report| !report.is_empty());
+            if let Some(report) = report {
+                let cut = report.chars().count() > FINISHED_REPORT_LIMIT;
+                let said: String = report.chars().take(FINISHED_REPORT_LIMIT).collect();
+                line.push_str(&format!(
+                    " Its last message: {said}{}",
+                    if cut { "…" } else { "" }
+                ));
+            }
+            lines.push(line);
+        }
+        Some(lines.join("\n"))
+    }
+
+    /// The message that wakes the main agent was not delivered. It is not the person's
+    /// message: the queue is left alone, nothing is retried, and the Chat says so.
+    fn wake_failed(&mut self, detail: &str) {
+        self.wake_sent = None;
+        self.notice(format!(
+            "ticketd could not wake the main agent after a sub-agent finished: {detail}"
+        ));
+    }
+
+    /// The wake message's own answers from the adapter. Its turn, when it starts, is the
+    /// one turn that is labelled as ticketd's.
+    fn on_wake_dispatched(&mut self, attempt: String, current: bool, outcome: DispatchOutcome) {
+        match outcome {
+            DispatchOutcome::NotSent(refusal) => self.wake_failed(refusal.reason()),
+            DispatchOutcome::Rejected { reason } => self.wake_failed(&reason),
+            DispatchOutcome::Written => {
+                if current && self.active.is_none() && self.wake_sent.is_some() {
+                    self.unconfirmed_start = Some(attempt);
+                    self.unconfirmed_deadline =
+                        Some(Instant::now() + DELIVERY_CONFIRMATION_TIMEOUT);
+                }
+            }
+            DispatchOutcome::Acknowledged { turn } => {
+                if current {
+                    let mut observations = Vec::new();
+                    self.turn(&turn, &mut observations);
+                    self.record_if_any(observations);
+                }
+            }
+            // The loss itself is handled as one; nothing of the person's was in flight.
+            DispatchOutcome::UnknownAfterLoss => self.wake_sent = None,
+        }
+    }
+
+    /// Every sub-agent still running was stopped by the person. With `note`, the Chat says
+    /// how many were stopped (when no turn is there to say it was stopped).
+    fn end_sub_agents_stopped(
+        &mut self,
+        observations: &mut Vec<ChatObservation>,
+        note: Option<usize>,
+    ) {
+        self.end_sub_agents(observations, note, ChatSubAgentStopper::Person, None);
+    }
+
+    /// ticketd is stopping the harness for `why`: every sub-agent still running ends as
+    /// stopped by ticketd, with the reason. Quitting is not that: it leaves the sub-agents
+    /// as contact lost, which is all anyone knows when ticketd goes away. Nor is a storage
+    /// failure, after which nothing more can be written.
+    fn end_sub_agents_by_ticketd(&mut self, why: StopReason) {
+        if let Some(running) = self.stopping_at_rest.take() {
+            // The person's Stop at rest, with the harness now confirmed gone.
+            self.end_sub_agents_stopped(&mut Vec::new(), Some(running));
+            return;
+        }
+        if matches!(why, StopReason::Quit | StopReason::StorageFailed) {
+            return;
+        }
+        self.end_sub_agents(
+            &mut Vec::new(),
+            None,
+            ChatSubAgentStopper::Ticketd,
+            Some(why.marker().to_owned()),
+        );
+    }
+
+    fn end_sub_agents(
+        &mut self,
+        observations: &mut Vec<ChatObservation>,
+        note: Option<usize>,
+        stopped_by: ChatSubAgentStopper,
+        stop_reason: Option<String>,
+    ) {
+        let mut running: Vec<String> = self.sub_agents.keys().cloned().collect();
+        running.sort();
+        self.sub_agents.clear();
+        observations.extend(self.withdraw_asked_by(None));
+        observations.extend(
+            running
+                .into_iter()
+                .map(|native_id| ChatObservation::SubAgentEnded {
+                    native_id,
+                    native_run_id: None,
+                    state: ChatSubAgentState::Stopped,
+                    stopped_by: Some(stopped_by),
+                    stop_reason: stop_reason.clone(),
+                    detail: None,
+                }),
+        );
+        if let Some(count) = note.filter(|count| *count > 0) {
+            observations.push(ChatObservation::SubAgentsStopped {
+                notice_id: Uuid::new_v4().to_string(),
+                count: count as i64,
+            });
+        }
+        let batch = std::mem::take(observations);
+        self.record(batch);
+    }
+
+    /// The person stops one sub-agent. Only a background one that runs now can be stopped
+    /// alone: a foreground one ends with its turn. The harness is asked, and its report of
+    /// the sub-agent's end (the person's, as ticketd asked) is what changes the record, so
+    /// the record never says stopped while the harness still runs it.
+    async fn stop_sub_agent(&mut self, native_id: &str) -> Result<(), HostError> {
+        if self.sub_agents.get(native_id) != Some(&true) {
+            return Err(HostError::SubAgentGone);
+        }
+        let Some(runtime) = &self.runtime else {
+            return Err(HostError::SubAgentGone);
+        };
+        let (handle, generation) = (runtime.handle.clone(), runtime.generation);
+        let request = StopSubAgentRequest {
+            generation,
+            sub_agent: NativeSubAgentId::new(native_id),
+        };
+        match self.drive(handle.stop_sub_agent(request)).await {
+            StopSubAgentOutcome::Asked => Ok(()),
+            StopSubAgentOutcome::NotRunning => Err(HostError::SubAgentGone),
+            StopSubAgentOutcome::Unsupported => Err(HostError::SubAgentNotStopped(
+                "this harness cannot stop one sub-agent alone".to_owned(),
+            )),
+            StopSubAgentOutcome::Refused { reason } => Err(HostError::SubAgentNotStopped(reason)),
+            StopSubAgentOutcome::Unconfirmed => Err(HostError::SubAgentNotStopped(
+                "it did not answer in time".to_owned(),
+            )),
+        }
+    }
+
+    /// Stop with no turn running but sub-agents running: they are stopped, the Chat says
+    /// how many, and the harness process ends, which ends every one of them for certain.
+    async fn stop_sub_agents_at_rest(&mut self) -> Result<(), HostError> {
+        if self.active.is_some()
+            || self.unconfirmed_start.is_some()
+            || self.dispatching.is_some()
+            || self.opening.is_some()
+        {
+            return Ok(());
+        }
+        self.wake_until = None;
+        self.unreported.clear();
+        self.wake_after = None;
+        if self.sub_agents.is_empty() {
+            return Ok(());
+        }
+        // A harness that keeps sub-agents running by itself (Codex's child threads) is told
+        // to stop each, then every one still running is stopped by the person and the Chat
+        // says how many, and the process ends: nothing runs in it any more.
+        let running = self.sub_agents.len();
+        let Some(runtime) = &self.runtime else {
+            self.end_sub_agents_stopped(&mut Vec::new(), Some(running));
+            return Ok(());
+        };
+        let (handle, generation) = (runtime.handle.clone(), runtime.generation);
+        self.drive(handle.interrupt_sub_agents(generation)).await;
+        // The harness process ends, which ends every one of them for certain, and only
+        // then are the ones it did not report recorded as stopped. The next message opens
+        // the session again. Where the exit is not confirmed, what ran is not known to
+        // have stopped: those stay as they were, and are lost contact with.
+        self.stopping_at_rest = Some(running);
+        let unconfirmed = self.stop_runtime(StopReason::Quit).await;
+        self.stopping_at_rest = None;
+        match unconfirmed {
+            Some(reason) => {
+                self.notice(format!("Stopping the harness was not confirmed: {reason}"));
+                Err(HostError::SubAgentNotStopped(reason))
+            }
+            None => Ok(()),
+        }
     }
 
     /// The person decided to send input again although its first delivery is uncertain.
@@ -1599,6 +2176,10 @@ impl Supervisor {
     /// harness has it stays unknown, so it is recorded as uncertain for the person to
     /// decide about; later evidence from this runtime can still settle it.
     fn delivery_unconfirmed(&mut self, attempt_id: String) {
+        if is_wake(&attempt_id) {
+            self.wake_failed("the harness did not confirm receiving it in time");
+            return;
+        }
         self.record(vec![ChatObservation::SubmissionUncertain {
             attempt_id,
             detail: Some("the harness did not confirm receiving it in time".to_owned()),
@@ -1631,6 +2212,9 @@ impl Supervisor {
                 generation,
                 outcome,
             });
+            // The sub-agents run on when their parent's turn is interrupted (Codex): ask
+            // each to stop too, after the turn, in one order.
+            handle.interrupt_sub_agents(generation).await;
         });
     }
 
@@ -2099,15 +2683,17 @@ impl Supervisor {
         }
         let permission_restart =
             why == StopReason::ExplicitResume && self.permission_restart_pending;
-        // Losing the event stream does not prove that the previous process exited.
-        let unconfirmed =
-            if permission_restart || self.unattended.is_some() || self.runtime.is_some() {
-                self.drive(bounded_close(handle.as_ref())).await
-            } else {
-                None
-            };
+        // Losing the event stream, even while this waited for the interrupt, does not
+        // prove that the process exited: the retained handle is always closed.
+        let unconfirmed = self.drive(bounded_close(handle.as_ref())).await;
         self.keep_unanswered_permission();
         self.runtime = None;
+        // Recorded as stopped only when the harness is known to have exited. Otherwise
+        // what still ran is left for the loss below to record as lost contact: nothing
+        // says whether it runs.
+        if unconfirmed.is_none() {
+            self.end_sub_agents_by_ticketd(why);
+        }
         self.runtime_gone(TurnEnding::StoppedByTicketd(why), false);
         if let Some(reason) = &unconfirmed {
             if permission_restart || self.unattended.is_some() {
@@ -2156,6 +2742,13 @@ impl Supervisor {
         self.refreshing = None;
         self.pending_contexts.clear();
         self.interactions.clear();
+        self.sub_agents.clear();
+        self.sub_agent_runs.clear();
+        self.sub_agent_notes.clear();
+        self.unreported.clear();
+        self.wake_after = None;
+        self.wake_sent = None;
+        self.wake_until = None;
         self.text.clear();
         self.pending_tools.clear();
         self.clear_direct();
@@ -2254,6 +2847,7 @@ impl Supervisor {
     /// sent goes first; queued input follows only while a runtime is live and the queue
     /// is not paused, so viewing or restoring a Chat never starts work.
     fn pump(&mut self) {
+        self.wake_polled = Instant::now();
         if let Some(ContextRefresh::RetryAt { armed, .. }) = &mut self.refreshing {
             *armed = false;
         }
@@ -2318,6 +2912,7 @@ impl Supervisor {
                 return;
             }
         };
+        self.queue_paused = chat.queue_paused;
         if chat.trashed {
             self.direct.clear();
             self.prepared_queue_edits.clear();
@@ -2368,6 +2963,8 @@ impl Supervisor {
                         let Some(message) = queue.into_iter().find(|message| !message.editing)
                         else {
                             self.queue_started = false;
+                            // Nothing of the person's to send: tell the main agent what finished.
+                            self.wake_if_due(&chat);
                             return;
                         };
                         if self.prepared_queue_edits.contains(&message.id) {
@@ -2386,6 +2983,7 @@ impl Supervisor {
                 if chat.queue_paused {
                     self.queue_started = false;
                 }
+                self.wake_if_due(&chat);
                 return;
             };
             // A run's supervisor may only send its own Prompt. This also holds
@@ -2517,6 +3115,24 @@ impl Supervisor {
                 return DispatchProgress::Finished;
             }
         };
+        // Before anything is taken for this input: if the note cannot be kept, the input
+        // is not sent, and what it would have used stays for the next one.
+        let note = match self.lost_sub_agents_note(&message) {
+            Ok(note) => note,
+            Err(error) => {
+                let detail = format!("ticketd could not record what it tells the harness: {error}");
+                // Nothing went out: say so, so the input is not left as possibly sent.
+                self.record(vec![ChatObservation::SubmissionNotDelivered {
+                    attempt_id: attempt,
+                    detail: Some(detail.clone()),
+                }]);
+                if is_refusal(&error) {
+                    self.notice(format!("A message was not sent: {detail}"));
+                    let _ = self.write(|core| core.set_chat_queue_paused(&chat, true));
+                }
+                return DispatchProgress::Finished;
+            }
+        };
         if starts_turn {
             // An earlier Stop was about an earlier submission.
             self.stop_when_turn_known = false;
@@ -2536,11 +3152,24 @@ impl Supervisor {
         } else {
             None
         };
-        // Context and selected history go to the harness with the input; the stored
-        // message stays the person's own words.
+        // What finished since their last message goes ahead of this one, in place of the
+        // message ticketd would have sent.
+        let finished = if self.unattended.is_none() {
+            std::mem::take(&mut self.unreported)
+        } else {
+            Vec::new()
+        };
+        if !finished.is_empty() {
+            self.wake_after = None;
+        }
+        let finished_note = self.finished_note(&finished);
+        // Context, selected history and ticketd's notes go to the harness with the input;
+        // the stored message stays the person's own words.
         let text = [
             context.as_deref(),
             preamble.as_deref(),
+            note.as_ref().map(|note| note.text.as_str()),
+            finished_note.as_deref(),
             (!message.text.is_empty()).then_some(message.text.as_str()),
         ]
         .into_iter()
@@ -2570,6 +3199,7 @@ impl Supervisor {
             starts_turn,
             early_rejection: None,
             preamble,
+            finished,
         });
         if let Some(refusal) = self.attachment_refusal(&submission.attachments) {
             self.on_dispatched(DispatchOutcome::NotSent(refusal));
@@ -2612,6 +3242,42 @@ impl Supervisor {
             let _ = done.send(Done::Dispatched { outcome });
         });
         DispatchProgress::Finished
+    }
+
+    /// The note the person's message carries after sub-agents lost contact: what ticketd
+    /// says to the harness about them, kept on the message so the person sees exactly it,
+    /// and told once. A message that was sent before keeps the note it carried.
+    fn lost_sub_agents_note(
+        &mut self,
+        message: &ChatMessage,
+    ) -> Result<Option<ChatMessageNote>, Error> {
+        if let Some(note) = &message.note {
+            return Ok(Some(note.clone()));
+        }
+        if self.unattended.is_some() || message.role != ChatRole::User {
+            return Ok(None);
+        }
+        let chat = self.chat_id.clone();
+        let Ok(lost) = self.core(|core| core.chat_restart_notice(&chat)) else {
+            return Ok(None);
+        };
+        if lost.is_empty() {
+            return Ok(None);
+        }
+        let resume = self
+            .adapter
+            .as_ref()
+            .is_some_and(|adapter| adapter.harness().sub_agents.resume);
+        let titles: Vec<String> = lost.iter().map(ChatSubAgent::title).collect();
+        let note = ChatMessageNote {
+            kind: ChatMessageNoteKind::LostSubAgents,
+            sub_agents: lost.into_iter().map(|record| record.native_id).collect(),
+            text: lost_sub_agents_text(&titles, resume),
+        };
+        // Told with this message, whether or not it gets through: a resend carries the
+        // stored note again.
+        self.write(|core| core.record_chat_message_note(&chat, &message.id, &note))?;
+        Ok(Some(note))
     }
 
     // ------------------------------------------------------------------
@@ -2769,6 +3435,7 @@ impl Supervisor {
                     origin: opening.origin,
                     turns: HashSet::new(),
                     tools: HashSet::new(),
+                    shell_windows: HashSet::new(),
                     said: HashSet::new(),
                     context: None,
                     link_context: None,
@@ -2887,6 +3554,10 @@ impl Supervisor {
             }
             (outcome, _) => outcome,
         };
+        if is_wake(&attempt_id) {
+            self.on_wake_dispatched(attempt_id, current, outcome);
+            return;
+        }
         match outcome {
             DispatchOutcome::NotSent(refusal) => {
                 let detail = refusal.reason().to_owned();
@@ -2953,6 +3624,20 @@ impl Supervisor {
         if dispatch.preamble.is_some() {
             self.preamble = dispatch.preamble;
         }
+        if !dispatch.finished.is_empty() {
+            // Not told after all, whatever finished meanwhile: for a sub-agent in both,
+            // the newer result is the one that stands.
+            let newer = std::mem::take(&mut self.unreported);
+            let mut merged: Vec<Finished> = dispatch
+                .finished
+                .into_iter()
+                .filter(|old| newer.iter().all(|new| new.native != old.native))
+                .collect();
+            merged.extend(newer);
+            self.unreported = merged;
+            self.wake_after
+                .get_or_insert_with(|| Instant::now() + WAKE_SETTLE);
+        }
         self.restore_rejected_context(&dispatch.attempt);
         if dispatch.starts_turn {
             self.stop_when_turn_known = false;
@@ -2989,6 +3674,17 @@ impl Supervisor {
         native: &NativeTurnId,
         observations: &mut Vec<ChatObservation>,
     ) -> Option<String> {
+        self.turn_by(native, None, observations)
+    }
+
+    /// As [`Self::turn`], and a turn seen for the first time says who started it when the
+    /// person did not.
+    fn turn_by(
+        &mut self,
+        native: &NativeTurnId,
+        origin: Option<TurnOrigin>,
+        observations: &mut Vec<ChatObservation>,
+    ) -> Option<String> {
         if self.pending_runtime_loss.is_some() {
             // Storage recovery owns the last observed end while the runtime closes.
             return None;
@@ -3001,14 +3697,31 @@ impl Supervisor {
         if self.active.is_some() {
             return None;
         }
+        // The first turn after ticketd's wake message is the one that message started.
+        let origin = origin.or_else(|| {
+            self.wake_sent.take().map(|sub_agent| TurnOrigin {
+                by: TurnStarter::Ticketd,
+                sub_agent,
+            })
+        });
         runtime.turns.insert(native.0.clone());
         observations.push(ChatObservation::TurnStarted {
             turn_id: turn_id.clone(),
             native_turn_id: Some(native.0.clone()),
+            origin: origin.as_ref().map(|origin| ChatTurnOrigin {
+                by: match origin.by {
+                    TurnStarter::Harness => ChatTurnStarter::Harness,
+                    TurnStarter::Ticketd => ChatTurnStarter::Ticketd,
+                },
+                sub_agent: origin.sub_agent.as_ref().map(|agent| agent.0.clone()),
+            }),
         });
+        // The main agent resumed: the grace for it to do so is over.
+        self.wake_until = None;
         self.active = Some(ActiveTurn {
             turn_id: turn_id.clone(),
             native: native.clone(),
+            by_itself: origin.is_some(),
             span: tracing::info_span!("chat_turn"),
         });
         self.unconfirmed_start = None;
@@ -3025,6 +3738,10 @@ impl Supervisor {
         turn_id: String,
         observations: &mut Vec<ChatObservation>,
     ) {
+        if is_wake(&attempt_id) {
+            // ticketd's own message has no stored message to settle.
+            return;
+        }
         if let Some(index) = self
             .pending_contexts
             .iter()
@@ -3037,7 +3754,8 @@ impl Supervisor {
             runtime.link_context = Some(transfer.text.clone());
             observations.push(ChatObservation::Tool {
                 tool_id: format!("{turn_id}:ticketd-context"),
-                turn_id: turn_id.clone(),
+                turn_id: Some(turn_id.clone()),
+                owner: ChatOwner::Main,
                 name: CONTEXT_RECORD_NAME.to_owned(),
                 input: transfer.text.to_string(),
                 state: ChatToolState::Completed,
@@ -3084,6 +3802,22 @@ impl Supervisor {
                 if unconfirmed {
                     self.unconfirmed_start = None;
                 }
+                if is_wake(&attempt_id) {
+                    // ticketd's own message: no stored message to settle, only its turn.
+                    match evidence {
+                        DeliveryEvidence::Acknowledged { turn }
+                        | DeliveryEvidence::Processing { turn } => {
+                            self.turn(&turn, &mut observations);
+                            self.record_if_any(observations);
+                        }
+                        DeliveryEvidence::Rejected { reason } => {
+                            if self.active.is_none() {
+                                self.wake_failed(&reason);
+                            }
+                        }
+                    }
+                    return;
+                }
                 match evidence {
                     DeliveryEvidence::Acknowledged { turn } => {
                         observations.push(ChatObservation::SubmissionAcknowledged {
@@ -3117,8 +3851,8 @@ impl Supervisor {
                 }
                 self.record(observations);
             }
-            EventKind::TurnStarted { turn } => {
-                self.turn(&turn, &mut observations);
+            EventKind::TurnStarted { turn, origin } => {
+                self.turn_by(&turn, origin, &mut observations);
                 self.record(observations);
             }
             EventKind::TextDelta { turn, item, text } => {
@@ -3151,7 +3885,8 @@ impl Supervisor {
                 self.text.retain(|buffer| buffer.message_id != message_id);
                 observations.push(ChatObservation::AssistantText {
                     message_id,
-                    turn_id,
+                    turn_id: Some(turn_id),
+                    owner: ChatOwner::Main,
                     text,
                     complete: true,
                 });
@@ -3168,31 +3903,217 @@ impl Supervisor {
                 let Some(turn_id) = self.turn(&turn, &mut observations) else {
                     return;
                 };
-                let tool_id = format!("{run}:{}", item.0);
-                let state = tool_state(status);
-                let tool = ChatObservation::Tool {
-                    tool_id: tool_id.clone(),
-                    turn_id,
-                    name: title,
-                    input: detail.map(|d| d.payload().to_owned()).unwrap_or_default(),
-                    state,
+                self.on_tool(
+                    &run,
+                    Some(turn_id),
+                    ChatOwner::Main,
+                    item,
+                    title,
+                    status,
                     output,
-                };
-                self.pending_tools.retain(|(id, _)| *id != tool_id);
-                let first = self
-                    .runtime
-                    .as_mut()
-                    .is_some_and(|runtime| runtime.tools.insert(tool_id.clone()));
-                if first || state != ChatToolState::Running {
-                    observations.push(tool);
-                    self.record(observations);
-                } else {
-                    // Progress of a running tool is saved with the next checkpoint.
-                    self.record_if_any(observations);
-                    self.pending_tools.push((tool_id, tool));
-                    self.checkpoint_at
-                        .get_or_insert(Instant::now() + TEXT_CHECKPOINT_INTERVAL);
+                    detail,
+                    observations,
+                );
+            }
+            EventKind::SubAgentToolUpdated {
+                sub_agent,
+                item,
+                title,
+                status,
+                output,
+                detail,
+            } => {
+                // A sub-agent's Step belongs to the turn that is active, if one is, and
+                // opens none.
+                let turn_id = self.active.as_ref().map(|active| active.turn_id.clone());
+                self.on_tool(
+                    &run,
+                    turn_id,
+                    ChatOwner::SubAgent {
+                        native_id: sub_agent.0,
+                    },
+                    item,
+                    title,
+                    status,
+                    output,
+                    detail,
+                    observations,
+                );
+            }
+            EventKind::SubAgentMessage {
+                sub_agent,
+                item,
+                text,
+            } => {
+                if let Some(note) = self.sub_agent_notes.get_mut(&sub_agent.0) {
+                    note.report = Some(text.clone());
                 }
+                // Said in the turn that is active, if one is; it opens none.
+                let turn_id = self.active.as_ref().map(|active| active.turn_id.clone());
+                observations.push(ChatObservation::AssistantText {
+                    message_id: format!("{run}:{}:{}", sub_agent.0, item.0),
+                    turn_id,
+                    owner: ChatOwner::SubAgent {
+                        native_id: sub_agent.0,
+                    },
+                    text,
+                    complete: true,
+                });
+                self.record(observations);
+            }
+            EventKind::SubAgentReasoningUpdated {
+                sub_agent,
+                run: native_run,
+                item,
+                running,
+                started_at,
+                ended_at,
+                text,
+            } => {
+                let record = ReasoningRecord {
+                    running,
+                    started_at,
+                    ended_at,
+                    text,
+                    heading: None,
+                };
+                let state = if running {
+                    ChatToolState::Running
+                } else {
+                    ChatToolState::Completed
+                };
+                let id = format!(
+                    "{run}:reasoning:{}:{}:{}",
+                    sub_agent.0,
+                    native_run.as_deref().unwrap_or("-"),
+                    item.0
+                );
+                self.sub_agent_record(sub_agent, id, REASONING_RECORD_NAME, &record, state);
+            }
+            EventKind::SubAgentFilesChanged {
+                sub_agent,
+                run: native_run,
+                files,
+            } => {
+                let id = format!(
+                    "{run}:files:{}:{}",
+                    sub_agent.0,
+                    native_run.as_deref().unwrap_or("-")
+                );
+                let record = FilesRecord::from(files.as_slice());
+                self.sub_agent_record(
+                    sub_agent,
+                    id,
+                    FILES_RECORD_NAME,
+                    &record,
+                    ChatToolState::Completed,
+                );
+            }
+            EventKind::SubAgentStarted(mut start) => {
+                self.name_the_model(&mut start.native);
+                self.sub_agents
+                    .insert(start.sub_agent.0.clone(), start.background);
+                if let Some(run) = &start.run {
+                    self.sub_agent_runs
+                        .insert(start.sub_agent.0.clone(), run.clone());
+                }
+                // Something runs again: the main agent is not about to resume alone, and a
+                // sub-agent that runs again has nothing to be told yet.
+                self.wake_until = None;
+                self.unreported
+                    .retain(|finished| finished.native != start.sub_agent.0);
+                if self.unreported.is_empty() {
+                    self.wake_after = None;
+                }
+                let note = self
+                    .sub_agent_notes
+                    .entry(start.sub_agent.0.clone())
+                    .or_insert_with(|| SubAgentNote {
+                        parent: None,
+                        title: "Sub-agent".to_owned(),
+                        report: None,
+                        spawned_in: None,
+                    });
+                note.parent = start.parent.as_ref().map(|parent| parent.0.clone());
+                note.spawned_in = self.active.as_ref().map(|active| active.turn_id.clone());
+                if let Some(title) = ticketd_core::sub_agent_title(&start.native) {
+                    note.title = title;
+                }
+                observations.push(ChatObservation::SubAgentStarted {
+                    native_id: start.sub_agent.0,
+                    parent: start.parent.map(|parent| parent.0),
+                    tool_id: start.tool.map(|item| format!("{run}:{}", item.0)),
+                    turn_id: self.active.as_ref().map(|active| active.turn_id.clone()),
+                    native_run_id: start.run,
+                    background: start.background,
+                    payload: start.native.to_string(),
+                });
+                self.record(observations);
+            }
+            EventKind::SubAgentUpdated {
+                sub_agent,
+                run: native_run_id,
+                background,
+                mut native,
+            } => {
+                if let Some(native) = &mut native {
+                    self.name_the_model(native);
+                }
+                if let (Some(background), Some(running)) = (
+                    background.filter(|_| !self.late_sub_agent_run(&sub_agent.0, &native_run_id)),
+                    self.sub_agents.get_mut(&sub_agent.0),
+                ) {
+                    *running = background;
+                }
+                if let (Some(title), Some(note)) = (
+                    native.as_ref().and_then(ticketd_core::sub_agent_title),
+                    self.sub_agent_notes.get_mut(&sub_agent.0),
+                ) {
+                    note.title = title;
+                }
+                self.record(vec![ChatObservation::SubAgentUpdated {
+                    native_id: sub_agent.0,
+                    native_run_id,
+                    background,
+                    payload: native.map(|native| native.to_string()),
+                }]);
+            }
+            EventKind::SubAgentEnded {
+                sub_agent,
+                run: native_run_id,
+                outcome,
+                detail,
+            } => {
+                let late = self.late_sub_agent_run(&sub_agent.0, &native_run_id);
+                if !late {
+                    self.sub_agent_ended(&sub_agent.0, &outcome);
+                }
+                let (state, stopped_by) = match outcome {
+                    SubAgentOutcome::Completed => (ChatSubAgentState::Completed, None),
+                    SubAgentOutcome::Failed => (ChatSubAgentState::Failed, None),
+                    SubAgentOutcome::Stopped(by) => (
+                        ChatSubAgentState::Stopped,
+                        Some(match by {
+                            SubAgentStopper::Person => ChatSubAgentStopper::Person,
+                            SubAgentStopper::MainAgent => ChatSubAgentStopper::MainAgent,
+                        }),
+                    ),
+                };
+                // An earlier run's late end says nothing of what a resumed run asked.
+                let mut observations = if late {
+                    Vec::new()
+                } else {
+                    self.withdraw_asked_by(Some(&sub_agent.0))
+                };
+                observations.push(ChatObservation::SubAgentEnded {
+                    native_id: sub_agent.0,
+                    native_run_id,
+                    state,
+                    stopped_by,
+                    stop_reason: None,
+                    detail,
+                });
+                self.record(observations);
             }
             EventKind::InteractionRequested(request) => {
                 self.on_interaction(&run, generation, request, observations);
@@ -3250,7 +4171,8 @@ impl Supervisor {
                 observations.extend(ended.into_iter().map(|buffer: TextBuffer| {
                     ChatObservation::AssistantText {
                         message_id: buffer.message_id,
-                        turn_id: buffer.turn_id,
+                        turn_id: Some(buffer.turn_id),
+                        owner: ChatOwner::Main,
                         text: buffer.text,
                         complete: true,
                     }
@@ -3270,8 +4192,12 @@ impl Supervisor {
                 // Queued input does not follow a turn that did not complete. A
                 // take-over ends the agent's turn for the person, who is about to
                 // send (#387 M2): their Chat's queue is not paused for it.
+                // A turn the harness or ticketd started is not one the person is waiting on:
+                // its failure shows, and notifies, but pauses nothing of theirs.
+                let by_itself = is_active && self.active.as_ref().is_some_and(|a| a.by_itself);
                 let pause_queue = ending != TurnEnding::Completed
-                    && self.shut_down_for != Some(StopReason::TakenOver);
+                    && self.shut_down_for != Some(StopReason::TakenOver)
+                    && !by_itself;
                 if is_active {
                     let mut end = ObservedTurnEnd {
                         receipt: ChatTurnReceipt::new(turn_id.clone()),
@@ -3293,8 +4219,15 @@ impl Supervisor {
                     self.record(observations);
                 }
                 self.text.retain(|buffer| buffer.turn_id != turn_id);
-                self.interactions.retain(|_, live| live.turn_id != turn_id);
+                self.interactions
+                    .retain(|_, live| live.turn_id.as_ref() != Some(&turn_id));
                 if is_active {
+                    // A sub-agent in the foreground ended with its turn. When the person
+                    // stopped the turn, every sub-agent still running was stopped with it.
+                    self.sub_agents.retain(|_, background| *background);
+                    if stopped {
+                        self.end_sub_agents_stopped(&mut Vec::new(), None);
+                    }
                     self.active = None;
                     self.stop = None;
                     self.stop_deadline = None;
@@ -3421,6 +4354,91 @@ impl Supervisor {
         }
     }
 
+    /// A tool item's latest state: recorded at once when it is new or finished, and with
+    /// the next checkpoint while it only reports progress.
+    #[allow(clippy::too_many_arguments)]
+    fn on_tool(
+        &mut self,
+        run: &str,
+        turn_id: Option<String>,
+        owner: ChatOwner,
+        item: NativeItemId,
+        title: String,
+        status: ToolStatus,
+        output: Option<String>,
+        detail: Option<ProviderDetail>,
+        mut observations: Vec<ChatObservation>,
+    ) {
+        let tool_id = format!("{run}:{}", item.0);
+        let state = tool_state(status);
+        let input = detail.map(|d| d.payload().to_owned()).unwrap_or_default();
+        let first = self
+            .runtime
+            .as_mut()
+            .is_some_and(|runtime| runtime.tools.insert(tool_id.clone()));
+        // A shell Step's window opens when it is first seen, so a write made while it runs
+        // can be credited to the agent that ran it. A Step reported before its command is
+        // known opens it with the update that first has the command.
+        let has_window = self
+            .runtime
+            .as_ref()
+            .is_some_and(|runtime| runtime.shell_windows.contains(&tool_id));
+        let window = if first || (state == ChatToolState::Running && !has_window) {
+            self.shell_window(&title, &input, state)
+        } else {
+            None
+        };
+        if window.is_some()
+            && let Some(runtime) = &mut self.runtime
+        {
+            runtime.shell_windows.insert(tool_id.clone());
+        }
+        let tool = ChatObservation::Tool {
+            tool_id: tool_id.clone(),
+            turn_id,
+            owner,
+            name: title,
+            input,
+            state,
+            output,
+        };
+        self.pending_tools.retain(|(id, _)| *id != tool_id);
+        if first || state != ChatToolState::Running {
+            observations.push(tool);
+            if let Some(writes) = window {
+                observations.push(ChatObservation::ShellStep {
+                    tool_id: tool_id.clone(),
+                    writes,
+                });
+            }
+            self.record(observations);
+        } else {
+            // Progress of a running tool is saved with the next checkpoint; its window,
+            // when this update opens one, goes now (the Step itself was saved when first seen).
+            if let Some(writes) = window {
+                observations.push(ChatObservation::ShellStep {
+                    tool_id: tool_id.clone(),
+                    writes,
+                });
+            }
+            self.record_if_any(observations);
+            self.pending_tools.push((tool_id, tool));
+            self.checkpoint_at
+                .get_or_insert(Instant::now() + TEXT_CHECKPOINT_INTERVAL);
+        }
+    }
+
+    /// What the plain `ticketd` calls of a Step could write, when it is a shell Step.
+    fn shell_window(
+        &self,
+        title: &str,
+        input: &str,
+        state: ChatToolState,
+    ) -> Option<Vec<ticketd_core::ChatPlannedWrite>> {
+        let adapter = self.adapter.as_ref()?;
+        crate::write_credit::shell_step_writes(adapter.harness().key.as_str(), title, input, state)
+    }
+
     /// Records a turn's reasoning, plan or files as the tool record that keeps it,
     /// replacing what the harness reported before.
     fn turn_record<T: serde::Serialize>(
@@ -3440,13 +4458,40 @@ impl Supervisor {
         };
         observations.push(ChatObservation::Tool {
             tool_id,
-            turn_id,
+            turn_id: Some(turn_id),
+            owner: ChatOwner::Main,
             name: name.to_owned(),
             input,
             state,
             output: None,
         });
         self.record(observations);
+    }
+
+    /// Records a sub-agent's reasoning or files as the tool record that keeps it, owned by
+    /// it. Like its Steps, it belongs to the turn that is active, if one is, and opens none.
+    fn sub_agent_record<T: serde::Serialize>(
+        &mut self,
+        sub_agent: NativeSubAgentId,
+        tool_id: String,
+        name: &str,
+        record: &T,
+        state: ChatToolState,
+    ) {
+        let Ok(input) = serde_json::to_string(record) else {
+            return;
+        };
+        self.record(vec![ChatObservation::Tool {
+            tool_id,
+            turn_id: self.active.as_ref().map(|active| active.turn_id.clone()),
+            owner: ChatOwner::SubAgent {
+                native_id: sub_agent.0,
+            },
+            name: name.to_owned(),
+            input,
+            state,
+            output: None,
+        }]);
     }
 
     fn record_if_any(&mut self, observations: Vec<ChatObservation>) {
@@ -3462,15 +4507,26 @@ impl Supervisor {
         request: InteractionRequest,
         mut observations: Vec<ChatObservation>,
     ) {
-        let native_turn = request
-            .turn
-            .or_else(|| self.active.as_ref().map(|active| active.native.clone()));
-        let Some(turn_id) = native_turn.and_then(|turn| self.turn(&turn, &mut observations)) else {
-            // It cannot be recorded, so it cannot be offered; it stays unanswered.
-            self.notice(
-                "The harness asked something outside a turn; it was not answered.".to_owned(),
-            );
-            return;
+        // A sub-agent's request belongs to the sub-agent, not to the turn that happens to
+        // be running: it needs no turn, and no turn's end takes it away.
+        let (turn_id, owner) = match request.owner {
+            Some(owner) => (None, ChatOwner::SubAgent { native_id: owner.0 }),
+            None => {
+                let native_turn = request
+                    .turn
+                    .or_else(|| self.active.as_ref().map(|active| active.native.clone()));
+                let Some(turn_id) =
+                    native_turn.and_then(|turn| self.turn(&turn, &mut observations))
+                else {
+                    // It cannot be recorded, so it cannot be offered; it stays unanswered.
+                    self.notice(
+                        "The harness asked something outside a turn; it was not answered."
+                            .to_owned(),
+                    );
+                    return;
+                };
+                (Some(turn_id), ChatOwner::Main)
+            }
         };
         let interaction_id = format!("{run}:request:{}", request.request.0);
         let (kind, prompt, reason) = match &request.kind {
@@ -3501,6 +4557,7 @@ impl Supervisor {
         observations.push(ChatObservation::InteractionRequested {
             interaction_id: interaction_id.clone(),
             turn_id: turn_id.clone(),
+            owner: owner.clone(),
             kind,
             native_request_id: Some(request.request.0.clone()),
             prompt,
@@ -3517,6 +4574,7 @@ impl Supervisor {
                 generation,
                 request: request.request,
                 turn_id,
+                owner,
                 kind: request.kind,
                 answering: None,
             },
@@ -3537,6 +4595,11 @@ impl Supervisor {
         }
         if self.checkpoint_at.is_some_and(|at| at <= now) {
             self.record(Vec::new());
+        }
+        if self.wake_until.is_some_and(|at| at <= now) {
+            // The main agent did not resume: the Chat is quiet.
+            self.wake_until = None;
+            self.unpublished = true;
         }
         if self.stop_deadline.is_some_and(|at| at <= now) {
             self.stop_deadline = None;
@@ -3600,8 +4663,18 @@ impl Supervisor {
         let _ = self.write(|core| core.record_chat_observations(&chat, vec![notice]));
     }
 
+    /// Results are waiting to be told to the main agent and nothing blocks the wake. A
+    /// paused queue does: they stay kept for the next input that can go, and are not work.
+    fn wake_waiting(&self) -> bool {
+        !self.unreported.is_empty() && !self.queue_paused
+    }
+
     fn live(&self) -> ChatLive {
         let working = self.active.is_some()
+            || !self.sub_agents.is_empty()
+            || self.wake_until.is_some()
+            || self.wake_waiting()
+            || self.wake_sent.is_some()
             || self.dispatching.is_some()
             || self.opening.is_some()
             || self.unconfirmed_start.is_some();
@@ -3614,6 +4687,8 @@ impl Supervisor {
                 Activity::Idle
             },
             running: self.runtime.is_some(),
+            sub_agents: self.sub_agents.len(),
+            waking: self.wake_until.is_some() || self.wake_waiting() || self.wake_sent.is_some(),
             // Until the session's first turn starts, whatever the process is doing.
             opening: match (&self.opening, &self.runtime) {
                 _ if !working => None,
@@ -3746,10 +4821,14 @@ mod tests {
 
     use super::*;
     use crate::testing::FakeAdapter;
+    use std::path::Path;
     use ticketd_core::{NewChat, WorkspaceSession};
 
     fn supervisor(path: PathBuf) -> (Supervisor, Chat) {
-        let fake = FakeAdapter::codex();
+        supervisor_with(path, FakeAdapter::codex())
+    }
+
+    fn supervisor_with(path: PathBuf, fake: FakeAdapter) -> (Supervisor, Chat) {
         let chat = Workspace::open(&path)
             .unwrap()
             .create_chat(
@@ -3773,6 +4852,44 @@ mod tests {
             Arc::new(HostLifecycle::default()),
         );
         (supervisor, chat)
+    }
+
+    fn start_child(
+        supervisor: &mut Supervisor,
+        generation: RuntimeGeneration,
+        native: &str,
+        run: Option<&str>,
+    ) {
+        supervisor.on_event(Some(RuntimeEvent {
+            generation,
+            kind: EventKind::SubAgentStarted(crate::SubAgentStart {
+                sub_agent: NativeSubAgentId::new(native),
+                run: run.map(str::to_owned),
+                parent: None,
+                tool: None,
+                background: true,
+                native: serde_json::json!({"description": "Slow check"}),
+            }),
+        }));
+    }
+
+    /// How the Chat's history ends the sub-agent's latest run: its state and who stopped it.
+    fn latest_run(
+        path: &Path,
+        chat: &Chat,
+        native: &str,
+    ) -> (ChatSubAgentState, Option<ChatSubAgentStopper>) {
+        let snapshot = Workspace::open(path)
+            .unwrap()
+            .chat_snapshot(&chat.id, 500)
+            .unwrap();
+        let record = snapshot
+            .sub_agents
+            .iter()
+            .find(|record| record.native_id == native)
+            .unwrap();
+        let run = record.latest().unwrap();
+        (run.state, run.stopped_by)
     }
 
     async fn open(supervisor: &mut Supervisor, chat: &Chat) -> RuntimeGeneration {
@@ -3903,6 +5020,85 @@ mod tests {
             .unwrap()
             .unwrap();
         assert!(fake.opens().is_empty());
+    }
+
+    /// The main agent's sub-agent finishes, at rest, in a Chat the supervisor serves.
+    async fn sub_agent_finishes_at_rest(
+        supervisor: &mut Supervisor,
+        generation: RuntimeGeneration,
+    ) {
+        for kind in [
+            EventKind::SubAgentStarted(crate::SubAgentStart {
+                sub_agent: NativeSubAgentId::new("child"),
+                run: None,
+                parent: None,
+                tool: None,
+                background: true,
+                native: serde_json::json!({"description": "Slow check"}),
+            }),
+            EventKind::SubAgentEnded {
+                sub_agent: NativeSubAgentId::new("child"),
+                run: None,
+                outcome: SubAgentOutcome::Completed,
+                detail: None,
+            },
+        ] {
+            supervisor.on_event(Some(RuntimeEvent { generation, kind }));
+        }
+        tokio::time::advance(WAKE_SETTLE).await;
+        supervisor.on_timer();
+        supervisor.pump();
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn ticketd_wakes_the_main_agent_for_a_finished_sub_agent_but_never_in_an_automation() {
+        let dir = tempfile::tempdir().unwrap();
+        let (mut attended, chat) = supervisor(dir.path().join("workspace.sqlite3"));
+        let generation = open(&mut attended, &chat).await;
+        sub_agent_finishes_at_rest(&mut attended, generation).await;
+        let wake = attended
+            .dispatching
+            .as_ref()
+            .expect("the main agent is woken");
+        assert_eq!(wake.attempt, "wake-1");
+
+        let dir = tempfile::tempdir().unwrap();
+        let (mut automation, chat) = supervisor(dir.path().join("workspace.sqlite3"));
+        automation.unattended = Some(UnattendedChat::new(
+            crate::Unattended {
+                run_id: "run-1".to_owned(),
+                model: None,
+                tools: ticketd_core::AutomationAgentTools {
+                    read_files: true,
+                    edit_files: false,
+                    run_commands: true,
+                    any_command: true,
+                    allowed_commands: Vec::new(),
+                    use_web: false,
+                },
+                turn_limit: 1,
+            },
+            Arc::new(tokio::sync::Mutex::new(())),
+        ));
+        let generation = open(&mut automation, &chat).await;
+        sub_agent_finishes_at_rest(&mut automation, generation).await;
+        assert!(automation.dispatching.is_none());
+        assert!(automation.unreported.is_empty());
+        assert!(automation.wake_sent.is_none());
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn a_harness_that_resumes_the_main_agent_itself_is_not_woken() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("workspace.sqlite3");
+        let (mut supervisor, chat) = supervisor(path);
+        supervisor.adapter = Some(Arc::new(FakeAdapter::claude()));
+        let generation = open(&mut supervisor, &chat).await;
+        sub_agent_finishes_at_rest(&mut supervisor, generation).await;
+        assert!(supervisor.dispatching.is_none());
+        assert!(supervisor.unreported.is_empty());
+        // Claude Code's own wake is waited for instead.
+        assert!(supervisor.wake_until.is_some());
     }
 
     #[tokio::test(start_paused = true)]
@@ -4123,5 +5319,350 @@ mod tests {
             Ok(Err(HostError::PermissionRestartCleanupUnconfirmed))
         ));
         assert!(supervisor.opening.is_none());
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn a_wake_deadline_that_falls_due_after_the_pump_still_gets_its_timer() {
+        let dir = tempfile::tempdir().unwrap();
+        let (mut supervisor, _chat) = supervisor(dir.path().join("workspace.sqlite3"));
+        supervisor.wake_after = Some(Instant::now() + WAKE_SETTLE);
+        supervisor.pump();
+        // The deadline passes between the pump's look and the next wait.
+        tokio::time::advance(WAKE_SETTLE).await;
+        assert_eq!(supervisor.next_timer(), supervisor.wake_after);
+        // Once looked at again and still blocked, it does not keep waking the loop.
+        supervisor.pump();
+        assert_ne!(supervisor.next_timer(), supervisor.wake_after);
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn stop_at_rest_records_the_sub_agents_stopped_only_once_the_exit_is_confirmed() {
+        for confirmed in [true, false] {
+            let dir = tempfile::tempdir().unwrap();
+            let path = dir.path().join("workspace.sqlite3");
+            let fake = FakeAdapter::codex();
+            if !confirmed {
+                fake.set_close_outcome(CloseOutcome::Unconfirmed {
+                    reason: "the process did not exit".to_owned(),
+                });
+            }
+            let (mut supervisor, chat) = supervisor_with(path.clone(), fake);
+            let generation = open(&mut supervisor, &chat).await;
+            start_child(&mut supervisor, generation, "child", None);
+
+            let result = supervisor.stop_sub_agents_at_rest().await;
+
+            if confirmed {
+                assert!(result.is_ok());
+                assert_eq!(
+                    latest_run(&path, &chat, "child"),
+                    (
+                        ChatSubAgentState::Stopped,
+                        Some(ChatSubAgentStopper::Person)
+                    )
+                );
+            } else {
+                // Stop cannot say it worked, and nothing claims the child stopped.
+                assert!(matches!(result, Err(HostError::SubAgentNotStopped(_))));
+                assert_eq!(
+                    latest_run(&path, &chat, "child"),
+                    (ChatSubAgentState::Lost, None)
+                );
+            }
+            // Either way the queue is not paused by a Stop at rest.
+            assert!(
+                !supervisor
+                    .core(|core| core.chat(&chat.id))
+                    .unwrap()
+                    .queue_paused
+            );
+        }
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn turning_chat_off_does_not_record_ticketd_stopping_what_it_could_not_confirm() {
+        for confirmed in [true, false] {
+            let dir = tempfile::tempdir().unwrap();
+            let path = dir.path().join("workspace.sqlite3");
+            let fake = FakeAdapter::codex();
+            if !confirmed {
+                fake.set_close_outcome(CloseOutcome::Unconfirmed {
+                    reason: "the process did not exit".to_owned(),
+                });
+            }
+            let (mut supervisor, chat) = supervisor_with(path.clone(), fake);
+            let generation = open(&mut supervisor, &chat).await;
+            start_child(&mut supervisor, generation, "child", None);
+
+            let unconfirmed = supervisor.stop_runtime(StopReason::TurnedOff).await;
+
+            assert_eq!(unconfirmed.is_none(), confirmed);
+            assert_eq!(
+                latest_run(&path, &chat, "child"),
+                if confirmed {
+                    (
+                        ChatSubAgentState::Stopped,
+                        Some(ChatSubAgentStopper::Ticketd),
+                    )
+                } else {
+                    (ChatSubAgentState::Lost, None)
+                }
+            );
+        }
+    }
+
+    #[tokio::test]
+    async fn a_rejected_input_gives_back_its_results_beside_newer_ones() {
+        let dir = tempfile::tempdir().unwrap();
+        let (mut supervisor, _chat) = supervisor(dir.path().join("workspace.sqlite3"));
+        let finished = |native: &str, failed| Finished {
+            native: native.to_owned(),
+            failed,
+        };
+        supervisor.unreported = vec![finished("b", false), finished("a", true)];
+        let dispatch = Dispatch {
+            attempt: "attempt".to_owned(),
+            generation: RuntimeGeneration(1),
+            starts_turn: false,
+            early_rejection: None,
+            preamble: None,
+            finished: vec![finished("a", false), finished("c", false)],
+        };
+
+        supervisor.not_accepted(dispatch, false, "rejected".to_owned());
+
+        // Not told after all: all three wait, and `a` is the newer, failed result.
+        let mut kept = supervisor.unreported.clone();
+        kept.sort_by(|one, other| one.native.cmp(&other.native));
+        assert_eq!(
+            kept,
+            [
+                finished("a", true),
+                finished("b", false),
+                finished("c", false)
+            ]
+        );
+        assert!(supervisor.wake_after.is_some());
+    }
+
+    #[tokio::test]
+    async fn an_earlier_runs_late_end_does_not_expire_a_resumed_runs_approval() {
+        let dir = tempfile::tempdir().unwrap();
+        let (mut supervisor, chat) = supervisor(dir.path().join("workspace.sqlite3"));
+        let generation = open(&mut supervisor, &chat).await;
+        start_child(&mut supervisor, generation, "child", Some("r1"));
+        start_child(&mut supervisor, generation, "child", Some("r2"));
+        supervisor.interactions.insert(
+            "ask".to_owned(),
+            LiveRequest {
+                generation,
+                request: NativeRequestId::new("ask"),
+                turn_id: None,
+                owner: ChatOwner::SubAgent {
+                    native_id: "child".to_owned(),
+                },
+                kind: InteractionKind::Approval {
+                    description: "cargo test".to_owned(),
+                    reason: None,
+                    decisions: vec![ApprovalDecision::Allow],
+                },
+                answering: None,
+            },
+        );
+        let ended = |run: &str| {
+            Some(RuntimeEvent {
+                generation,
+                kind: EventKind::SubAgentEnded {
+                    sub_agent: NativeSubAgentId::new("child"),
+                    run: Some(run.to_owned()),
+                    outcome: SubAgentOutcome::Completed,
+                    detail: None,
+                },
+            })
+        };
+
+        supervisor.on_event(ended("r1"));
+        assert!(supervisor.interactions.contains_key("ask"));
+        supervisor.on_event(ended("r2"));
+        assert!(supervisor.interactions.is_empty());
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn a_wake_the_paused_queue_blocks_is_not_work_in_progress() {
+        let dir = tempfile::tempdir().unwrap();
+        let (mut supervisor, chat) = supervisor(dir.path().join("workspace.sqlite3"));
+        let generation = open(&mut supervisor, &chat).await;
+        supervisor
+            .write(|core| core.set_chat_queue_paused(&chat.id, true))
+            .unwrap();
+
+        sub_agent_finishes_at_rest(&mut supervisor, generation).await;
+
+        // The result is kept for the next input that can go, and the Chat is quiet.
+        assert!(!supervisor.unreported.is_empty());
+        assert!(supervisor.dispatching.is_none());
+        let live = supervisor.live();
+        assert_eq!(live.activity, Activity::Idle);
+        assert!(!live.waking);
+
+        supervisor.resume_queue().await.unwrap();
+        supervisor.pump();
+        assert!(supervisor.dispatching.is_some());
+        assert_eq!(supervisor.live().activity, Activity::Working);
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn a_shell_step_opens_its_write_window_when_its_command_first_arrives() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("workspace.sqlite3");
+        let (mut supervisor, chat) = supervisor_with(path.clone(), FakeAdapter::claude());
+        let generation = open(&mut supervisor, &chat).await;
+        start_child(&mut supervisor, generation, "child", None);
+        let windows = || -> i64 {
+            rusqlite::Connection::open(&path)
+                .unwrap()
+                .query_row(
+                    "SELECT COUNT(*) FROM chat_step_windows WHERE chat_id = ?1",
+                    [&chat.id],
+                    |row| row.get(0),
+                )
+                .unwrap()
+        };
+        let mut update = |input: serde_json::Value| {
+            supervisor.on_event(Some(RuntimeEvent {
+                generation,
+                kind: EventKind::SubAgentToolUpdated {
+                    sub_agent: NativeSubAgentId::new("child"),
+                    item: NativeItemId::new("tool-1"),
+                    title: "Bash".to_owned(),
+                    status: ToolStatus::Running,
+                    output: None,
+                    detail: Some(ProviderDetail::new("tool_use", &input.to_string())),
+                },
+            }));
+        };
+
+        // First seen with no command yet: no window.
+        update(serde_json::json!({}));
+        assert_eq!(windows(), 0);
+        // The update that supplies the command opens it, once.
+        let command = serde_json::json!({"command": "ticketd activity add T-KQ1 --brief x"});
+        update(command.clone());
+        assert_eq!(windows(), 1);
+        update(command);
+        assert_eq!(windows(), 1);
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn stop_does_not_leave_finished_results_on_an_input_that_is_then_rejected() {
+        let dir = tempfile::tempdir().unwrap();
+        let (mut supervisor, _chat) = supervisor(dir.path().join("workspace.sqlite3"));
+        supervisor.dispatching = Some(Dispatch {
+            attempt: "attempt".to_owned(),
+            generation: RuntimeGeneration(1),
+            starts_turn: false,
+            early_rejection: None,
+            preamble: None,
+            finished: vec![Finished {
+                native: "a".to_owned(),
+                failed: false,
+            }],
+        });
+
+        supervisor.request_stop().unwrap();
+        let dispatch = supervisor.dispatching.take().unwrap();
+        supervisor.not_accepted(dispatch, false, "rejected".to_owned());
+
+        // Nothing is told to the main agent after a Stop, not even by the next message.
+        assert!(supervisor.unreported.is_empty());
+        assert!(supervisor.wake_after.is_none());
+    }
+
+    #[tokio::test]
+    async fn an_answer_on_its_way_is_not_expired_when_its_sub_agent_ends_first() {
+        let dir = tempfile::tempdir().unwrap();
+        let (mut supervisor, chat) = supervisor(dir.path().join("workspace.sqlite3"));
+        let generation = open(&mut supervisor, &chat).await;
+        start_child(&mut supervisor, generation, "child", None);
+        for (id, answering) in [("answered", Some("allow".to_owned())), ("waiting", None)] {
+            supervisor.interactions.insert(
+                id.to_owned(),
+                LiveRequest {
+                    generation,
+                    request: NativeRequestId::new(id),
+                    turn_id: None,
+                    owner: ChatOwner::SubAgent {
+                        native_id: "child".to_owned(),
+                    },
+                    kind: InteractionKind::Approval {
+                        description: "cargo test".to_owned(),
+                        reason: None,
+                        decisions: vec![ApprovalDecision::Allow],
+                    },
+                    answering,
+                },
+            );
+        }
+        supervisor.on_event(Some(RuntimeEvent {
+            generation,
+            kind: EventKind::SubAgentEnded {
+                sub_agent: NativeSubAgentId::new("child"),
+                run: None,
+                outcome: SubAgentOutcome::Completed,
+                detail: None,
+            },
+        }));
+        // The unanswered request goes with its asker; the answer on its way stays, so
+        // the reply that settles it still finds it.
+        assert_eq!(
+            supervisor.interactions.keys().collect::<Vec<_>>(),
+            ["answered"]
+        );
+        let (reply, answered) = oneshot::channel();
+        supervisor.on_done(Done::Responded {
+            interaction_id: "answered".to_owned(),
+            response: "allow".to_owned(),
+            outcome: RespondOutcome::Sent,
+            reply,
+        });
+        assert!(answered.await.unwrap().is_ok());
+        assert!(supervisor.interactions.is_empty());
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn closing_after_the_event_stream_is_lost_mid_stop_still_confirms_the_exit() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("workspace.sqlite3");
+        let fake = FakeAdapter::codex();
+        fake.set_close_outcome(CloseOutcome::Unconfirmed {
+            reason: "the process did not exit".to_owned(),
+        });
+        let (mut supervisor, chat) = supervisor_with(path.clone(), fake.clone());
+        let generation = open(&mut supervisor, &chat).await;
+        start_child(&mut supervisor, generation, "child", None);
+        // A turn runs; the stream is lost while ticketd waits for its interrupt.
+        fake.emit(EventKind::TurnStarted {
+            turn: NativeTurnId::new("turn-1"),
+            origin: None,
+        })
+        .await;
+        let started = next_event(&mut supervisor.runtime).await;
+        supervisor.on_event(started);
+        assert!(supervisor.active.is_some());
+        fake.emit(EventKind::RuntimeLost {
+            exit_code: None,
+            diagnostics: "stream ended".to_owned(),
+        })
+        .await;
+
+        let unconfirmed = supervisor.close_runtime(StopReason::TurnedOff).await;
+
+        // The retained handle was closed, found not to have exited, and nothing claims
+        // the child stopped.
+        assert!(unconfirmed.is_some());
+        assert_eq!(
+            latest_run(&path, &chat, "child"),
+            (ChatSubAgentState::Lost, None)
+        );
     }
 }

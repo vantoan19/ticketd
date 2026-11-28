@@ -24,6 +24,7 @@ import {
   type ModelOption,
   type PermissionMode,
   type RejectionCode,
+  type SubAgentTaskStatus,
   type ToolOutcome,
 } from "./protocol";
 
@@ -31,6 +32,8 @@ import {
 export const MAX_TOOL_RESULT_CHARS = 1_048_576;
 /** Characters kept from an SDK frame the bridge has no event for. */
 export const MAX_UNMAPPED_JSON_CHARS = 4096;
+/** Characters kept of what a sub-agent was asked; the host shows it as its brief. */
+export const MAX_SUB_AGENT_PROMPT_CHARS = 65_536;
 
 /** The part of an SDK query handle the bridge uses. The SDK's `Query` satisfies it. */
 export interface SdkQuery extends AsyncIterable<unknown> {
@@ -42,6 +45,8 @@ export interface SdkQuery extends AsyncIterable<unknown> {
     commands?: unknown[];
   }>;
   close(): void;
+  /** Stops one running task; a `task_notification` with status `stopped` follows. */
+  stopTask?(taskId: string): Promise<void>;
   // Settings and context, from SDK 0.3.322's `Query`.
   setModel?(model?: string): Promise<void>;
   setPermissionMode?(mode: PermissionMode): Promise<void>;
@@ -95,12 +100,26 @@ interface SessionState {
   requests: Map<string, PendingRequest>;
   /** Content block indices of the thinking blocks being streamed. */
   thinking: Set<number>;
+  /**
+   * The tasks that started as sub-agents (agent-kind), by task id. `task_updated` and
+   * `task_notification` do not say what kind of task they are about.
+   */
+  subAgents: Set<string>;
   ended: boolean;
 }
 
 interface Session extends SessionState {
   query: SdkQuery;
 }
+
+const SUB_AGENT_TASK_STATUSES: readonly SubAgentTaskStatus[] = [
+  "pending",
+  "running",
+  "completed",
+  "failed",
+  "killed",
+  "paused",
+];
 
 const isObject = (value: unknown): value is Json =>
   typeof value === "object" && value !== null && !Array.isArray(value);
@@ -255,6 +274,8 @@ export function createBridge(deps: BridgeDeps) {
             return respond(current, command);
           case "interrupt":
             return interrupt(current, command);
+          case "stop_task":
+            return void stopTask(current, command);
           case "set_setting":
             return void setSetting(current, command);
           case "close":
@@ -386,6 +407,7 @@ export function createBridge(deps: BridgeDeps) {
       wakeInput: undefined,
       requests: new Map(),
       thinking: new Set(),
+      subAgents: new Set(),
       ended: false,
     };
     const options: Options = {
@@ -626,6 +648,7 @@ export function createBridge(deps: BridgeDeps) {
           generation: current.generation,
           request_id: requestId,
           tool_use_id: context.toolUseID,
+          agent_id: context.agentID ?? null,
           questions: input.questions ?? [],
         });
       }
@@ -756,6 +779,31 @@ export function createBridge(deps: BridgeDeps) {
           error: errorInfo(error),
         }),
     );
+  }
+
+  async function stopTask(
+    current: Session,
+    command: Extract<Command, { cmd: "stop_task" }>,
+  ) {
+    const { query } = current;
+    const answer = (outcome: "asked" | "refused", message: string | null) =>
+      emit({
+        event: "stop_task_result",
+        id: command.id,
+        generation: current.generation,
+        task_id: command.task_id,
+        outcome,
+        message,
+      });
+    if (!query.stopTask) {
+      return answer("refused", "this Claude Agent SDK cannot stop a task");
+    }
+    try {
+      await query.stopTask(command.task_id);
+      answer("asked", null);
+    } catch (error) {
+      answer("refused", errorInfo(error).message);
+    }
   }
 
   async function setSetting(
@@ -891,6 +939,12 @@ export function createBridge(deps: BridgeDeps) {
           emit({ event: "compacted", generation });
           return reportContextUsage(current);
         }
+        if (message.subtype === "task_started")
+          return subAgentStarted(current, message);
+        if (message.subtype === "task_updated")
+          return subAgentUpdated(current, message);
+        if (message.subtype === "task_notification")
+          return subAgentEnded(current, message);
         if (message.subtype !== "init") return unmapped(current, message);
         return emit({
           event: "session_info",
@@ -968,6 +1022,7 @@ export function createBridge(deps: BridgeDeps) {
           uuid: text(message.uuid),
           message_id: text(inner.id),
           parent_tool_use_id: parent,
+          model: text(inner.model),
           blocks: blocks(inner.content).map(contentBlock),
           error: text(message.error),
           aborted: message.aborted === true,
@@ -1008,6 +1063,90 @@ export function createBridge(deps: BridgeDeps) {
       default:
         return unmapped(current, message);
     }
+  }
+
+  /**
+   * A task is a sub-agent when it is an agent-kind task a person would read: not a
+   * shell or monitor (they stay Steps), and not an ambient or transcript-less task.
+   * A frame with no task type is taken for one only when it names a sub-agent type or
+   * carries the prompt it was given, which a shell or monitor never does.
+   */
+  function subAgentStarted(current: Session, message: Json) {
+    const taskId = text(message.task_id);
+    const kind = text(message.task_type);
+    const type = text(message.subagent_type);
+    const agent =
+      kind === "local_agent" ||
+      (kind === null && (type !== null || text(message.prompt) !== null));
+    if (
+      taskId === null ||
+      !agent ||
+      message.ambient === true ||
+      message.skip_transcript === true
+    ) {
+      return unmapped(current, message);
+    }
+    current.subAgents.add(taskId);
+    const prompt = text(message.prompt);
+    return emit({
+      event: "sub_agent_started",
+      generation: current.generation,
+      task_id: taskId,
+      run_id: text(message.run_id),
+      tool_use_id: text(message.tool_use_id),
+      parent_task_id: text(message.parent_task_id),
+      description: text(message.description) ?? "",
+      subagent_type: type,
+      background: message.is_backgrounded === true,
+      prompt:
+        prompt === null ? null : prompt.slice(0, MAX_SUB_AGENT_PROMPT_CHARS),
+      prompt_truncated: (prompt?.length ?? 0) > MAX_SUB_AGENT_PROMPT_CHARS,
+      spawn_depth: number(message.spawn_depth),
+    });
+  }
+
+  function subAgentUpdated(current: Session, message: Json) {
+    const taskId = text(message.task_id);
+    if (taskId === null || !current.subAgents.has(taskId)) {
+      return unmapped(current, message);
+    }
+    const patch = isObject(message.patch) ? message.patch : {};
+    const status = text(patch.status);
+    return emit({
+      event: "sub_agent_updated",
+      generation: current.generation,
+      task_id: taskId,
+      run_id: text(message.run_id),
+      status: SUB_AGENT_TASK_STATUSES.find((known) => known === status) ?? null,
+      description: text(patch.description),
+      background:
+        typeof patch.is_backgrounded === "boolean"
+          ? patch.is_backgrounded
+          : null,
+      error: text(patch.error),
+    });
+  }
+
+  function subAgentEnded(current: Session, message: Json) {
+    const taskId = text(message.task_id);
+    const status = text(message.status);
+    if (
+      taskId === null ||
+      !current.subAgents.has(taskId) ||
+      (status !== "completed" && status !== "failed" && status !== "stopped")
+    ) {
+      return unmapped(current, message);
+    }
+    return emit({
+      event: "sub_agent_ended",
+      generation: current.generation,
+      task_id: taskId,
+      run_id: text(message.run_id),
+      tool_use_id: text(message.tool_use_id),
+      status,
+      reason: text(message.reason),
+      summary: text(message.summary) ?? "",
+    });
   }
 
   const blocks = (content: unknown) =>

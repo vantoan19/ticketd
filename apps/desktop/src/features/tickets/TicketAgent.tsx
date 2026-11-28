@@ -20,8 +20,10 @@ import {
   useLinkedChats,
 } from "@/features/chats/use-chats";
 import { topChat } from "@/features/chats/use-ticket-chats";
+import { useTicketAgents } from "@/features/chats/use-ticket-agents";
+import { Elapsed, TicketAgentsLabel } from "./TicketAgentsLabel";
 import type { ChatSummary } from "@/features/chats/client";
-import { duration, stepWords } from "@/features/chats/model";
+import { stepWords } from "@/features/chats/model";
 import type { LatestUpdate } from "@/lib/api/progress";
 import type { Ticket } from "@/lib/api/client";
 import { relativeDateTime } from "@/lib/format";
@@ -74,7 +76,8 @@ export function TicketAgentSession({
     (opening.answered ||
       failure !== null ||
       (latest.value !== undefined && latest.current));
-  const ready = Boolean(ticket && answered && (!enabled || list));
+  const agents = useTicketAgents(ticket && enabled ? ticket.id : null);
+  const ready = Boolean(ticket && answered && (!enabled || (list && agents)));
   const chats = list?.chats ?? [];
   const projected =
     attention?.chats.filter((chat) =>
@@ -106,6 +109,7 @@ export function TicketAgentSession({
       reserved:
         chats.length > 0 ||
         projected.length > 0 ||
+        (agents?.length ?? 0) > 0 ||
         Boolean(
           update?.editing_agent || ticket?.progress_summary?.editing_agent,
         ),
@@ -114,8 +118,14 @@ export function TicketAgentSession({
     <AgentContext
       value={{
         ready,
-        reserved: opened && Boolean(opening.reserved),
+        // A request waiting for the person always takes the slot, even when the slot
+        // was left empty at the opening: its sentence is the point, and the header's
+        // icon alone does not say who asks for what. So do working agents that came
+        // later: the label names them.
+        reserved:
+          opened && (Boolean(opening.reserved) || (agents?.length ?? 0) > 0),
         chat,
+        agents: agents ?? [],
         update: ready ? update : (ticket?.progress_summary ?? null),
       }}
     >
@@ -195,7 +205,9 @@ export function TicketAgentStrip({
         aria-atomic="true"
         className="ticket-agent-strip ui-agent-strip"
       >
-        {agent.chat ? (
+        {agent.agents.length > 0 ? (
+          <TicketAgentsLabel agents={agent.agents} reference={reference} />
+        ) : agent.chat ? (
           <LiveAgent
             key={agent.chat.id}
             chat={agent.chat}
@@ -346,7 +358,7 @@ function LiveAgentText({ chat }: { chat: ChatSummary }) {
       <span>
         <strong>{chat.harness_name}</strong>{" "}
         {working
-          ? "is working on this"
+          ? "is working on this ticket"
           : `wants to run ${request?.kind === "request" ? (request.command ?? request.subject ?? request.title) : (chat.status.detail ?? "a command")}`}
         {working && stepText && (
           <span className="text-muted-foreground"> · {stepText}</span>
@@ -357,19 +369,5 @@ function LiveAgentText({ chat }: { chat: ChatSummary }) {
         <Loader2 className="size-3 animate-spin" aria-hidden="true" />
       )}
     </>
-  );
-}
-
-function Elapsed({ started }: { started: string }) {
-  const [now, setNow] = useState(Date.now);
-  useEffect(() => {
-    const timer = window.setInterval(() => setNow(Date.now()), 1000);
-    return () => window.clearInterval(timer);
-  }, []);
-  return (
-    <span aria-hidden="true" className="text-muted-foreground">
-      {" "}
-      · {duration(Math.max(0, now - Date.parse(started)))}
-    </span>
   );
 }

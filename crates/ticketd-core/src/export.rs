@@ -103,7 +103,7 @@ const EXPORTED: &[(&str, &str)] = &[
     ),
     (
         "chats",
-        "id, title, harness, execution_folder, folder_managed, archived, trashed, queue_paused, muted, effective_settings, created_at, automation_run_id",
+        "id, title, harness, execution_folder, folder_managed, archived, trashed, queue_paused, muted, effective_settings, created_at, automation_run_id, restart_notice",
     ),
     ("chat_links", "chat_id, kind, target_id"),
     (
@@ -112,11 +112,11 @@ const EXPORTED: &[(&str, &str)] = &[
     ),
     (
         "chat_turns",
-        "id, chat_id, position, native_turn_id, state, detail, problem, problem_resets_at, ending, started_at, ended_at",
+        "id, chat_id, position, native_turn_id, state, detail, problem, problem_resets_at, ending, started_at, ended_at, origin_by, origin_sub_agent",
     ),
     (
         "chat_messages",
-        "id, chat_id, position, role, text, complete, turn_id, created_at, editing, requires_link_context",
+        "id, chat_id, position, role, text, complete, turn_id, sub_agent_id, created_at, editing, requires_link_context, note",
     ),
     (
         "chat_submission_attempts",
@@ -124,15 +124,23 @@ const EXPORTED: &[(&str, &str)] = &[
     ),
     (
         "chat_tools",
-        "id, chat_id, position, turn_id, name, input, state, output, output_truncated, started_at",
+        "id, chat_id, position, turn_id, sub_agent_id, name, input, state, output, output_truncated, started_at",
     ),
     (
         "chat_interactions",
-        "id, chat_id, position, turn_id, kind, tool_id, native_request_id, prompt, reason, state, response, asked_at, resolved_at",
+        "id, chat_id, position, turn_id, sub_agent_id, kind, tool_id, native_request_id, prompt, reason, state, response, asked_at, resolved_at",
     ),
     (
         "chat_notices",
-        "id, chat_id, position, text, from_harness, created_at",
+        "id, chat_id, position, text, from_harness, created_at, sub_agents_stopped",
+    ),
+    (
+        "chat_sub_agents",
+        "id, chat_id, native_id, parent_native_id, tool_id, background, payload, created_at",
+    ),
+    (
+        "chat_sub_agent_runs",
+        "id, chat_id, sub_agent_id, position, run, native_run_id, turn_id, state, stopped_by, stop_reason, detail, started_at, ended_at, tool_id",
     ),
     ("automations", "id, name, definition, trashed, created_at"),
     (
@@ -203,7 +211,11 @@ const OMITTED_TABLES: &[(&str, &str)] = &[
     ),
     (
         "chat_record_writes",
-        "bookkeeping for crediting CLI writes to Chat Turns",
+        "bookkeeping for crediting CLI writes to Chat Turns and sub-agents",
+    ),
+    (
+        "chat_step_windows",
+        "bookkeeping for crediting CLI writes to the sub-agent whose shell Step was running",
     ),
     ("device", "this installation's device code and counter"),
     ("document_fts", "a search index derived from Documents"),

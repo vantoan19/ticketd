@@ -400,6 +400,13 @@ export const SHORTCUTS = [
     note: "From an empty message box.",
   },
   {
+    id: "chat-leave-sub-agent",
+    keys: [["Mod", "["], ["Esc"]],
+    scope: "Chat",
+    label: "Leave a sub-agent's view",
+    note: "Back to the main agent, when no menu or dialog is open. It never stops the sub-agent.",
+  },
+  {
     id: "chat-pick",
     keys: [["1–9"]],
     scope: "Chat",

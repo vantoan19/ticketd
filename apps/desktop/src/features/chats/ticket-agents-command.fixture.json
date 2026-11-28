@@ -1,0 +1,30 @@
+[
+  {
+    "id": "c-limiter",
+    "chat_id": "c-limiter",
+    "retention": "active",
+    "chat_title": "Review the rate limiter",
+    "sub_agent": null,
+    "harness_id": "claude-code",
+    "harness_name": "Claude Code",
+    "model": "Claude Opus 5.5",
+    "title": "Review the rate limiter",
+    "started_at": "2026-11-27T10:00:00Z",
+    "doing": "Waiting for 1 sub-agent",
+    "approval": null
+  },
+  {
+    "id": "c-limiter:sa-tests",
+    "chat_id": "c-limiter",
+    "retention": "active",
+    "chat_title": "Review the rate limiter",
+    "sub_agent": "sa-tests",
+    "harness_id": "claude-code",
+    "harness_name": "Claude Code",
+    "model": "Claude Sonnet 5.5",
+    "title": "Check limiter test coverage",
+    "started_at": "2026-11-27T10:00:00Z",
+    "doing": null,
+    "approval": null
+  }
+]

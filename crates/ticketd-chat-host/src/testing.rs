@@ -363,19 +363,34 @@ impl FakeAdapter {
                 return false;
             };
             match &kind {
-                EventKind::TurnStarted { turn } => live.runtime.turn_started(turn),
+                EventKind::TurnStarted { turn, .. } => live.runtime.turn_started(turn),
                 EventKind::TurnEnded { turn, outcome, .. } => {
                     // The script provides the actual events. Update only the
                     // lifecycle checked when the next command arrives.
                     live.runtime
                         .end_turn(turn.clone(), outcome.clone(), |_| Default::default());
                 }
-                EventKind::InteractionRequested(request) => {
-                    live.runtime.register_request(
-                        request.request.clone(),
-                        request.turn.as_ref(),
-                        (),
-                    );
+                EventKind::InteractionRequested(request) => match &request.owner {
+                    // A sub-agent's request lives as long as its asker, whatever turn
+                    // it arrived in.
+                    Some(owner) => {
+                        live.runtime.register_owned_request(
+                            request.request.clone(),
+                            owner.clone(),
+                            (),
+                        );
+                    }
+                    None => {
+                        live.runtime.register_request(
+                            request.request.clone(),
+                            request.turn.as_ref(),
+                            (),
+                        );
+                    }
+                },
+                EventKind::SubAgentEnded { sub_agent, .. } => {
+                    // The script provides the withdrawal events themselves.
+                    live.runtime.withdraw_owned(sub_agent);
                 }
                 EventKind::InteractionResolved { request, .. } => {
                     live.runtime.resolve_request(request);
@@ -453,6 +468,7 @@ impl HarnessAdapter for FakeAdapter {
             .and_then(|text| serde_json::from_str::<serde_json::Value>(text).ok())
             .and_then(|value| value["permission"].as_str().map(str::to_owned));
         let option = |id: &str, permission| crate::SettingOption {
+            resolved: None,
             id: id.to_owned(),
             label: id.to_owned(),
             description: None,

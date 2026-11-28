@@ -11,10 +11,12 @@ use crate::json_rpc::{Reply, RpcError};
 use crate::runtime::RuntimeState;
 use crate::{
     ApprovalDecision, DeliveryEvidence, EventKind, InteractionAnswer, InteractionKind,
-    InteractionRequest, NativeItemId, NativeRequestId, NativeSessionId, NativeTurnId, NoticeKind,
-    Problem, ProblemKind, ProviderDetail, Question, Refusal, SubmissionId, ToolStatus,
-    TurnEvidence, TurnOutcome, reset_time,
+    InteractionRequest, NativeItemId, NativeRequestId, NativeSessionId, NativeSubAgentId,
+    NativeTurnId, NoticeKind, Problem, ProblemKind, ProviderDetail, Question, Refusal,
+    SubmissionId, ToolStatus, TurnEvidence, TurnOutcome, reset_time,
 };
+
+mod children;
 
 use super::report::{REOPEN_WITH, Reports};
 use super::steps::tool_detail;
@@ -55,7 +57,6 @@ const IGNORED_ITEMS: &[&str] = &[
     "functionCallOutput",
     "hookPrompt",
     "sleep",
-    "subAgentActivity",
 ];
 
 /// What an outgoing request was for, kept until its reply or its late reply.
@@ -114,6 +115,8 @@ pub(super) struct Session {
     /// The settings last recorded with the Chat (`NoticeKind::EffectiveSettings`).
     recorded: Option<Value>,
     pub(super) reports: Reports,
+    /// The child threads the Chat's thread started: its sub-agents.
+    children: Vec<children::Child>,
 }
 
 impl Session {
@@ -131,6 +134,7 @@ impl Session {
     pub fn disconnected(&mut self) {
         self.runtime.disconnected();
         self.tools.clear();
+        self.children.clear();
     }
 
     // -- replies ------------------------------------------------------------------
@@ -255,18 +259,17 @@ impl Session {
     // -- notifications ------------------------------------------------------------
 
     pub fn notification(&mut self, method: &str, params: &Value) -> Vec<EventKind> {
-        // ponytail: activity on other threads of this process (sub-agents) is not
-        // shown; their approvals still arrive as requests. Model them when Chats
-        // display sub-agent work.
+        // Another thread of this process is a sub-agent's: what it does is its own, never
+        // the Chat's turn.
         if self.is_other_thread(params) {
-            return Vec::new();
+            return self.child_notification(method, params);
         }
         let events = match method {
             "turn/started" => text(params, &["turn", "id"]).map(|turn| {
                 let turn = NativeTurnId::new(turn);
                 self.runtime.turn_started(&turn);
                 self.reports.turn_started();
-                vec![EventKind::TurnStarted { turn }]
+                vec![EventKind::TurnStarted { turn, origin: None }]
             }),
             "turn/completed" => params
                 .get("turn")
@@ -464,7 +467,15 @@ impl Session {
         let kind = text(item, &["type"])?;
         let id = text(item, &["id"])?;
         let turn = text(params, &["turnId"])?;
+        let thread = self.thread().unwrap_or_default().to_owned();
+        let mut announced = Vec::new();
+        if kind == "collabAgentToolCall" {
+            // multi-agent v1: the call that starts a sub-agent is still a Step; its row
+            // replaces it once the sub-agent is known.
+            announced = self.spawned(&thread, item);
+        }
         let events = match kind {
+            "subAgentActivity" => self.sub_agent_activity(&thread, item),
             "agentMessage" if completed => vec![EventKind::MessageCompleted {
                 turn: NativeTurnId::new(turn),
                 item: NativeItemId::new(id),
@@ -496,7 +507,8 @@ impl Session {
                 None => Vec::new(),
             },
         };
-        Some(events)
+        announced.extend(events);
+        Some(announced)
     }
 
     /// A user message echoing a submission this runtime wrote is evidence that the
@@ -607,28 +619,9 @@ impl Session {
             });
         }
         let cut_off = self.runtime.interrupted(&turn);
-        let status = match text(item, &["status"]) {
-            // Reported as it came: what a failure after a Stop means is not decided
-            // here (#387 3B3).
-            Some("failed") if cut_off => ToolStatus::FailedAfterInterrupt,
-            Some("failed") => ToolStatus::Failed,
-            Some("declined") => ToolStatus::Declined,
-            Some("inProgress") => ToolStatus::Running,
-            Some("completed") => ToolStatus::Succeeded,
-            _ if completed => ToolStatus::Succeeded,
-            _ => ToolStatus::Running,
-        };
-        let output = text(item, &["aggregatedOutput"])
-            .or_else(|| text(item, &["error", "message"]))
-            // What a dynamic tool (ticketd's own) returned.
-            .or_else(|| item["contentItems"][0]["text"].as_str())
-            .map(str::to_owned);
-        // The output travels in `output`; keep it out of the bounded detail.
-        let mut rest = item.clone();
-        if let Some(fields) = rest.as_object_mut() {
-            fields.remove("aggregatedOutput");
-        }
-        let detail = tool_detail(kind, &rest);
+        let status = item_status(item, completed, cut_off);
+        let output = item_output(item);
+        let detail = item_detail(kind, item);
         if completed {
             self.tools.remove(id);
         } else {
@@ -650,29 +643,14 @@ impl Session {
     }
 
     fn tool_output(&mut self, turn: NativeTurnId, item: NativeItemId, delta: &str) -> EventKind {
-        let progress = self.tools.entry(item.0.clone()).or_insert(ToolProgress {
-            title: "Command".to_owned(),
-            output: String::new(),
-            input: None,
-        });
-        progress.output.push_str(delta);
-        let mut excess = progress
-            .output
-            .len()
-            .saturating_sub(MAX_LIVE_TOOL_OUTPUT_BYTES);
-        while !progress.output.is_char_boundary(excess) {
-            excess += 1;
-        }
-        progress.output.drain(..excess);
-        // ponytail: each delta re-sends the bounded live tail (64 KiB at most); send
-        // increments if profiling in #267 shows this matters.
+        let (title, output, input) = progress_output(&mut self.tools, &item.0, delta);
         EventKind::ToolUpdated {
             turn,
             item,
-            title: progress.title.clone(),
+            title,
             status: ToolStatus::Running,
-            output: Some(progress.output.clone()),
-            detail: progress.input.clone(),
+            output: Some(output),
+            detail: input,
         }
     }
 
@@ -753,23 +731,38 @@ impl Session {
         let item = matches!(kind, RequestKind::Approval { .. })
             .then(|| text(params, &["itemId"]).map(NativeItemId::new))
             .flatten();
-        let turn = text(params, &["turnId"]).map(NativeTurnId::new);
-        self.runtime.register_request(
-            request.clone(),
-            turn.as_ref(),
-            Request {
-                id: id.clone(),
-                kind,
-            },
-        );
-        let requested = EventKind::InteractionRequested(InteractionRequest {
+        let payload = Request {
+            id: id.clone(),
+            kind,
+        };
+        // A sub-agent asks on its own turn, which is not the Chat's: the request is the
+        // child's, lives as long as the child's turn, and opens no turn of the Chat.
+        let (turn, owner, mut events) =
+            match text(params, &["threadId"]).filter(|_| self.is_other_thread(params)) {
+                Some(thread) => {
+                    let child_turn = text(params, &["turnId"]);
+                    let events = self.known(thread, child_turn, json!({}));
+                    let owner = NativeSubAgentId::new(thread);
+                    self.runtime
+                        .register_owned_request(request.clone(), owner.clone(), payload);
+                    (None, Some(owner), events)
+                }
+                None => {
+                    let turn = text(params, &["turnId"]).map(NativeTurnId::new);
+                    self.runtime
+                        .register_request(request.clone(), turn.as_ref(), payload);
+                    (turn, None, Vec::new())
+                }
+            };
+        events.push(EventKind::InteractionRequested(InteractionRequest {
             request,
             turn,
+            owner,
             item,
             kind: shown,
             detail: Some(detail(method, params)),
-        });
-        (vec![requested], None)
+        }));
+        (events, None)
     }
 
     /// Builds the reply frame for a live request and marks it answered. Nothing is
@@ -883,6 +876,68 @@ fn refuse(id: &Value, method: &str, params: &Value) -> (Vec<EventKind>, Option<V
         json!({"id": id, "error": {"code": -32601, "message": message}})
     };
     (vec![unknown(method, params)], Some(reply))
+}
+
+/// How far an item has got, from its own status. `cut_off` is a Stop that ticketd asked
+/// for: what then fails is not told as a failure here (#387 3B3).
+fn item_status(item: &Value, completed: bool, cut_off: bool) -> ToolStatus {
+    match text(item, &["status"]) {
+        Some("failed") if cut_off => ToolStatus::FailedAfterInterrupt,
+        Some("failed") => ToolStatus::Failed,
+        Some("declined") => ToolStatus::Declined,
+        Some("inProgress") => ToolStatus::Running,
+        Some("completed") => ToolStatus::Succeeded,
+        _ if completed => ToolStatus::Succeeded,
+        _ => ToolStatus::Running,
+    }
+}
+
+/// What an item printed or returned.
+fn item_output(item: &Value) -> Option<String> {
+    text(item, &["aggregatedOutput"])
+        .or_else(|| text(item, &["error", "message"]))
+        // What a dynamic tool (ticketd's own) returned.
+        .or_else(|| item["contentItems"][0]["text"].as_str())
+        .map(str::to_owned)
+}
+
+/// What an item did, as stored for its Step. The output travels apart from it.
+fn item_detail(kind: &str, item: &Value) -> ProviderDetail {
+    let mut rest = item.clone();
+    if let Some(fields) = rest.as_object_mut() {
+        fields.remove("aggregatedOutput");
+    }
+    tool_detail(kind, &rest)
+}
+
+/// Adds the live output of a command to what is kept of it, bounded, and says what the
+/// Step shows now: its title, its output so far and what it ran.
+fn progress_output(
+    tools: &mut HashMap<String, ToolProgress>,
+    item: &str,
+    delta: &str,
+) -> (String, String, Option<ProviderDetail>) {
+    let progress = tools.entry(item.to_owned()).or_insert(ToolProgress {
+        title: "Command".to_owned(),
+        output: String::new(),
+        input: None,
+    });
+    progress.output.push_str(delta);
+    let mut excess = progress
+        .output
+        .len()
+        .saturating_sub(MAX_LIVE_TOOL_OUTPUT_BYTES);
+    while !progress.output.is_char_boundary(excess) {
+        excess += 1;
+    }
+    progress.output.drain(..excess);
+    // ponytail: each delta re-sends the bounded live tail (64 KiB at most); send
+    // increments if profiling in #267 shows this matters.
+    (
+        progress.title.clone(),
+        progress.output.clone(),
+        progress.input.clone(),
+    )
 }
 
 fn tool_title(kind: &str, item: &Value) -> Option<String> {

@@ -222,6 +222,7 @@ async fn chat_does_nothing_while_the_switch_is_off_and_turning_it_off_stops_runn
 
 fn offered(id: &str, is_default: bool) -> ticketd_chat_host::SettingOption {
     ticketd_chat_host::SettingOption {
+        resolved: None,
         id: id.to_owned(),
         label: id.to_uppercase(),
         description: None,
@@ -489,6 +490,7 @@ async fn what_would_be_stopped_counts_runs_that_are_going_apart_from_working_cha
         claude
             .emit(EventKind::TurnStarted {
                 turn: NativeTurnId::new("agent-turn"),
+                origin: None,
             })
             .await
     );
@@ -684,6 +686,7 @@ async fn a_view_follows_numbered_changes_in_ticketd_terms_and_answers_only_live_
     f.emit(EventKind::InteractionRequested(InteractionRequest {
         request: NativeRequestId::new("approval-1"),
         turn: Some(turn()),
+        owner: None,
         item: None,
         kind: InteractionKind::Approval {
             description: "Run cargo test".to_owned(),
@@ -776,6 +779,7 @@ async fn a_decided_approval_folds_into_the_step_it_answered_and_no_other() {
     f.emit(EventKind::InteractionRequested(InteractionRequest {
         request: NativeRequestId::new("approval-1"),
         turn: Some(turn()),
+        owner: None,
         item: Some(NativeItemId::new("cmd-1")),
         kind: InteractionKind::Approval {
             description: "rm -rf node_modules".to_owned(),
@@ -913,6 +917,91 @@ async fn the_view_reopens_with_what_the_person_read_through() {
 }
 
 #[tokio::test(start_paused = true)]
+async fn a_sub_agent_row_is_a_reading_position_the_chat_keeps_and_reopens_with() {
+    let f = Fixture::new().await;
+    let id = f.chat().await;
+    f.start_sub_agent(
+        "sa-tests",
+        json!({ "description": "Check limiter test coverage" }),
+    )
+    .await;
+    let (opened, _) = f.open(&id).await;
+    let row = opened
+        .snapshot
+        .items
+        .iter()
+        .find_map(|item| match item {
+            Item::SubAgent { id, .. } => Some(id.clone()),
+            _ => None,
+        })
+        .expect("the sub-agent's row");
+
+    f.chats.read_through(&id, &row).unwrap();
+
+    let (opened, _) = f.open(&id).await;
+    assert_eq!(
+        opened.snapshot.chat.read_through.as_deref(),
+        Some(row.as_str()),
+        "kept by the row it names, so the New marker finds it again"
+    );
+}
+
+#[tokio::test(start_paused = true)]
+async fn a_launch_step_already_shown_is_taken_away_when_its_sub_agent_row_replaces_it() {
+    let f = Fixture::new().await;
+    let id = f.chat().await;
+    let (_, seen) = f.open(&id).await;
+    // The harness shows the launch call before it says what it started.
+    f.emit(command_tool("spawn-1", "spawn", ToolStatus::Running))
+        .await;
+    assert!(
+        seen.lock()
+            .unwrap()
+            .iter()
+            .any(|change| change["item"]["id"]
+                .as_str()
+                .is_some_and(|item| item.ends_with(":spawn-1"))),
+        "the launch Step was sent: {:?}",
+        seen.lock().unwrap()
+    );
+    f.emit(EventKind::SubAgentStarted(SubAgentStart {
+        sub_agent: NativeSubAgentId::new("sa-tests"),
+        run: None,
+        parent: None,
+        tool: Some(NativeItemId::new("spawn-1")),
+        background: true,
+        native: json!({ "description": "Check limiter test coverage" }),
+    }))
+    .await;
+    f.emit(command_tool("spawn-1", "spawn", ToolStatus::Succeeded))
+        .await;
+
+    assert_eq!(
+        seen.lock().unwrap().last().unwrap()["kind"],
+        "resync",
+        "the view cannot remove a Step, so it reads the history again"
+    );
+}
+
+#[tokio::test(start_paused = true)]
+async fn a_launch_that_started_no_sub_agent_stays_a_step_without_a_resync() {
+    let f = Fixture::new().await;
+    let id = f.chat().await;
+    let (_, seen) = f.open(&id).await;
+    f.emit(command_tool("spawn-1", "spawn", ToolStatus::Running))
+        .await;
+    f.emit(command_tool("spawn-1", "spawn", ToolStatus::Failed))
+        .await;
+
+    assert!(
+        seen.lock()
+            .unwrap()
+            .iter()
+            .all(|change| change["kind"] != "resync")
+    );
+}
+
+#[tokio::test(start_paused = true)]
 async fn reopening_attaches_to_the_running_chat_and_closing_a_view_stops_nothing() {
     let f = Fixture::new().await;
     let id = f.chat().await;
@@ -985,6 +1074,21 @@ async fn steering_says_its_effect_stop_shows_progress_and_send_now_takes_one_que
     assert!(opened.snapshot.chat.stopping);
     let queue: Vec<_> = opened.snapshot.chat.queue.iter().map(|q| &q.text).collect();
     assert_eq!(queue, ["later"]);
+}
+
+#[tokio::test(start_paused = true)]
+async fn stopping_a_sub_agent_that_does_not_run_is_a_stale_view_and_touches_nothing() {
+    let f = Fixture::new().await;
+    let id = f.chat().await;
+    let (opened, _) = f.open(&id).await;
+    assert!(!opened.snapshot.chat.stopping);
+
+    let refused = f.chats.stop_sub_agent(&id, "no-such-sub-agent").await;
+    assert_eq!(refused.unwrap_err().code, "stale");
+    // Not a Stop of the Chat: its turn and queue are as they were.
+    let (opened, _) = f.open(&id).await;
+    assert!(!opened.snapshot.chat.stopping);
+    assert!(!opened.snapshot.chat.queue_paused);
 }
 
 #[tokio::test(start_paused = true)]
@@ -2395,10 +2499,12 @@ async fn an_attachment_only_first_message_is_saved_and_replayed_once() {
         current: Some("ask".into()),
         options: vec![
             ticketd_chat_host::SettingOption {
+                resolved: None,
                 permission: Some(PermissionKind::Ask),
                 ..offered("ask", true)
             },
             ticketd_chat_host::SettingOption {
+                resolved: None,
                 permission: Some(PermissionKind::FullAccess),
                 ..offered("full", false)
             },
@@ -3988,4 +4094,683 @@ fn a_failed_background_action_logs_the_chat_and_the_kind_but_not_the_failure_tex
     }
     assert!(text.contains("\"chat_id\":\"chat-1\""), "{text}");
     assert!(!text.contains("jdoe"), "{text}");
+}
+
+// The ticket label: who is at work on a ticket (T-UB238, spec decisions 16 and 17).
+
+use crate::ticket_agents::TicketAgentView;
+use ticketd_chat_host::{NativeSubAgentId, SubAgentOutcome, SubAgentStart};
+use ticketd_core::{ChatObservation, ChatOwner, ChatPlannedWrite, ChatToolState};
+
+impl Fixture {
+    /// A Chat linked to `ticket_id` whose first turn runs.
+    async fn linked_chat(&self, ticket_id: &str) -> String {
+        let mut input = self.input("first");
+        input.links = vec![LinkRef {
+            kind: LinkKind::Ticket,
+            id: ticket_id.to_owned(),
+        }];
+        let created = self.chats.create(input).await.unwrap();
+        settle().await;
+        created.chat_id
+    }
+
+    fn agents(&self, ticket_id: &str) -> Vec<TicketAgentView> {
+        self.chats.ticket_agents(ticket_id).unwrap()
+    }
+
+    async fn end_turn(&self) {
+        self.emit(EventKind::TurnEnded {
+            turn: turn(),
+            outcome: TurnOutcome::Completed,
+            submissions: Vec::new(),
+        })
+        .await;
+    }
+
+    async fn start_sub_agent(&self, id: &str, native: serde_json::Value) {
+        self.emit(EventKind::SubAgentStarted(SubAgentStart {
+            sub_agent: NativeSubAgentId::new(id),
+            run: None,
+            parent: None,
+            tool: None,
+            background: true,
+            native,
+        }))
+        .await;
+    }
+
+    async fn end_sub_agent(&self, id: &str) {
+        self.emit(EventKind::SubAgentEnded {
+            sub_agent: NativeSubAgentId::new(id),
+            run: None,
+            outcome: SubAgentOutcome::Completed,
+            detail: None,
+        })
+        .await;
+    }
+
+    /// The `ticketd` CLI of the sub-agent's shell Step writes an Activity on the ticket.
+    fn sub_agent_writes(&self, chat_id: &str, sub_agent: &str, reference: &str) {
+        let mut host = self.core();
+        let step = |state| ChatObservation::Tool {
+            tool_id: format!("run-1:{sub_agent}-bash"),
+            turn_id: None,
+            owner: ChatOwner::SubAgent {
+                native_id: sub_agent.to_owned(),
+            },
+            name: "Bash".to_owned(),
+            input: String::new(),
+            state,
+            output: None,
+        };
+        host.record_chat_observations(
+            chat_id,
+            vec![
+                step(ChatToolState::Running),
+                ChatObservation::ShellStep {
+                    tool_id: format!("run-1:{sub_agent}-bash"),
+                    writes: Vec::<ChatPlannedWrite>::new(),
+                },
+            ],
+        )
+        .unwrap();
+        let mut cli = self.core();
+        cli.act_for_chat(chat_id).unwrap();
+        cli.add_activity(
+            reference,
+            "Added a case for a request with no key.",
+            Some("codex"),
+        )
+        .unwrap();
+        host.record_chat_observations(chat_id, vec![step(ChatToolState::Completed)])
+            .unwrap();
+    }
+}
+
+#[tokio::test(start_paused = true)]
+async fn a_linked_chat_is_an_agent_on_its_ticket_while_its_turn_runs() {
+    let f = Fixture::new().await;
+    let ticket = f.core().create_ticket("Rate limiter").unwrap();
+    let other = f.core().create_ticket("Unrelated").unwrap();
+    let chat_id = f.linked_chat(&ticket.id).await;
+
+    let agents = f.agents(&ticket.id);
+
+    assert_eq!(agents.len(), 1, "{agents:?}");
+    let main = &agents[0];
+    assert_eq!(main.id, chat_id);
+    assert_eq!(main.chat_id, chat_id);
+    assert_eq!(main.retention, "active");
+    assert_eq!(main.sub_agent, None);
+    assert_eq!(main.harness_name, "Codex");
+    assert_eq!(
+        main.model, None,
+        "no model reported: the desktop says Codex"
+    );
+    assert_eq!(main.title, main.chat_title);
+    assert!(!main.started_at.is_empty());
+    assert_eq!(main.approval, None);
+    assert!(f.agents(&other.id).is_empty(), "another ticket has none");
+
+    f.end_turn().await;
+    assert!(
+        f.agents(&ticket.id).is_empty(),
+        "a Chat at rest is not at work"
+    );
+}
+
+#[tokio::test(start_paused = true)]
+async fn the_main_agents_model_is_the_chats_reported_one_in_words() {
+    let f = Fixture::new().await;
+    let ticket = f.core().create_ticket("Rate limiter").unwrap();
+    f.linked_chat(&ticket.id).await;
+    f.emit(EventKind::SettingsState(HarnessSettings {
+        model: Some(ticketd_chat_host::Setting {
+            current: Some("gpt-b".to_owned()),
+            options: vec![offered("gpt-a", true), offered("gpt-b", false)],
+            unchangeable: None,
+            applies_from: ticketd_chat_host::AppliesFrom::NextTurn,
+            answered_by: None,
+        }),
+        ..HarnessSettings::default()
+    }))
+    .await;
+
+    assert_eq!(f.agents(&ticket.id)[0].model.as_deref(), Some("GPT-B"));
+}
+
+#[tokio::test(start_paused = true)]
+async fn the_main_agent_says_what_it_does_in_words() {
+    let f = Fixture::new().await;
+    let ticket = f.core().create_ticket("Rate limiter").unwrap();
+    f.linked_chat(&ticket.id).await;
+    assert_eq!(f.agents(&ticket.id)[0].doing, None);
+
+    f.emit(command_tool(
+        "cmd-1",
+        "npm test -- rate-limit",
+        ToolStatus::Running,
+    ))
+    .await;
+    assert_eq!(
+        f.agents(&ticket.id)[0].doing.as_deref(),
+        Some("Running npm test -- rate-limit")
+    );
+
+    f.emit(command_tool(
+        "cmd-1",
+        "npm test -- rate-limit",
+        ToolStatus::Succeeded,
+    ))
+    .await;
+    f.start_sub_agent(
+        "sa-tests",
+        json!({ "description": "Check limiter test coverage" }),
+    )
+    .await;
+    f.start_sub_agent(
+        "sa-bypass",
+        json!({ "description": "Find limiter bypasses" }),
+    )
+    .await;
+    assert_eq!(
+        f.agents(&ticket.id)[0].doing.as_deref(),
+        Some("Waiting for 2 sub-agents")
+    );
+    f.end_sub_agent("sa-bypass").await;
+    assert_eq!(
+        f.agents(&ticket.id)[0].doing.as_deref(),
+        Some("Waiting for 1 sub-agent")
+    );
+}
+
+#[tokio::test(start_paused = true)]
+async fn a_sub_agent_counts_only_through_a_credited_write_and_only_while_it_runs() {
+    let f = Fixture::new().await;
+    let ticket = f.core().create_ticket("Rate limiter").unwrap();
+    // A Chat that is not linked to the ticket.
+    let chat_id = f.chat().await;
+    f.start_sub_agent(
+        "sa-tests",
+        json!({ "description": "Check limiter test coverage", "model": "claude-sonnet-5-5-20260301" }),
+    )
+    .await;
+    assert!(
+        f.agents(&ticket.id).is_empty(),
+        "a sub-agent that wrote nothing here is not linked, and its Chat is not either"
+    );
+
+    f.sub_agent_writes(&chat_id, "sa-tests", &ticket.reference);
+
+    let agents = f.agents(&ticket.id);
+    let [sub] = agents.as_slice() else {
+        panic!("only the credited sub-agent is at work here: {agents:?}")
+    };
+    assert_eq!(sub.id, format!("{chat_id}:sa-tests"));
+    assert_eq!(sub.sub_agent.as_deref(), Some("sa-tests"));
+    assert_eq!(sub.title, "Check limiter test coverage");
+    // The session lists no models, so the model reads as the harness reported it.
+    assert_eq!(sub.model.as_deref(), Some("claude-sonnet-5-5-20260301"));
+    assert_eq!(sub.doing, None, "a sub-agent's title is its line");
+
+    f.end_sub_agent("sa-tests").await;
+    assert!(
+        f.agents(&ticket.id).is_empty(),
+        "finished work leaves the label"
+    );
+}
+
+#[tokio::test(start_paused = true)]
+async fn the_main_agent_of_an_unlinked_chat_counts_when_its_own_write_is_credited() {
+    let f = Fixture::new().await;
+    let ticket = f.core().create_ticket("Rate limiter").unwrap();
+    let chat_id = f.chat().await;
+    let mut cli = f.core();
+    cli.act_for_chat(&chat_id).unwrap();
+    cli.add_activity(&ticket.reference, "Looking into it.", Some("codex"))
+        .unwrap();
+
+    let agents = f.agents(&ticket.id);
+    assert_eq!(agents.len(), 1, "{agents:?}");
+    assert_eq!(agents[0].id, chat_id);
+    assert_eq!(agents[0].sub_agent, None);
+
+    f.end_turn().await;
+    assert!(f.agents(&ticket.id).is_empty());
+}
+
+#[tokio::test(start_paused = true)]
+async fn a_request_waiting_on_the_person_is_the_agents_approval() {
+    let f = Fixture::new().await;
+    let ticket = f.core().create_ticket("Rate limiter").unwrap();
+    f.linked_chat(&ticket.id).await;
+    f.emit(EventKind::InteractionRequested(InteractionRequest {
+        request: NativeRequestId::new("approval-1"),
+        turn: Some(turn()),
+        owner: None,
+        item: None,
+        kind: InteractionKind::Approval {
+            description: "npm test -- rate-limit".to_owned(),
+            reason: None,
+            decisions: vec![ApprovalDecision::Allow, ApprovalDecision::Deny],
+        },
+        detail: None,
+    }))
+    .await;
+
+    let agents = f.agents(&ticket.id);
+    assert_eq!(
+        agents[0]
+            .approval
+            .as_ref()
+            .map(|approval| approval.summary.as_str()),
+        Some("npm test -- rate-limit")
+    );
+}
+
+#[tokio::test(start_paused = true)]
+async fn a_sub_agents_own_view_lists_the_records_it_changed() {
+    let f = Fixture::new().await;
+    let ticket = f.core().create_ticket("Rate limiter").unwrap();
+    let chat_id = f.linked_chat(&ticket.id).await;
+    f.start_sub_agent(
+        "sa-tests",
+        json!({ "description": "Check limiter test coverage" }),
+    )
+    .await;
+    f.sub_agent_writes(&chat_id, "sa-tests", &ticket.reference);
+    f.end_sub_agent("sa-tests").await;
+
+    let (opened, _) = f.open(&chat_id).await;
+    let items = serde_json::to_value(&opened.snapshot.items).unwrap();
+    let records: Vec<&Value> = items
+        .as_array()
+        .unwrap()
+        .iter()
+        .filter(|item| item["kind"] == "records" && item["owner"] == "sa-tests")
+        .collect();
+    assert_eq!(records.len(), 1, "{items:#}");
+    assert_eq!(
+        records[0]["net"],
+        json!([{
+            "kind": "update",
+            "reference": ticket.reference,
+            "excerpt": "Added a case for a request with no key.",
+        }])
+    );
+}
+
+#[tokio::test(start_paused = true)]
+async fn a_sub_agents_approval_is_its_own_entry_on_the_ticket_before_it_writes_anything() {
+    let f = Fixture::new().await;
+    let ticket = f.core().create_ticket("Rate limiter").unwrap();
+    f.linked_chat(&ticket.id).await;
+    f.start_sub_agent(
+        "sa-tests",
+        json!({
+            "description": "Check limiter test coverage",
+            "model": "claude-sonnet-5-5",
+            "model_name": "Claude Sonnet 5.5",
+        }),
+    )
+    .await;
+    f.emit(EventKind::InteractionRequested(InteractionRequest {
+        request: NativeRequestId::new("approval-1"),
+        turn: None,
+        owner: Some(NativeSubAgentId::new("sa-tests")),
+        item: None,
+        kind: InteractionKind::Approval {
+            description: "npm test -- rate-limit".to_owned(),
+            reason: None,
+            decisions: vec![ApprovalDecision::Allow, ApprovalDecision::Deny],
+        },
+        detail: None,
+    }))
+    .await;
+
+    let agents = f.agents(&ticket.id);
+    let asking = agents
+        .iter()
+        .find(|agent| agent.sub_agent.as_deref() == Some("sa-tests"))
+        .unwrap_or_else(|| panic!("the sub-agent's own entry: {agents:?}"));
+    assert_eq!(asking.model.as_deref(), Some("Claude Sonnet 5.5"));
+    assert_eq!(
+        asking
+            .approval
+            .as_ref()
+            .map(|approval| approval.summary.as_str()),
+        Some("npm test -- rate-limit")
+    );
+    let main = agents.iter().find(|agent| agent.sub_agent.is_none());
+    assert_eq!(
+        main.and_then(|main| main.approval.as_ref()),
+        None,
+        "the main agent asks nothing"
+    );
+}
+
+#[tokio::test(start_paused = true)]
+async fn the_chats_list_row_names_the_sub_agent_that_asks_for_approval() {
+    let f = Fixture::new().await;
+    let ticket = f.core().create_ticket("Rate limiter").unwrap();
+    f.linked_chat(&ticket.id).await;
+    f.start_sub_agent(
+        "sa-tests",
+        json!({ "description": "Check limiter test coverage" }),
+    )
+    .await;
+    f.emit(EventKind::InteractionRequested(InteractionRequest {
+        request: NativeRequestId::new("approval-1"),
+        turn: None,
+        owner: Some(NativeSubAgentId::new("sa-tests")),
+        item: None,
+        kind: InteractionKind::Approval {
+            description: "npm test -- rate-limit".to_owned(),
+            reason: None,
+            decisions: vec![ApprovalDecision::Allow, ApprovalDecision::Deny],
+        },
+        detail: None,
+    }))
+    .await;
+
+    let row = f.chats.list(ChatListFilter::Active).unwrap().remove(0);
+    assert_eq!(row.status.word, "Approval needed");
+    assert_eq!(
+        row.status.detail.as_deref(),
+        Some("Check limiter test coverage"),
+        "the sub-agent, not the command it wants to run"
+    );
+}
+
+impl Fixture {
+    /// A sub-agent asks for approval; its request belongs to no turn.
+    async fn sub_agent_asks(&self, sub_agent: &str, request: &str) {
+        self.emit(EventKind::InteractionRequested(InteractionRequest {
+            request: NativeRequestId::new(request),
+            turn: None,
+            owner: Some(NativeSubAgentId::new(sub_agent)),
+            item: None,
+            kind: InteractionKind::Approval {
+                description: "npm test -- rate-limit".to_owned(),
+                reason: None,
+                decisions: vec![ApprovalDecision::Allow, ApprovalDecision::Deny],
+            },
+            detail: None,
+        }))
+        .await;
+    }
+}
+
+#[tokio::test(start_paused = true)]
+async fn a_sub_agent_asking_after_the_main_turn_ended_still_puts_its_ticket_in_the_digest() {
+    let f = Fixture::new().await;
+    let ticket = f.core().create_ticket("Rate limiter").unwrap();
+    f.linked_chat(&ticket.id).await;
+    f.start_sub_agent(
+        "sa-tests",
+        json!({ "description": "Check limiter test coverage" }),
+    )
+    .await;
+    f.sub_agent_asks("sa-tests", "approval-1").await;
+    f.end_turn().await;
+
+    let agents = f.agents(&ticket.id);
+    assert_eq!(
+        agents
+            .iter()
+            .map(|agent| agent.sub_agent.as_deref())
+            .collect::<Vec<_>>(),
+        [Some("sa-tests")],
+        "the direct read shows the asking sub-agent: {agents:?}"
+    );
+    let digest = f.chats.ticket_agents_digest().unwrap();
+    assert_eq!(
+        digest.iter().map(|(id, _)| id.as_str()).collect::<Vec<_>>(),
+        [ticket.id.as_str()],
+        "the watcher can track what the direct read shows"
+    );
+}
+
+#[tokio::test(start_paused = true)]
+async fn an_unrelated_sub_agents_approval_is_not_added_to_a_ticket_another_one_wrote_to() {
+    let f = Fixture::new().await;
+    let ticket = f.core().create_ticket("Rate limiter").unwrap();
+    // A Chat the ticket is not linked to: only sa-tests wrote to the ticket.
+    let chat_id = f.chat().await;
+    f.start_sub_agent(
+        "sa-tests",
+        json!({ "description": "Check limiter test coverage" }),
+    )
+    .await;
+    f.start_sub_agent(
+        "sa-bypass",
+        json!({ "description": "Find limiter bypasses" }),
+    )
+    .await;
+    f.sub_agent_writes(&chat_id, "sa-tests", &ticket.reference);
+    f.sub_agent_asks("sa-bypass", "approval-1").await;
+
+    let agents = f.agents(&ticket.id);
+    assert_eq!(
+        agents
+            .iter()
+            .map(|agent| agent.sub_agent.as_deref())
+            .collect::<Vec<_>>(),
+        [Some("sa-tests")],
+        "sa-bypass never wrote to the ticket and its Chat is not linked: {agents:?}"
+    );
+}
+
+#[tokio::test(start_paused = true)]
+async fn a_request_still_waiting_keeps_its_asker_after_the_history_window_moved_past_it() {
+    let f = Fixture::new().await;
+    let ticket = f.core().create_ticket("Rate limiter").unwrap();
+    f.linked_chat(&ticket.id).await;
+    f.start_sub_agent(
+        "sa-tests",
+        json!({ "description": "Check limiter test coverage" }),
+    )
+    .await;
+    f.sub_agent_asks("sa-tests", "approval-1").await;
+    // More Steps than the list reads, after the request.
+    for step in 0..crate::chats::SUMMARY_ITEMS + 5 {
+        f.emit(command_tool(
+            &format!("cmd-{step}"),
+            "npm test",
+            ToolStatus::Succeeded,
+        ))
+        .await;
+    }
+
+    let row = f.chats.list(ChatListFilter::Active).unwrap().remove(0);
+    assert_eq!(row.status.word, "Approval needed");
+    assert_eq!(
+        row.status.detail.as_deref(),
+        Some("Check limiter test coverage"),
+        "the row names the sub-agent that asks, not the command"
+    );
+    let agents = f.agents(&ticket.id);
+    let asking = agents
+        .iter()
+        .find(|agent| agent.sub_agent.as_deref() == Some("sa-tests"))
+        .unwrap_or_else(|| panic!("the asking sub-agent keeps its own entry: {agents:?}"));
+    assert_eq!(
+        asking
+            .approval
+            .as_ref()
+            .map(|approval| approval.summary.as_str()),
+        Some("npm test -- rate-limit")
+    );
+}
+
+#[tokio::test(start_paused = true)]
+async fn the_overview_digest_moves_with_the_set_and_with_a_field() {
+    let f = Fixture::new().await;
+    let ticket = f.core().create_ticket("Rate limiter").unwrap();
+    let before = f.chats.ticket_agents_digest().unwrap();
+    assert!(before.is_empty());
+
+    f.linked_chat(&ticket.id).await;
+    let started = f.chats.ticket_agents_digest().unwrap();
+    assert_ne!(started, before, "an agent started");
+
+    f.emit(command_tool("cmd-1", "npm test", ToolStatus::Running))
+        .await;
+    let doing = f.chats.ticket_agents_digest().unwrap();
+    assert_ne!(doing, started, "its step changed");
+    assert_eq!(
+        f.chats.ticket_agents_digest().unwrap(),
+        doing,
+        "nothing moved"
+    );
+
+    f.end_turn().await;
+    assert!(f.chats.ticket_agents_digest().unwrap().is_empty());
+}
+
+#[test]
+fn an_approval_comes_first_then_chat_by_chat_main_agent_before_its_sub_agents() {
+    use crate::ticket_agents::order;
+    let agent = |chat: &str, sub: Option<&str>, started: &str, approval: bool| TicketAgentView {
+        id: format!("{chat}:{sub:?}"),
+        chat_id: chat.to_owned(),
+        retention: "active",
+        chat_title: chat.to_owned(),
+        sub_agent: sub.map(str::to_owned),
+        harness_id: "claude-code".to_owned(),
+        harness_name: "Claude Code".to_owned(),
+        model: None,
+        title: chat.to_owned(),
+        started_at: started.to_owned(),
+        doing: None,
+        approval: approval.then(|| crate::ticket_agents::ApprovalView {
+            summary: "npm test".to_owned(),
+        }),
+    };
+    // (agent, the Chat's latest activity)
+    let mut rows = vec![
+        (
+            agent("old", Some("b"), "2026-11-27T10:03:00Z", false),
+            "2026-11-27T10:00:00Z".to_owned(),
+        ),
+        (
+            agent("new", Some("late"), "2026-11-27T10:04:00Z", false),
+            "2026-11-27T10:09:00Z".to_owned(),
+        ),
+        (
+            agent("new", None, "2026-11-27T10:05:00Z", false),
+            "2026-11-27T10:09:00Z".to_owned(),
+        ),
+        (
+            agent("new", Some("early"), "2026-11-27T10:01:00Z", false),
+            "2026-11-27T10:09:00Z".to_owned(),
+        ),
+        (
+            agent("old", None, "2026-11-27T10:02:00Z", false),
+            "2026-11-27T10:00:00Z".to_owned(),
+        ),
+        (
+            agent("old", Some("asks"), "2026-11-27T10:06:00Z", true),
+            "2026-11-27T10:00:00Z".to_owned(),
+        ),
+    ];
+    order(&mut rows);
+    let order: Vec<_> = rows
+        .iter()
+        .map(|(agent, _)| (agent.chat_id.as_str(), agent.sub_agent.as_deref()))
+        .collect();
+    assert_eq!(
+        order,
+        vec![
+            ("old", Some("asks")),
+            ("new", None),
+            ("new", Some("early")),
+            ("new", Some("late")),
+            ("old", None),
+            ("old", Some("b")),
+        ]
+    );
+}
+
+/// What the command sends is what the ticket's label reads: the desktop tests parse and
+/// open the same file (`TicketAgentCommand.test.tsx`).
+#[tokio::test(start_paused = true)]
+async fn the_command_sends_what_the_desktops_label_reads() {
+    let f = Fixture::with_adapter(FakeAdapter::claude()).await;
+    let ticket = f.core().create_ticket("Rate limiter").unwrap();
+    let mut input = f.input("Review the rate limiter");
+    input.links = vec![LinkRef {
+        kind: LinkKind::Ticket,
+        id: ticket.id.clone(),
+    }];
+    let chat_id = f.chats.create(input).await.unwrap().chat_id;
+    settle().await;
+    // Claude Code starts its turn on its own word.
+    f.emit(EventKind::TurnStarted {
+        turn: turn(),
+        origin: None,
+    })
+    .await;
+    let model = |current: &str, models: &[(&str, &str)]| {
+        Some(ticketd_chat_host::Setting {
+            current: Some(current.to_owned()),
+            options: models
+                .iter()
+                .map(|(id, label)| ticketd_chat_host::SettingOption {
+                    resolved: None,
+                    label: (*label).to_owned(),
+                    ..offered(id, false)
+                })
+                .collect(),
+            unchangeable: None,
+            applies_from: ticketd_chat_host::AppliesFrom::NextTurn,
+            answered_by: None,
+        })
+    };
+    f.emit(EventKind::SettingsState(HarnessSettings {
+        model: model(
+            "claude-opus-5-5",
+            &[
+                ("claude-opus-5-5", "Claude Opus 5.5"),
+                ("claude-sonnet-5-5", "Claude Sonnet 5.5"),
+            ],
+        ),
+        ..HarnessSettings::default()
+    }))
+    .await;
+    f.start_sub_agent(
+        "sa-tests",
+        json!({
+            "description": "Check limiter test coverage",
+            "model": "claude-sonnet-5-5-20260301",
+        }),
+    )
+    .await;
+    f.sub_agent_writes(&chat_id, "sa-tests", &ticket.reference);
+
+    let mut sent = serde_json::to_value(f.agents(&ticket.id)).unwrap();
+    // What differs from one run to the next: the Chat's id and the clock.
+    for agent in sent.as_array_mut().unwrap() {
+        let agent = agent.as_object_mut().unwrap();
+        for (key, value) in agent.iter_mut() {
+            match (key.as_str(), value.as_str()) {
+                ("started_at", _) => *value = json!("2026-11-27T10:00:00Z"),
+                (_, Some(text)) if text.starts_with(&chat_id) => {
+                    *value = json!(text.replacen(&chat_id, "c-limiter", 1));
+                }
+                _ => {}
+            }
+        }
+    }
+    let expected: serde_json::Value = serde_json::from_str(include_str!(
+        "../../src/features/chats/ticket-agents-command.fixture.json"
+    ))
+    .unwrap();
+    assert_eq!(
+        sent,
+        expected,
+        "the command now sends:\n{}",
+        serde_json::to_string_pretty(&sent).unwrap()
+    );
 }

@@ -47,9 +47,27 @@ function identity(report: Omit<ErrorReport, "count">) {
   return `${report.name}\n${report.frames[0] ?? ""}`;
 }
 
+/** A window error that threw nothing: the page only has its message. */
+class MessageOnly {
+  constructor(readonly message: string) {}
+}
+
+/**
+ * The layout notice a browser raises when a ResizeObserver callback changes what
+ * it observes (WebKit raises it as a window error with no error, only a message).
+ * Nothing threw and nothing is lost: it is not a failure to report.
+ */
+const RESIZE_NOTICE =
+  /^ResizeObserver loop (?:completed with undelivered notifications|limit exceeded)/;
+
 function describe(error: unknown, route: string): Omit<ErrorReport, "count"> {
   const isError = error instanceof Error;
-  const name = isError && error.name ? error.name : "NonError";
+  const name =
+    isError && error.name
+      ? error.name
+      : error instanceof MessageOnly
+        ? "ErrorEvent"
+        : "NonError";
   const frames = (isError ? (error.stack ?? "") : "")
     .split("\n")
     .flatMap((line) => {
@@ -102,7 +120,11 @@ export function installErrorReporter(options: Options = {}): ErrorReporter {
     }
   };
 
-  const onError = (event: ErrorEvent) => report(event.error ?? event.message);
+  const onError = (event: ErrorEvent) => {
+    if (event.error != null) return report(event.error);
+    if (RESIZE_NOTICE.test(event.message)) return;
+    report(new MessageOnly(event.message));
+  };
   const onRejection = (event: PromiseRejectionEvent) => report(event.reason);
   window.addEventListener("error", onError);
   window.addEventListener("unhandledrejection", onRejection);

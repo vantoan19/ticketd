@@ -11,8 +11,9 @@ use crate::runtime::RuntimeState;
 use crate::{
     ApprovalDecision, DeliveryEvidence, EventKind, HarnessCommand, InteractionAnswer,
     InteractionKind, InteractionRequest, InteractionResolution, NativeItemId, NativeRequestId,
-    NativeSessionId, NativeTurnId, NoticeKind, Problem, ProblemKind, ProviderDetail, Question,
-    Refusal, SettingKey, SubmissionId, ToolStatus, TurnEvidence, TurnOutcome, reset_time,
+    NativeSessionId, NativeSubAgentId, NativeTurnId, NoticeKind, Problem, ProblemKind,
+    ProviderDetail, Question, Refusal, SettingKey, SubAgentOutcome, SubAgentStart, SubAgentStopper,
+    SubmissionId, ToolStatus, TurnEvidence, TurnOrigin, TurnOutcome, TurnStarter, reset_time,
 };
 
 use super::report::{PLAN_TOOLS, Reports};
@@ -52,6 +53,93 @@ pub(super) struct Session {
     /// Nobody approves for this session: a tool Claude Code denied fails the turn.
     unattended: bool,
     reports: Reports,
+    /// The sub-agents of this session, by task ID, and the tool uses frames name them by.
+    sub_agents: SubAgents,
+    /// Inputs of the person's written to the harness whose processing was not shown yet.
+    /// Output can come before the harness says it is processing them, and a turn they
+    /// start is not one the harness started by itself.
+    pending_inputs: HashSet<String>,
+}
+
+/// How many frames of a sub-agent that has not been announced yet are held for it, and
+/// how many sub-agents are waited for.
+const HELD_FRAMES: usize = 256;
+const HELD_AGENTS: usize = 32;
+/// The most the frames waiting for an announcement keep in all, as the bytes they were
+/// sent in: the counts alone would let a session hold a gigabyte.
+pub(super) const HELD_BYTES: usize = 4 * 1024 * 1024;
+
+/// What the session knows of its sub-agents. Claude Code tags each frame of a sub-agent
+/// with the tool use that started it (`parent_tool_use_id`); `task_started` says which
+/// task that is, and can arrive after the first of its frames.
+#[derive(Debug, Default)]
+struct SubAgents {
+    /// By task ID.
+    known: HashMap<String, Agent>,
+    /// The launch a tool use started or resumed, by tool-use ID.
+    by_tool_use: HashMap<String, Launch>,
+    /// The sub-agent that ran each of its tool calls, by tool-use ID.
+    owner: HashMap<String, String>,
+    /// Frames of a tool use not announced as a sub-agent yet: (event name, event, bytes).
+    held: HashMap<String, Vec<(String, Value, usize)>>,
+    /// What the held frames keep, in bytes: charged on hold, given back on replay or drop.
+    held_bytes: usize,
+    /// The sub-agent that finished last while no turn ran, until a turn opens: the one
+    /// the turn Claude Code starts by itself follows.
+    finished_at_rest: Option<String>,
+}
+
+/// What a tool use started: the task, and the run it opened. A task resumed through
+/// another tool use has a newer run; frames of the earlier launch are late.
+#[derive(Debug, Clone)]
+struct Launch {
+    task: String,
+    run: Option<String>,
+}
+
+impl SubAgents {
+    /// A turn ended. Frames still waiting for an announcement never get one, and what
+    /// a foreground sub-agent ran in the turn is over with it.
+    ///
+    /// Returns the foreground sub-agents that were over with it.
+    fn turn_ended(&mut self) -> Vec<String> {
+        self.held.clear();
+        self.held_bytes = 0;
+        self.finished_at_rest = None;
+        let mut over = Vec::new();
+        for (task, agent) in self.known.iter_mut().filter(|(_, agent)| !agent.background) {
+            if agent.running {
+                over.push(task.clone());
+            }
+            agent.running = false;
+        }
+        // A sub-agent in the background goes on past the turn, and so do its tool calls.
+        let running: HashSet<&str> = self
+            .known
+            .iter()
+            .filter(|(_, agent)| agent.running)
+            .map(|(task, _)| task.as_str())
+            .collect();
+        self.owner.retain(|_, task| running.contains(task.as_str()));
+        over
+    }
+}
+
+#[derive(Debug, Default)]
+struct Agent {
+    /// The tool use that started it; its result, for a sub-agent in the foreground, says
+    /// it ended.
+    tool_use: Option<String>,
+    /// The harness's ID for the run in progress.
+    run: Option<String>,
+    running: bool,
+    background: bool,
+    /// ticketd asked Claude Code to stop it: how it ended is then the person's doing.
+    stop_asked: bool,
+    /// The model its own messages reported last.
+    model: Option<String>,
+    /// What its latest message said: its final report repeats it.
+    last_text: Option<String>,
 }
 
 fn text<'a>(event: &'a Value, field: &str) -> Option<&'a str> {
@@ -62,6 +150,44 @@ fn strings(event: &Value, field: &str) -> Vec<String> {
     let items = event.get(field).and_then(Value::as_array);
     let items = items.into_iter().flatten().filter_map(Value::as_str);
     items.map(str::to_owned).collect()
+}
+
+/// Whose tool call it is: the main agent's, in its turn, or a sub-agent's, which belongs to
+/// no turn of its own.
+#[derive(Clone, Copy)]
+enum Who<'a> {
+    Main(&'a NativeTurnId),
+    SubAgent(&'a str),
+}
+
+/// The latest state of one tool item.
+fn tool_event(
+    who: Who<'_>,
+    id: &str,
+    title: &str,
+    status: ToolStatus,
+    output: Option<String>,
+    detail: Option<ProviderDetail>,
+) -> EventKind {
+    let (item, title) = (NativeItemId::new(id), title.to_owned());
+    match who {
+        Who::SubAgent(owner) => EventKind::SubAgentToolUpdated {
+            sub_agent: NativeSubAgentId::new(owner),
+            item,
+            title,
+            status,
+            output,
+            detail,
+        },
+        Who::Main(turn) => EventKind::ToolUpdated {
+            turn: turn.clone(),
+            item,
+            title,
+            status,
+            output,
+            detail,
+        },
+    }
 }
 
 pub(super) fn unknown(summary: &str, kind: &str, payload: &Value) -> EventKind {
@@ -86,6 +212,17 @@ impl Session {
         self.runtime.active_turn_id()
     }
 
+    /// An input of the person's is being written to the harness.
+    pub fn input_written(&mut self, submission: &str) {
+        self.pending_inputs.insert(submission.to_owned());
+    }
+
+    /// The bridge refused an input and no longer holds it: output with no input behind it
+    /// is the harness's again.
+    pub fn input_refused(&mut self, submission: &str) {
+        self.pending_inputs.remove(submission);
+    }
+
     pub fn interrupt_written(&mut self) {
         if let Some(turn) = self.active_turn().cloned() {
             let _ = self.runtime.mark_interrupt(&turn);
@@ -101,22 +238,45 @@ impl Session {
     /// The runtime is gone: nothing is live any more.
     pub fn clear_live(&mut self) {
         self.runtime.disconnected();
+        self.pending_inputs.clear();
         self.turn_error = None;
         self.tools.clear();
         self.declined.clear();
         self.streams.clear();
+        self.sub_agents = SubAgents::default();
     }
 
     /// The open turn, opening one when Claude Code shows activity outside a turn.
     /// Claude Code has no turn identity, so the id is local to this runtime.
     fn turn(&mut self, events: &mut Vec<EventKind>) -> NativeTurnId {
+        self.open_turn(events, true)
+    }
+
+    /// The turn the person's input started, opened as soon as the harness says it took the
+    /// input. Not labelled: the person started it.
+    fn turn_for_input(&mut self, events: &mut Vec<EventKind>) -> NativeTurnId {
+        self.open_turn(events, false)
+    }
+
+    fn open_turn(&mut self, events: &mut Vec<EventKind>, by_itself: bool) -> NativeTurnId {
         if let Some(turn) = self.active_turn() {
             return turn.clone();
         }
         self.turns_started += 1;
         let id = NativeTurnId(format!("local-turn-{}", self.turns_started));
         self.runtime.turn_started(&id);
-        events.push(EventKind::TurnStarted { turn: id.clone() });
+        // Output of the main agent with no input of the person's behind it: Claude Code
+        // resumed by itself, which it does when a sub-agent in the background finishes.
+        // What that sub-agent was is the last one that finished since the last turn.
+        let finished = self.sub_agents.finished_at_rest.take();
+        let origin = (by_itself && self.pending_inputs.is_empty()).then(|| TurnOrigin {
+            by: TurnStarter::Harness,
+            sub_agent: finished.map(NativeSubAgentId),
+        });
+        events.push(EventKind::TurnStarted {
+            turn: id.clone(),
+            origin,
+        });
         id
     }
 
@@ -140,7 +300,10 @@ impl Session {
         match name {
             "session_info" => self.session_info(event, &mut events),
             "input_processing" => {
-                let turn = self.turn(&mut events);
+                for submission in strings(event, "submission_ids") {
+                    self.pending_inputs.remove(&submission);
+                }
+                let turn = self.turn_for_input(&mut events);
                 for submission in strings(event, "submission_ids") {
                     events.push(EventKind::SubmissionEvidence {
                         submission: SubmissionId(submission),
@@ -149,10 +312,17 @@ impl Session {
                 }
             }
             "delta" => self.delta(event, &mut events),
+            // A sub-agent's thinking is its own, and opens no turn.
+            "thinking" if !event["parent_tool_use_id"].is_null() => {
+                self.sub_agent_thinking(event, &mut events);
+            }
             "thinking" => {
                 let turn = self.turn(&mut events);
                 events.extend(self.reports.thinking(&turn, event));
             }
+            "sub_agent_started" => self.sub_agent_started(event, &mut events),
+            "sub_agent_updated" => self.sub_agent_updated(event, &mut events),
+            "sub_agent_ended" => self.sub_agent_ended(event, &mut events),
             "context_usage" => events.extend(Reports::context(event)),
             "compacted" => events.push(EventKind::Compacted),
             "assistant_content" => self.assistant_content(event, &mut events),
@@ -295,6 +465,11 @@ impl Session {
     }
 
     fn assistant_content(&mut self, event: &Value, events: &mut Vec<EventKind>) {
+        // A sub-agent's frames are its own: they open no turn and are not the main
+        // agent's reply, reasoning, plan or Steps.
+        if let Some(parent) = text(event, "parent_tool_use_id") {
+            return self.sub_agent_content(parent, event, events);
+        }
         let turn = self.turn(events);
         if let Some(error) = text(event, "error") {
             self.turn_error = Some(error.to_owned());
@@ -305,12 +480,11 @@ impl Session {
                 detail: None,
             });
         }
-        let from_sub_agent = !event["parent_tool_use_id"].is_null();
         let blocks = event.get("blocks").and_then(Value::as_array);
         for block in blocks.into_iter().flatten() {
             match text(block, "type") {
                 // Blocks complete in the order their streams began.
-                Some("text") if !from_sub_agent => {
+                Some("text") => {
                     let item = match self.streams.pop_front() {
                         Some((_, item)) => item,
                         None => self.new_item(),
@@ -321,11 +495,10 @@ impl Session {
                         text: text(block, "text").unwrap_or_default().to_owned(),
                     });
                 }
-                Some("thinking") if !from_sub_agent => {
+                Some("thinking") => {
                     let said = text(block, "text").unwrap_or_default();
                     events.push(self.reports.thinking_text(&turn, said));
                 }
-                Some("text" | "thinking") => {}
                 // Redacted thinking has no text to show; its block start was reported.
                 Some("other") if text(block, "block_type") == Some("redacted_thinking") => {}
                 Some("tool_use") => {
@@ -340,7 +513,7 @@ impl Session {
                         continue;
                     }
                     let changed = self.reports.file_tool(&turn, id, &title, &block["input"]);
-                    self.observe_tool_input(&turn, id, &title, &block["input"], events);
+                    self.observe_tool_input(Who::Main(&turn), id, &title, &block["input"], events);
                     events.extend(changed);
                 }
                 _ => events.push(unknown(
@@ -352,10 +525,409 @@ impl Session {
         }
     }
 
+    /// A `thinking` frame of a sub-agent: its reasoning item.
+    fn sub_agent_thinking(&mut self, event: &Value, events: &mut Vec<EventKind>) {
+        let Some(parent) = text(event, "parent_tool_use_id") else {
+            return;
+        };
+        let Some(launch) = self.sub_agents.by_tool_use.get(parent).cloned() else {
+            return self.hold(parent, "thinking", event);
+        };
+        // A frame of a launch a resume superseded changes nothing about the run now.
+        if self.superseded(parent, &launch) {
+            return;
+        }
+        let task = launch.task;
+        let run = self.sub_agents.known.get(&task).and_then(|a| a.run.clone());
+        events.extend(
+            self.reports
+                .sub_agent_thinking(&task, run.as_deref(), event),
+        );
+    }
+
+    /// A frame of the sub-agent the tool use `parent` started: its messages, reasoning
+    /// and tool calls are its own, and open no turn.
+    fn sub_agent_content(&mut self, parent: &str, event: &Value, events: &mut Vec<EventKind>) {
+        let Some(launch) = self.sub_agents.by_tool_use.get(parent).cloned() else {
+            return self.hold(parent, "assistant_content", event);
+        };
+        if self.superseded(parent, &launch) {
+            return;
+        }
+        let task = launch.task;
+        let turn = self.active_turn().cloned();
+        let run = self
+            .sub_agents
+            .known
+            .get(&task)
+            .and_then(|agent| agent.run.clone());
+        if let Some(model) = text(event, "model")
+            && let Some(agent) = self.sub_agents.known.get_mut(&task)
+            && agent.model.as_deref() != Some(model)
+        {
+            agent.model = Some(model.to_owned());
+            events.push(EventKind::SubAgentUpdated {
+                sub_agent: NativeSubAgentId::new(&task),
+                run: None,
+                background: None,
+                native: Some(json!({"model": model})),
+            });
+        }
+        if let Some(error) = text(event, "error") {
+            events.push(EventKind::Notice {
+                turn: turn.clone(),
+                kind: NoticeKind::Warning,
+                message: format!("Claude Code reported an error in a sub-agent: {error}"),
+                detail: None,
+            });
+        }
+        let blocks = event.get("blocks").and_then(Value::as_array);
+        for block in blocks.into_iter().flatten() {
+            match text(block, "type") {
+                Some("tool_use") => {
+                    let Some(id) = text(block, "id") else {
+                        events.push(unknown("a tool use without an id", "tool_use", block));
+                        continue;
+                    };
+                    let title = text(block, "name").unwrap_or("tool").to_owned();
+                    // Only the main agent's plan is the turn's plan: a sub-agent's list
+                    // stays a Step of its own. Its edits are its run's files, not the turn's.
+                    self.sub_agents.owner.insert(id.to_owned(), task.clone());
+                    let changed = self.reports.sub_agent_file_tool(
+                        &task,
+                        run.as_deref(),
+                        id,
+                        &title,
+                        &block["input"],
+                    );
+                    self.observe_tool_input(
+                        Who::SubAgent(&task),
+                        id,
+                        &title,
+                        &block["input"],
+                        events,
+                    );
+                    events.extend(changed);
+                }
+                Some("text") => {
+                    let said = text(block, "text").unwrap_or_default();
+                    if said.trim().is_empty() {
+                        continue;
+                    }
+                    if let Some(agent) = self.sub_agents.known.get_mut(&task) {
+                        agent.last_text = Some(said.to_owned());
+                    }
+                    events.push(EventKind::SubAgentMessage {
+                        sub_agent: NativeSubAgentId::new(&task),
+                        item: self.new_item(),
+                        text: said.to_owned(),
+                    });
+                }
+                Some("thinking") => {
+                    let said = text(block, "text").unwrap_or_default();
+                    events.push(
+                        self.reports
+                            .sub_agent_thinking_text(&task, run.as_deref(), said),
+                    );
+                }
+                Some("other") if text(block, "block_type") == Some("redacted_thinking") => {}
+                _ => events.push(unknown(
+                    "Claude Code sent content ticketd does not show",
+                    text(block, "block_type").unwrap_or("content"),
+                    block,
+                )),
+            }
+        }
+    }
+
+    /// Keeps a frame of a tool use that no `task_started` has named yet, until one does.
+    /// A tool use that never becomes a sub-agent is dropped with its turn.
+    fn hold(&mut self, parent: &str, name: &str, event: &Value) {
+        let sub_agents = &mut self.sub_agents;
+        if !sub_agents.held.contains_key(parent) && sub_agents.held.len() >= HELD_AGENTS {
+            return;
+        }
+        if sub_agents
+            .held
+            .get(parent)
+            .is_some_and(|frames| frames.len() >= HELD_FRAMES)
+        {
+            return;
+        }
+        let bytes = event.to_string().len();
+        if sub_agents.held_bytes + bytes > HELD_BYTES {
+            return;
+        }
+        sub_agents.held_bytes += bytes;
+        sub_agents.held.entry(parent.to_owned()).or_default().push((
+            name.to_owned(),
+            event.clone(),
+            bytes,
+        ));
+    }
+
+    /// The person stops one background sub-agent: remembered, so that its end is theirs.
+    /// Refused when it does not run now, or runs in the foreground, where Claude Code ends
+    /// it with its turn.
+    pub fn stop_asked(&mut self, task: &str) -> Result<(), Refusal> {
+        match self.sub_agents.known.get_mut(task) {
+            Some(agent) if agent.running && agent.background => {
+                agent.stop_asked = true;
+                Ok(())
+            }
+            _ => Err(Refusal::UnknownSubAgent),
+        }
+    }
+
+    /// Claude Code did not take the request: nobody asked it to stop.
+    pub fn stop_not_asked(&mut self, task: &str) {
+        if let Some(agent) = self.sub_agents.known.get_mut(task) {
+            agent.stop_asked = false;
+        }
+    }
+
+    fn stopper(&self, task: &str) -> SubAgentStopper {
+        if self
+            .sub_agents
+            .known
+            .get(task)
+            .is_some_and(|agent| agent.stop_asked)
+            || self
+                .active_turn()
+                .is_some_and(|turn| self.runtime.interrupted(turn))
+        {
+            SubAgentStopper::Person
+        } else {
+            SubAgentStopper::MainAgent
+        }
+    }
+
+    fn sub_agent_started(&mut self, event: &Value, events: &mut Vec<EventKind>) {
+        let Some(task) = text(event, "task_id") else {
+            events.push(unknown(
+                "a sub-agent without a task id",
+                "sub_agent_started",
+                event,
+            ));
+            return;
+        };
+        let tool_use = text(event, "tool_use_id");
+        let background = event["background"] == true;
+        let run = text(event, "run_id").map(str::to_owned);
+        let agent = self.sub_agents.known.entry(task.to_owned()).or_default();
+        agent.running = true;
+        agent.stop_asked = false;
+        agent.background = background;
+        // A new run has its own report: the last run's last message says nothing of it.
+        if agent.run != run {
+            agent.last_text = None;
+        }
+        agent.run.clone_from(&run);
+        agent.tool_use = tool_use.map(str::to_owned);
+        if let Some(tool_use) = tool_use {
+            self.sub_agents.by_tool_use.insert(
+                tool_use.to_owned(),
+                Launch {
+                    task: task.to_owned(),
+                    run: run.clone(),
+                },
+            );
+        }
+        events.push(EventKind::SubAgentStarted(SubAgentStart {
+            sub_agent: NativeSubAgentId::new(task),
+            run,
+            parent: text(event, "parent_task_id").map(NativeSubAgentId::new),
+            tool: tool_use.map(NativeItemId::new),
+            background,
+            native: json!({
+                "description": event.get("description"),
+                "subagent_type": event.get("subagent_type"),
+                "prompt": event.get("prompt"),
+            }),
+        }));
+        // What it did before it was announced.
+        if let Some(tool_use) = tool_use
+            && let Some(frames) = self.sub_agents.held.remove(tool_use)
+        {
+            for (name, frame, bytes) in frames {
+                self.sub_agents.held_bytes = self.sub_agents.held_bytes.saturating_sub(bytes);
+                if let Some((more, _)) = self.event(&name, &frame) {
+                    events.extend(more);
+                }
+            }
+        }
+    }
+
+    /// Whether the tool use `parent` is no longer how its task is launched: a resume went
+    /// through another tool use, or opened a newer run. The earlier launch may have named
+    /// no run, so the tool use is what tells.
+    fn superseded(&self, parent: &str, launch: &Launch) -> bool {
+        self.late_run(&launch.task, launch.run.as_deref())
+            || self
+                .sub_agents
+                .known
+                .get(&launch.task)
+                .is_some_and(|agent| agent.tool_use.as_deref() != Some(parent))
+    }
+
+    /// Whether a frame naming run `incoming` of `task` is late: the run it names sorts
+    /// before the one that runs now (the SDK orders a task's run IDs by when they opened).
+    fn late_run(&self, task: &str, incoming: Option<&str>) -> bool {
+        matches!(
+            (self.sub_agents.known.get(task).and_then(|agent| agent.run.as_deref()), incoming),
+            (Some(current), Some(incoming)) if incoming < current
+        )
+    }
+
+    fn sub_agent_updated(&mut self, event: &Value, events: &mut Vec<EventKind>) {
+        let Some(task) = text(event, "task_id") else {
+            return;
+        };
+        // A resumed task is the same task with a new run: what an earlier run says now
+        // changes nothing about the one that runs.
+        if self.late_run(task, text(event, "run_id")) {
+            return;
+        }
+        let background = event["background"].as_bool();
+        let described = text(event, "description");
+        let outcome = match text(event, "status") {
+            Some("completed") => Some(SubAgentOutcome::Completed),
+            Some("failed") => Some(SubAgentOutcome::Failed),
+            Some("killed") => Some(SubAgentOutcome::Stopped(self.stopper(task))),
+            _ => None,
+        };
+        let error = text(event, "error").map(str::to_owned);
+        let Some(agent) = self.sub_agents.known.get_mut(task) else {
+            return;
+        };
+        if let Some(background) = background {
+            agent.background = background;
+        }
+        if background.is_some() || described.is_some() {
+            events.push(EventKind::SubAgentUpdated {
+                sub_agent: NativeSubAgentId::new(task),
+                run: text(event, "run_id").map(str::to_owned),
+                background,
+                native: described.map(|description| json!({ "description": description })),
+            });
+        }
+        if let Some(outcome) = outcome
+            && agent.running
+        {
+            agent.running = false;
+            if !matches!(outcome, SubAgentOutcome::Stopped(_))
+                && self.runtime.active_turn_id().is_none()
+            {
+                self.sub_agents.finished_at_rest = Some(task.to_owned());
+            }
+            // What it asked and nobody answered goes with it.
+            events.extend(self.runtime.withdraw_owned(&NativeSubAgentId::new(task)));
+            events.push(EventKind::SubAgentEnded {
+                sub_agent: NativeSubAgentId::new(task),
+                run: text(event, "run_id").map(str::to_owned),
+                outcome,
+                detail: error,
+            });
+        }
+    }
+
+    fn sub_agent_ended(&mut self, event: &Value, events: &mut Vec<EventKind>) {
+        let Some(task) = text(event, "task_id") else {
+            return;
+        };
+        if self.late_run(task, text(event, "run_id")) {
+            return;
+        }
+        let outcome = match text(event, "status") {
+            Some("completed") => SubAgentOutcome::Completed,
+            Some("failed") => SubAgentOutcome::Failed,
+            _ => SubAgentOutcome::Stopped(self.stopper(task)),
+        };
+        let run = text(event, "run_id").map(str::to_owned);
+        let Some(agent) = self.sub_agents.known.get_mut(task) else {
+            return;
+        };
+        let current = run.is_none() || agent.run.is_none() || agent.run == run;
+        if current {
+            // The last to finish while no turn runs is the one the turn Claude Code starts
+            // by itself follows.
+            let finished_at_rest = agent.running
+                && !matches!(outcome, SubAgentOutcome::Stopped(_))
+                && self.runtime.active_turn_id().is_none();
+            agent.running = false;
+            if finished_at_rest {
+                self.sub_agents.finished_at_rest = Some(task.to_owned());
+            }
+        }
+        // Its final report is its last message; the notification repeats it, and says it
+        // alone when the sub-agent's messages did not arrive.
+        let report = text(event, "summary")
+            .map(str::trim)
+            .filter(|report| !report.is_empty())
+            .filter(|_| current && outcome == SubAgentOutcome::Completed)
+            .filter(|report| agent.last_text.as_deref().map(str::trim) != Some(*report))
+            .map(str::to_owned);
+        if let Some(report) = report {
+            agent.last_text = Some(report.clone());
+            events.push(EventKind::SubAgentMessage {
+                sub_agent: NativeSubAgentId::new(task),
+                item: self.new_item(),
+                text: report,
+            });
+        }
+        self.reports.sub_agent_ended(task);
+        // What it asked and nobody answered goes with it.
+        events.extend(self.runtime.withdraw_owned(&NativeSubAgentId::new(task)));
+        events.push(EventKind::SubAgentEnded {
+            sub_agent: NativeSubAgentId::new(task),
+            run,
+            outcome,
+            detail: None,
+        });
+    }
+
+    /// The result of the tool use that started a sub-agent in the foreground says the
+    /// sub-agent is done, whether or not a task notification said it. A sub-agent in the
+    /// background goes on past it.
+    fn foreground_agent_returned(
+        &mut self,
+        tool_use: &str,
+        failed: bool,
+        after_interrupt: bool,
+        events: &mut Vec<EventKind>,
+    ) {
+        let Some(launch) = self.sub_agents.by_tool_use.get(tool_use) else {
+            return;
+        };
+        let Some(agent) = self.sub_agents.known.get_mut(&launch.task) else {
+            return;
+        };
+        if !agent.running || agent.background || agent.tool_use.as_deref() != Some(tool_use) {
+            return;
+        }
+        agent.running = false;
+        let (task, run) = (launch.task.clone(), agent.run.clone());
+        self.reports.sub_agent_ended(&task);
+        events.extend(self.runtime.withdraw_owned(&NativeSubAgentId::new(&task)));
+        events.push(EventKind::SubAgentEnded {
+            sub_agent: NativeSubAgentId::new(task),
+            run,
+            // The error a Stop gives the tool is the person's Stop, not a failure.
+            outcome: if failed && after_interrupt {
+                SubAgentOutcome::Stopped(SubAgentStopper::Person)
+            } else if failed {
+                SubAgentOutcome::Failed
+            } else {
+                SubAgentOutcome::Completed
+            },
+            detail: None,
+        });
+    }
+
     /// A permission callback and assistant content can both carry this tool's input.
     fn observe_tool_input(
         &mut self,
-        turn: &NativeTurnId,
+        who: Who<'_>,
         id: &str,
         title: &str,
         input: &Value,
@@ -384,19 +956,25 @@ impl Session {
         }
         self.tools
             .insert(id.to_owned(), (title.to_owned(), detail.clone()));
-        events.push(EventKind::ToolUpdated {
-            turn: turn.clone(),
-            item: NativeItemId::new(id),
-            title: title.to_owned(),
-            status: ToolStatus::Running,
-            output: None,
-            detail: Some(detail),
-        });
+        events.push(tool_event(
+            who,
+            id,
+            title,
+            ToolStatus::Running,
+            None,
+            Some(detail),
+        ));
     }
 
     fn tool_result(&mut self, event: &Value, events: &mut Vec<EventKind>) {
         let failed = event["is_error"] == true;
         let tool_use = text(event, "tool_use_id").unwrap_or_default();
+        // A result of a sub-agent not announced yet waits for it.
+        if let Some(parent) = text(event, "parent_tool_use_id")
+            && !self.sub_agents.by_tool_use.contains_key(parent)
+        {
+            return self.hold(parent, "tool_result", event);
+        }
         if self.reports.is_plan_tool(tool_use) {
             let turn = self.turn(events);
             events.extend(
@@ -405,9 +983,16 @@ impl Session {
             );
             return;
         }
+        let owner = self.sub_agents.owner.get(tool_use).cloned();
         let declined = text(event, "tool_use_id").is_some_and(|id| self.declined.remove(id));
         let known = text(event, "tool_use_id").and_then(|id| Some((id, self.tools.get(id)?)));
-        let (Some((id, (title, detail))), Some(turn)) = (known, self.active_turn()) else {
+        // A sub-agent's Step needs no turn; the main agent's needs the one it ran in.
+        let who = match (&owner, self.active_turn()) {
+            (Some(owner), _) => Some(Who::SubAgent(owner)),
+            (None, Some(turn)) => Some(Who::Main(turn)),
+            (None, None) => None,
+        };
+        let (Some((id, (title, detail))), Some(who)) = (known, who) else {
             let payload = json!({"tool_use_id": event.get("tool_use_id")});
             events.push(unknown(
                 "a tool result for a tool this turn did not start",
@@ -424,25 +1009,39 @@ impl Session {
         // Claude Code answers the tool a Stop cuts off with an error result. That the
         // interrupt was written is reported; what it means for the tool is not decided
         // here (#387 3B3).
-        let after_interrupt = self.runtime.interrupted(turn);
-        events.push(EventKind::ToolUpdated {
-            turn: turn.clone(),
-            item: NativeItemId::new(id),
-            title: title.clone(),
-            status: match (failed, declined) {
-                (true, true) => ToolStatus::Declined,
-                (true, false) if after_interrupt => ToolStatus::FailedAfterInterrupt,
-                (true, false) => ToolStatus::Failed,
-                (false, _) => ToolStatus::Succeeded,
-            },
-            output: Some(output),
-            detail: Some(detail),
-        });
-        let turn = turn.clone();
-        events.extend(
-            self.reports
-                .file_result(&turn, id, failed, &event["outcome"]),
-        );
+        let after_interrupt = self
+            .active_turn()
+            .is_some_and(|turn| self.runtime.interrupted(turn));
+        let status = match (failed, declined) {
+            (true, true) => ToolStatus::Declined,
+            (true, false) if after_interrupt => ToolStatus::FailedAfterInterrupt,
+            (true, false) => ToolStatus::Failed,
+            (false, _) => ToolStatus::Succeeded,
+        };
+        events.push(tool_event(
+            who,
+            id,
+            title,
+            status,
+            Some(output),
+            Some(detail),
+        ));
+        match (&owner, self.active_turn().cloned()) {
+            (Some(task), _) => events.extend(self.reports.sub_agent_file_result(
+                task,
+                id,
+                failed,
+                &event["outcome"],
+            )),
+            (None, Some(turn)) => {
+                events.extend(
+                    self.reports
+                        .file_result(&turn, id, failed, &event["outcome"]),
+                )
+            }
+            (None, None) => {}
+        }
+        self.foreground_agent_returned(tool_use, failed, after_interrupt, events);
     }
 
     fn permission_request(&mut self, event: &Value, events: &mut Vec<EventKind>) {
@@ -470,7 +1069,10 @@ impl Session {
             "blocked_path": event.get("blocked_path"),
             "agent_id": event.get("agent_id"),
         });
-        let turn = self.turn(events);
+        // A sub-agent's request is its own (`agent_id` is its task ID): no turn is opened
+        // for it, none owns it, and none's end withdraws it.
+        let owner = text(event, "agent_id").map(NativeSubAgentId::new);
+        let turn = owner.is_none().then(|| self.turn(events));
         // Claude Code can ask before emitting assistant content for the tool.
         if let (Some(id), Some(name), Some(input)) = (
             text(event, "tool_use_id"),
@@ -478,21 +1080,38 @@ impl Session {
             event.get("input").filter(|input| input.is_object()),
         ) && !PLAN_TOOLS.contains(&name)
         {
-            self.observe_tool_input(&turn, id, name, input, events);
+            match (&turn, &owner) {
+                (Some(turn), _) => {
+                    self.observe_tool_input(Who::Main(turn), id, name, input, events)
+                }
+                // A sub-agent's tool is its own Step, once the sub-agent is known.
+                (None, Some(agent)) if self.sub_agents.known.contains_key(&agent.0) => {
+                    self.sub_agents.owner.insert(id.to_owned(), agent.0.clone());
+                    self.observe_tool_input(Who::SubAgent(&agent.0), id, name, input, events);
+                }
+                (None, _) => {}
+            }
         }
-        if !self.runtime.register_request(
-            request.clone(),
-            Some(&turn),
-            Request {
-                questions: None,
-                tool_use: text(event, "tool_use_id").map(str::to_owned),
-            },
-        ) {
+        let payload = Request {
+            questions: None,
+            tool_use: text(event, "tool_use_id").map(str::to_owned),
+        };
+        let registered = match &owner {
+            Some(owner) => {
+                self.runtime
+                    .register_owned_request(request.clone(), owner.clone(), payload)
+            }
+            None => self
+                .runtime
+                .register_request(request.clone(), turn.as_ref(), payload),
+        };
+        if !registered {
             return;
         }
         events.push(EventKind::InteractionRequested(InteractionRequest {
             request,
-            turn: Some(turn),
+            turn,
+            owner,
             // The bridge names the tool use a permission is asked for.
             item: text(event, "tool_use_id").map(NativeItemId::new),
             kind: InteractionKind::approval(
@@ -549,25 +1168,35 @@ impl Session {
                 "decision": {"kind": "deny", "message": "ticketd could not show this question"},
             }));
         }
-        let turn = self.turn(events);
-        if !self.runtime.register_request(
-            request.clone(),
-            Some(&turn),
-            Request {
-                questions: Some(
-                    questions
-                        .iter()
-                        .map(|question| (question.id.clone(), question.multi_select))
-                        .collect(),
-                ),
-                tool_use: None,
-            },
-        ) {
+        // A sub-agent's question is its own, like its permission requests (`agent_id` is
+        // its task ID): no turn is opened for it, and only its end withdraws it.
+        let owner = text(event, "agent_id").map(NativeSubAgentId::new);
+        let turn = owner.is_none().then(|| self.turn(events));
+        let payload = Request {
+            questions: Some(
+                questions
+                    .iter()
+                    .map(|question| (question.id.clone(), question.multi_select))
+                    .collect(),
+            ),
+            tool_use: None,
+        };
+        let registered = match &owner {
+            Some(owner) => {
+                self.runtime
+                    .register_owned_request(request.clone(), owner.clone(), payload)
+            }
+            None => self
+                .runtime
+                .register_request(request.clone(), turn.as_ref(), payload),
+        };
+        if !registered {
             return None;
         }
         events.push(EventKind::InteractionRequested(InteractionRequest {
             request,
-            turn: Some(turn),
+            turn,
+            owner,
             // The AskUserQuestion tool use it was asked from: its row waits with it.
             item: text(event, "tool_use_id").map(NativeItemId::new),
             kind: InteractionKind::Question { questions },
@@ -657,9 +1286,22 @@ impl Session {
         self.identify(text(event, "session_id"), events);
         let id = self.turn(events);
         let last_error = self.turn_error.take();
-        self.tools.clear();
-        self.declined.clear();
         self.streams.clear();
+        for task in self.sub_agents.turn_ended() {
+            // A sub-agent in the foreground was over with the turn, and so was what it asked.
+            events.extend(self.runtime.withdraw_owned(&NativeSubAgentId::new(&task)));
+        }
+        self.pending_inputs = strings(event, "pending_submission_ids")
+            .into_iter()
+            .collect();
+        // The tool calls of a sub-agent still running in the background go on.
+        let sub_agents = &self.sub_agents;
+        self.tools
+            .retain(|tool, _| sub_agents.owner.contains_key(tool));
+        // The same goes for what the person declined: a main-agent tool's denial ends with
+        // the turn, a background sub-agent's tool may still answer later.
+        self.declined
+            .retain(|tool| sub_agents.owner.contains_key(tool));
         self.reports.turn_ended();
         let subtype = text(event, "subtype").unwrap_or("unknown");
         let failed = event["is_error"] == true || subtype.starts_with("error");

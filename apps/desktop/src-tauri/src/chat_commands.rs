@@ -27,6 +27,7 @@ use crate::chats::{
     QueuedDraft, QuitAction, Restored, Retention, Stopping, UncertainDecision, close_action,
     quit_action, tray_tooltip,
 };
+use crate::ticket_agents::TicketAgentView;
 use ticketd_chat_host::attention::{Alert, Notifier, Row, badge_text};
 
 /// Fired when any Chat's list row or the counts may have changed. Payload: `Overview`.
@@ -222,6 +223,10 @@ fn watch_overview(app: &AppHandle) {
     let (app, chats) = (app.clone(), bridge.chats.clone());
     tauri::async_runtime::spawn(async move {
         let (mut seen, mut shown) = (None, None);
+        // The ticket labels as last announced: a label appears, changes and goes with
+        // the overview event, which lists and labels fetch again on.
+        let mut labels = LabelWatch::new(read_labels(&chats));
+        let mut label_retry: Option<Instant> = None;
         let mut notifier = Notifier::default();
         let mut workspace_changed = crate::wake::CHANGED.subscribe();
         let mut project_retry = chats
@@ -246,6 +251,7 @@ fn watch_overview(app: &AppHandle) {
                 }
                 Ok(()) = workspace_changed.changed() => true,
                 () = sleep_until(project_retry) => true,
+                () = sleep_until(label_retry) => true,
                 () = sleep_until(quiet) => false,
             };
             let projects_changed = refresh_projects
@@ -260,6 +266,16 @@ fn watch_overview(app: &AppHandle) {
                     }
                 };
             if refresh_projects && !projects_changed {
+                // A credited write on a ticket can bring an agent onto its label with no
+                // Chat record changing.
+                labels.announce(
+                    read_labels(&chats),
+                    || chats.overview().ok(),
+                    |overview| app.emit(OVERVIEW_EVENT, overview).is_ok(),
+                );
+                label_retry = labels
+                    .retry_due()
+                    .then(|| Instant::now() + OVERVIEW_INTERVAL);
                 continue;
             }
             if quiet.is_none_or(|at| at > Instant::now()) {
@@ -275,20 +291,136 @@ fn watch_overview(app: &AppHandle) {
             }
             seen = written;
             let Ok((overview, rows, trashed)) = chats.overview_digest() else {
+                // A label change waits for the overview too: try again soon.
+                labels.failed();
+                label_retry = labels
+                    .retry_due()
+                    .then(|| Instant::now() + OVERVIEW_INTERVAL);
                 continue;
             };
             notify(&app, &chats, &mut notifier, &rows);
+            let current = read_labels(&chats);
+            let announced = labels.changed(&current);
             let digest = (rows, trashed);
             // Lists are fetched again on this event, so it fires only when a row or the
             // counts would read differently; a text checkpoint alone changes neither.
-            if shown.as_ref() != Some(&digest) {
+            let mut sent = None;
+            if shown.as_ref() != Some(&digest) || announced {
                 shown = Some(digest);
                 update_tray(&app, &overview);
                 set_badge(&app, overview.app_icon);
-                let _ = app.emit(OVERVIEW_EVENT, overview);
+                sent = Some(app.emit(OVERVIEW_EVENT, overview).is_ok());
             }
+            labels.after_overview(current, sent);
+            label_retry = labels
+                .retry_due()
+                .then(|| Instant::now() + OVERVIEW_INTERVAL);
         }
     });
+}
+
+type LabelDigest = Vec<(String, Vec<TicketAgentView>)>;
+
+/// What one look at the ticket labels came to.
+#[derive(Debug, PartialEq, Eq)]
+enum Announced {
+    /// Nothing differs from what was announced.
+    Quiet,
+    /// The overview event went out with the change.
+    Sent,
+    /// A change is pending: the labels or the overview could not be read, or the event
+    /// could not be sent.
+    Retry,
+}
+
+/// The ticket labels as last announced. A change counts as announced only once its
+/// overview event is out; until then it stays pending, found again on the next wake and
+/// retried a bounded number of times after a failure.
+struct LabelWatch {
+    announced: Option<LabelDigest>,
+    failures: u32,
+}
+
+impl LabelWatch {
+    /// Tries at one change, the first included.
+    const ATTEMPTS: u32 = 5;
+
+    fn new(announced: Option<LabelDigest>) -> Self {
+        Self {
+            announced,
+            failures: 0,
+        }
+    }
+
+    /// Whether `current` differs from the last announced; nothing is recorded.
+    fn changed(&self, current: &Option<LabelDigest>) -> bool {
+        current.is_some() && *current != self.announced
+    }
+
+    /// A failed try is followed by another one soon, up to `ATTEMPTS`.
+    fn retry_due(&self) -> bool {
+        (1..Self::ATTEMPTS).contains(&self.failures)
+    }
+
+    /// The change in `current` went out with an overview event.
+    fn sent(&mut self, current: Option<LabelDigest>) {
+        if current.is_some() {
+            self.announced = current;
+        }
+        self.failures = 0;
+    }
+
+    /// Nothing is pending any more.
+    fn settled(&mut self) {
+        self.failures = 0;
+    }
+
+    /// What the labels `current` came to after an overview pass: `sent` is whether that
+    /// pass's event went out (`None`: it sent none). A label read that failed is a failure
+    /// whether or not rows changed too.
+    fn after_overview(&mut self, current: Option<LabelDigest>, sent: Option<bool>) {
+        match (self.changed(&current), sent) {
+            _ if current.is_none() => self.failed(),
+            (true, Some(true)) => self.sent(current),
+            (true, _) => self.failed(),
+            (false, _) => self.settled(),
+        }
+    }
+
+    fn failed(&mut self) {
+        self.failures = self.failures.saturating_add(1);
+    }
+
+    /// Announces the change in `current` (the labels as just read; `None` when they could
+    /// not be read) by sending `overview` through `emit`, and records it as announced only
+    /// when that went out.
+    fn announce<T>(
+        &mut self,
+        current: Option<LabelDigest>,
+        overview: impl FnOnce() -> Option<T>,
+        emit: impl FnOnce(T) -> bool,
+    ) -> Announced {
+        if current.is_none() {
+            self.failed();
+            return Announced::Retry;
+        }
+        if !self.changed(&current) {
+            self.settled();
+            return Announced::Quiet;
+        }
+        if overview().is_some_and(emit) {
+            self.sent(current);
+            Announced::Sent
+        } else {
+            self.failed();
+            Announced::Retry
+        }
+    }
+}
+
+/// The ticket labels as they read now; `None` when they cannot be read.
+fn read_labels(chats: &Chats) -> Option<LabelDigest> {
+    chats.ticket_agents_digest().ok()
 }
 
 async fn sleep_until(at: Option<Instant>) {
@@ -549,6 +681,15 @@ pub async fn chat_linked_to(bridge: State<'_, ChatBridge>, link: LinkRef) -> Out
     bridge.chats.linked_to(&link)
 }
 
+/// The agents at work on one ticket, for its label; refetched when the overview changes.
+#[tauri::command]
+pub async fn chat_ticket_agents(
+    bridge: State<'_, ChatBridge>,
+    ticket_id: String,
+) -> Outcome<Vec<TicketAgentView>> {
+    bridge.chats.ticket_agents(&ticket_id)
+}
+
 /// The whole output of one step, which views carry only the last lines of until its
 /// row opens.
 #[tauri::command(async)]
@@ -691,6 +832,16 @@ fn open_failure(path: &std::path::Path, error: &str) -> ChatFailure {
 #[tauri::command]
 pub async fn chat_stop(bridge: State<'_, ChatBridge>, chat_id: String) -> Outcome<()> {
     bridge.chats.stop(&chat_id).await
+}
+
+/// Stops one sub-agent of a Chat and nothing else. Stale when it no longer runs.
+#[tauri::command]
+pub async fn chat_stop_sub_agent(
+    bridge: State<'_, ChatBridge>,
+    chat_id: String,
+    sub_agent: String,
+) -> Outcome<()> {
+    bridge.chats.stop_sub_agent(&chat_id, &sub_agent).await
 }
 
 #[tauri::command]
@@ -1017,6 +1168,87 @@ pub fn on_run_event(app: &AppHandle, event: &RunEvent) {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    fn labels(ticket: &str) -> LabelDigest {
+        vec![(ticket.to_owned(), Vec::new())]
+    }
+
+    #[test]
+    fn a_label_change_stays_pending_until_its_overview_event_is_sent() {
+        let mut watch = LabelWatch::new(Some(labels("T-1")));
+
+        // The overview cannot be read: nothing is announced and the change is kept.
+        assert_eq!(
+            watch.announce(Some(labels("T-2")), || None::<u8>, |_| true),
+            Announced::Retry
+        );
+        assert!(watch.changed(&Some(labels("T-2"))));
+
+        // The event cannot be sent: kept too.
+        assert_eq!(
+            watch.announce(Some(labels("T-2")), || Some(1), |_| false),
+            Announced::Retry
+        );
+        assert!(watch.changed(&Some(labels("T-2"))));
+
+        // Sent: the change is announced once.
+        assert_eq!(
+            watch.announce(Some(labels("T-2")), || Some(1), |_| true),
+            Announced::Sent
+        );
+        assert!(!watch.changed(&Some(labels("T-2"))));
+        assert_eq!(
+            watch.announce(Some(labels("T-2")), || Some(1), |_| true),
+            Announced::Quiet
+        );
+    }
+
+    #[test]
+    fn a_label_change_that_cannot_be_sent_is_retried_a_bounded_number_of_times() {
+        let mut watch = LabelWatch::new(Some(labels("T-1")));
+        assert!(!watch.retry_due(), "nothing failed yet");
+        let mut attempts = 1;
+        assert_eq!(
+            watch.announce(Some(labels("T-2")), || None::<u8>, |_| true),
+            Announced::Retry
+        );
+        while watch.retry_due() {
+            attempts += 1;
+            assert_eq!(
+                watch.announce(Some(labels("T-2")), || None::<u8>, |_| true),
+                Announced::Retry
+            );
+            assert!(attempts <= 100, "the retry never ends");
+        }
+        assert_eq!(attempts, LabelWatch::ATTEMPTS);
+
+        // The next ordinary wake still finds the change, and a send settles the watch.
+        assert_eq!(
+            watch.announce(Some(labels("T-2")), || Some(1), |_| true),
+            Announced::Sent
+        );
+        assert!(!watch.retry_due());
+    }
+
+    #[test]
+    fn a_failed_label_read_is_a_failure_even_when_rows_changed_in_the_same_pass() {
+        let mut watch = LabelWatch::new(Some(labels("T-1")));
+
+        // The rows changed and their event went out, but the labels could not be read.
+        watch.after_overview(None, Some(true));
+        assert!(watch.retry_due());
+
+        // A pass that sends nothing and reads fine settles it; a label change whose
+        // event went out is announced.
+        let mut watch = LabelWatch::new(Some(labels("T-1")));
+        watch.after_overview(Some(labels("T-1")), None);
+        assert!(!watch.retry_due());
+        watch.after_overview(Some(labels("T-2")), Some(true));
+        assert!(!watch.changed(&Some(labels("T-2"))));
+        watch.after_overview(Some(labels("T-3")), Some(false));
+        assert!(watch.changed(&Some(labels("T-3"))));
+        assert!(watch.retry_due());
+    }
 
     #[test]
     fn a_confirmed_quit_that_the_page_does_not_complete_is_asked_again() {

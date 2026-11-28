@@ -17,6 +17,8 @@ pub mod context;
 mod contract;
 pub mod diffstat;
 mod host;
+#[cfg(test)]
+mod host_script;
 mod install;
 mod json_rpc;
 mod outcome;
@@ -36,6 +38,7 @@ mod tool_steps;
 mod turn_ending;
 mod unattended;
 mod wire;
+mod write_credit;
 
 pub use claude::{BRIDGE_SIDECAR_NAME, ClaudeAdapter, read_claude_steps};
 pub use codex::CodexAdapter;

@@ -20,7 +20,7 @@ use ticketd_chat_host::{
 use ticketd_core::harnesses::ResumePolicy;
 use ticketd_core::{
     BackupCheck, Chat, ChatAgentChange, ChatAttachmentContent, ChatCreationReplay, ChatDelivery,
-    ChatInputStanding, ChatItem, ChatLink, ChatLinkKind, ChatListFilter, ChatMessage,
+    ChatInputStanding, ChatItem, ChatLink, ChatLinkKind, ChatListFilter, ChatMessage, ChatOwner,
     ChatQueueEdit, ChatRecord, ChatRole, ChatStartPicks, ChatSubmissionIntent, ChatTurnState,
     MAX_BACKUP_FILE_BYTES, NewChat, Project, Workspace, WorkspaceGuard,
 };
@@ -33,11 +33,45 @@ use crate::chat_view::{
     Tracker, harness_name,
 };
 use crate::folder_probe;
+use crate::ticket_agents::{self, TicketAgentView};
 use ticketd_chat_host::attention::Rank;
 use ticketd_chat_host::conditions::{ChatProblemKind, HarnessState, HarnessWord};
 
 /// History read to build a list row. A Chat's latest outcome is near its end.
-const SUMMARY_ITEMS: usize = 50;
+pub(crate) const SUMMARY_ITEMS: usize = 50;
+
+/// The requests the host still holds that a history window of `SUMMARY_ITEMS` left out: an
+/// older request stays answerable while other agents add history, so its asker is read
+/// apart from the window. Nothing is read when the host holds no request.
+pub(crate) fn live_requests_outside(
+    workspace: &Workspace,
+    chat_id: &str,
+    live: &ChatLive,
+    items: &[ChatItem],
+) -> Outcome<Vec<ChatItem>> {
+    if live.interactions.is_empty() {
+        return Ok(Vec::new());
+    }
+    let read = |id: &str| {
+        items
+            .iter()
+            .any(|item| matches!(item, ChatItem::Interaction(kept) if kept.id == id))
+    };
+    Ok(workspace
+        .chat_pending_interactions(chat_id)?
+        .into_iter()
+        .filter(|item| match item {
+            ChatItem::Interaction(request) => {
+                !read(&request.id)
+                    && live
+                        .interactions
+                        .iter()
+                        .any(|asked| asked.interaction_id == request.id)
+            }
+            _ => false,
+        })
+        .collect())
+}
 // ponytail: "the whole conversation" and lookups by message id read at most this many
 // items; page through `chat_history` when a Chat outgrows it.
 const HISTORY_ITEMS: usize = 10_000;
@@ -83,14 +117,14 @@ impl From<ticketd_core::Error> for ChatFailure {
 impl From<HostError> for ChatFailure {
     fn from(error: HostError) -> Self {
         match error {
-            HostError::InteractionExpired => stale(error.to_string()),
+            HostError::InteractionExpired | HostError::SubAgentGone => stale(error.to_string()),
             HostError::Core(error) => error.into(),
             other => failed(other.to_string()),
         }
     }
 }
 
-type Outcome<T> = Result<T, ChatFailure>;
+pub(crate) type Outcome<T> = Result<T, ChatFailure>;
 
 #[derive(Clone, PartialEq, Eq, Deserialize, Serialize)]
 #[serde(rename_all = "camelCase")]
@@ -593,6 +627,7 @@ fn with_gone(workspace: &Workspace, item: Item) -> Item {
         changes,
         net,
         turn_id,
+        owner,
         ..
     } = item
     else {
@@ -626,6 +661,7 @@ fn with_gone(workspace: &Workspace, item: Item) -> Item {
         changes,
         net,
         turn_id,
+        owner,
     }
 }
 
@@ -888,7 +924,9 @@ fn messages(workspace: &Workspace, chat_id: &str) -> Result<Vec<ChatMessage>, ti
         .items
         .into_iter()
         .filter_map(|item| match item {
-            ChatItem::Message(message) => Some(message),
+            // A sub-agent's words are not the Chat's conversation: a fresh session does
+            // not take them up as history.
+            ChatItem::Message(message) if message.owner == ChatOwner::Main => Some(message),
             _ => None,
         })
         .collect())
@@ -1378,7 +1416,18 @@ impl Chats {
     pub fn read_through(&self, chat_id: &str, item_id: &str) -> Outcome<()> {
         // A turn's timing item is named after its turn.
         let record = item_id.strip_prefix("turn:").unwrap_or(item_id);
-        self.workspace()?.mark_chat_read_through(chat_id, record)?;
+        let mut workspace = self.workspace()?;
+        // A sub-agent's row has an ID of the view's own (`{sub-agent}:row-{run}`): it is
+        // kept as the item read, and placed where the run it shows began.
+        if let Some((native_id, run)) = record.rsplit_once(":row-")
+            && let Ok(run) = run.parse::<i64>()
+            && let Some(sub_agent) = workspace.chat_sub_agent(chat_id, native_id)?
+            && let Some(run) = sub_agent.runs.iter().find(|stored| stored.run == run)
+        {
+            workspace.mark_chat_read_through_at(chat_id, record, &run.id)?;
+            return Ok(());
+        }
+        workspace.mark_chat_read_through(chat_id, record)?;
         Ok(())
     }
 
@@ -1415,8 +1464,13 @@ impl Chats {
     ) -> Outcome<Summary> {
         #[cfg(test)]
         self.rows_built.fetch_add(1, Ordering::SeqCst);
-        let items = workspace.chat_snapshot(&chat.id, SUMMARY_ITEMS)?.items;
-        let mut tracker = Tracker::from_items(&items);
+        let snapshot = workspace.chat_snapshot(&chat.id, SUMMARY_ITEMS)?;
+        // The sub-agents too: a row names the one that asks for approval.
+        let mut tracker = Tracker::from_snapshot(&snapshot.items, &snapshot.sub_agents);
+        // A request still waiting keeps its asker, however much history came after it.
+        for request in live_requests_outside(workspace, &chat.id, live, &snapshot.items)? {
+            tracker.note(&request);
+        }
         // A long turn's own record can lie outside the window; the row still says it.
         if let Some(turn) = workspace.chat_latest_turn(&chat.id)? {
             tracker.note(&ChatItem::Turn(turn));
@@ -1493,6 +1547,40 @@ impl Chats {
             rows: kept,
         };
         Ok((overview_of(&rows), rows, trashed))
+    }
+
+    /// The agents at work on one ticket (the ticket's label), in the order it reads them.
+    pub fn ticket_agents(&self, ticket_id: &str) -> Outcome<Vec<TicketAgentView>> {
+        self.host()?;
+        let workspace = self.workspace()?;
+        let Some(reference) = workspace.ticket_reference_of(ticket_id)? else {
+            return Ok(Vec::new());
+        };
+        self.with_ticket_agents(&workspace, |reader| reader.agents(ticket_id, &reference))
+    }
+
+    /// Every ticket with agents at work and who they are: moves with the set and with any
+    /// field the label shows, so the interface is told when a label appears, changes or
+    /// goes.
+    pub fn ticket_agents_digest(&self) -> Outcome<Vec<(String, Vec<TicketAgentView>)>> {
+        let workspace = self.workspace()?;
+        self.with_ticket_agents(&workspace, |reader| reader.all())
+    }
+
+    fn with_ticket_agents<T>(
+        &self,
+        workspace: &Workspace,
+        read: impl FnOnce(&mut ticket_agents::Reader<'_>) -> Outcome<T>,
+    ) -> Outcome<T> {
+        let live = self
+            .started_host()
+            .map(|host| host.live())
+            .unwrap_or_default();
+        let chats = folder_users(workspace)?;
+        let summarize = |chat: &Chat, live: &ChatLive| self.summary(workspace, chat, &chats, live);
+        read(&mut ticket_agents::Reader::new(
+            workspace, &chats, &live, &summarize,
+        ))
     }
 
     pub fn list(&self, scope: ChatListFilter) -> Outcome<Vec<Summary>> {
@@ -1933,7 +2021,8 @@ impl Chats {
         let projects = self.projects.subscribe();
         let (attached, subscription) = host.attach(chat_id).await?;
         let workspace = self.workspace()?;
-        let tracker = Tracker::from_items(&attached.snapshot.items);
+        let tracker =
+            Tracker::from_snapshot(&attached.snapshot.items, &attached.snapshot.sub_agents);
         let chat = attached.snapshot.chat;
         let mut around = surroundings(
             &workspace,
@@ -2032,6 +2121,9 @@ impl Chats {
                 _ = &mut resynced => Update::Chat(None),
             };
             let mut ended = false;
+            // A Step the view shows that its sub-agent's row now replaces: a change
+            // cannot remove it, so the view reads the history again.
+            let mut hidden = false;
             let records = match update {
                 Update::Projects => {
                     let projects = projects.borrow_and_update().clone();
@@ -2043,8 +2135,20 @@ impl Chats {
                 Update::Chat(Some(ChatUpdate::Changes(changes))) => {
                     let active = view.chat.active_turn.as_ref().map(|turn| turn.id.clone());
                     let mut records = Vec::new();
+                    // A sub-agent's record first: its runs and Steps are read by it.
+                    for change in &changes {
+                        if let ChatRecord::SubAgent(record) = &change.record {
+                            view.tracker.note_sub_agent(record);
+                            hidden |= std::iter::once(record.tool_id.as_deref())
+                                .chain(record.runs.iter().map(|run| run.tool_id.as_deref()))
+                                .flatten()
+                                .any(|tool_id| view.sent.contains_key(tool_id));
+                        }
+                    }
                     for change in changes {
                         match change.record {
+                            // Read above; what shows of it is told with the Chat's state.
+                            ChatRecord::SubAgent(_) => {}
                             ChatRecord::Chat(chat) => {
                                 view.chat = chat;
                                 view.around = None;
@@ -2068,6 +2172,10 @@ impl Chats {
                                     view.around = None;
                                 }
                                 view.tracker.note(&item);
+                                // A run that moved changes how the Steps it ran read.
+                                if let ChatItem::SubAgentRun(run) = &item {
+                                    records.extend(view.tracker.sub_agent_steps(&run.sub_agent));
+                                }
                                 records.push(item);
                             }
                         }
@@ -2094,6 +2202,7 @@ impl Chats {
                             text: delta,
                             state: "streaming",
                             turn_id: Some(turn_id),
+                            owner: None,
                         };
                         json!({ "kind": "item", "item": item })
                     } else {
@@ -2167,7 +2276,14 @@ impl Chats {
             let fresh = self.fresh(&view.chat.id);
             for record in records {
                 let tracker = &view.tracker;
-                for item in chat_view::items(&record, &view.chat, &view.live, fresh, tracker) {
+                let shown = chat_view::items(&record, &view.chat, &view.live, fresh, tracker);
+                if let ChatItem::Tool(tool) = &record
+                    && shown.is_empty()
+                    && view.sent.contains_key(&tool.id)
+                {
+                    hidden = true;
+                }
+                for item in shown {
                     let item = match &item {
                         Item::Records { .. } => match self.lend(&mut lent) {
                             Ok(workspace) => with_gone(workspace, item),
@@ -2188,6 +2304,9 @@ impl Chats {
                     view.sent.insert(id, item.clone());
                     batch.push(number(&mut view, json!({ "kind": "item", "item": item })));
                 }
+            }
+            if hidden {
+                break;
             }
             // If the workspace cannot be read the view keeps what it shows; the next
             // change tries again.
@@ -2437,6 +2556,12 @@ impl Chats {
 
     pub async fn stop(&self, chat_id: &str) -> Outcome<()> {
         Ok(self.host()?.stop(chat_id).await?)
+    }
+
+    /// The person stops one sub-agent of the Chat, named as the view names it. It no longer
+    /// running is a stale view, not a failure.
+    pub async fn stop_sub_agent(&self, chat_id: &str, sub_agent: &str) -> Outcome<()> {
+        Ok(self.host()?.stop_sub_agent(chat_id, sub_agent).await?)
     }
 
     /// Answers a request only while the host holds it as live.
@@ -2832,7 +2957,7 @@ impl Chats {
             }
             ChatItem::Tool(tool) if tool.id == response_id => {
                 let turn = snapshot.items.iter().find_map(|item| match item {
-                    ChatItem::Turn(turn) if turn.id == tool.turn_id => Some(turn),
+                    ChatItem::Turn(turn) if tool.turn_id.as_ref() == Some(&turn.id) => Some(turn),
                     _ => None,
                 });
                 let date = turn.map_or(String::new(), |turn| shown_date(&turn.started_at));

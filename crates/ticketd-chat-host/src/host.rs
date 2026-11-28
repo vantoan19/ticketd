@@ -83,6 +83,10 @@ pub enum HostError {
     Harness(Problem),
     #[error("no adapter is available for harness '{0}'")]
     HarnessUnavailable(String),
+    #[error("that sub-agent is not running")]
+    SubAgentGone,
+    #[error("the harness did not stop the sub-agent: {0}")]
+    SubAgentNotStopped(String),
     #[error("the Chat is already starting its harness")]
     Busy,
     #[error("the Chat is working; try again when it has finished")]
@@ -191,6 +195,12 @@ pub struct ChatLive {
     pub activity: Activity,
     /// A provider process is running for this Chat.
     pub running: bool,
+    /// How many sub-agents run now (nested ones too). With no turn they hold the Chat
+    /// working: `activity` is `Working` and the person's Stop stops them.
+    pub sub_agents: usize,
+    /// The last sub-agent just finished with no turn running, and the main agent is about to
+    /// resume, by itself or because ticketd tells it so: still working, with no turn yet.
+    pub waking: bool,
     /// Work waits on a harness session that has not started a turn yet, and how that
     /// session opens. A process alone is not a working session: the harness can take
     /// seconds after it starts before the first turn runs.
@@ -224,6 +234,8 @@ impl ChatLive {
         Self {
             activity: Activity::Idle,
             running: false,
+            sub_agents: 0,
+            waking: false,
             opening: None,
             steering: None,
             steering_images_refused: false,
@@ -979,6 +991,16 @@ impl ChatHost {
             return Err(HostError::PermissionRestartCleanupUnconfirmed);
         }
         Ok(())
+    }
+
+    /// The person's Stop for one sub-agent, by its native ID: it and what it started stop,
+    /// and the main agent and every other sub-agent run on. Refused as
+    /// [`HostError::SubAgentGone`] when it does not run now (or runs in the foreground,
+    /// where it ends with its turn).
+    pub async fn stop_sub_agent(&self, chat_id: &str, native_id: &str) -> Result<(), HostError> {
+        let native_id = native_id.to_owned();
+        self.ask(chat_id, |reply| Command::StopSubAgent { native_id, reply })
+            .await
     }
 
     /// Closes the agents an Automation run had working in `chat_ids`, because ticketd

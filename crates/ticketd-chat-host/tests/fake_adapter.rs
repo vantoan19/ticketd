@@ -6,8 +6,10 @@ use std::path::PathBuf;
 
 use ticketd_chat_host::testing::{FakeAdapter, SubmitReply, Written};
 use ticketd_chat_host::{
-    DispatchOutcome, EventKind, HarnessAdapter, NativeTurnId, OpenRequest, OpenedRuntime, Refusal,
-    RuntimeGeneration, SessionStart, StartSettings, Submission, SubmissionId, SubmissionKind,
+    ApprovalDecision, DispatchOutcome, EventKind, HarnessAdapter, InteractionAnswer,
+    InteractionKind, InteractionRequest, InteractionResponse, NativeRequestId, NativeSubAgentId,
+    NativeTurnId, OpenRequest, OpenedRuntime, Refusal, RespondOutcome, RuntimeGeneration,
+    SessionStart, StartSettings, SubAgentOutcome, Submission, SubmissionId, SubmissionKind,
     TurnOutcome,
 };
 
@@ -156,5 +158,61 @@ async fn a_replaced_runtime_refuses_commands_for_its_own_generation() {
     assert_eq!(
         old.runtime.submit(start("s1", GENERATION)).await,
         DispatchOutcome::NotSent(Refusal::RuntimeClosed)
+    );
+}
+
+#[tokio::test]
+async fn a_sub_agents_request_lives_as_long_as_its_asker_not_the_turn_it_arrived_in() {
+    let fake = FakeAdapter::codex();
+    let mut opened = open(&fake, GENERATION).await;
+    let turn = acknowledged_turn(&opened, "s1").await;
+    let child = NativeSubAgentId::new("child");
+    let answer = |request: &str| InteractionResponse {
+        generation: GENERATION,
+        request: NativeRequestId::new(request),
+        answer: InteractionAnswer::Approval(ApprovalDecision::Allow),
+    };
+    for request in ["first", "second"] {
+        fake.emit(EventKind::InteractionRequested(InteractionRequest {
+            request: NativeRequestId::new(request),
+            turn: Some(turn.clone()),
+            owner: Some(child.clone()),
+            item: None,
+            kind: InteractionKind::Approval {
+                description: "cargo test".to_owned(),
+                reason: None,
+                decisions: vec![ApprovalDecision::Allow],
+            },
+            detail: None,
+        }))
+        .await;
+        opened.events.recv().await.unwrap();
+    }
+
+    // The turn that named them ends: they are the sub-agent's, so they stay.
+    fake.emit(EventKind::TurnEnded {
+        turn,
+        outcome: TurnOutcome::Completed,
+        submissions: vec![],
+    })
+    .await;
+    opened.events.recv().await.unwrap();
+    assert_eq!(
+        opened.runtime.respond(answer("first")).await,
+        RespondOutcome::Sent
+    );
+
+    // Their asker ends: what is still waiting goes with it.
+    fake.emit(EventKind::SubAgentEnded {
+        sub_agent: child,
+        run: None,
+        outcome: SubAgentOutcome::Completed,
+        detail: None,
+    })
+    .await;
+    opened.events.recv().await.unwrap();
+    assert_eq!(
+        opened.runtime.respond(answer("second")).await,
+        RespondOutcome::NotSent(Refusal::UnknownRequest)
     );
 }

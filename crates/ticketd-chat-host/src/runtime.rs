@@ -8,8 +8,8 @@ use serde_json::Value;
 use crate::json_rpc::{CallOutcome, Connection, Peer, RpcError, WriteFailure};
 use crate::{
     AutomationPromptAdmission, DeliveryEvidence, DispatchOutcome, EventKind, InteractionResolution,
-    InterruptOutcome, NativeRequestId, NativeTurnId, Refusal, RespondOutcome, RuntimeGeneration,
-    SubmissionId, SubmissionKind, TurnEvidence, TurnOutcome,
+    InterruptOutcome, NativeRequestId, NativeSubAgentId, NativeTurnId, Refusal, RespondOutcome,
+    RuntimeGeneration, SubmissionId, SubmissionKind, TurnEvidence, TurnOutcome,
 };
 
 // Checked commands for a runtime over JSON-RPC. The codec prepares frames and
@@ -89,6 +89,8 @@ const MAX_REMEMBERED: usize = 64;
 #[derive(Debug)]
 struct LiveRequest<R> {
     turn: Option<NativeTurnId>,
+    /// The sub-agent that asked, when one did: the request ends with it, not with a turn.
+    owner: Option<NativeSubAgentId>,
     /// The payload stays available to a bridge that can confirm an answer was refused.
     payload: Option<R>,
     answered: bool,
@@ -307,12 +309,46 @@ impl<R> RuntimeState<R> {
             std::collections::hash_map::Entry::Vacant(entry) => {
                 entry.insert(LiveRequest {
                     turn: turn.cloned(),
+                    owner: None,
                     payload: Some(payload),
                     answered: false,
                 });
                 true
             }
         }
+    }
+
+    /// A request a sub-agent asked. No turn owns it, so no turn ends it: it stays live
+    /// until it is answered or [`Self::withdraw_owned`] says its asker is gone.
+    pub(crate) fn register_owned_request(
+        &mut self,
+        request: NativeRequestId,
+        owner: NativeSubAgentId,
+        payload: R,
+    ) -> bool {
+        let registered = self.register_request(request.clone(), None, payload);
+        if registered && let Some(live) = self.requests.get_mut(&request) {
+            live.owner = Some(owner);
+        }
+        registered
+    }
+
+    /// The sub-agent's run ended: everything it asked and nobody answered is withdrawn.
+    pub(crate) fn withdraw_owned(&mut self, owner: &NativeSubAgentId) -> Vec<EventKind> {
+        let mut events = Vec::new();
+        self.requests.retain(|request, live| {
+            if live.owner.as_ref() != Some(owner) {
+                return true;
+            }
+            if !live.answered {
+                events.push(EventKind::InteractionResolved {
+                    request: request.clone(),
+                    resolution: InteractionResolution::Withdrawn,
+                });
+            }
+            false
+        });
+        events
     }
 
     /// Only a valid answer consumes the request, immediately before the write

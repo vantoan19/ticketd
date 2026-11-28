@@ -18,8 +18,17 @@ use crate::{Error, Workspace};
 
 pub(crate) mod attachments;
 pub use attachments::{ChatAttachment, ChatAttachmentContent};
+pub(crate) use credit::migrate as migrate_credit;
+mod credit;
+pub use credit::{
+    ChatPlannedWrite, ChatPlannedWriteKind, ChatWriteCredit, TicketWriteCredits, TicketWritingAgent,
+};
 mod receipt;
+pub(crate) mod sub_agents;
 pub use receipt::ChatTurnReceipt;
+pub use sub_agents::{
+    ChatSubAgent, ChatSubAgentRun, ChatSubAgentState, ChatSubAgentStopper, sub_agent_title,
+};
 #[cfg(test)]
 mod tests;
 
@@ -207,6 +216,37 @@ pub(crate) fn migrate_turn_ending(connection: &Connection) -> Result<(), Error> 
     Ok(())
 }
 
+/// Format 105: every Step and approval records its owner (`sub_agent_id`, see
+/// [`ChatOwner`]; `NULL`, the main agent, for everything recorded before) and may have no
+/// turn. SQLite cannot drop `NOT NULL` from a column, so both tables are rebuilt with
+/// `turn_id` nullable, keeping every row, position and column.
+/// Like every migration step it may run again over a schema that already has it.
+pub(crate) fn migrate_owner_and_optional_turn(connection: &Connection) -> Result<(), Error> {
+    let done: bool = connection.query_row(
+        "SELECT EXISTS(SELECT 1 FROM pragma_table_info('chat_tools') WHERE name = 'sub_agent_id')",
+        [],
+        |row| row.get(0),
+    )?;
+    if done {
+        return Ok(());
+    }
+    connection.execute_batch(
+        "CREATE TABLE chat_tools_new (id TEXT PRIMARY KEY, chat_id TEXT NOT NULL REFERENCES chats(id), position INTEGER NOT NULL UNIQUE, turn_id TEXT REFERENCES chat_turns(id), name TEXT NOT NULL, input TEXT NOT NULL, state TEXT NOT NULL, output TEXT, output_truncated INTEGER NOT NULL DEFAULT 0, started_at TEXT, sub_agent_id TEXT);
+         INSERT INTO chat_tools_new (id, chat_id, position, turn_id, name, input, state, output, output_truncated, started_at)
+             SELECT id, chat_id, position, turn_id, name, input, state, output, output_truncated, started_at FROM chat_tools;
+         DROP TABLE chat_tools;
+         ALTER TABLE chat_tools_new RENAME TO chat_tools;
+         CREATE INDEX chat_tools_chat ON chat_tools(chat_id, position);
+         CREATE TABLE chat_interactions_new (id TEXT PRIMARY KEY, chat_id TEXT NOT NULL REFERENCES chats(id), position INTEGER NOT NULL UNIQUE, turn_id TEXT REFERENCES chat_turns(id), kind TEXT NOT NULL, native_request_id TEXT, prompt TEXT NOT NULL, reason TEXT, state TEXT NOT NULL, response TEXT, tool_id TEXT, asked_at TEXT, resolved_at TEXT, sub_agent_id TEXT);
+         INSERT INTO chat_interactions_new (id, chat_id, position, turn_id, kind, native_request_id, prompt, reason, state, response, tool_id, asked_at, resolved_at)
+             SELECT id, chat_id, position, turn_id, kind, native_request_id, prompt, reason, state, response, tool_id, asked_at, resolved_at FROM chat_interactions;
+         DROP TABLE chat_interactions;
+         ALTER TABLE chat_interactions_new RENAME TO chat_interactions;
+         CREATE INDEX chat_interactions_chat ON chat_interactions(chat_id, position);",
+    )?;
+    Ok(())
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum ChatLinkKind {
@@ -291,6 +331,10 @@ pub struct Chat {
     pub marked_unread: bool,
     /// The person turned this Chat's notifications off.
     pub muted: bool,
+    /// The native IDs of the sub-agents that lost contact and that the next message has not
+    /// told the harness about yet: ticketd holds a note for it. Empty when there is none.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub restart_notice: Vec<String>,
     pub created_at: String,
 }
 
@@ -415,6 +459,10 @@ pub struct ChatMessage {
     /// False for assistant text still streaming or cut short by a crash.
     pub complete: bool,
     pub turn_id: Option<String>,
+    /// The agent that wrote it, for assistant text: a sub-agent's words are not the main
+    /// agent's reply (format 105). User input is always the main agent's.
+    #[serde(default)]
+    pub owner: ChatOwner,
     /// User input with no submission that may have reached the harness.
     pub queued: bool,
     /// Kept for draft recovery and excluded from dispatch while the edit is held.
@@ -423,8 +471,28 @@ pub struct ChatMessage {
     /// User input needs linked-record context before dispatch.
     #[serde(default)]
     pub requires_link_context: bool,
+    /// What ticketd added to this message for the harness, besides the person's words.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub note: Option<ChatMessageNote>,
     pub attempts: Vec<ChatSubmissionAttempt>,
     pub created_at: String,
+}
+
+/// What ticketd told the harness along with a message, kept as it was said.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ChatMessageNote {
+    pub kind: ChatMessageNoteKind,
+    /// The native IDs of the sub-agents it is about.
+    pub sub_agents: Vec<String>,
+    /// Exactly the text that was added.
+    pub text: String,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum ChatMessageNoteKind {
+    /// Sub-agents lost contact when ticketd quit.
+    LostSubAgents,
 }
 
 /// A saved request can outlive its queued message.
@@ -566,6 +634,27 @@ pub struct ChatTurn {
     pub ending: Option<String>,
     pub started_at: String,
     pub ended_at: Option<String>,
+    /// Who started the turn when the person did not (format 105): the harness resuming
+    /// the main agent by itself, or ticketd waking it. `None`: the person's message did.
+    #[serde(default)]
+    pub origin: Option<ChatTurnOrigin>,
+}
+
+/// Who started a turn the person did not.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ChatTurnOrigin {
+    pub by: ChatTurnStarter,
+    /// The native ID of the sub-agent whose finish it follows, when that is known.
+    pub sub_agent: Option<String>,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum ChatTurnStarter {
+    /// The harness resumed the main agent by itself.
+    Harness,
+    /// ticketd sent the message that woke it.
+    Ticketd,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
@@ -579,11 +668,54 @@ pub enum ChatToolState {
     Unknown,
 }
 
+/// Which agent a Step or an approval belongs to (format 105).
+///
+/// Every Step and approval has exactly one owner: the Chat's main agent, or one
+/// sub-agent the Chat's harness started. A sub-agent is identified inside its Chat by the
+/// harness's native ID (Claude's task ID, Codex's child thread ID, Antigravity's child
+/// conversation ID). The core keeps that ID as given and decides nothing from it; the
+/// sub-agent record keyed by (Chat, native ID) is a later addition.
+///
+/// Stored as one nullable column, `sub_agent_id`, on `chat_tools` and `chat_interactions`:
+/// `NULL` is the main agent, so all data from before format 105 is the main agent's.
+#[derive(Debug, Clone, Default, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[serde(tag = "kind", rename_all = "snake_case")]
+pub enum ChatOwner {
+    #[default]
+    Main,
+    SubAgent {
+        /// The harness's native ID of the sub-agent, unique within the Chat.
+        native_id: String,
+    },
+}
+
+impl ChatOwner {
+    /// The value of the `sub_agent_id` column: `None` for the main agent.
+    fn column(&self) -> Option<&str> {
+        match self {
+            ChatOwner::Main => None,
+            ChatOwner::SubAgent { native_id } => Some(native_id),
+        }
+    }
+
+    fn from_column(native_id: Option<String>) -> Self {
+        native_id.map_or(ChatOwner::Main, |native_id| ChatOwner::SubAgent {
+            native_id,
+        })
+    }
+}
+
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct ChatTool {
     pub id: String,
     pub position: i64,
-    pub turn_id: String,
+    /// The turn the Step ran in. `None` when no turn owns it: a sub-agent's Step outside
+    /// the main agent's turns (format 105).
+    #[serde(default)]
+    pub turn_id: Option<String>,
+    /// The agent that ran the Step.
+    #[serde(default)]
+    pub owner: ChatOwner,
     pub name: String,
     pub input: String,
     pub state: ChatToolState,
@@ -615,7 +747,12 @@ pub enum ChatInteractionState {
 pub struct ChatInteraction {
     pub id: String,
     pub position: i64,
-    pub turn_id: String,
+    /// The turn the request arrived in; `None` when no turn owns it (format 105).
+    #[serde(default)]
+    pub turn_id: Option<String>,
+    /// The agent that asked.
+    #[serde(default)]
+    pub owner: ChatOwner,
     pub kind: ChatInteractionKind,
     pub native_request_id: Option<String>,
     /// For an approval, what would run or change; for a question, its text.
@@ -670,6 +807,9 @@ pub struct ChatNotice {
     /// Said by the harness (a warning, a retry), not by ticketd.
     #[serde(default)]
     pub from_harness: bool,
+    /// For the note that the person stopped sub-agents while no turn ran: how many.
+    #[serde(default)]
+    pub sub_agents_stopped: Option<i64>,
 }
 
 /// One entry of a Chat's history, ordered by `position`.
@@ -682,6 +822,8 @@ pub enum ChatItem {
     Tool(ChatTool),
     Interaction(ChatInteraction),
     Notice(ChatNotice),
+    /// One run of a sub-agent, where it began in the Chat's history.
+    SubAgentRun(ChatSubAgentRun),
 }
 
 /// Something the host observed from the harness. Record only what was actually seen:
@@ -714,6 +856,9 @@ pub enum ChatObservation {
     TurnStarted {
         turn_id: String,
         native_turn_id: Option<String>,
+        /// Who started it when the person did not.
+        #[serde(default)]
+        origin: Option<ChatTurnOrigin>,
     },
     /// `state` is the terminal outcome; `Active` is refused.
     TurnEnded {
@@ -737,21 +882,44 @@ pub enum ChatObservation {
     /// A checkpoint of an assistant message: `text` replaces what was stored.
     AssistantText {
         message_id: String,
-        turn_id: String,
+        /// The turn it was said in, when one was active. Must be this Chat's.
+        #[serde(default)]
+        turn_id: Option<String>,
+        /// The agent that said it. An existing message keeps the owner it was recorded with.
+        #[serde(default)]
+        owner: ChatOwner,
         text: String,
         complete: bool,
     },
     Tool {
         tool_id: String,
-        turn_id: String,
+        /// The turn the Step belongs to, when one does. Must be this Chat's.
+        #[serde(default)]
+        turn_id: Option<String>,
+        /// The agent that ran it. An existing record keeps the owner it was recorded with.
+        #[serde(default)]
+        owner: ChatOwner,
         name: String,
         input: String,
         state: ChatToolState,
         output: Option<String>,
     },
+    /// The Step `tool_id` (recorded before this, or in the same batch) runs a shell command.
+    /// Writes the Chat's agents commit while it runs may be its owner's (see
+    /// `ChatWriteCredit`); `writes` is what the plain `ticketd` calls it names would write.
+    ShellStep {
+        tool_id: String,
+        #[serde(default)]
+        writes: Vec<ChatPlannedWrite>,
+    },
     InteractionRequested {
         interaction_id: String,
-        turn_id: String,
+        /// The turn it arrived in, when one does. Must be this Chat's.
+        #[serde(default)]
+        turn_id: Option<String>,
+        /// The agent that asked.
+        #[serde(default)]
+        owner: ChatOwner,
         kind: ChatInteractionKind,
         native_request_id: Option<String>,
         prompt: String,
@@ -759,6 +927,54 @@ pub enum ChatObservation {
         reason: Option<String>,
         /// For an approval, the tool call it is about, when the harness said.
         tool_id: Option<String>,
+    },
+    /// A sub-agent started or was resumed: a run begins. The first sighting makes its
+    /// record; a resume (a new `native_run_id`) adds a run to it.
+    SubAgentStarted {
+        /// The harness's ID for the sub-agent, unique within the Chat.
+        native_id: String,
+        /// The native ID of the sub-agent that started it; `None` for the main agent.
+        #[serde(default)]
+        parent: Option<String>,
+        /// The Step (a tool record of this Chat) that started it.
+        #[serde(default)]
+        tool_id: Option<String>,
+        /// The turn the run began in, when one was active. Must be this Chat's.
+        #[serde(default)]
+        turn_id: Option<String>,
+        #[serde(default)]
+        native_run_id: Option<String>,
+        #[serde(default)]
+        background: bool,
+        /// A JSON object of what the harness said (`description`, `subagent_type`,
+        /// `prompt`, `model`), merged over what is kept.
+        payload: String,
+    },
+    /// More is known of a sub-agent: its words, or that it runs in the background.
+    /// Ignored for a sub-agent never seen, and for a run an earlier one than the latest.
+    SubAgentUpdated {
+        native_id: String,
+        #[serde(default)]
+        native_run_id: Option<String>,
+        #[serde(default)]
+        background: Option<bool>,
+        #[serde(default)]
+        payload: Option<String>,
+    },
+    /// A run ended. `state` is anything but `Running`. Ignored when the run already ended
+    /// or an earlier run than the latest is meant.
+    SubAgentEnded {
+        native_id: String,
+        #[serde(default)]
+        native_run_id: Option<String>,
+        state: ChatSubAgentState,
+        #[serde(default)]
+        stopped_by: Option<ChatSubAgentStopper>,
+        #[serde(default)]
+        stop_reason: Option<String>,
+        /// What the harness said went wrong, for a run that failed.
+        #[serde(default)]
+        detail: Option<String>,
     },
     /// `state` is `Answered` or `Expired`.
     InteractionResolved {
@@ -772,6 +988,12 @@ pub enum ChatObservation {
         /// Said by the harness rather than by ticketd.
         #[serde(default)]
         from_harness: bool,
+    },
+    /// The person stopped `count` sub-agents while no turn ran. A note of its own so the
+    /// Chat says so where the turn's stop would have been.
+    SubAgentsStopped {
+        notice_id: String,
+        count: i64,
     },
 }
 
@@ -791,6 +1013,10 @@ pub struct ChatSnapshot {
     /// The latest history, oldest first.
     pub items: Vec<ChatItem>,
     pub earlier: bool,
+    /// Every sub-agent of the Chat, oldest first, whatever part of the history `items`
+    /// holds: a row in the history names one whose record is older than the page.
+    #[serde(default)]
+    pub sub_agents: Vec<ChatSubAgent>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -801,6 +1027,9 @@ pub struct ChatSnapshot {
 pub enum ChatRecord {
     Chat(Chat),
     Item(ChatItem),
+    /// A sub-agent and its runs. It is not an entry of the Chat's history (each run is);
+    /// a follower is told when the record changed.
+    SubAgent(ChatSubAgent),
 }
 
 /// The current state of a record that changed, at the sequence of its latest change.
@@ -897,15 +1126,30 @@ fn turn_from_row(row: &Row<'_>) -> rusqlite::Result<ChatTurn> {
         problem: row.get(7)?,
         problem_resets_at: row.get(8)?,
         ending: row.get(9)?,
+        origin: row
+            .get::<_, Option<String>>(10)?
+            .map(|by| {
+                Ok::<_, rusqlite::Error>(ChatTurnOrigin {
+                    by: serde_json::from_value(serde_json::Value::String(by)).map_err(|error| {
+                        rusqlite::Error::FromSqlConversionFailure(
+                            10,
+                            rusqlite::types::Type::Text,
+                            Box::new(error),
+                        )
+                    })?,
+                    sub_agent: row.get(11)?,
+                })
+            })
+            .transpose()?,
     })
 }
 
-const TURN: &str = "SELECT id, position, native_turn_id, state, detail, started_at, ended_at, problem, problem_resets_at, ending FROM chat_turns";
+const TURN: &str = "SELECT id, position, native_turn_id, state, detail, started_at, ended_at, problem, problem_resets_at, ending, origin_by, origin_sub_agent FROM chat_turns";
 
 /// A Chat's own columns, for `FROM chats`, in the order [`chat_from_row`] reads them.
 const CHAT_COLUMNS: &str = "id, title, harness, execution_folder, folder_managed, archived, trashed, queue_paused, created_at, effective_settings,
     (SELECT native_session_id FROM chat_sessions WHERE chat_id = chats.id ORDER BY position DESC LIMIT 1),
-    seen_through, muted, read_through, marked_unread";
+    seen_through, muted, read_through, marked_unread, restart_notice";
 
 /// A Chat from [`CHAT_COLUMNS`], without its links and active turn.
 fn chat_from_row(row: &Row<'_>) -> rusqlite::Result<Chat> {
@@ -925,6 +1169,10 @@ fn chat_from_row(row: &Row<'_>) -> rusqlite::Result<Chat> {
         muted: row.get(12)?,
         read_through: row.get(13)?,
         marked_unread: row.get(14)?,
+        restart_notice: row
+            .get::<_, Option<String>>(15)?
+            .and_then(|text| serde_json::from_str(&text).ok())
+            .unwrap_or_default(),
         links: Vec::new(),
         active_turn: None,
     })
@@ -981,7 +1229,7 @@ fn read_chat(connection: &Connection, id: &str) -> Result<Chat, Error> {
 fn read_message(connection: &Connection, id: &str) -> Result<Option<ChatMessage>, Error> {
     let message = connection
         .query_row(
-            "SELECT id, position, role, text, complete, turn_id, created_at, editing, requires_link_context FROM chat_messages WHERE id = ?1",
+            "SELECT id, position, role, text, complete, turn_id, created_at, editing, requires_link_context, sub_agent_id, note FROM chat_messages WHERE id = ?1",
             [id],
             |row| {
                 Ok(ChatMessage {
@@ -996,6 +1244,10 @@ fn read_message(connection: &Connection, id: &str) -> Result<Option<ChatMessage>
                     queued: false,
                     editing: row.get(7)?,
                     requires_link_context: row.get(8)?,
+                    owner: ChatOwner::from_column(row.get(9)?),
+                    note: row
+                        .get::<_, Option<String>>(10)?
+                        .and_then(|text| serde_json::from_str(&text).ok()),
                     attempts: Vec::new(),
                 })
             },
@@ -1056,7 +1308,7 @@ fn read_item(connection: &Connection, kind: &str, id: &str) -> Result<Option<Cha
             .map(ChatItem::Session),
         "tool" => connection
             .query_row(
-                "SELECT id, position, turn_id, name, input, state, output, output_truncated, started_at FROM chat_tools WHERE id = ?1",
+                "SELECT id, position, turn_id, name, input, state, output, output_truncated, started_at, sub_agent_id FROM chat_tools WHERE id = ?1",
                 [id],
                 |row| {
                     Ok(ChatTool {
@@ -1069,6 +1321,7 @@ fn read_item(connection: &Connection, kind: &str, id: &str) -> Result<Option<Cha
                         output: row.get(6)?,
                         output_truncated: row.get(7)?,
                         started_at: row.get(8)?,
+                        owner: ChatOwner::from_column(row.get(9)?),
                     })
                 },
             )
@@ -1076,7 +1329,7 @@ fn read_item(connection: &Connection, kind: &str, id: &str) -> Result<Option<Cha
             .map(ChatItem::Tool),
         "interaction" => connection
             .query_row(
-                "SELECT id, position, turn_id, kind, native_request_id, prompt, state, response, reason, tool_id, asked_at, resolved_at FROM chat_interactions WHERE id = ?1",
+                "SELECT id, position, turn_id, kind, native_request_id, prompt, state, response, reason, tool_id, asked_at, resolved_at, sub_agent_id FROM chat_interactions WHERE id = ?1",
                 [id],
                 |row| {
                     Ok(ChatInteraction {
@@ -1092,6 +1345,7 @@ fn read_item(connection: &Connection, kind: &str, id: &str) -> Result<Option<Cha
                         tool_id: row.get(9)?,
                         asked_at: row.get(10)?,
                         resolved_at: row.get(11)?,
+                        owner: ChatOwner::from_column(row.get(12)?),
                     })
                 },
             )
@@ -1099,7 +1353,7 @@ fn read_item(connection: &Connection, kind: &str, id: &str) -> Result<Option<Cha
             .map(ChatItem::Interaction),
         "notice" => connection
             .query_row(
-                "SELECT id, position, text, created_at, from_harness FROM chat_notices WHERE id = ?1",
+                "SELECT id, position, text, created_at, from_harness, sub_agents_stopped FROM chat_notices WHERE id = ?1",
                 [id],
                 |row| {
                     Ok(ChatNotice {
@@ -1108,11 +1362,13 @@ fn read_item(connection: &Connection, kind: &str, id: &str) -> Result<Option<Cha
                         text: row.get(2)?,
                         created_at: row.get(3)?,
                         from_harness: row.get(4)?,
+                        sub_agents_stopped: row.get(5)?,
                     })
                 },
             )
             .optional()?
             .map(ChatItem::Notice),
+        "sub_agent_run" => sub_agents::read_run(connection, id)?.map(ChatItem::SubAgentRun),
         _ => None,
     })
 }
@@ -1130,7 +1386,8 @@ fn read_history(
              UNION ALL SELECT position, 'turn', id, chat_id FROM chat_turns
              UNION ALL SELECT position, 'tool', id, chat_id FROM chat_tools
              UNION ALL SELECT position, 'interaction', id, chat_id FROM chat_interactions
-             UNION ALL SELECT position, 'notice', id, chat_id FROM chat_notices)
+             UNION ALL SELECT position, 'notice', id, chat_id FROM chat_notices
+             UNION ALL SELECT position, 'sub_agent_run', id, chat_id FROM chat_sub_agent_runs)
          WHERE chat_id = ?1 AND position < ?2 ORDER BY position DESC LIMIT ?3",
     )?;
     let mut subjects = statement
@@ -1762,6 +2019,7 @@ fn observe(
         ChatObservation::TurnStarted {
             turn_id,
             native_turn_id,
+            origin,
         } => {
             if owned(connection, "chat_turns", chat_id, &turn_id)? {
                 return Ok(());
@@ -1787,10 +2045,18 @@ fn observe(
             )?;
             connection.execute(
                 &format!(
-                    "INSERT INTO chat_turns (id, chat_id, position, native_turn_id, state, started_at)
-                     VALUES (?1, ?2, ?3, ?4, 'active', COALESCE(?5, {NOW}))"
+                    "INSERT INTO chat_turns (id, chat_id, position, native_turn_id, state, started_at, origin_by, origin_sub_agent)
+                     VALUES (?1, ?2, ?3, ?4, 'active', COALESCE(?5, {NOW}), ?6, ?7)"
                 ),
-                params![turn_id, chat_id, position, native_turn_id, started_at],
+                params![
+                    turn_id,
+                    chat_id,
+                    position,
+                    native_turn_id,
+                    started_at,
+                    origin.as_ref().map(|origin| name(origin.by)).transpose()?,
+                    origin.and_then(|origin| origin.sub_agent),
+                ],
             )?;
             Ok(())
         }
@@ -1849,6 +2115,7 @@ fn observe(
                     ended_at
                 ],
             )?;
+            sub_agents::end_turn(connection, chat_id, &turn_id, state, ending.as_deref())?;
             expire_interactions(connection, chat_id, Some(&turn_id))
         }
         ChatObservation::CaptureAgentChanges { turn_id } => {
@@ -1861,7 +2128,8 @@ fn observe(
                 chat_id,
                 ChatObservation::Tool {
                     tool_id: format!("{turn_id}:ticketd-changes"),
-                    turn_id,
+                    turn_id: Some(turn_id),
+                    owner: ChatOwner::Main,
                     name: AGENT_CHANGES_RECORD_NAME.to_owned(),
                     input: serde_json::to_string(&changes)?,
                     state: ChatToolState::Completed,
@@ -1873,10 +2141,13 @@ fn observe(
         ChatObservation::AssistantText {
             message_id,
             turn_id,
+            owner,
             text,
             complete,
         } => {
-            require_turn(connection, chat_id, &turn_id)?;
+            if let Some(turn_id) = &turn_id {
+                require_turn(connection, chat_id, turn_id)?;
+            }
             if owned(connection, "chat_messages", chat_id, &message_id)? {
                 let updated = connection.execute(
                     "UPDATE chat_messages SET text = ?2, complete = ?3 WHERE id = ?1 AND role = 'assistant'",
@@ -1891,8 +2162,8 @@ fn observe(
             } else {
                 let position = log(connection, chat_id, "message", &message_id)?;
                 connection.execute(
-                    "INSERT INTO chat_messages (id, chat_id, position, role, text, complete, turn_id) VALUES (?1, ?2, ?3, 'assistant', ?4, ?5, ?6)",
-                    params![message_id, chat_id, position, text, complete, turn_id],
+                    "INSERT INTO chat_messages (id, chat_id, position, role, text, complete, turn_id, sub_agent_id) VALUES (?1, ?2, ?3, 'assistant', ?4, ?5, ?6, ?7)",
+                    params![message_id, chat_id, position, text, complete, turn_id, owner.column()],
                 )?;
             }
             Ok(())
@@ -1900,12 +2171,15 @@ fn observe(
         ChatObservation::Tool {
             tool_id,
             turn_id,
+            owner,
             name: tool_name,
             input,
             state,
             output,
         } => {
-            require_turn(connection, chat_id, &turn_id)?;
+            if let Some(turn_id) = &turn_id {
+                require_turn(connection, chat_id, turn_id)?;
+            }
             let (output, truncated) = match output.map(bounded) {
                 Some((output, truncated)) => (Some(output), truncated),
                 None => (None, false),
@@ -1915,26 +2189,35 @@ fn observe(
                     "UPDATE chat_tools SET name = ?2, input = ?3, state = ?4, output = ?5, output_truncated = ?6 WHERE id = ?1",
                     params![tool_id, tool_name, input, name(state)?, output, truncated],
                 )?;
+                if state != ChatToolState::Running {
+                    credit::close_window(connection, &tool_id)?;
+                }
                 log(connection, chat_id, "tool", &tool_id)?;
             } else {
                 let position = log(connection, chat_id, "tool", &tool_id)?;
                 connection.execute(
-                    &format!("INSERT INTO chat_tools (id, chat_id, position, turn_id, name, input, state, output, output_truncated, started_at) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, {NOW})"),
-                    params![tool_id, chat_id, position, turn_id, tool_name, input, name(state)?, output, truncated],
+                    &format!("INSERT INTO chat_tools (id, chat_id, position, turn_id, sub_agent_id, name, input, state, output, output_truncated, started_at) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, {NOW})"),
+                    params![tool_id, chat_id, position, turn_id, owner.column(), tool_name, input, name(state)?, output, truncated],
                 )?;
             }
             Ok(())
         }
+        ChatObservation::ShellStep { tool_id, writes } => {
+            credit::open_window(connection, chat_id, &tool_id, &writes)
+        }
         ChatObservation::InteractionRequested {
             interaction_id,
             turn_id,
+            owner,
             kind,
             native_request_id,
             prompt,
             reason,
             tool_id,
         } => {
-            require_turn(connection, chat_id, &turn_id)?;
+            if let Some(turn_id) = &turn_id {
+                require_turn(connection, chat_id, turn_id)?;
+            }
             if owned(connection, "chat_interactions", chat_id, &interaction_id)? {
                 return Ok(());
             }
@@ -1942,11 +2225,66 @@ fn observe(
             let reason: Option<String> =
                 reason.map(|reason| reason.chars().take(CHAT_NOTICE_LIMIT).collect());
             connection.execute(
-                &format!("INSERT INTO chat_interactions (id, chat_id, position, turn_id, kind, native_request_id, prompt, reason, state, tool_id, asked_at) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, 'pending', ?9, {NOW})"),
-                params![interaction_id, chat_id, position, turn_id, name(kind)?, native_request_id, prompt, reason, tool_id],
+                &format!("INSERT INTO chat_interactions (id, chat_id, position, turn_id, sub_agent_id, kind, native_request_id, prompt, reason, state, tool_id, asked_at) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, 'pending', ?10, {NOW})"),
+                params![interaction_id, chat_id, position, turn_id, owner.column(), name(kind)?, native_request_id, prompt, reason, tool_id],
             )?;
             Ok(())
         }
+        ChatObservation::SubAgentStarted {
+            native_id,
+            parent,
+            tool_id,
+            turn_id,
+            native_run_id,
+            background,
+            payload,
+        } => sub_agents::observe(
+            connection,
+            chat_id,
+            sub_agents::Change::Started {
+                native_id,
+                parent,
+                tool_id,
+                turn_id,
+                native_run_id,
+                background,
+                payload,
+            },
+        ),
+        ChatObservation::SubAgentUpdated {
+            native_id,
+            native_run_id,
+            background,
+            payload,
+        } => sub_agents::observe(
+            connection,
+            chat_id,
+            sub_agents::Change::Updated {
+                native_id,
+                native_run_id,
+                background,
+                payload,
+            },
+        ),
+        ChatObservation::SubAgentEnded {
+            native_id,
+            native_run_id,
+            state,
+            stopped_by,
+            stop_reason,
+            detail,
+        } => sub_agents::observe(
+            connection,
+            chat_id,
+            sub_agents::Change::Ended {
+                native_id,
+                native_run_id,
+                state,
+                stopped_by,
+                stop_reason,
+                detail,
+            },
+        ),
         ChatObservation::InteractionResolved {
             interaction_id,
             state,
@@ -1996,6 +2334,22 @@ fn observe(
             connection.execute(
                 "INSERT INTO chat_notices (id, chat_id, position, text, from_harness) VALUES (?1, ?2, ?3, ?4, ?5)",
                 params![notice_id, chat_id, position, text, from_harness],
+            )?;
+            Ok(())
+        }
+        ChatObservation::SubAgentsStopped { notice_id, count } => {
+            if owned(connection, "chat_notices", chat_id, &notice_id)? {
+                return Ok(());
+            }
+            let noun = if count == 1 {
+                "sub-agent"
+            } else {
+                "sub-agents"
+            };
+            let position = log(connection, chat_id, "notice", &notice_id)?;
+            connection.execute(
+                "INSERT INTO chat_notices (id, chat_id, position, text, from_harness, sub_agents_stopped) VALUES (?1, ?2, ?3, ?4, 0, ?5)",
+                params![notice_id, chat_id, position, format!("You stopped {count} {noun}."), count],
             )?;
             Ok(())
         }
@@ -2166,7 +2520,9 @@ fn lose_contact(
         )?;
         log(connection, chat_id, "tool", &id)?;
     }
+    credit::close_windows(connection, chat_id)?;
     expire_interactions(connection, chat_id, None)?;
+    sub_agents::lose_contact(connection, chat_id)?;
     for id in ids(
         "SELECT DISTINCT message_id FROM chat_submission_attempts WHERE chat_id = ?1 AND delivery = 'possible' AND turn_id IS NULL",
     )? {
@@ -2186,6 +2542,9 @@ pub(crate) fn delete_where(connection: &Connection, filter: &str) -> Result<(), 
     for table in [
         "chat_record_writes",
         "chat_changes",
+        "chat_sub_agent_runs",
+        "chat_sub_agents",
+        "chat_step_windows",
         "chat_notices",
         "chat_interactions",
         "chat_tools",
@@ -2308,6 +2667,25 @@ impl Workspace {
             .optional()?)
     }
 
+    /// The requests of the Chat that wait for an answer, whatever the history window of a
+    /// snapshot reached: a request an older burst of history has pushed out of it is still
+    /// answerable, and its asker is read from here.
+    pub fn chat_pending_interactions(&self, chat_id: &str) -> Result<Vec<ChatItem>, Error> {
+        self.read(|_| {
+            let mut statement = self.connection.prepare(
+                "SELECT id FROM chat_interactions WHERE chat_id = ?1 AND state = 'pending' ORDER BY position",
+            )?;
+            let ids = statement
+                .query_map([chat_id], |row| row.get::<_, String>(0))?
+                .collect::<Result<Vec<_>, _>>()?;
+            let mut pending = Vec::with_capacity(ids.len());
+            for id in ids {
+                pending.extend(read_item(&self.connection, "interaction", &id)?);
+            }
+            Ok(pending)
+        })
+    }
+
     /// The Chat's linked records as they are now, in link order.
     pub fn chat_linked_records(&self, id: &str) -> Result<Vec<ChatLinkedRecord>, Error> {
         let heading = crate::documents::HEADING;
@@ -2393,12 +2771,12 @@ impl Workspace {
             }
             // The columns of `TURN`, then the Chat.
             let mut statement = connection.prepare_cached(
-                "SELECT id, position, native_turn_id, state, detail, started_at, ended_at, problem, problem_resets_at, ending, chat_id
+                "SELECT id, position, native_turn_id, state, detail, started_at, ended_at, problem, problem_resets_at, ending, origin_by, origin_sub_agent, chat_id
                    FROM chat_turns WHERE chat_id IN (SELECT value FROM json_each(?1)) AND state = 'active'",
             )?;
             let mut turns: HashMap<String, ChatTurn> = statement
                 .query_map([&ids], |row| {
-                    Ok((row.get::<_, String>(10)?, turn_from_row(row)?))
+                    Ok((row.get::<_, String>(12)?, turn_from_row(row)?))
                 })?
                 .collect::<Result<_, _>>()?;
             // The Chats outside the trash, in the order the Active and then the Archived
@@ -2570,6 +2948,18 @@ impl Workspace {
     /// is not this Chat's, or is earlier than what was read, changes nothing. No Chat
     /// change is logged: reading is not a change the views have to follow.
     pub fn mark_chat_read_through(&mut self, id: &str, record: &str) -> Result<Chat, Error> {
+        self.mark_chat_read_through_at(id, record, record)
+    }
+
+    /// Like [`Self::mark_chat_read_through`] for an item a view shows under an ID of its
+    /// own, such as a sub-agent's row: `record` is kept as the item read, and its place in
+    /// the history is that of the stored record `anchor` (the sub-agent's run).
+    pub fn mark_chat_read_through_at(
+        &mut self,
+        id: &str,
+        record: &str,
+        anchor: &str,
+    ) -> Result<Chat, Error> {
         let chat = self.chat(id)?;
         let position: Option<i64> = self
             .connection
@@ -2580,9 +2970,10 @@ impl Workspace {
                      UNION ALL SELECT position, id, chat_id FROM chat_turns
                      UNION ALL SELECT position, id, chat_id FROM chat_tools
                      UNION ALL SELECT position, id, chat_id FROM chat_interactions
-                     UNION ALL SELECT position, id, chat_id FROM chat_notices)
+                     UNION ALL SELECT position, id, chat_id FROM chat_notices
+                     UNION ALL SELECT position, id, chat_id FROM chat_sub_agent_runs)
                  WHERE chat_id = ?1 AND id = ?2",
-                params![id, record],
+                params![id, anchor],
                 |row| row.get(0),
             )
             .optional()?;
@@ -3450,6 +3841,7 @@ impl Workspace {
                      EXISTS (SELECT 1 FROM chat_turns WHERE chat_id = chats.id AND state = 'active')
                   OR EXISTS (SELECT 1 FROM chat_tools WHERE chat_id = chats.id AND state = 'running')
                   OR EXISTS (SELECT 1 FROM chat_interactions WHERE chat_id = chats.id AND state = 'pending')
+                  OR EXISTS (SELECT 1 FROM chat_sub_agent_runs WHERE chat_id = chats.id AND state = 'running')
                   OR EXISTS (SELECT 1 FROM chat_submission_attempts WHERE chat_id = chats.id AND delivery = 'possible' AND turn_id IS NULL))
                  ORDER BY rowid",
             )?;
@@ -3468,7 +3860,122 @@ impl Workspace {
     /// records are credited to that Chat. Connection-scoped like `act_as_local_person`;
     /// TEMP triggers keep every write path unchanged.
     pub fn act_for_chat(&mut self, chat_id: &str) -> Result<(), Error> {
-        receipt::prepare_writer(&self.connection, chat_id)
+        self.act_for_chat_call(chat_id, None)
+    }
+
+    /// Like [`Self::act_for_chat`], for a harness that names each command it runs:
+    /// `call_id` (blank counts as none) is kept with every write, and tells exactly which
+    /// Step, so which agent, made it.
+    pub fn act_for_chat_call(&mut self, chat_id: &str, call_id: Option<&str>) -> Result<(), Error> {
+        let call_id = call_id.map(str::trim).filter(|id| !id.is_empty());
+        receipt::prepare_writer(&self.connection, chat_id, call_id)
+    }
+
+    /// The agent each tagged status move and Activity on a ticket is credited to, as far as
+    /// it can be told exactly: see `ChatWriteCredit`.
+    pub fn ticket_write_credits(&self, reference: &str) -> Result<TicketWriteCredits, Error> {
+        self.read(|_| {
+            let ticket = self.show_ticket(reference)?;
+            credit::ticket_credits(&self.connection, &ticket.id, &ticket.reference)
+        })
+    }
+
+    /// [`Self::ticket_write_credits`] for only the Activities `activity_ids` and the status
+    /// moves `status_numbers` (their numbers in the history feed): what a page of the
+    /// ticket's feed shows, without attributing every other write on the ticket.
+    pub fn ticket_write_credits_for(
+        &self,
+        reference: &str,
+        activity_ids: &[String],
+        status_numbers: &[i64],
+    ) -> Result<TicketWriteCredits, Error> {
+        self.read(|_| {
+            let ticket = self.show_ticket(reference)?;
+            credit::ticket_credits_scoped(
+                &self.connection,
+                &ticket.id,
+                &ticket.reference,
+                Some((activity_ids, status_numbers)),
+            )
+        })
+    }
+
+    /// A ticket's history with the agent each status move is credited to: see
+    /// [`Self::ticket_write_credits`]. Other entries carry none.
+    pub fn ticket_history_credits(
+        &self,
+        reference: &str,
+    ) -> Result<Vec<(crate::HistoryEntry, Option<ChatWriteCredit>)>, Error> {
+        self.read(|_| {
+            let ticket = self.show_ticket(reference)?;
+            let entries = crate::history::read(&self.connection, &ticket.id)?;
+            let numbers = crate::history::numbers(&self.connection, &ticket.id)?;
+            let mut credits =
+                credit::ticket_credits(&self.connection, &ticket.id, &ticket.reference)?;
+            Ok(entries
+                .into_iter()
+                .zip(numbers)
+                .map(|(entry, number)| (entry, credits.statuses.remove(&number)))
+                .collect())
+        })
+    }
+
+    /// One sub-agent of a Chat, by the harness's own ID for it, with its runs.
+    pub fn chat_sub_agent(
+        &self,
+        chat_id: &str,
+        native_id: &str,
+    ) -> Result<Option<ChatSubAgent>, Error> {
+        self.read(|_| {
+            sub_agents::read_record(&self.connection, &sub_agents::record_id(chat_id, native_id))
+        })
+    }
+
+    /// The agents of Chats on this computer with a credited write on the ticket, and
+    /// whether each is running now (a sub-agent's latest run is; the main agent has an
+    /// active turn): the label "{model} is working on this ticket" reads this.
+    pub fn ticket_writing_agents(&self, reference: &str) -> Result<Vec<TicketWritingAgent>, Error> {
+        self.read(|_| {
+            let ticket = self.show_ticket(reference)?;
+            credit::writing_agents(&self.connection, &ticket.id, &ticket.reference)
+        })
+    }
+
+    /// The tickets (ID and reference) that a Chat with something running now has a
+    /// credited write on: where a ticket label may be showing or about to. Reading each
+    /// ticket's [`Self::ticket_writing_agents`] says exactly who runs.
+    pub fn tickets_with_running_writers(&self) -> Result<Vec<(String, String)>, Error> {
+        self.read(|_| {
+            let mut statement = self.connection.prepare(
+                "WITH running AS (
+                     SELECT id FROM chats WHERE trashed = 0 AND (
+                         EXISTS (SELECT 1 FROM chat_turns WHERE chat_id = chats.id AND state = 'active')
+                      OR EXISTS (SELECT 1 FROM chat_sub_agent_runs WHERE chat_id = chats.id AND state = 'running')))
+                 SELECT DISTINCT t.id, t.reference FROM tickets t WHERE t.id IN (
+                     SELECT a.ticket_id FROM activities a JOIN chat_record_writes w ON w.activity_id = a.id
+                     WHERE w.chat_id IN (SELECT id FROM running)
+                     UNION
+                     SELECT h.ticket_id FROM ticket_history h JOIN chat_record_writes w ON w.history_number = h.number
+                     WHERE h.kind = 'status' AND w.chat_id IN (SELECT id FROM running))
+                 ORDER BY t.reference",
+            )?;
+            let tickets = statement
+                .query_map([], |row| Ok((row.get(0)?, row.get(1)?)))?
+                .collect::<Result<_, _>>()?;
+            Ok(tickets)
+        })
+    }
+
+    /// The reference of the ticket with this ID, if there is one.
+    pub fn ticket_reference_of(&self, id: &str) -> Result<Option<String>, Error> {
+        self.read(|_| {
+            Ok(self
+                .connection
+                .query_row("SELECT reference FROM tickets WHERE id = ?1", [id], |row| {
+                    row.get(0)
+                })
+                .optional()?)
+        })
     }
 
     /// What the Chat's agent changed in tickets during the Turn, oldest first.
@@ -3517,7 +4024,50 @@ impl Workspace {
                 sequence,
                 items: page.items,
                 earlier: page.earlier,
+                sub_agents: sub_agents::read_all(transaction, chat_id)?,
             })
+        })
+    }
+
+    /// The sub-agents the next message has to tell the harness about: the ones that lost
+    /// contact and are still lost, oldest first. Empty when there is nothing to tell.
+    pub fn chat_restart_notice(&self, chat_id: &str) -> Result<Vec<ChatSubAgent>, Error> {
+        crate::read_scope::run(&self.connection, |connection| {
+            read_chat(connection, chat_id)?;
+            let kept = sub_agents::notice(connection, chat_id)?;
+            let mut lost = Vec::new();
+            for native_id in kept {
+                let record = sub_agents::read_record(
+                    connection,
+                    &sub_agents::record_id(chat_id, &native_id),
+                )?;
+                lost.extend(record.filter(|record| {
+                    record.latest().map(|run| run.state) == Some(ChatSubAgentState::Lost)
+                }));
+            }
+            Ok(lost)
+        })
+    }
+
+    /// Keeps `note` as what ticketd added to the person's message `message_id` for the
+    /// harness, and clears the Chat's notice: it has been told.
+    pub fn record_chat_message_note(
+        &mut self,
+        chat_id: &str,
+        message_id: &str,
+        note: &ChatMessageNote,
+    ) -> Result<(), Error> {
+        let stored = serde_json::to_string(note)?;
+        self.chat_write(|connection| {
+            let changed = connection.execute(
+                "UPDATE chat_messages SET note = ?3 WHERE id = ?2 AND chat_id = ?1 AND role = 'user'",
+                params![chat_id, message_id, stored],
+            )?;
+            if changed == 0 {
+                return Err(invalid("the message the note belongs to is missing"));
+            }
+            log(connection, chat_id, "message", message_id)?;
+            sub_agents::set_notice(connection, chat_id, &[])
         })
     }
 
@@ -3607,6 +4157,8 @@ impl Workspace {
             for (kind, id, sequence) in subjects {
                 let record = if kind == "chat" {
                     Some(ChatRecord::Chat(read_chat(transaction, &id)?))
+                } else if kind == "sub_agent" {
+                    sub_agents::read_record(transaction, &id)?.map(ChatRecord::SubAgent)
                 } else {
                     read_item(transaction, &kind, &id)?.map(ChatRecord::Item)
                 };
