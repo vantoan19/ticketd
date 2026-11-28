@@ -71,6 +71,7 @@ export function AttachmentCard({
   storageKnown = true,
   onOpen,
   action,
+  width,
 }: {
   file: Attachment;
   /** An authored label that differs from the file's name: it names the card. */
@@ -84,6 +85,7 @@ export function AttachmentCard({
   storageKnown?: boolean;
   onOpen: () => void;
   action?: ReactNode;
+  width?: number | undefined;
 }) {
   const [ref, near] = useNearViewport<HTMLDivElement>();
   const here =
@@ -143,6 +145,7 @@ export function AttachmentCard({
       }
       onOpen={onOpen}
       action={action}
+      width={width}
     />
   );
 }

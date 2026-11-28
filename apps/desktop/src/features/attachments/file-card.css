@@ -17,7 +17,7 @@
 .file-card {
   position: relative;
   display: flex;
-  width: 176px;
+  width: calc(var(--file-card-width) * 1px);
   flex: none;
   border-radius: var(--radius-card);
   background: var(--surface);
@@ -71,13 +71,6 @@
   line-height: var(--text-caption-line);
   color: var(--foreground);
 }
-.file-card-more {
-  font-family: var(--font-mono);
-  font-size: var(--text-reading-heading);
-  font-weight: 500;
-  line-height: var(--text-reading-heading-line);
-  color: var(--foreground);
-}
 .file-card-still {
   position: absolute;
   inset: 0;
@@ -96,7 +89,7 @@ iframe.file-card-still {
   inset: 0 auto auto 0;
   width: 1280px;
   height: 800px;
-  transform: scale(calc(176 / 1280));
+  transform: scale(calc(var(--file-card-width) / 1280));
   transform-origin: top left;
 }
 /* A PDF's first page, as paper: 62% of the frame's width, centered and
@@ -125,7 +118,7 @@ img.file-card-still[data-paper] {
   color: black;
   font-size: var(--text-doc);
   line-height: var(--text-doc-line);
-  transform: scale(calc(0.62 * 176 / 432));
+  transform: scale(calc(0.62 * var(--file-card-width) / 432));
   transform-origin: top left;
   pointer-events: none;
   animation: file-card-fade var(--dur-enter) ease both;

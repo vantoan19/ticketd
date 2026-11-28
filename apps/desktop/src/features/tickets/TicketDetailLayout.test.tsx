@@ -336,3 +336,90 @@ test("showing another ticket starts its rail and document at the top", async () 
   for (const node of scrollers()) expect(node.scrollTop).toBe(0);
   vi.restoreAllMocks();
 });
+
+test("Files previews three beside the list and four in the expanded ticket, with a header disclosure", async () => {
+  const files = ["report", "logs", "results", "patch", "runbook"].map(
+    (name) => ({
+      id: name,
+      kind: "local_snapshot",
+      display_name: `${name}.txt`,
+      original_filename: `${name}.txt`,
+      locator: `${name}/bytes/${name}.txt`,
+      size_bytes: 32,
+    }),
+  );
+  bridge.invoke.mockImplementation(async (command: string, args?: object) => {
+    if (command === "show_ticket") return ticket;
+    if (command === "ticket_attachments") return files;
+    if (command === "attachment_preview")
+      return {
+        attachment: files.find(
+          (file) => file.id === (args as { id: string }).id,
+        ),
+        status: "unsupported",
+        media_type: null,
+        message: null,
+        can_open: true,
+        usage: { total: 0, entries: [], legacy_drafts_pending: false },
+      };
+    return bridgeDefault(command, args as { reference?: string });
+  });
+  const props = {
+    mention: null,
+    selected: ticket.reference,
+    setSelected: vi.fn(),
+    opened: [ticket.reference],
+    onMentionReady: vi.fn(),
+    onClearMention: vi.fn(),
+    projects: [],
+    plans: [],
+  };
+  const details = (expanded: boolean) => (
+    <TestReads primed={{ ticket }}>
+      <TicketDetails
+        {...props}
+        expanded={expanded}
+        onExpand={() => view.rerender(details(true))}
+        onReturn={() => view.rerender(details(false))}
+      />
+    </TestReads>
+  );
+  const view = render(details(false));
+  const filesList = await screen.findByRole("list", { name: "Files" });
+  const names = () =>
+    within(filesList)
+      .getAllByRole("button", { name: /\.txt$/ })
+      .map((card) => card.getAttribute("aria-label"));
+  await within(filesList).findByRole("button", { name: "report.txt" });
+  expect(names()).toEqual(["report.txt", "logs.txt", "results.txt"]);
+  fireEvent.click(screen.getByRole("button", { name: "Expand ticket" }));
+  expect(names()).toEqual([
+    "report.txt",
+    "logs.txt",
+    "results.txt",
+    "patch.txt",
+  ]);
+  const section = within(screen.getByRole("region", { name: "Files 5" }));
+  const more = section.getByRole("button", { name: "Show all 5" });
+  expect(
+    within(filesList).queryByRole("button", { name: "Show all 5" }),
+  ).toBeNull();
+  expect(section.queryByRole("button", { name: "Attach" })).toBeNull();
+  expect(more.getAttribute("aria-expanded")).toBe("false");
+  fireEvent.click(more);
+  expect(more.getAttribute("aria-expanded")).toBe("true");
+  expect(names()).toEqual([
+    "report.txt",
+    "logs.txt",
+    "results.txt",
+    "patch.txt",
+    "runbook.txt",
+  ]);
+  fireEvent.click(section.getByRole("button", { name: "Show less" }));
+  expect(names()).toEqual([
+    "report.txt",
+    "logs.txt",
+    "results.txt",
+    "patch.txt",
+  ]);
+});

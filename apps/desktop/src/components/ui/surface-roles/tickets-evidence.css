@@ -15,13 +15,14 @@
   line-height: 20px;
   white-space: nowrap;
 }
+.evidence-kind-icon,
 .evidence-item-meta {
   color: var(--muted-foreground);
   font-size: var(--text-caption);
   line-height: 16px;
 }
 .evidence-item-value {
-  white-space: pre-wrap;
+  white-space: nowrap;
   font-size: var(--text-ui);
   line-height: 20px;
 }
@@ -29,16 +30,6 @@
   font-family: var(--font-mono);
   font-size: var(--text-code);
   font-variant-ligatures: none;
-}
-.evidence-confirm-title {
-  font-size: var(--text-ui);
-  font-weight: 500;
-  line-height: 20px;
-}
-.evidence-confirm-text {
-  color: var(--muted-foreground);
-  font-size: var(--text-ui);
-  line-height: 20px;
 }
 .ticket-add-row .ui-button {
   color: var(--muted-foreground);

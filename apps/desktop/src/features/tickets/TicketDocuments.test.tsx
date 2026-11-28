@@ -9,7 +9,8 @@ import {
 } from "@testing-library/react";
 import { afterEach, expect, test, vi } from "vitest";
 import { invoke } from "@tauri-apps/api/core";
-import { TicketFiles as TicketDocuments } from "@/features/tickets/TicketFiles";
+import { useState } from "react";
+import { TicketFiles, type FileAddRequest } from "./TicketFiles";
 import type { Ticket } from "@/lib/api/client";
 import { Backlinks } from "@/features/tickets/Backlinks";
 import { TestOpenTicket } from "@/features/tickets/open-ticket/testing";
@@ -37,6 +38,30 @@ const ticket = {
   title: "Work",
   body: "Description",
 } as Ticket;
+function TicketDocuments({
+  onOpenUpdate,
+}: {
+  onOpenUpdate?: (activityId: string) => void;
+}) {
+  const [request, setRequest] = useState<FileAddRequest | null>(null);
+  const [trigger, setTrigger] = useState<HTMLButtonElement | null>(null);
+  return (
+    <>
+      <button
+        type="button"
+        ref={setTrigger}
+        onClick={() => setRequest({ kind: "document", key: Date.now() })}
+      >
+        Document…
+      </button>
+      <TicketFiles
+        addRequest={request}
+        addTrigger={trigger}
+        {...(onOpenUpdate && { onOpenUpdate })}
+      />
+    </>
+  );
+}
 const files = (onOpenUpdate?: (activityId: string) => void) => (
   <TestOpenTicket ticket={ticket}>
     <TicketDocuments {...(onOpenUpdate && { onOpenUpdate })} />
@@ -98,12 +123,7 @@ test("attaching Activity details from the picker links them without a separate k
     return Promise.resolve(command === "ticket_attachments" ? [] : null);
   });
   render(files());
-  // Empty Files: one "Attach…" row opens File… / Document….
-  fireEvent.pointerDown(
-    await screen.findByRole("button", { name: "Attach…" }),
-    { button: 0, ctrlKey: false },
-  );
-  fireEvent.click(await screen.findByRole("menuitem", { name: "Document…" }));
+  fireEvent.click(await screen.findByRole("button", { name: "Document…" }));
   fireEvent.click(await screen.findByText("T-KQ11 · Update details"));
   expect(invoke).toHaveBeenCalledWith("recent_documents", {
     offset: 0,
@@ -227,11 +247,7 @@ test("a Document attached from the picker appears once the change is reported", 
     return Promise.resolve(command === "ticket_attachments" ? [] : null);
   });
   render(files());
-  fireEvent.pointerDown(
-    await screen.findByRole("button", { name: "Attach…" }),
-    { button: 0, ctrlKey: false },
-  );
-  fireEvent.click(await screen.findByRole("menuitem", { name: "Document…" }));
+  fireEvent.click(await screen.findByRole("button", { name: "Document…" }));
   fireEvent.click(await screen.findByText("T-KQ11 · Update details"));
   expect(await screen.findByRole("button", { name: "Trace" })).toBeTruthy();
 });

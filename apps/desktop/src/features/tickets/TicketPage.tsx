@@ -19,7 +19,10 @@ import { Reminder } from "@/features/tickets/Reminder";
 import { RailPlacement } from "@/features/tickets/rail-placement";
 import { TicketProperties } from "@/features/tickets/TicketProperties";
 import { LinkedWork, LinkedWorkDialogs } from "@/features/tickets/LinkedWork";
-import { TicketFiles } from "@/features/tickets/TicketFiles";
+import {
+  TicketFiles,
+  type FileAddRequest,
+} from "@/features/tickets/TicketFiles";
 import { useLinkedWork } from "@/features/tickets/useLinkedWork";
 import { Activity } from "@/features/tickets/Activity";
 import { SourceConversation } from "@/features/tickets/SourceConversation";
@@ -56,6 +59,7 @@ type NoteTarget = { id: string; key: number };
 /** The ticket document with its wrapping properties and linked context. */
 export function TicketPage({
   active,
+  expanded = false,
   swap = false,
   leaving = false,
   outsideResults = false,
@@ -70,6 +74,7 @@ export function TicketPage({
 }: {
   /** Only the selected ticket reads its links, evidence, and backlinks. */
   active: boolean;
+  expanded?: boolean;
   /** Shown after another open ticket: its document fades up once that one has left. */
   swap?: boolean;
   /** Not the open ticket any more, kept on screen for one exit while it fades out. */
@@ -98,11 +103,12 @@ export function TicketPage({
   const work = useLinkedWork();
   const sourcesConfigured = useSourcesConfigured();
   const trash = useTicketTrash(changed);
-  // A new ticket is calm: empty Subtickets and Evidence fold into one quiet
-  // row of adds under the description, and appear once they have content.
-  const [evidenceCount, setEvidenceCount] = useState<number | null>(null);
+  // Evidence and Files have their add actions under the description.
   const [evidenceRequest, setEvidenceRequest] = useState(0);
-  const [fileAddTarget, setFileAddTarget] = useState<HTMLSpanElement | null>(
+  const [fileAddRequest, setFileAddRequest] = useState<FileAddRequest | null>(
+    null,
+  );
+  const [fileAddTarget, setFileAddTarget] = useState<HTMLButtonElement | null>(
     null,
   );
   const noSubtickets = work.current?.links?.children_progress.total === 0;
@@ -135,17 +141,38 @@ export function TicketPage({
           Link
         </Button>
       )}
-      {evidenceCount === 0 && (
-        <Button
-          variant="ghost"
-          size="sm"
-          onClick={() => setEvidenceRequest((count) => count + 1)}
-        >
-          <Plus aria-hidden="true" />
-          Evidence
-        </Button>
-      )}
-      <span ref={setFileAddTarget} />
+      <Button
+        variant="ghost"
+        size="sm"
+        onClick={() => setEvidenceRequest((count) => count + 1)}
+      >
+        <Plus aria-hidden="true" />
+        Evidence
+      </Button>
+      <DropdownMenu>
+        <DropdownMenuTrigger asChild>
+          <Button ref={setFileAddTarget} variant="ghost" size="sm">
+            <Plus aria-hidden="true" />
+            File
+          </Button>
+        </DropdownMenuTrigger>
+        <DropdownMenuContent align="end">
+          <DropdownMenuItem
+            onSelect={() =>
+              setFileAddRequest({ kind: "file", key: Date.now() })
+            }
+          >
+            File…
+          </DropdownMenuItem>
+          <DropdownMenuItem
+            onSelect={() =>
+              setFileAddRequest({ kind: "document", key: Date.now() })
+            }
+          >
+            Document…
+          </DropdownMenuItem>
+        </DropdownMenuContent>
+      </DropdownMenu>
     </div>
   );
   const ticketRuns = useTicketRuns(ticket.reference, active);
@@ -260,7 +287,10 @@ export function TicketPage({
     <TicketFiles
       key={ticket.reference}
       onOpenUpdate={(id) => setUpdateTarget({ id, key: Date.now() })}
-      emptyTarget={fileAddTarget}
+      expanded={expanded}
+      addRequest={fileAddRequest}
+      hideEmpty
+      addTrigger={fileAddTarget}
     />
   );
   const relationships = active && (
@@ -466,7 +496,6 @@ export function TicketPage({
             trashed={ticket.trashed}
             folded
             addRequest={evidenceRequest}
-            onCount={setEvidenceCount}
           />
         )}
         {

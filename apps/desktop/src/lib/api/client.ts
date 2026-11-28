@@ -411,6 +411,12 @@ const evidenceSchema = lazySchema(() =>
     editing_agent: z.string().nullable(),
   }),
 );
+const evidencePageSchema = lazySchema(() =>
+  z.object({
+    items: z.array(evidenceSchema),
+    total: z.number().int().nonnegative(),
+  }),
+);
 export type Evidence = z.infer<typeof evidenceSchema>;
 export type EvidenceInput = Pick<
   Evidence,
@@ -830,6 +836,11 @@ export const client = {
     return z
       .array(evidenceSchema)
       .parse(await invoke("list_evidence", { reference, offset }));
+  },
+  async evidencePage(reference: string, offset: number) {
+    return evidencePageSchema.parse(
+      await invoke("ticket_evidence_page", { reference, offset }),
+    );
   },
   async addEvidence(
     reference: string,
