@@ -395,7 +395,7 @@ test("shows time in each current status and puts longer waiting reviews first af
     ["In progress", "2h"],
     ["Ready", "2d"],
     ["Blocked", "3d"],
-  ]) {
+  ] as const) {
     expect(
       within(regions.getByRole("region", { name })).getByRole("time")
         .textContent,

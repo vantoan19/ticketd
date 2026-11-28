@@ -41,6 +41,8 @@ const base: View = {
   plan,
   members: [],
   latest_updates: {},
+  status_since: {},
+  pull_request: null,
   counts: {
     todo: 0,
     in_progress: 0,
