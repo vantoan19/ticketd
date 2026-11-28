@@ -3,11 +3,15 @@ import { Button } from "@/components/ui/button";
 import { useLayoutEffect, useRef, useState } from "react";
 import { DropdownMenuItem } from "@/components/ui/dropdown-menu";
 import { Evidence } from "@/features/tickets/Evidence";
-import { Backlinks, type MentionTarget } from "@/features/tickets/Backlinks";
+import type { MentionTarget } from "@/features/tickets/Backlinks";
 import { RailPlacement } from "@/features/tickets/rail-placement";
 import { TicketClosingLine, TicketParentLine } from "./TicketPageLines";
 import { TicketContextLine, TicketBlockersPopover } from "./TicketContextLine";
-import { LinkedWork, LinkedWorkDialogs } from "@/features/tickets/LinkedWork";
+import {
+  LinkedWork,
+  LinkedWorkDialogs,
+  type LinkedWorkHandle,
+} from "@/features/tickets/LinkedWork";
 import {
   TicketFiles,
   type FileAddRequest,
@@ -15,7 +19,7 @@ import {
 import { useLinkedWork, orderBlockers } from "@/features/tickets/useLinkedWork";
 import { Activity } from "@/features/tickets/Activity";
 import { SourceConversation } from "@/features/tickets/SourceConversation";
-import { MarkdownDocument } from "@/features/markdown/MarkdownDocument";
+import { TicketDescription } from "./TicketDescription";
 import { ReadOnlyTitle, SourceDescription } from "./ReadOnlySource";
 import { SourceUnavailableNotice } from "@/features/tickets/SourceUnavailableNotice";
 import { NeedsReviewNotice } from "@/features/sync-review/NeedsReviewNotice";
@@ -31,7 +35,7 @@ import { useTicketTrash } from "@/features/tickets/use-ticket-trash";
 import type { Project } from "@/lib/api/client";
 import { useOpenTicket } from "./open-ticket";
 import { TicketDecisionCard, type ReviewQueue } from "./TicketDecisionCard";
-import { revealInDetail } from "./detail-scroll";
+import { revealTicketDescription } from "./description-navigation";
 import { plural } from "@/lib/format";
 import { useWorkspaceChange } from "@/lib/workspace-change";
 import type { Plan } from "@/lib/api/plans";
@@ -48,7 +52,6 @@ export function TicketPage({
   projects,
   plans,
   select,
-  onOpenGraph,
   noteTarget,
   mention,
   onMention,
@@ -64,7 +67,6 @@ export function TicketPage({
   projects: Project[];
   plans: Plan[];
   select: (reference: string | null) => void;
-  onOpenGraph: () => void;
   noteTarget: NoteTarget | null;
   /** The description mention being followed, once the ticket has been fetched. */
   mention: (MentionTarget & { key: number }) | null;
@@ -104,6 +106,7 @@ export function TicketPage({
   // The source owns the title and description, so they are read, never edited.
   const contentLocked = Boolean(source?.content_locked);
   const linked = useRef<HTMLDivElement>(null);
+  const linkedWork = useRef<LinkedWorkHandle>(null);
   const parentRow = work.rows.find((row) => row.kind === "parent");
   const parent = work.current?.links ? parentRow : ticket.parent;
   const files = active && (
@@ -117,9 +120,12 @@ export function TicketPage({
     />
   );
   const relationships = active && (
-    <LinkedWork work={work} select={select} onOpenGraph={onOpenGraph} document>
-      <Backlinks select={onMention} />
-    </LinkedWork>
+    <LinkedWork
+      ref={linkedWork}
+      work={work}
+      select={select}
+      onMention={onMention}
+    />
   );
   const runs = active && <TicketRunsSection runs={ticketRuns.runs} />;
   const blockerCount = orderBlockers(work).filter(
@@ -156,9 +162,10 @@ export function TicketPage({
             </DropdownMenuItem>
           </>
         }
-        onOpenSubtickets={() =>
-          linked.current?.scrollIntoView({ block: "start" })
-        }
+        onOpenSubtickets={() => {
+          linkedWork.current?.openSubtickets();
+          linked.current?.scrollIntoView({ block: "start" });
+        }}
       />
       <TicketDecisionCard
         active={active && !leaving}
@@ -181,15 +188,7 @@ export function TicketPage({
         onOpenUpdate={(id) => setUpdateTarget({ id, key: Date.now() })}
         onEvidence={() => setShowEvidenceRequest((count) => count + 1)}
         select={select}
-        onAcceptance={(offset) => {
-          const heading = page.current?.querySelector<HTMLElement>(
-            `.description-document [data-heading-offset="${offset}"]`,
-          );
-          if (!heading) return;
-          heading.tabIndex = -1;
-          heading.focus({ preventScroll: true });
-          revealInDetail(heading);
-        }}
+        onAcceptance={() => revealTicketDescription(ticket.id, "acceptance")}
       />
     </>
   );
@@ -266,7 +265,8 @@ export function TicketPage({
                   <p className="sr-only">Description</p>
                   <div className="markdown-preview description-document">
                     {ticket.body.trim() ? (
-                      <MarkdownDocument
+                      <TicketDescription
+                        ticketId={ticket.id}
                         source={ticket.body}
                         select={select}
                         revision={revision}

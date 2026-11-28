@@ -3,10 +3,10 @@ import { cleanup, render, screen } from "@testing-library/react";
 import { afterEach, expect, test, vi } from "vitest";
 import { Activity } from "./Activity";
 import { OpenTicketFor } from "@/features/tickets/open-ticket/parts/activity-testing";
-import { Backlinks } from "./Backlinks";
+import { LinkedWork } from "./LinkedWork";
+import { useLinkedWork } from "./useLinkedWork";
+import { bridgeDefault } from "@/test/bridge-defaults";
 import { Evidence } from "./Evidence";
-import { Subtickets } from "./Subtickets";
-import type { LinkedWorkState } from "./useLinkedWork";
 
 const bridge = vi.hoisted(() => ({ invoke: vi.fn() }));
 vi.mock("@tauri-apps/api/core", () => bridge);
@@ -21,47 +21,46 @@ const headerOf = (name: RegExp | string) =>
     .getByRole("heading", { name })
     .closest<HTMLElement>('[data-slot="section-header"]');
 
-test("each major ticket section opens with its heading row, set apart by space alone", async () => {
+function TicketLinks() {
+  const work = useLinkedWork();
+  return <LinkedWork work={work} select={() => {}} onMention={() => {}} />;
+}
+
+test("major ticket sections use visible headings and mentions live in Linked", async () => {
   bridge.invoke.mockImplementation(async (command: string) =>
     command === "ticket_backlinks"
-      ? [
-          {
-            source_reference: "T-KQ2",
-            source_title: "Cache layer",
-            activity_id: null,
-            reported_at: null,
-            passage: "Blocked on T-KQ1.",
-            mention_start: 11,
-            mention_end: 14,
-          },
-        ]
-      : command === "ticket_evidence_page"
-        ? { items: [], total: 0 }
-        : [],
+      ? {
+          total: 1,
+          items: [
+            {
+              reference: "T-KQ2",
+              title: "Cache layer",
+              status: "In review",
+              mentioned_at: "2026-10-31T10:00:00Z",
+              passages: [
+                {
+                  activity_id: null,
+                  passage: "Blocked on T-KQ1.",
+                  mention_start: 11,
+                  mention_end: 16,
+                },
+              ],
+            },
+          ],
+        }
+      : bridgeDefault(command),
   );
-  const work = {
-    rows: [],
-    current: {
-      links: {
-        children: { next_offset: null },
-        children_progress: { done: 0, total: 0 },
-      },
-    },
-    ticket: { trashed: false },
-  } as unknown as LinkedWorkState;
   render(
-    <>
-      <Subtickets work={work} select={() => {}} />
-      <OpenTicketFor reference="T-KQ1">
-        <Evidence trashed={false} />
-        <Backlinks select={() => {}} />
-        <Activity reference="T-KQ1" projects={[]} active trashed={false} />
-      </OpenTicketFor>
-    </>,
+    <OpenTicketFor reference="T-KQ1">
+      <TicketLinks />
+      <Evidence trashed={false} />
+      <Activity reference="T-KQ1" projects={[]} active trashed={false} />
+    </OpenTicketFor>,
   );
-  await screen.findByText("Cache layer");
-  for (const name of ["Subtickets", "Evidence", /^Mentioned in/, "Activity"])
+  await screen.findByRole("button", {
+    name: /Mentioned in 1 ticket/,
+    expanded: false,
+  });
+  for (const name of ["Linked", "Evidence", "Activity"])
     expect(headerOf(name)).not.toBeNull();
-  // The count sits in the same header as the title.
-  expect(headerOf(/^Mentioned in/)?.textContent).toBe("Mentioned in 1");
 });

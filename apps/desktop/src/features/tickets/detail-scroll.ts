@@ -9,12 +9,12 @@ export function scrollParent(target: HTMLElement): HTMLElement | null {
 }
 
 /** Reveal a target without moving the list, headers, or outer workspace. */
-export function revealInDetail(target: HTMLElement) {
+export function revealInDetail(target: HTMLElement, rect?: DOMRect) {
   const detail = target.closest<HTMLElement>(".detail-scroll");
   if (!detail) return;
   const scroller = scrollParent(target) ?? detail;
   const bounds = scroller.getBoundingClientRect();
-  const item = target.getBoundingClientRect();
+  const item = rect ?? target.getBoundingClientRect();
   const centerOffset = Math.max(0, (scroller.clientHeight - item.height) / 2);
   scroller.scrollTop += item.top - bounds.top - centerOffset;
 }

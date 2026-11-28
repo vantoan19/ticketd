@@ -1,28 +1,42 @@
-import { useMemo, useState } from "react";
+import { useMemo } from "react";
 import { documents, type DocumentLink } from "@/features/documents/api";
 import { client, type Ticket } from "@/lib/api/client";
-import type { FailureDescription } from "@/lib/api/describe-failure";
-import { read, skip, useRead } from "@/lib/workspace-reads";
+import {
+  pagedRead,
+  read,
+  skip,
+  usePagedRead,
+  useRead,
+} from "@/lib/workspace-reads";
 import { documentLinksRead } from "./files";
 
 // What mentions a Ticket: other tickets and updates (a window at a time), and
 // Documents.
 
-type Backlink = Awaited<ReturnType<typeof client.backlinks>>[number];
+type MentionPage = Awaited<ReturnType<typeof client.backlinks>>;
 
-export type TicketBacklinks = {
-  /** The shown window; the previous one stays while the next is read. Each
-   * mentioning update carries its `reported_at`. */
-  links: Backlink[] | undefined;
-  failure: FailureDescription | null;
-  retry(): void;
-};
-
-const backlinksRead = read({
+const backlinksRead = pagedRead({
   key: "backlinks",
-  call: (args: { reference: string; offset: number }) =>
-    client.backlinks(args.reference, args.offset),
+  call: (reference: string, offset) => client.backlinks(reference, offset),
+  next: (page: MentionPage, pages) => {
+    const loaded = pages.reduce(
+      (count, entry) => count + entry.items.length,
+      0,
+    );
+    return page.items.length > 0 && loaded < page.total ? loaded : null;
+  },
+  join: (pages: readonly MentionPage[]) => {
+    const tickets = new Map<string, MentionPage["items"][number]>();
+    for (const page of pages) {
+      for (const ticket of page.items) {
+        if (!tickets.has(ticket.reference))
+          tickets.set(ticket.reference, ticket);
+      }
+    }
+    return { items: [...tickets.values()], total: pages.at(-1)?.total ?? 0 };
+  },
   failure: "load mentions",
+  more: "load more mentions",
 });
 
 const PAGE = 100;
@@ -43,24 +57,11 @@ const laterDocumentBacklinksRead = read({
   failure: "load mentions",
 });
 
-/** One window of 20 backlinks, from `offset`. */
-export function useBacklinks(
-  record: Ticket | undefined,
-  offset: number,
-): TicketBacklinks {
-  const state = useRead(
-    backlinksRead,
-    record ? { reference: record.reference, offset } : skip,
-  );
-  // Show the previous window until the next one is read, so nothing jumps.
-  const [shown, setShown] = useState(state.value);
-  if (state.value && state.value !== shown) setShown(state.value);
-  return {
-    links: state.value ?? shown,
-    failure: state.failure,
-    retry: state.retry,
-  };
+export function useBacklinks(record: Ticket | undefined) {
+  return usePagedRead(backlinksRead, record?.reference ?? skip);
 }
+
+export type TicketBacklinks = ReturnType<typeof useBacklinks>;
 
 /** The Documents that mention the Ticket (incoming links of kind document). */
 export function useDocumentBacklinks(
