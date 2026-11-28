@@ -387,12 +387,6 @@
   max-width: none;
   margin: auto;
 }
-.attachment-preview-image[data-zoom="in"] {
-  cursor: zoom-in;
-}
-.attachment-preview-image[data-zoom="out"] {
-  cursor: zoom-out;
-}
 .attachment-preview-canvas video {
   max-width: 100%;
   max-height: 60dvh;

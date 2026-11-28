@@ -14,6 +14,7 @@ import { fitScale, type Size } from "./image-layout";
 import { stepZoom } from "./pdf-layout";
 import type { StageKeys } from "./PdfStage";
 import { ViewBar, ViewBarGroup } from "./ViewBar";
+import { useDragPan } from "./use-drag-pan";
 
 /** The room around the picture inside the stage: 20px, and 72px under it for the bar. */
 const PAD = 20;
@@ -22,8 +23,8 @@ const BAR_ROOM = 72;
 /**
  * A picture in the viewer: it fits inside the stage above the view bar on its own
  * checkerboard, and the stage stays recessed. The bar is the zoom group
- * ("- 66% + · Fit"); clicking the picture toggles Fit and 100%, and + - 0 zoom and
- * fit while the stage has focus (the PDF's keys, `attachments-zoom`).
+ * ("- 66% + · Fit"); clicking the picture toggles Fit and 100%, and dragging
+ * pans an overflowing picture. + - 0 zoom and fit while the stage has focus.
  */
 export function ImageStage({
   file,
@@ -44,6 +45,7 @@ export function ImageStage({
   // The width the stage shows, which the bar spans so it stays centered while it scrolls.
   const [shown, setShown] = useState(0);
   const [zoom, setZoom] = useState<number | "fit">("fit");
+  const { dragging, startPan, consumeDragClick } = useDragPan(scrollerRef);
   // The point of the picture in the middle of the view, kept across a zoom.
   const anchor = useRef<{ x: number; y: number } | null>(null);
 
@@ -124,6 +126,10 @@ export function ImageStage({
   }, [keysRef, scale, fit]);
 
   const fitted = zoom === "fit";
+  const pannable =
+    natural &&
+    (Math.round(natural.width * scale) > room.width ||
+      Math.round(natural.height * scale) > room.height);
   return (
     <>
       <div className="attachment-picture">
@@ -132,8 +138,11 @@ export function ImageStage({
           className="attachment-preview-image"
           src={url}
           alt={file.display_name}
+          draggable={false}
           // A click toggles between the picture fitted and at its own size.
           data-zoom={fitted ? "in" : "out"}
+          data-pannable={pannable ? "" : undefined}
+          data-dragging={dragging ? "" : undefined}
           style={
             natural
               ? { width: Math.round(natural.width * scale), height: "auto" }
@@ -144,7 +153,10 @@ export function ImageStage({
               event.currentTarget;
             if (width > 0 && height > 0) setNatural({ width, height });
           }}
-          onClick={() => changeZoom(fitted ? 1 : "fit")}
+          onPointerDown={startPan}
+          onClick={() => {
+            if (!consumeDragClick()) changeZoom(fitted ? 1 : "fit");
+          }}
           onError={onError}
         />
       </div>

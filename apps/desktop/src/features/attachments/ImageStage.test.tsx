@@ -92,6 +92,37 @@ test("clicking the picture toggles between Fit and 100%", () => {
   expect(fit.getAttribute("aria-pressed")).toBe("true");
 });
 
+test("dragging a zoomed picture pans both axes and keeps the current zoom", () => {
+  const { stage, image } = loaded();
+  Object.defineProperties(stage, {
+    scrollWidth: { value: 1680 },
+    scrollHeight: { value: 992 },
+  });
+  Object.defineProperty(image, "setPointerCapture", { value: () => {} });
+  fireEvent.click(image);
+  const left = stage.scrollLeft;
+  const top = stage.scrollTop;
+
+  const pointer = { pointerId: 1, pointerType: "mouse", button: 0 };
+  fireEvent.pointerDown(image, { ...pointer, clientX: 300, clientY: 250 });
+  fireEvent.pointerMove(image, { ...pointer, clientX: 260, clientY: 230 });
+  fireEvent.pointerMove(stage, { ...pointer, clientX: 220, clientY: 190 });
+  fireEvent.pointerUp(stage, { ...pointer, clientX: 220, clientY: 190 });
+  fireEvent.click(image);
+
+  expect(stage.scrollLeft).toBe(left + 80);
+  expect(stage.scrollTop).toBe(top + 60);
+  expect(zoomOf()).toBe("100%");
+  const fit = screen.getByRole("button", { name: "Fit" });
+  expect(fit.getAttribute("aria-pressed")).toBe("false");
+
+  fireEvent.pointerDown(image, { ...pointer, clientX: 220, clientY: 190 });
+  fireEvent.pointerMove(image, { ...pointer, clientX: 221, clientY: 191 });
+  fireEvent.pointerUp(image, { ...pointer, clientX: 221, clientY: 191 });
+  fireEvent.click(image);
+  expect(fit.getAttribute("aria-pressed")).toBe("true");
+});
+
 test("+ - and 0 zoom and fit while the stage has focus, but not inside a field", () => {
   const { stage, image } = loaded();
   const start = zoomOf();
