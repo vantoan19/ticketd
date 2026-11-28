@@ -1,4 +1,12 @@
-import { useContext, useEffect, useState, type ReactNode } from "react";
+import {
+  useContext,
+  useEffect,
+  useLayoutEffect,
+  useMemo,
+  useRef,
+  useState,
+  type ReactNode,
+} from "react";
 import { TriangleAlert } from "lucide-react";
 import { useStatusLine } from "@/components/ui/use-status-line";
 import { Tooltip } from "@/components/ui/tooltip";
@@ -46,10 +54,12 @@ function mergeChatSummaries(projected: ChatSummary[], linked: ChatSummary[]) {
 
 /** Keep the opening's decision to give agents room in the document. */
 export function TicketAgentSession({
+  selected,
   record,
   preview,
   children,
 }: {
+  selected: string | null;
   record: TicketState;
   preview: Ticket | undefined;
   children: (loading: boolean) => ReactNode;
@@ -57,6 +67,25 @@ export function TicketAgentSession({
   const ticket = record.value === undefined ? preview : record.value;
   const { enabled, checking } = useChatFeature();
   const { show } = useStatusLine();
+  const selection = useMemo(() => ({ reference: selected }), [selected]);
+  const currentSelection = useRef<typeof selection | null>(null);
+  const dismissUnknownAnswer = useRef<(() => void) | void>(undefined);
+  useLayoutEffect(() => {
+    currentSelection.current = selection;
+    return () => {
+      currentSelection.current = null;
+      dismissUnknownAnswer.current?.();
+      dismissUnknownAnswer.current = undefined;
+    };
+  }, [selection]);
+  function reportUnknownAnswer() {
+    // The request card can close while its ticket is still selected.
+    if (!selection.reference || currentSelection.current !== selection) return;
+    dismissUnknownAnswer.current = show({
+      tone: "error",
+      message: "Couldn't confirm whether the answer arrived.",
+    });
+  }
   const { list } = useLinkedChats(
     ticket && enabled ? { kind: "ticket", id: ticket.id } : null,
   );
@@ -117,6 +146,7 @@ export function TicketAgentSession({
         ready,
         openedWithCard: sameOpening ? opening.withCard : null,
         state,
+        reportUnknownAnswer,
         update:
           latest.value === undefined
             ? (ticket?.progress_summary ?? null)

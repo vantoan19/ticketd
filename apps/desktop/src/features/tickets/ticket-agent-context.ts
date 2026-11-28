@@ -7,5 +7,6 @@ export const AgentContext = createContext<{
   openedWithCard: boolean | null;
   ready: boolean;
   state: TicketAgentState | null;
+  reportUnknownAnswer: () => void;
   update: LatestUpdate | null;
 } | null>(null);

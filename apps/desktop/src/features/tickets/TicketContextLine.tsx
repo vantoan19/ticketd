@@ -253,7 +253,9 @@ export function TicketContextLine({
           {control}
         </div>
       ) : (
-        control
+        <span key={label} className="ticket-context-property">
+          {control}
+        </span>
       ),
     );
   };
@@ -261,7 +263,6 @@ export function TicketContextLine({
   addRow(
     "Status",
     <TicketCommandPicker
-      key="status"
       {...picker}
       scope="Status"
       trigger={
@@ -329,10 +330,9 @@ export function TicketContextLine({
       </RailRow>
     );
     addRow(
-      scope,
+      "Project / Plan",
       projectName && planName ? (
         <PropertyMenu
-          key="assignment"
           picker={picker}
           trigger={trigger}
           label="Project and Plan"
@@ -347,12 +347,7 @@ export function TicketContextLine({
           </DropdownMenuItem>
         </PropertyMenu>
       ) : (
-        <TicketCommandPicker
-          key="assignment"
-          {...picker}
-          scope={scope}
-          trigger={trigger}
-        />
+        <TicketCommandPicker {...picker} scope={scope} trigger={trigger} />
       ),
     );
   }
@@ -361,7 +356,6 @@ export function TicketContextLine({
     addRow(
       "Blocked by",
       <TicketBlockersPopover
-        key="blockers"
         removable={rail}
         work={work}
         select={select}
@@ -391,7 +385,6 @@ export function TicketContextLine({
     addRow(
       "Subtickets",
       <RailRow
-        key="subtickets"
         onClick={onOpenSubtickets}
         icon={
           <svg
@@ -426,7 +419,6 @@ export function TicketContextLine({
     addRow(
       "Tags",
       <TicketCommandPicker
-        key="tags"
         {...picker}
         scope="Tags"
         trigger={
@@ -457,7 +449,6 @@ export function TicketContextLine({
     addRow(
       "Reminder",
       <TicketCommandPicker
-        key="reminder"
         {...picker}
         scope="Reminder"
         trigger={
@@ -556,7 +547,6 @@ export function TicketContextLine({
       )}
     </PropertyMenu>
   );
-  const last = rail ? null : chips.pop();
   return (
     <div
       className={rail ? "ticket-rail-properties" : "ticket-context-line"}
@@ -566,12 +556,9 @@ export function TicketContextLine({
       {chips}
       {rail ? (
         add
-      ) : (
-        <span className="ticket-context-tail">
-          {last}
-          {add}
-        </span>
-      )}
+      ) : add ? (
+        <span className="ticket-context-add">{add}</span>
+      ) : null}
     </div>
   );
 }

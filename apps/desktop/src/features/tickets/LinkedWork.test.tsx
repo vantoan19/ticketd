@@ -87,6 +87,10 @@ function bridge(
     parent?: Item;
     children?: Item[];
     finishedChildren?: Item[];
+    readChildren?: (offset: number) => Promise<{
+      children: ReturnType<typeof pageOf>;
+      children_progress: { total: number; done: number };
+    }>;
     discovered?: Item[];
     nextRelated?: Item[];
     duplicate_of?: Item;
@@ -105,16 +109,19 @@ function bridge(
         ...(options.children ?? []),
         ...(options.finishedChildren ?? []),
       ];
+      const children = (await options.readChildren?.(offset)) ?? {
+        children: offset
+          ? pageOf(options.finishedChildren)
+          : pageOf(options.children, options.finishedChildren ? 20 : null),
+        children_progress: {
+          total: totalChildren.length,
+          done: totalChildren.filter((item) => item.status === "Done").length,
+        },
+      };
       return {
         relationships: {
           parent: options.parent ? related(options.parent) : null,
-          children: offset
-            ? pageOf(options.finishedChildren)
-            : pageOf(options.children, options.finishedChildren ? 20 : null),
-          children_progress: {
-            total: totalChildren.length,
-            done: totalChildren.filter((item) => item.status === "Done").length,
-          },
+          ...children,
           prerequisites: pageOf(options.prerequisites),
           blocking: pageOf(options.blocking),
           related: offset
@@ -463,6 +470,67 @@ test("subtickets show seven in review, in progress and Todo, with named folds", 
   );
   expect(linked.getByRole("button", { name: "Todo task 6" })).toBeTruthy();
   expect(linked.getByRole("button", { name: "Done task 3" })).toBeTruthy();
+});
+
+test("a partial list of finished subtickets does not count Canceled as open", async () => {
+  const canceled = Array.from({ length: 20 }, (_, index) => ({
+    reference: `T-C${index + 1}`,
+    title: `Canceled task ${index + 1}`,
+    status: "Canceled",
+  }));
+  bridge({
+    readChildren: async (offset) =>
+      offset
+        ? new Promise(() => {})
+        : {
+            children: pageOf(canceled, 20),
+            children_progress: { total: 24, done: 0 },
+          },
+  });
+  renderSection(base);
+  const group = await screen.findByRole("button", {
+    name: /Subtickets loading links/,
+    expanded: false,
+  });
+  fireEvent.click(group);
+  expect(screen.queryByRole("button", { name: /more open/ })).toBeNull();
+  expect(
+    screen.getByRole("button", { name: /20 finished: T-C1, T-C2/ }),
+  ).toBeTruthy();
+});
+
+test("loaded open subtickets beyond seven remain reachable before paging completes", async () => {
+  const children = Array.from({ length: 20 }, (_, index) => ({
+    reference: `T-S${index + 1}`,
+    title: `Task ${index + 1}`,
+    status: index < 7 ? "Todo" : "Done",
+  }));
+  bridge({
+    readChildren: async (offset) => {
+      if (!offset)
+        return {
+          children: pageOf(children, 20),
+          children_progress: { total: 21, done: 14 },
+        };
+      if (offset === 20)
+        return {
+          children: pageOf(
+            [{ reference: "T-S21", title: "New open subticket" }],
+            40,
+          ),
+          children_progress: { total: 41, done: 22 },
+        };
+      return new Promise(() => {});
+    },
+  });
+  renderSection(base);
+  const overflow = await screen.findByRole("button", {
+    name: "1 more open: T-S21",
+  });
+  fireEvent.click(overflow);
+  expect(
+    screen.getByRole("button", { name: "New open subticket" }),
+  ).toBeTruthy();
 });
 
 test("a row whose removal failed comes back, with the reason", async () => {

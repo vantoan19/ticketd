@@ -213,6 +213,7 @@ function ticketView(
               openedWithCard: true,
               ready: true,
               state: agentState,
+              reportUnknownAnswer: () => {},
               update: null,
             }
           }

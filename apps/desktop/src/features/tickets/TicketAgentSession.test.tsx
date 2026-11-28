@@ -30,7 +30,11 @@ const ticket = ticketFor("T-KQ1");
 function Session({ children }: { children?: ReactNode }) {
   const record = useTicket(ticket.reference);
   return (
-    <TicketAgentSession record={record} preview={ticket}>
+    <TicketAgentSession
+      selected={ticket.reference}
+      record={record}
+      preview={ticket}
+    >
       {(loading) => (
         <>
           <output>{loading ? "loading" : "ready"}</output>

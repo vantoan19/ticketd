@@ -59,6 +59,7 @@ function card(selected: Entry, record: Ticket): ReactNode {
           openedWithCard: false,
           ready: true,
           state: null,
+          reportUnknownAnswer: () => {},
           update: null,
         }}
       >
