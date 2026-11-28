@@ -649,6 +649,12 @@ the space below the shared pane header for tickets.
   In progress, Ready and Blocked, and the last change at the right. Canceled
   and Duplicate are excluded. Loading keeps the head and shows a progress
   skeleton and three skeleton rows. A failed read shows Retry below the head.
+- **Since you last looked:** after Files and before Documents, up to five 36px
+  rows show the latest status change, join or authored update for different
+  tickets. A status change shows its icon, ticket title and new status. A new
+  member reads “Joined · {title}”. An update shows its first sentence. Each row
+  opens its ticket in the detail pane. The section appears on active Plans
+  with changes after this computer's last look, recorded when leaving the Plan.
 - **Overview documents:** the spec appears first with a Spec badge, then
   Documents in newest-first order. Six display before Show all. Each directly
   opens the Document, with Back to the Plan in the reader. On active Plans
@@ -663,7 +669,7 @@ the space below the shared pane header for tickets.
 
 The **Plans** and **Projects** pages use a PageHeader with a count, a one-sentence lede and a small primary action. New Plan names the Plan in a small dialog and opens it. It is also available from the command palette or with N on the Plans page. Plans uses the centered management-page layout (860px maximum, 44px top and 40px side gutters, 24px and 16px when narrow). Active / Archived and New Plan share the header row. On narrow pages, the controls wrap below the title and lede.
 
-An active **Plans** row starts with a 20px Plan ring and its name. The second line lists nonzero states in status words, for example “3 in review · 1 in progress · 2 ready · 7 blocked”. The right edge holds the done/countable total as “23 of 29” above the time since the newest member change. An orange dot leads the state for review work or a Plan ready to wrap up. A Plan with only externally blocked work left reads “Ready to wrap up”. A nonempty Plan with no open tickets reads “All done · ready to archive”. Archived rows are muted and read “N left open” or “All done”. Hover or keyboard focus reveals Reactivate, with Undo on the status line. The sidebar places an orange dot before an active Plan’s count when it has tickets In review, and the row’s accessible description names the review count.
+An active **Plans** row starts with a 20px Plan ring and its name. The second line lists nonzero states in status words, for example “3 in review · 1 in progress · 2 ready · 7 blocked”. The right edge holds the done/countable total as “23 of 29” above the time since the newest member change. An orange dot leads the state for review work or a Plan ready to wrap up. Otherwise, the blue unread dot leads the state when the latest member change is after this computer’s last look. A Plan with only externally blocked work left reads “Ready to wrap up”. A nonempty Plan with no open tickets reads “All done · ready to archive”. Archived rows are muted and read “N left open” or “All done”. Hover or keyboard focus reveals Reactivate, with Undo on the status line. The sidebar places an orange dot before an active Plan’s count when it has tickets In review, and the row’s accessible description names the review count.
 
 Rows with reviews come first, then the most recent member change. Opening the page sets the order. Updates refresh each row in place, and new rows join after the existing ones. Whole-Plan counts stay authoritative. The Flow metadata window can confirm readiness and wrap-up for up to 500 members and 50 prerequisites per member. When the window omits information, the row gives the known status totals. A failed refresh keeps the last good row and offers Retry.
 

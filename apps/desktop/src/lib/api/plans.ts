@@ -1,6 +1,7 @@
 import { invoke } from "@/lib/api/bridge-failure";
 import { lazySchema } from "@/lib/api/lazy-schema";
 import { z } from "zod";
+import { ticketStatuses } from "@/lib/statuses";
 import { graphSchema, ticketSchema } from "./client";
 const planSchema = lazySchema(() =>
   z.object({
@@ -46,10 +47,36 @@ const viewSchema = lazySchema(() =>
   }),
 );
 
+const activitySchema = lazySchema(() => {
+  const common = {
+    reference: z.string(),
+    title: z.string(),
+    timestamp: z.iso.datetime({ offset: true }),
+    editing_agent: z.string().nullable(),
+  };
+  const status = z.enum(ticketStatuses);
+  return z.array(
+    z.discriminatedUnion("kind", [
+      z.object({
+        ...common,
+        kind: z.literal("status"),
+        from: status,
+        to: status,
+      }),
+      z.object({ ...common, kind: z.literal("joined") }),
+      z.object({ ...common, kind: z.literal("update"), brief: z.string() }),
+    ]),
+  );
+});
+
 export type Plan = z.infer<typeof planSchema>;
 export type View = z.infer<typeof viewSchema>;
 export type PlanCounts = View["counts"];
+export type PlanActivity = z.infer<typeof activitySchema>[number];
 export const plansClient = {
+  async activity(id: string, limit: number) {
+    return activitySchema.parse(await invoke("plan_activity", { id, limit }));
+  },
   async setDocument(planId: string, documentId: string, present: boolean) {
     await invoke("set_plan_document", {
       planId,

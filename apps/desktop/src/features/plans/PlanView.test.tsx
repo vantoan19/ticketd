@@ -8,6 +8,8 @@ import {
   within,
 } from "@testing-library/react";
 import { afterEach, beforeEach, expect, test, vi } from "vitest";
+import { StrictMode } from "react";
+import { loadPreferences, setPreference } from "@/lib/preferences";
 import { App } from "@/app/App";
 import { bridgeDefault } from "@/test/bridge-defaults";
 
@@ -63,6 +65,7 @@ const ticket = (item: Fake) => ({
 });
 
 beforeEach(() => {
+  localStorage.clear();
   plans = [{ id: "e1", name: "Launch", archived: false, purpose: "" }];
   tickets = [
     { id: "1", reference: "T-KQ1", status: "Todo", plan: "e1" },
@@ -97,6 +100,12 @@ beforeEach(() => {
             duplicate: count("Duplicate"),
           },
         };
+      }
+      case "show_ticket": {
+        const member = tickets.find(
+          (item) => item.reference === input?.reference,
+        );
+        return member ? ticket(member) : null;
       }
       case "show_document":
         return {
@@ -564,4 +573,156 @@ test("a long purpose expands and the spec opens with a route back to its Plan", 
   const back = await screen.findByRole("button", { name: "Back to Launch" });
   fireEvent.click(back);
   expect(await screen.findByRole("region", { name: "Launch" })).toBeTruthy();
+});
+
+test("a first visit records a last look only after leaving the Plan", async () => {
+  render(
+    <StrictMode>
+      <App />
+    </StrictMode>,
+  );
+  fireEvent.click(await screen.findByRole("button", { name: "Launch" }));
+  await within(context()).findByText("1 of 2 done");
+  expect(loadPreferences().planLastLook.e1).toBeUndefined();
+  expect(
+    screen.queryByRole("region", { name: "Since you last looked" }),
+  ).toBeNull();
+  expect(calls.some(([name]) => name === "plan_activity")).toBe(false);
+
+  fireEvent.click(screen.getByRole("radio", { name: "List" }));
+  fireEvent.click(screen.getByRole("radio", { name: "Overview" }));
+  await within(context()).findByText("1 of 2 done");
+  expect(loadPreferences().planLastLook.e1).toBeUndefined();
+  const beforeLeaving = Date.now();
+  fireEvent.click(screen.getByRole("button", { name: "Plans" }));
+  await screen.findByRole("heading", { name: "Plans" });
+  expect(
+    Date.parse(loadPreferences().planLastLook.e1 ?? ""),
+  ).toBeGreaterThanOrEqual(beforeLeaving);
+});
+
+test("the Overview shows new changes, opens their ticket, and clears on return", async () => {
+  const lastLook = "2026-02-01T00:00:00.000Z";
+  setPreference("planLastLook", { e1: lastLook });
+  const timestamp = "2026-02-02T00:00:00.000Z";
+  tickets.push(
+    ...[4, 5, 6, 7, 8].map((id) => ({
+      id: String(id),
+      reference: `T-KQ${id}`,
+      status: "Todo",
+      plan: "e1",
+    })),
+  );
+  const base = { timestamp, editing_agent: "agent" };
+  const changes = [
+    {
+      ...base,
+      reference: "T-KQ1",
+      title: "Release work",
+      kind: "update",
+      brief: "**Verified the release.** Another sentence.",
+    },
+    {
+      ...base,
+      reference: "T-KQ2",
+      title: "Release build",
+      kind: "status",
+      from: "In review",
+      to: "Done",
+    },
+    ...[4, 5, 6, 7].map((id) => ({
+      ...base,
+      reference: `T-KQ${id}`,
+      title: `Member ${id}`,
+      kind: "joined",
+    })),
+  ];
+  const feed = [...changes.slice(0, 5), { ...changes[5], timestamp: lastLook }];
+  const answer = bridge.invoke.getMockImplementation()!;
+  bridge.invoke.mockImplementation(async (command: string, args: never) =>
+    command === "plan_activity"
+      ? feed.slice(0, (args as { limit: number }).limit)
+      : answer(command, args),
+  );
+
+  await openLaunch();
+  const updates = await screen.findByRole("region", {
+    name: "Since you last looked",
+  });
+  expect(within(updates).getAllByRole("button")).toHaveLength(5);
+  expect(
+    within(updates).getByRole("button", { name: /Release build.*Done/ }),
+  ).toBeTruthy();
+  expect(
+    within(updates).getByRole("button", { name: /Joined · Member 4/ }),
+  ).toBeTruthy();
+  expect(within(updates).queryByText("Joined · Member 7")).toBeNull();
+  expect(within(updates).queryByText("Another sentence.")).toBeNull();
+
+  fireEvent.click(
+    within(updates).getByRole("button", { name: /Verified the release\./ }),
+  );
+  expect(
+    await screen.findByRole("button", { name: "Close ticket details" }),
+  ).toBeTruthy();
+  expect(bridge.invoke).toHaveBeenCalledWith("show_ticket", {
+    reference: "T-KQ1",
+  });
+  expect(loadPreferences().planLastLook.e1).toBe(lastLook);
+  expect(
+    screen.getByRole("region", { name: "Since you last looked" }),
+  ).toBeTruthy();
+
+  fireEvent.click(screen.getByRole("button", { name: "Plans" }));
+  await screen.findByRole("heading", { name: "Plans" });
+  fireEvent.click(await screen.findByRole("button", { name: "Launch" }));
+  await within(context()).findByText("1 of 7 done");
+  expect(
+    screen.queryByRole("region", { name: "Since you last looked" }),
+  ).toBeNull();
+  expect(bridge.invoke).toHaveBeenCalledWith("plan_activity", {
+    id: "e1",
+    limit: 5,
+  });
+});
+
+test("the Overview excludes changes at the last look and hides the feed after archive", async () => {
+  const lastLook = "2026-02-01T00:00:00.000Z";
+  setPreference("planLastLook", { e1: lastLook });
+  const answer = bridge.invoke.getMockImplementation()!;
+  bridge.invoke.mockImplementation(async (command: string, args: never) =>
+    command === "plan_activity"
+      ? [
+          {
+            reference: "T-KQ1",
+            title: "New member",
+            timestamp: "2026-02-02T00:00:00.000Z",
+            editing_agent: null,
+            kind: "joined",
+          },
+          {
+            reference: "T-KQ2",
+            title: "Previously seen",
+            timestamp: lastLook,
+            editing_agent: null,
+            kind: "joined",
+          },
+        ]
+      : answer(command, args),
+  );
+  await openLaunch();
+  const updates = await screen.findByRole("region", {
+    name: "Since you last looked",
+  });
+  expect(
+    within(updates).getByRole("button", { name: /Joined · New member/ }),
+  ).toBeTruthy();
+  expect(
+    within(updates).queryByRole("button", { name: /Joined · Previously seen/ }),
+  ).toBeNull();
+  await chooseAction("Archive Plan");
+  await screen.findByRole("button", { name: "Reactivate" });
+  expect(
+    screen.queryByRole("region", { name: "Since you last looked" }),
+  ).toBeNull();
 });

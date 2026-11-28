@@ -10,6 +10,7 @@ import { DocumentNavigation } from "@/features/documents/navigation";
 import { plansClient, type Plan, type View } from "@/lib/api/plans";
 import { compactAgo, formatDateTime } from "@/lib/format";
 import { PlanDocuments } from "./PlanDocuments";
+import { PlanOverviewChanges } from "./PlanOverviewChanges";
 import { planWorkModel } from "./plan-work-model";
 import { usePlanAction, type PlanViewState } from "./usePlanView";
 import "./plan-overview.css";
@@ -22,6 +23,8 @@ export function PlanOverview({
   plan,
   state,
   work,
+  selected,
+  onOpen,
   paneRef,
 }: {
   plan: Plan;
@@ -80,7 +83,13 @@ export function PlanOverview({
                 {/* PlanOverviewWrapUp */}
                 {/* PlanOverviewSections, or PlanEmptyState */}
                 {/* PlanOverviewFiles */}
-                {/* PlanOverviewChanges */}
+                {view.members.length > 0 && (
+                  <PlanOverviewChanges
+                    plan={current}
+                    selected={selected}
+                    onOpen={onOpen}
+                  />
+                )}
                 <PlanDocuments view={view} state={state} />
               </>
             ) : (
