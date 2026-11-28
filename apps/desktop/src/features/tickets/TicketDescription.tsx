@@ -236,12 +236,19 @@ function TicketDescriptionReading({ ticketId, peek, ...markdown }: Props) {
         ? range.getBoundingClientRect()
         : undefined,
     );
-    if (typeof Highlight !== "undefined" && CSS.highlights) {
-      CSS.highlights.set("ticket-description-find", new Highlight(range));
-      return () => {
-        CSS.highlights.delete("ticket-description-find");
-      };
+    const highlights = globalThis.CSS?.highlights;
+    if (typeof Highlight === "undefined" || !highlights) return;
+    const name = "ticket-description-find";
+    let highlight = highlights.get(name);
+    if (!highlight) {
+      highlight = new Highlight();
+      highlights.set(name, highlight);
     }
+    highlight.add(range);
+    return () => {
+      highlight.delete(range);
+      if (highlight.size === 0) highlights.delete(name);
+    };
   }, [currentMatch]);
 
   function find(query: string, direction = 0) {

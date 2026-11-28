@@ -368,7 +368,7 @@ A workspace navigation sheet closes when the window becomes wide and stays close
 
 A navigation sheet is at most 280px or viewport width minus 32px. Popovers retain 16px viewport clearance and collide away from edges. Forms that cannot fit a popover use a sheet/dialog with a scrollable body. At short heights, keep form actions reachable without clipping the body.
 
-Switching pane modes, resizing, or opening navigation must not remount drafts, reset selection, or lose list scroll position. Horizontal scrolling belongs only inside code, wide tables, or the graph canvas. At 200% zoom, reflow the shell rather than shrinking the type. Native page
+Switching pane modes, resizing, or opening navigation must not remount drafts, reset selection, or lose list scroll position. Horizontal scrolling stays within code, wide tables, the graph canvas, and the collapsed Files row. At 200% zoom, reflow the shell rather than shrinking the type. Native page
 zoom uses the current webview's zoom API, from 50% to 200%; five Zoom in steps
 from 100% reach exactly 200%. Mod+= or Mod+plus enlarges, Mod+minus reduces,
 and Mod+0 resets to 100%, including while a field, rich editor, dialog or graph
@@ -522,7 +522,7 @@ A ticket in Trash shows one compact neutral notice at the top of the document co
 
 The single document column is centred at up to 680px including 32px gutters (16px in a pane at most 480px wide), with 26px/34px title type and 15px/24px prose. Full width with the rail gives the prose a 680px column of its own and 40px top padding. Read-only workspace state disables description and title editing. The description control explains the reason through its tooltip.
 
-Use 8px from title to state line and 24px from state line to the description. Use 40px between major sections. The ticket is one scrolling page. Each major section in the reading column (Linked, Evidence, Files, Source conversation, Activity) opens with a section header holding the title, count, and actions. Space sets sections apart. Shadow boundaries belong to pane edges, floating surfaces, and the source description card. Empty Ticket sections share the property menu.
+Use 8px from title to state line and 24px from state line to the description. Use 48px between major sections. The ticket is one scrolling page. Each major section in the reading column (Linked, Evidence, Files, Source conversation, Activity) opens with a section header holding the title, count, and actions. Space sets sections apart. Shadow boundaries belong to pane edges, floating surfaces, and the source description card. Empty Ticket sections share the property menu.
 
 The rail appears for an expanded ticket at a detail pane width of at least 1024px. It holds Status, Project, Plan, Blocked by, Subtickets, Tags and Reminder in that order, with 80px labels for present properties and “+ Add property” below. Blocked by opens the blockers popover. Subtickets opens the same list inline in the rail. “On this page” appears from three description headings and marks the heading at the reading line, 48px below the scroll area's top. Choosing a heading opens its fold when needed and focuses the heading in the description. Linked follows with Parent, Blocks, Related and “{n} mentions” disclosure rows, along with duplicate relationships when present. The single-column layout puts the context line under the title and Linked below the description. The full-width layout puts these controls in the rail, with the parent link above the title in either layout.
 

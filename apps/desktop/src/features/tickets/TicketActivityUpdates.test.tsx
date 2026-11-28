@@ -119,7 +119,13 @@ afterEach(async () => {
   localStorage.clear();
 });
 
-function Detail({ signal }: { signal?: ChangeSignal } = {}) {
+function Detail({
+  signal,
+  inboxTarget,
+}: {
+  signal?: ChangeSignal;
+  inboxTarget?: { reference: string; id: string; key: number };
+} = {}) {
   const [selected, setSelected] = useState<string | null>(ticket.reference);
   return (
     <TestReads {...(signal && { signal })}>
@@ -136,6 +142,7 @@ function Detail({ signal }: { signal?: ChangeSignal } = {}) {
         }
         position={{ index: selected === ticket.reference ? 1 : 2, total: 2 }}
         mention={null}
+        {...(inboxTarget && { inboxTarget })}
         expanded={false}
         onExpand={() => {}}
         onReturn={() => {}}
@@ -179,7 +186,7 @@ test("uses a stub only while the card shows the update", async () => {
   expect(activity().queryByText(stub)).toBeNull();
 });
 
-test("the latest update stub can edit an update outside the loaded All page", async () => {
+function fillFirstPageWithChanges() {
   automatic = Array.from({ length: 50 }, (_, id) => ({
     type: "automatic",
     id,
@@ -187,11 +194,15 @@ test("the latest update stub can edit an update outside the loaded All page", as
       kind: "status",
       from_value: "Todo",
       to_value: "In progress",
-      timestamp: at(22),
+      timestamp: at(26),
       editing_agent: null,
     },
   }));
   localStorage.setItem("ticketd:activity-view", "all");
+}
+
+test("the latest update stub can edit an update outside the loaded All page", async () => {
+  fillFirstPageWithChanges();
   render(<Detail />);
 
   await screen.findByRole("region", { name: "Activity" });
@@ -211,6 +222,20 @@ test("the latest update stub can edit an update outside the loaded All page", as
       })
     ).textContent,
   ).toContain("Previous report");
+});
+
+test("an older update reached by a direct link in All is not marked Latest", async () => {
+  fillFirstPageWithChanges();
+  addNewUpdates();
+  render(
+    <Detail inboxTarget={{ reference: ticket.reference, id: "old", key: 1 }} />,
+  );
+
+  expect(await screen.findByText("Most recent report")).toBeTruthy();
+  expect(await activity().findByText(stub)).toBeTruthy();
+  const linked = await activity().findByLabelText("Selected update");
+  expect(within(linked).getByText("Previous report")).toBeTruthy();
+  expect(within(linked).queryByText("Latest")).toBeNull();
 });
 
 test.each(["close", "switch", "quit"] as const)(
