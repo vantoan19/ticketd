@@ -5,6 +5,7 @@
 //! ticketd-specific to GitHub, and never touches the workspace database.
 
 mod credentials;
+mod gh;
 mod transport;
 
 use credentials::{AmbientCredentials, CredentialSource};
@@ -49,6 +50,7 @@ pub(crate) struct GithubConnector {
     pinned_token_variable: Option<String>,
     transport: Box<dyn HttpTransport>,
     credentials: Box<dyn CredentialSource>,
+    repository_options_gh: Option<gh::GhApi>,
     ambient: bool,
 }
 
@@ -61,6 +63,8 @@ impl GithubConnector {
 
     fn ambient_for(id: Option<&str>, account: Option<&str>) -> Self {
         let custom = configured_api_url();
+        let use_gh_for_repository_options =
+            custom.is_none() && account.is_none() && !credentials::has_legacy_token(id);
         // github.com tokens are for github.com: another host gets its own.
         let custom_host = custom
             .as_deref()
@@ -74,6 +78,7 @@ impl GithubConnector {
         connector.pinned_token_variable = account
             .zip(id)
             .map(|(_, id)| credentials::connection_token_variable(id));
+        connector.repository_options_gh = use_gh_for_repository_options.then(gh::GhApi::system);
         connector
     }
 
@@ -92,6 +97,7 @@ impl GithubConnector {
             pinned_token_variable: None,
             transport,
             credentials,
+            repository_options_gh: None,
             ambient: false,
         }
     }
@@ -423,8 +429,24 @@ impl GithubConnector {
 
     fn json(&self, url: &str, subject: &str) -> Result<(Value, Option<String>), SourceError> {
         let response = self.get(url, subject)?;
-        let next = response.header("link").and_then(next_link);
-        Ok((response_json(&response)?, next))
+        json_page(&response)
+    }
+
+    fn repository_options_page(&self, url: &str) -> Result<(Value, Option<String>), SourceError> {
+        const SUBJECT: &str = "the list of your repositories";
+        let Some(gh) = &self.repository_options_gh else {
+            return self.json(url, SUBJECT);
+        };
+        let endpoint = url
+            .strip_prefix(&self.api_url)
+            .and_then(|path| path.strip_prefix('/'))
+            .filter(|path| *path == "user/repos" || path.starts_with("user/repos?"))
+            .ok_or_else(|| {
+                SourceError::Protocol(
+                    "the repository list referred to an unexpected next page".into(),
+                )
+            })?;
+        json_page(&gh.get("github.com", endpoint, SUBJECT)?)
     }
 
     fn repositories(config: &ConfigValues) -> Vec<String> {
@@ -644,7 +666,7 @@ impl Connector for GithubConnector {
                 ));
                 for _ in 0..OPTION_PAGES {
                     let Some(current) = url.take() else { break };
-                    let (page, next) = self.json(&current, "the list of your repositories")?;
+                    let (page, next) = self.repository_options_page(&current)?;
                     for repository in page.as_array().into_iter().flatten() {
                         let Some(name) = repository.get("full_name").and_then(Value::as_str) else {
                             continue;
@@ -1654,6 +1676,11 @@ pub(super) fn account_database_id(key: &str) -> Option<u64> {
 fn response_json(response: &HttpResponse) -> Result<Value, SourceError> {
     serde_json::from_slice(&response.body)
         .map_err(|_| SourceError::Protocol("GitHub returned a body that is not JSON".into()))
+}
+
+fn json_page(response: &HttpResponse) -> Result<(Value, Option<String>), SourceError> {
+    let next = response.header("link").and_then(next_link);
+    Ok((response_json(response)?, next))
 }
 
 fn response_message(response: &HttpResponse) -> Option<String> {
