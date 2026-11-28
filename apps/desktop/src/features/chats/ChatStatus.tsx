@@ -7,11 +7,9 @@ import { needsYou } from "@/features/chats/model";
 import { lead } from "@/lib/motion-tokens";
 
 /**
- * A Chat's ranked status as one line: an 8px dot (orange needsYou for you, blue
- * unread), the word, then the muted detail, which truncates first. Work is the
- * word "Working" in ink with no spinner: the sidebar and the open Chat's live line
- * each keep the one that moves; a menu opts in with `spinner`. The host words it; this only draws it. When the status
- * changes in view the dot arrives first, then the word crossfades.
+ * A Chat's status in one line, with its dot and optional Working spinner.
+ * The detail is muted and truncates before the status word. A newly visible
+ * dot fades in before the word crossfades.
  */
 export function ChatStatus({
   status,
@@ -20,7 +18,7 @@ export function ChatStatus({
 }: {
   status: Status;
   activity: Activity;
-  /** A menu has no live line or sidebar count beside it, so its working row keeps the spinner. */
+  /** Show the activity indicator beside Working. */
   spinner?: boolean;
 }) {
   const working =
@@ -38,13 +36,9 @@ export function ChatStatus({
       data-signal={signal ? "" : undefined}
       data-arrived={arrived ? "" : undefined}
     >
-      {dot ? (
-        <StatusDot key={dot} tone={dot} />
-      ) : (
-        spinner &&
-        working && (
-          <LoaderCircle size={12} className="chat-spin" aria-hidden="true" />
-        )
+      {dot && <StatusDot key={dot} tone={dot} />}
+      {spinner && working && (
+        <LoaderCircle size={12} className="chat-spin" aria-hidden="true" />
       )}
       <span className="chat-status-word">
         <CrossfadeText delay={arrived ? lead() : 0}>

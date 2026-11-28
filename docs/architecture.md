@@ -483,11 +483,12 @@ trigger Automations. The value itself is not stored.
 
 The person picks how a Chat's harness asks from the permission modes its adapter
 reports, Full access among them ([ADR 0020](adr/0020-full-access-in-a-persons-chat.md)).
-A pick in New Chat opens the session with it; a change in a Chat is held while a
-turn runs and applies from the next message, like the model and effort. A reopened
-Chat keeps its mode, recorded with its settings (`reopen_with`): Claude Code is
-opened with the mode, and the effort, it last reported, and Codex with the choice
-its last turn carried. While no session runs, the Chat shows the mode its next
+A pick in New Chat opens the session with it. A permission change made during a
+turn is held until that turn ends. The host reports steering as unavailable during
+the change and queues follow-ups for the next turn. A reopened Chat keeps its
+mode in its recorded settings (`reopen_with`). Claude Code opens with the mode
+and effort it last reported. Codex opens with the choice its last turn carried.
+While no session runs, the Chat shows the mode its next
 session opens with (`HarnessAdapter::permission_before_session`, which reads the
 same record), so a Chat in Full access says so before its next message, and a
 change made then is kept for that session, new or resumed. A permission change is

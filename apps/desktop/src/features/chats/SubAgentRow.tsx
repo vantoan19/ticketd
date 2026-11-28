@@ -26,9 +26,8 @@ function tooltipOf(row: ItemOf<"sub_agent">, record: SubAgent | undefined) {
 
 /**
  * One run of a sub-agent as a step row: `[bot] Title · suffix ›`. The whole row
- * opens the sub-agent's view. While it runs the spinner takes the icon's slot
- * (no shimmer: it runs for minutes) and the clock counts; the spinner and the
- * clock are hidden from a screen reader, which hears the state in the name.
+ * opens the sub-agent's view. While it runs, the suffix shows the clock and a
+ * spinner follows it. The accessible name includes the state and elapsed time.
  */
 export const SubAgentRow = memo(function SubAgentRow({
   item,
@@ -58,16 +57,7 @@ export const SubAgentRow = memo(function SubAgentRow({
         aria-label={subAgentLabel(title, item, record, now)}
         onClick={(event) => onOpen?.(item, event.currentTarget)}
       >
-        <RowLine
-          line
-          icon={
-            running ? (
-              <LoaderCircle size={12} className="chat-spin" />
-            ) : (
-              <Bot size={16} />
-            )
-          }
-        >
+        <RowLine line icon={<Bot size={16} />}>
           <span className="chat-subagent-title">{title}</span>
           <span className="chat-step-suffix">
             {suffix.map((part) => (
@@ -80,6 +70,11 @@ export const SubAgentRow = memo(function SubAgentRow({
             ))}
           </span>
         </RowLine>
+        {running && (
+          <span className="chat-row-icon" aria-hidden="true">
+            <LoaderCircle size={12} className="chat-spin" />
+          </span>
+        )}
         <ChevronRight size={14} className="chat-chevron" aria-hidden />
       </button>
     </Tooltip>

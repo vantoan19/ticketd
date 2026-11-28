@@ -13,6 +13,7 @@ import type {
   TranscriptItem,
   ItemOf,
 } from "@/features/chats/client";
+import { changeHeld, changePending } from "@/features/chats/composer-settings";
 import { scopeIsPath } from "@/features/chats/files";
 import {
   count,
@@ -1312,9 +1313,13 @@ export function composerControls(
       send: "queue",
       enabled: typed,
       queues: typed,
-      effect: chat.steering.available
-        ? "The running turn can't take these images, so this waits for the turn to end."
-        : `${chat.harness.name} can't steer, so this waits for the turn to end.`,
+      effect:
+        changeHeld(chat.settings?.permission) ||
+        changePending(chat.settings?.permission)
+          ? "Your message will use the new permissions when the next turn starts."
+          : chat.steering.available
+            ? "The running turn can't take these images, so this waits for the turn to end."
+            : `${chat.harness.name} can't steer, so this waits for the turn to end.`,
     };
   return {
     send: "steer",
