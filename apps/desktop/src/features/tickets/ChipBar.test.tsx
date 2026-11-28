@@ -13,6 +13,7 @@ import { TicketDetails } from "./TicketDetails";
 import { TestReads } from "@/lib/workspace-reads/testing";
 import type { Ticket } from "@/lib/api/client";
 import { bridgeDefault, unknownCommands } from "@/test/bridge-defaults";
+import { fakeChangeSignal } from "@/lib/workspace-reads/fake-signal";
 
 const bridge = vi.hoisted(() => ({ invoke: vi.fn() }));
 vi.mock("@tauri-apps/api/core", () => bridge);
@@ -41,14 +42,16 @@ Element.prototype.scrollIntoView = () => {};
 
 const changes: object[] = [];
 let following = false;
+let reminder: string | null = null;
 beforeEach(() => {
   callbacks = [];
   following = false;
+  reminder = null;
   changes.length = 0;
   bridge.invoke.mockImplementation(async (command: string, args?: object) => {
     if (command === "show_ticket") return ticket;
     if (command === "is_following") return following;
-    if (command === "reminder") return null;
+    if (command === "reminder") return reminder;
     if (command === "set_following") {
       following = (args as { following: boolean }).following;
       return null;
@@ -81,9 +84,12 @@ const ticket: Ticket = {
   children: [],
   prerequisites: [],
 };
-function renderDetails(record = ticket) {
+function renderDetails(
+  record = ticket,
+  signal?: ReturnType<typeof fakeChangeSignal>,
+) {
   render(
-    <TestReads primed={{ ticket: record }}>
+    <TestReads primed={{ ticket: record }} {...(signal && { signal })}>
       <TicketDetails
         mention={null}
         selected={record.reference}
@@ -195,6 +201,28 @@ test("widening the pane keeps the same bar", async () => {
   expect(
     await screen.findByRole("group", { name: "Ticket properties" }),
   ).toBeTruthy();
+});
+
+test("a reminder arriving while Tags is open preserves the picker and its trigger", async () => {
+  const signal = fakeChangeSignal();
+  renderDetails(ticket, signal);
+  resizePane(500);
+  const tags = await screen.findByRole("button", { name: "Tags: release" });
+  fireEvent.click(tags);
+  const search = await screen.findByRole("combobox");
+  fireEvent.change(search, { target: { value: "front" } });
+  search.focus();
+
+  reminder = "2099-12-31T00:00:00Z";
+  await act(async () => signal.change());
+  expect(
+    await screen.findByRole("button", { name: /^Manage reminder, scheduled/ }),
+  ).toBeTruthy();
+  expect(screen.getByRole("combobox")).toBe(search);
+  expect(document.activeElement).toBe(search);
+  expect(search).toHaveProperty("value", "front");
+  fireEvent.keyDown(search, { key: "Escape" });
+  await waitFor(() => expect(document.activeElement).toBe(tags));
 });
 
 test("a hidden pane reports no width and keeps its layout", async () => {

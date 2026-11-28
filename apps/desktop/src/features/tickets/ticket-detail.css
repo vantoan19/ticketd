@@ -131,24 +131,30 @@
   text-align: start;
 }
 .ticket-context-line {
+  --context-gap: 4px;
+  --context-add-width: calc(var(--spacing) * 7);
   display: flex;
   flex-wrap: wrap;
   align-items: center;
-  gap: 4px;
+  gap: var(--context-gap);
   margin: 12px 0 0 -8px;
 }
-.ticket-context-tail {
+.ticket-context-property {
   display: inline-flex;
-  align-items: center;
-  gap: 4px;
   min-width: 0;
   max-width: 100%;
 }
-.ticket-context-tail > :first-child {
-  min-width: 0;
+/* Count Add's width on the preceding chip so both wrap together. */
+.ticket-context-property:has(+ .ticket-context-add) {
+  padding-inline-end: calc(var(--context-add-width) + var(--context-gap));
 }
-.ticket-context-tail > :only-child:not(.rail-row) {
-  max-width: 100%;
+.ticket-context-add {
+  display: inline-flex;
+  flex: none;
+  inline-size: var(--context-add-width);
+  margin-inline-start: calc(
+    -1 * (var(--context-add-width) + var(--context-gap))
+  );
 }
 .ticket-context-line .rail-row {
   width: auto;

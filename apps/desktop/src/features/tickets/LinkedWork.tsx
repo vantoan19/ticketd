@@ -212,7 +212,6 @@ export function LinkedWork({
       rows: subtickets,
       total,
       partial: subticketPartial,
-      openTotal: subticketPartial ? total - done : undefined,
       doneTotal: done,
     },
     {
@@ -242,7 +241,7 @@ export function LinkedWork({
   const [subticketsOpen, setSubticketsOpen] = useLinkedGroup(
     ticket.id,
     "subticket",
-    !rail && (groups[1].openTotal ?? subtickets.filter(isOpen).length) > 0,
+    !rail && subtickets.some(isOpen),
   );
   const [parentOpen, setParentOpen] = useLinkedGroup(
     ticket.id,
@@ -313,7 +312,9 @@ export function LinkedWork({
         (!rail || group.kind !== "blocked_by") &&
         group.partial &&
         (disclosures[index]?.[0] ||
-          (!("openTotal" in group) && !group.rows.some(isOpen))),
+          (group.kind !== "blocked_by" &&
+            (group.kind !== "subticket" || group.total !== group.doneTotal) &&
+            !group.rows.some(isOpen))),
     ) || links?.duplicates.next_offset != null;
   useEffect(() => {
     if (needsPage && !loadingMore && !moreFailure) showMore();
@@ -607,9 +608,11 @@ function RelationshipGroup({
   ).length;
   let summary = openCount > 0 ? `${openCount} open` : "all finished";
   if (kind === "subticket") {
-    if (total === doneCount) summary = "all done";
+    if (total === doneCount && openCount === 0) summary = "all done";
     else if (review > 0) summary = `${review} in review`;
     else if (progress > 0) summary = `${progress} in progress`;
+    else if (partial)
+      summary = openCount > 0 ? `${openCount} open loaded` : "loading links";
   }
   const unknownTotal = partial && kind !== "subticket" && kind !== "blocked_by";
   if (unknownTotal && !openCount) summary = "loading links";

@@ -175,7 +175,11 @@ export function TicketDetails({
       aria-labelledby="detail-heading"
     >
       <OverlayBoundary element={boundary}>
-        <TicketAgentSession record={record} preview={preview}>
+        <TicketAgentSession
+          selected={selected}
+          record={record}
+          preview={preview}
+        >
           {(agentLoading) => (
             <>
               <TicketHeader

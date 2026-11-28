@@ -33,6 +33,7 @@ vi.mock("@tauri-apps/api/core", () => bridge);
 vi.mock("@uiw/react-codemirror", () => ({ default: () => null }));
 
 const ticket = ticketFor("T-KQ29");
+const nextTicket = ticketFor("T-KQ30", { title: "Next ticket" });
 const main = ticketAgentFixtures().one[0]!;
 const now = new Date().toISOString();
 const tenMinutesAgo = new Date(Date.parse(now) - 600_000).toISOString();
@@ -108,6 +109,8 @@ beforeEach(() => {
   bridge.invoke.mockImplementation(
     async (command: string, args?: { reference?: string }) => {
       if (command === "change_ticket" && changedTicket) return changedTicket;
+      if (command === "show_ticket" && args?.reference === nextTicket.reference)
+        return nextTicket;
       if (command === "show_ticket" && changedTicket) return changedTicket;
       if (command === "show_ticket" && savedTicket) return savedTicket;
       if (command === "chat_harness_catalog") return [];
@@ -177,7 +180,7 @@ function PostNewOutcome() {
   return (
     <button
       type="button"
-      onClick={() => show({ tone: "error", message: "Newer status" })}
+      onClick={() => show({ message: "Newer status", undo: () => {} })}
     >
       Post newer status
     </button>
@@ -480,6 +483,46 @@ test("a lost answer keeps choices disabled and the delivery status visible after
   await screen.findByRole("region", { name: "Ready for review" });
   expect(screen.getByText(message)).toBeTruthy();
 });
+
+test.each([false, true])(
+  "reports lost answers after the request closes only for the selected ticket (navigated: %s)",
+  async (navigated) => {
+    const pending = deferred<null>();
+    answer = pending.promise;
+    linked = [summary("approval")];
+    items = [request];
+    const select = open({ ...ticket, status: "In review" }, false, true);
+    fireEvent.click(await screen.findByRole("button", { name: "Allow once" }));
+
+    linked = [summary("done")];
+    items = [];
+    if (navigated) {
+      select(1, nextTicket.reference);
+      await screen.findByRole("heading", { name: nextTicket.title });
+      fireEvent.click(
+        screen.getByRole("button", { name: "Post newer status" }),
+      );
+      await screen.findByRole("button", { name: "Undo" });
+    } else {
+      select(1);
+      await screen.findByRole("region", { name: "Ready for review" });
+    }
+    await act(async () =>
+      pending.reject({
+        code: "contact_lost",
+        message: "contact with the harness was lost",
+      }),
+    );
+    const warning = "Couldn't confirm whether the answer arrived.";
+    if (navigated) {
+      expect(screen.queryByText(warning)).toBeNull();
+      expect(screen.getByText("Newer status")).toBeTruthy();
+      expect(screen.getByRole("button", { name: "Undo" })).toBeTruthy();
+    } else {
+      expect(await screen.findByText(warning)).toBeTruthy();
+    }
+  },
+);
 
 test("working shows the report, current step, and other agents; O opens the main Chat", async () => {
   vi.setSystemTime(new Date(now));

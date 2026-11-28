@@ -1,4 +1,5 @@
 import {
+  useContext,
   useEffect,
   useEffectEvent,
   useId,
@@ -24,6 +25,7 @@ import { useChat } from "@/features/chats/use-chats";
 import type { LatestUpdate } from "@/lib/api/progress";
 import { ariaKeyShortcuts, shortcutLabel } from "@/lib/shortcuts";
 import { Elapsed, TicketAgentsLabel } from "./TicketAgentsLabel";
+import { AgentContext } from "./ticket-agent-context";
 import {
   useOpenTicketAgentChat,
   type TicketAgentState,
@@ -262,7 +264,7 @@ function ApprovalChoices({
   children: React.ReactNode;
 }) {
   const client = useChatClient();
-  const { show } = useStatusLine();
+  const reportUnknownAnswer = useContext(AgentContext)?.reportUnknownAnswer;
   const choiceId = useId();
   const inFlight = useRef(false);
   const [picked, setPicked] = useState<string | null>(null);
@@ -280,11 +282,7 @@ function ApprovalChoices({
       .catch((reason: unknown) => {
         if (reason instanceof ChatError && reason.code === "contact_lost") {
           setFailure("contact_lost");
-          // The request can expire as soon as contact is lost.
-          show({
-            tone: "error",
-            message: "Couldn't confirm whether the answer arrived.",
-          });
+          reportUnknownAnswer?.();
           return;
         }
         inFlight.current = false;
