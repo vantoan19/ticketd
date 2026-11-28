@@ -1,14 +1,18 @@
-import { useContext, useState } from "react";
+import { useContext } from "react";
 import { DocumentNavigation } from "@/features/documents/navigation";
 import { Button } from "@/components/ui/button";
-import { SectionHeader } from "@/components/ui/section-header";
+import { Disclosure } from "@/components/ui/disclosure";
 import { FailureState } from "@/components/ui/failure-alert";
+import { Reference } from "@/components/ui/reference";
+import { compactAgo, formatDateTime, plural } from "@/lib/format";
+import { StatusIcon } from "./StatusIcon";
 import { useOpenTicket } from "./open-ticket";
 import { plainPassage } from "./plain-passage";
 import { EmphasizedPassage } from "./reference-passage";
-import { formatDateTime } from "@/lib/format";
+import { useLinkedGroup } from "./linked-group";
+import type { PartState } from "./open-ticket/parts";
+import type { DocumentLink } from "@/features/documents/api";
 import "./backlinks.css";
-import { Reference } from "@/components/ui/reference";
 
 /** Where a mention was found, so the source ticket can reveal the passage. */
 export type MentionTarget = {
@@ -18,47 +22,96 @@ export type MentionTarget = {
   mentioned: string;
   noteId: string | null;
   passage: string;
-  /** Source span of the mention, in UTF-16 code units of the Markdown. */
+  /** Source span of the mention, in Unicode scalar values of the Markdown. */
   start: number;
   end: number;
 };
 
 export function Backlinks({
   select,
+  mentions,
+  documentLinks,
 }: {
   select: (target: MentionTarget) => void;
+  mentions: PartState<"backlinks">;
+  documentLinks: DocumentLink[];
 }) {
-  const { reference } = useOpenTicket();
+  const { record, reference } = useOpenTicket();
   const openDocument = useContext(DocumentNavigation);
-  const [offset, setOffset] = useState(0);
-  const {
-    links: found,
-    failure: error,
-    retry,
-  } = useOpenTicket("backlinks", offset);
-  const links = found ?? [];
-  const documentLinks = useOpenTicket("documentBacklinks");
-  if (
-    !error &&
-    links.length === 0 &&
-    documentLinks.length === 0 &&
-    offset === 0
-  )
-    return null;
+  const [open, setOpen] = useLinkedGroup(record.id, "mentioned_in", false);
+  const { value, failure, retry, loadingMore, showMore } = mentions;
+  const count = value?.total ?? 0;
+  const links = value?.items ?? [];
+  if (!failure && count === 0 && documentLinks.length === 0) return null;
   return (
-    <section className="backlinks" aria-label="Mentioned in">
-      <SectionHeader
-        title="Mentioned in"
-        count={
-          offset === 0
-            ? links.length < 20
-              ? links.length + documentLinks.length
-              : "20+"
-            : undefined
-        }
-      />
-      {error && <FailureState size="inline" failure={error} onRetry={retry} />}
+    <Disclosure
+      className="linked-work-disclosure backlinks"
+      label={
+        <>
+          Mentioned in{" "}
+          <span className="linked-work-note">{plural(count, "ticket")}</span>
+        </>
+      }
+      count={count + documentLinks.length}
+      open={open}
+      onOpenChange={setOpen}
+    >
+      <p className="linked-work-note">
+        Tickets whose text names {reference}, newest first
+      </p>
+      {failure && (
+        <FailureState size="inline" failure={failure} onRetry={retry} />
+      )}
       <ul className="backlink-list">
+        {links.map((link) => {
+          const time = compactAgo(link.mentioned_at);
+          return (
+            <li key={link.reference}>
+              {link.passages.map((passage, index) => (
+                <button
+                  key={`${passage.activity_id ?? "description"}-${passage.mention_start}`}
+                  type="button"
+                  className="backlink-source"
+                  onClick={() =>
+                    select({
+                      reference: link.reference,
+                      mentioned: reference,
+                      noteId: passage.activity_id,
+                      passage: passage.passage,
+                      start: passage.mention_start,
+                      end: passage.mention_end,
+                    })
+                  }
+                >
+                  {index === 0 && (
+                    <span className="backlink-heading">
+                      <span role="img" aria-label={link.status}>
+                        <StatusIcon status={link.status} size={16} decorative />
+                      </span>
+                      <Reference>{link.reference}</Reference>
+                      <strong>{link.title}</strong>
+                      {time && (
+                        <time
+                          className="backlink-where"
+                          dateTime={link.mentioned_at}
+                          title={formatDateTime(link.mentioned_at)}
+                        >
+                          {time}
+                        </time>
+                      )}
+                    </span>
+                  )}
+                  <span className="mention-passage">
+                    <EmphasizedPassage
+                      text={plainPassage(passage.passage)}
+                      reference={reference}
+                    />
+                  </span>
+                </button>
+              ))}
+            </li>
+          );
+        })}
         {documentLinks.map((link) => (
           <li key={`${link.source_id}-${link.passage}`}>
             <button
@@ -82,67 +135,18 @@ export function Backlinks({
             </button>
           </li>
         ))}
-        {links.map((link, index) => (
-          <li
-            key={`${link.source_reference}-${link.activity_id ?? "description"}-${index}`}
-          >
-            <button
-              type="button"
-              className="backlink-source"
-              onClick={() =>
-                select({
-                  reference: link.source_reference,
-                  mentioned: reference,
-                  noteId: link.activity_id,
-                  passage: link.passage,
-                  start: link.mention_start,
-                  end: link.mention_end,
-                })
-              }
-            >
-              <span className="backlink-heading">
-                <Reference>{link.source_reference}</Reference>
-                <strong>{link.source_title}</strong>
-                <span className="backlink-where">
-                  {link.activity_id
-                    ? `Update${link.reported_at ? ` · ${formatDateTime(link.reported_at)}` : ""}`
-                    : "Description"}
-                </span>
-              </span>
-              <span className="mention-passage">
-                <EmphasizedPassage
-                  text={plainPassage(link.passage)}
-                  reference={reference}
-                />
-              </span>
-            </button>
-          </li>
-        ))}
       </ul>
-      {(offset > 0 || links.length === 20) && (
-        <div className="backlink-pages">
-          {offset > 0 && (
-            <Button
-              type="button"
-              variant="ghost"
-              size="sm"
-              onClick={() => setOffset(Math.max(0, offset - 20))}
-            >
-              Previous backlinks
-            </Button>
-          )}
-          {links.length === 20 && (
-            <Button
-              type="button"
-              variant="ghost"
-              size="sm"
-              onClick={() => setOffset(offset + 20)}
-            >
-              More backlinks
-            </Button>
-          )}
-        </div>
+      {mentions.more && (
+        <Button
+          type="button"
+          variant="ghost"
+          size="xs"
+          busy={loadingMore}
+          onClick={showMore}
+        >
+          Show {Math.min(3, count - links.length)} more
+        </Button>
       )}
-    </section>
+    </Disclosure>
   );
 }

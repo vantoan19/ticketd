@@ -3,7 +3,7 @@ pub mod agent_skills;
 pub mod harnesses;
 pub use search::{MetadataSelection, TicketMetadata, TicketMetadataPage, TicketWithUpdate};
 mod backlinks;
-pub use backlinks::Backlink;
+pub use backlinks::{Backlink, MentionPassage, MentioningTicket, TicketMentions};
 mod backup;
 mod backup_archive;
 mod restore;

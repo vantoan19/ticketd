@@ -1,9 +1,3 @@
-.backlinks {
-  margin-top: 40px;
-}
-.backlinks [data-slot="section-header"] {
-  margin-bottom: 8px;
-}
 .backlink-list {
   display: flex;
   flex-direction: column;
@@ -17,7 +11,8 @@
   flex-direction: column;
   gap: 2px;
   width: 100%;
-  padding: 8px;
+  min-height: 28px;
+  padding: 2px 8px;
   border: 0;
   border-radius: var(--radius-md);
   background: transparent;
@@ -37,20 +32,19 @@
 .backlink-heading {
   display: flex;
   flex-wrap: wrap;
+  align-items: center;
   gap: 0 6px;
   font-size: var(--text-ui);
-  line-height: 20px;
+  line-height: var(--text-ui-line);
 }
 .backlink-heading strong {
   font-weight: 500;
 }
-.backlink-where::before {
-  content: "· ";
-}
 .backlink-where {
+  margin-inline-start: auto;
   color: var(--secondary-foreground);
   font-size: var(--text-ui);
-  line-height: 20px;
+  line-height: var(--text-ui-line);
 }
 .mention-passage {
   display: -webkit-box;
@@ -59,17 +53,10 @@
   overflow: hidden;
   color: var(--muted-foreground);
   font-size: var(--text-ui);
-  line-height: 20px;
-}
-.backlink-pages {
-  display: flex;
-  gap: 8px;
-  margin-top: 4px;
+  line-height: var(--text-ui-line);
 }
 .mention-passage mark {
-  padding: 0 2px;
-  border-radius: var(--radius-segment);
-  background: var(--muted);
-  color: var(--foreground);
-  font-weight: 500;
+  background: none;
+  color: inherit;
+  font-weight: 600;
 }

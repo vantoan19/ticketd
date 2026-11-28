@@ -135,13 +135,12 @@ export function TicketDetails({
   const pages =
     selected && !kept.includes(selected) ? [...kept, selected] : kept;
   // Pages are memoized, so what they call is the same object on every render.
-  const latest = useRef({ open, showGraph, setSelected });
+  const latest = useRef({ open, setSelected });
   useEffect(() => {
-    latest.current = { open, showGraph, setSelected };
+    latest.current = { open, setSelected };
   });
   const [pageActions] = useState<PageActions>(() => ({
     select: (reference) => latest.current.open(reference),
-    openGraph: (reference) => latest.current.showGraph(reference),
     mention: (target) => latest.current.setSelected(target.reference, target),
   }));
   return (
@@ -242,7 +241,6 @@ export function TicketDetails({
 
 type PageActions = {
   select: (reference: string | null) => void;
-  openGraph: (reference: string) => void;
   mention: (target: MentionTarget) => void;
 };
 
@@ -289,7 +287,6 @@ const OpenedPage = memo(function OpenedPage({
         projects={projects}
         plans={plans}
         select={actions.select}
-        onOpenGraph={() => actions.openGraph(reference)}
         noteTarget={newest(
           inboxTarget,
           mention?.noteId ? { id: mention.noteId, key: mention.key } : null,

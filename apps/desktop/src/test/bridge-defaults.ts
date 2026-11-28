@@ -39,6 +39,7 @@ export function bridgeDefault(
         tickets: [],
         tags: [],
       };
+    case "ticket_backlinks":
     case "ticket_evidence_page":
       return { items: [], total: 0 };
     case "automation_run_taken_over_in":
@@ -65,7 +66,6 @@ export function bridgeDefault(
     case "ticket_attachments":
     case "list_attachments":
     case "search_attachments":
-    case "ticket_backlinks":
     case "inbox":
     case "search_tags":
     case "source_conversation":
