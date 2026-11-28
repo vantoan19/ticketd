@@ -1,7 +1,15 @@
 import { Card, CardHeader } from "@/components/ui/card";
-import { useId, useLayoutEffect, useRef, useState } from "react";
+import {
+  useId,
+  useLayoutEffect,
+  useRef,
+  useState,
+  type ReactNode,
+} from "react";
 import { LockKeyhole } from "lucide-react";
 import { Button } from "@/components/ui/button";
+import { StatusDot } from "@/components/ui/status-dot";
+import { sourceState } from "./ticket-source";
 import {
   Popover,
   PopoverContent,
@@ -10,13 +18,16 @@ import {
 import { MarkdownDocument } from "@/features/markdown/MarkdownDocument";
 import type { Ticket, TicketSource } from "@/lib/api/client";
 import { SourceLink } from "./SourceLink";
+import { SourceRail } from "./SourceRail";
 
 function Explanation({
   source,
   field,
+  children,
 }: {
   source: TicketSource;
   field: string;
+  children?: ReactNode;
 }) {
   return (
     <PopoverContent align="start" className="source-readonly-explanation">
@@ -27,7 +38,9 @@ function Explanation({
         Edit it on {source.provider_name}; the change arrives on the next
         refresh.
       </p>
-      <SourceLink url={source.url}>Edit on {source.provider_name}</SourceLink>
+      {children ?? (
+        <SourceLink url={source.url}>Edit on {source.provider_name}</SourceLink>
+      )}
     </PopoverContent>
   );
 }
@@ -40,7 +53,7 @@ export function ReadOnlyTitle({
   source: TicketSource;
 }) {
   return (
-    <h3 className="detail-title">
+    <h1 className="detail-title">
       <Popover>
         <PopoverTrigger asChild>
           <button type="button" className="source-title-trigger">
@@ -49,7 +62,7 @@ export function ReadOnlyTitle({
         </PopoverTrigger>
         <Explanation source={source} field="title" />
       </Popover>
-    </h3>
+    </h1>
   );
 }
 
@@ -58,11 +71,13 @@ export function SourceDescription({
   source,
   select,
   revision,
+  refresh,
 }: {
   ticket: Ticket;
   source: TicketSource;
   select: (reference: string | null) => void;
   revision: number;
+  refresh?: () => Promise<void>;
 }) {
   const bodyId = useId();
   const [open, setOpen] = useState(false);
@@ -78,11 +93,8 @@ export function SourceDescription({
     observer.observe(node);
     return () => observer.disconnect();
   }, [ticket.body]);
-  const label = source.unavailable
-    ? "Open"
-    : source.status_locked
-      ? "View"
-      : "Edit";
+  const label = source.unavailable ? "Open" : "Edit";
+  const state = sourceState(source);
   return (
     <Popover open={open} onOpenChange={setOpen}>
       <Card asChild>
@@ -91,12 +103,39 @@ export function SourceDescription({
           aria-label={`Description from ${source.provider_name}, read-only`}
         >
           <CardHeader>
-            <span>{source.provider_name} issue</span>
+            <span className="source-card-summary">
+              <span>{source.provider_name} issue</span>
+              <span aria-hidden="true">·</span>
+              <span className="ticket-source-state">
+                {state.tone && <StatusDot tone={state.tone} />}
+                {state.text}
+              </span>
+              {(source.created_at || source.author) && (
+                <>
+                  <span aria-hidden="true">·</span>
+                  <span>
+                    opened
+                    {source.created_at && (
+                      <>
+                        {" "}
+                        <time dateTime={source.created_at}>
+                          {new Date(source.created_at).toLocaleDateString(
+                            undefined,
+                            { dateStyle: "medium" },
+                          )}
+                        </time>
+                      </>
+                    )}
+                    {source.author && ` by ${source.author}`}
+                  </span>
+                </>
+              )}
+            </span>
             <span className="source-card-actions">
               <PopoverTrigger asChild>
                 <Button
                   variant="ghost"
-                  size="sm"
+                  size="compact"
                   aria-label="Explain read-only description"
                 >
                   <LockKeyhole data-icon="inline-start" />
@@ -146,7 +185,11 @@ export function SourceDescription({
           )}
         </section>
       </Card>
-      <Explanation source={source} field="description" />
+      <Explanation source={source} field="description">
+        {refresh && open && (
+          <SourceRail ticket={ticket} refresh={refresh} embedded />
+        )}
+      </Explanation>
     </Popover>
   );
 }

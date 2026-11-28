@@ -31,24 +31,99 @@
   top: 100%;
   inset-inline-end: 0;
 }
-/* One 32px row under the title: "Updated 5 h ago", the source state, or
-   save state. Its height is fixed so nothing moves when its words change. */
-.ticket-state-line {
+.ticket-parent-line {
+  min-width: 0;
+  margin-bottom: 8px;
+}
+.ticket-parent-line > button {
+  display: block;
+  max-width: 100%;
+  line-height: 20px;
+  text-align: start;
+}
+.ticket-context-line {
   display: flex;
   flex-wrap: wrap;
   align-items: center;
-  gap: 4px 12px;
-  min-height: 32px;
-  margin: 4px 0 0;
+  gap: 4px;
+  margin: 12px 0 0 -8px;
 }
-.ticket-source-state {
+.ticket-context-tail {
   display: inline-flex;
   align-items: center;
-  gap: 8px;
+  gap: 4px;
+  min-width: 0;
   max-width: 100%;
 }
-.editor-title {
-  margin-bottom: 8px;
+.ticket-context-tail > :first-child {
+  min-width: 0;
+}
+.ticket-context-tail > :only-child:not(.rail-row) {
+  max-width: 100%;
+}
+.ticket-context-line .rail-row {
+  width: auto;
+  max-width: 100%;
+  height: 28px;
+  min-height: 28px;
+  margin: 0;
+  padding-inline: 8px;
+  gap: 6px;
+  white-space: nowrap;
+}
+.ticket-context-tags {
+  display: inline-flex;
+  max-width: 100%;
+  align-items: center;
+  gap: 4px;
+}
+.ticket-context-tags > * {
+  min-width: 0;
+}
+.ticket-context-tags > :last-child {
+  flex-shrink: 0;
+}
+.ticket-subtickets-ring {
+  fill: none;
+  stroke-width: 2;
+}
+.ticket-blockers-popover {
+  max-height: calc(var(--radix-popover-content-available-height) - 32px);
+  overflow: auto;
+}
+.ticket-blockers-popover .rail-row {
+  margin: 0;
+  width: 100%;
+  max-width: 100%;
+  padding-inline: 4px;
+  text-align: start;
+  overflow-wrap: anywhere;
+}
+.ticket-blockers-footer,
+.ticket-closing-line,
+.ticket-source-state,
+.source-card-summary {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+}
+.ticket-blockers-footer,
+.ticket-closing-line,
+.source-card-summary {
+  flex-wrap: wrap;
+}
+.ticket-closing-line {
+  margin-top: 8px;
+}
+.detail-document .ticket-agent-slot {
+  margin-top: 24px;
+}
+.detail-document .editor-body {
+  margin-top: 24px;
+}
+.detail-document .ticket-agent-slot ~ .editor-body {
+  margin-top: 32px;
 }
 .list-position {
   display: flex;

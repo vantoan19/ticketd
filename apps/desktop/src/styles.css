@@ -2613,8 +2613,7 @@ html[data-hover-held] .sidebar-nav button:hover:not([data-active="true"]) {
   align-items: center;
   gap: 4px;
 }
-/* The reading column and the property rail. Below 760px the rail is
-   replaced by a chip bar under the title; see properties.css. */
+/* The ticket detail reading column. */
 .detail-content {
   min-height: 100%;
   display: grid;
@@ -2626,7 +2625,7 @@ html[data-hover-held] .sidebar-nav button:hover:not([data-active="true"]) {
 }
 .detail-document {
   min-width: 0;
-  padding: 28px 40px 96px;
+  padding: 28px 32px 96px;
   width: 100%;
   max-width: 680px;
   margin-inline: auto;
@@ -2640,7 +2639,7 @@ html[data-hover-held] .sidebar-nav button:hover:not([data-active="true"]) {
 }
 .editor-title {
   display: block;
-  margin: 0 0 16px;
+  margin: 0;
 }
 .editor-title textarea {
   display: block;
@@ -2676,7 +2675,7 @@ html[data-hover-held] .sidebar-nav button:hover:not([data-active="true"]) {
   display: none;
 }
 .detail-document > .detail-title {
-  margin-bottom: 8px;
+  margin: 0;
   font-size: var(--text-doc-title);
   font-weight: 600;
   line-height: var(--text-doc-title-line);
@@ -3238,9 +3237,11 @@ html[data-hover-held] .sidebar-nav button:hover:not([data-active="true"]) {
     margin-left: auto;
   }
 }
+:where(.ticket-detail[data-width~="max-480"]) .detail-document {
+  padding-inline: 16px;
+}
 @media (max-width: 440px) {
   .detail-header,
-  .detail-document,
   .ticket-properties {
     padding-inline: 16px;
   }

@@ -51,11 +51,6 @@
 .ticket-follow-feedback {
   white-space: nowrap;
 }
-.ticket-state-line {
-  color: var(--secondary-foreground);
-  font-size: var(--text-ui);
-  line-height: 20px;
-}
 .list-position-text {
   text-align: end;
   font-size: var(--text-caption);

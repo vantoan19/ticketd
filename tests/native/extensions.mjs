@@ -292,7 +292,12 @@ try {
     "Contextual relationship did not persist",
   );
   assert.equal(run("show", target.reference).availability, "Ready");
-  await click(await (await detail()).$("button=Evidence"));
+  await click(
+    await (await detail()).$('button[aria-label="Add ticket property"]'),
+  );
+  await click(
+    await browser.$('//*[@role="menuitem" and normalize-space(.)="Evidence…"]'),
+  );
   const evidenceForm = await browser.$('[role="dialog"]');
   await (await evidenceForm.$("input[required]")).setValue("Native check");
   await (

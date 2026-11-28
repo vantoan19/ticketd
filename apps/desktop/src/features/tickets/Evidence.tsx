@@ -115,8 +115,7 @@ export function Evidence({
 }: {
   trashed: boolean;
   /**
-   * With no evidence the section folds away; the page's one quiet add row
-   * offers "+ Evidence" instead (detB DB-30).
+   * With no evidence the section folds away; the context line offers Evidence….
    */
   folded?: boolean;
   /** Bump to open Add evidence from outside the section. */

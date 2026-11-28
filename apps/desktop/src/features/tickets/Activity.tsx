@@ -829,6 +829,7 @@ function RecoveredActivity({
     >
       {/* The note is only worth saying where a source owns the ticket and could be confused for the destination. */}
       <SectionHeader
+        level={2}
         title="Activity"
         // The read gives no total, so while more is waiting the count only
         // says how many updates are loaded so far.

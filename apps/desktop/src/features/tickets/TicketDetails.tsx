@@ -168,6 +168,7 @@ export function TicketDetails({
                 onClose={() => open(null)}
                 {...(openGraph && { onOpenGraph: () => showGraph(selected) })}
                 position={position}
+                outsideResults={outsideResults}
                 projects={projects}
                 {...(returnLabel && { returnLabel })}
                 {...(onAdjacent && { onAdjacent })}
@@ -221,7 +222,6 @@ export function TicketDetails({
                     swap={swap.swapped && reference === selected}
                     leaving={reference === swap.leaving}
                     seed={reference === selected ? preview : undefined}
-                    outsideResults={outsideResults && reference === selected}
                     projects={projects}
                     plans={plans}
                     inboxTarget={
@@ -258,7 +258,6 @@ const OpenedPage = memo(function OpenedPage({
   swap,
   leaving,
   seed,
-  outsideResults,
   projects,
   plans,
   inboxTarget,
@@ -272,7 +271,6 @@ const OpenedPage = memo(function OpenedPage({
   swap: boolean;
   leaving: boolean;
   seed: Ticket | undefined;
-  outsideResults: boolean;
   projects: Project[];
   plans: Plan[];
   /** The Inbox note to show, when it is on this page. */
@@ -288,7 +286,6 @@ const OpenedPage = memo(function OpenedPage({
         expanded={expanded}
         swap={swap}
         leaving={leaving}
-        outsideResults={outsideResults}
         projects={projects}
         plans={plans}
         select={actions.select}
