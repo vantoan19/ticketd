@@ -201,7 +201,8 @@
   margin-left: 2px;
 }
 .ui-pane-header-title > h1,
-.ui-pane-header-title > h2 {
+.ui-pane-header-title > h2,
+.ui-pane-header-title > [data-slot="pane-heading"] {
   min-width: 0;
   overflow: hidden;
   color: var(--foreground);
@@ -228,7 +229,7 @@
 .ui-pane-header-title > [data-control] > [data-slot="button"] > svg {
   color: var(--muted-foreground);
 }
-.ui-pane-header-title > :not(h1, h2) {
+.ui-pane-header-title > :not(h1, h2, [data-slot="pane-heading"]) {
   flex: none;
   white-space: nowrap;
 }

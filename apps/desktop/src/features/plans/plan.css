@@ -1,7 +1,6 @@
 @import "../../components/ui/surface-roles/plans-plan.css";
 
-/* A Plan: its header spans both panes. The responsive PaneHeader and summary
-   reserve their desktop or narrow height across states (DESIGN.md section 10). */
+/* The responsive Plan header spans both panes (DESIGN.md section 10). */
 .plan-header {
   display: flex;
   flex: none;
@@ -20,17 +19,6 @@
   display: none;
 }
 
-/* S11: purpose above a single progress row. Every state reserves both rows. */
-.plan-context {
-  display: flex;
-  flex: none;
-  flex-direction: column;
-  gap: 12px;
-  height: 96px;
-  min-width: 0;
-  padding: 18px 20px;
-  overflow: hidden;
-}
 .plan-ring-slot {
   display: block;
   width: 16px;
@@ -40,150 +28,17 @@
   display: flex;
   gap: 8px;
 }
-.plan-summary-row {
-  display: flex;
-  align-items: center;
-  gap: 14px;
-  min-width: 0;
-  height: 24px;
-}
-.plan-summary-bar,
-.plan-summary-loading {
-  flex: 0 1 280px;
-  width: 280px;
-}
-.plan-summary-legend {
-  min-width: 0;
-  overflow: hidden;
-  text-overflow: ellipsis;
-}
-.plan-summary-row > .plan-documents {
-  margin-left: auto;
-}
-.plan-purpose {
-  display: inline-flex;
-  flex: none;
-  align-items: center;
-  gap: 6px;
-  min-width: 0;
-  height: 24px;
-  margin-inline-start: -6px;
-  padding: 0 6px;
-}
-.plan-purpose-text {
-  min-width: 0;
-  overflow: hidden;
-  text-overflow: ellipsis;
-}
-/* The pencil says the purpose is editable, on hover and focus only. */
-.plan-purpose > svg {
-  flex: none;
-  width: 12px;
-  height: 12px;
-  visibility: hidden;
-}
-.plan-purpose:is(:hover, :focus-visible) > svg {
-  visibility: visible;
-}
-/* In-place fields keep the text where it was read: the inline Input's 6px
-   inset is taken back with a negative margin. */
 .plan-name-field {
   width: 360px;
   max-width: 100%;
   margin-inline-start: -6px;
 }
-.plan-purpose-field {
-  flex: none;
-  height: 24px;
-  min-width: 160px;
-  margin-inline-start: -6px;
+.plan-context-note {
+  padding: 0 20px 8px;
 }
-.plan-progress {
-  display: inline-flex;
-  flex: none;
-  align-items: center;
-  gap: 8px;
-}
-.plan-documents {
-  display: inline-flex;
-  flex: 0 1 auto;
-  align-items: center;
-  gap: 6px;
-  min-width: 0;
-}
-.plan-doc-label {
-  flex: none;
-}
-.plan-documents [data-slot="badge"] {
-  min-width: 0;
-  height: 24px;
-  padding-inline: 8px 6px;
-}
-.plan-documents [data-slot="badge"] svg {
-  flex: none;
-  width: 14px;
-  height: 14px;
-}
-.plan-doc-title {
-  min-width: 0;
-  overflow: hidden;
-  text-overflow: ellipsis;
-}
-.plan-doc-state {
-  flex: none;
-}
-.plan-documents-more {
-  flex: none;
-}
-.plan-context-action {
-  flex: none;
-}
-.plan-document-picker,
-.plan-documents-popover {
+.plan-document-picker {
   width: 320px;
   max-width: calc(100vw - 32px);
-}
-.plan-documents-popover ul {
-  margin: 0;
-  padding: 0;
-}
-.plan-documents-popover [data-slot="item"] > button:first-of-type {
-  flex: 1 1 0;
-  min-width: 0;
-  overflow: hidden;
-  text-overflow: ellipsis;
-}
-
-:where(.plan-workspace[data-width~="max-640"]) .plan-context {
-  height: 184px;
-}
-:where(.plan-workspace[data-width~="max-640"]) .plan-summary-row {
-  display: grid;
-  grid-template-columns: minmax(0, 1fr) auto;
-  grid-template-rows: 24px 48px 24px;
-  gap: 8px 14px;
-  height: 112px;
-}
-:where(.plan-workspace[data-width~="max-640"]) .plan-summary-bar,
-:where(.plan-workspace[data-width~="max-640"]) .plan-summary-loading {
-  width: 100%;
-}
-:where(.plan-workspace[data-width~="max-640"]) .plan-summary-legend {
-  grid-column: 1 / -1;
-  grid-row: 2;
-  align-self: start;
-}
-:where(.plan-workspace[data-width~="max-640"])
-  .plan-summary-row
-  > .plan-documents {
-  grid-column: 1 / -1;
-  grid-row: 3;
-  justify-self: start;
-  max-width: 100%;
-  margin-left: 0;
-}
-:where(.plan-workspace[data-width~="max-640"]) .plan-context-note {
-  grid-column: 1 / -1;
 }
 
 /* Plans index: management rows (P12), 48px, full-row hover. */

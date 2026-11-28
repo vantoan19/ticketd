@@ -239,6 +239,10 @@ impl Workspace {
     pub fn show_plan(&self, id: &str) -> Result<PlanView, Error> {
         self.show_plan_bounded(id, None, 0, true)
     }
+    /// Read all members for the Desktop Overview and its Documents newest first.
+    pub fn show_plan_overview(&self, id: &str) -> Result<PlanView, Error> {
+        self.read_plan(id, None, 0, true, true)
+    }
     /// Preserve the Plan view and full counts while bounding member/document reads.
     pub fn show_plan_bounded(
         &self,
@@ -246,6 +250,16 @@ impl Workspace {
         limit: Option<u32>,
         offset: u32,
         include_members: bool,
+    ) -> Result<PlanView, Error> {
+        self.read_plan(id, limit, offset, include_members, false)
+    }
+    fn read_plan(
+        &self,
+        id: &str,
+        limit: Option<u32>,
+        offset: u32,
+        include_members: bool,
+        newest_documents: bool,
     ) -> Result<PlanView, Error> {
         crate::read_scope::run(&self.connection, |tx| {
             let plan = get(tx, id)?;
@@ -264,7 +278,12 @@ impl Workspace {
                 .map(|reference| self.show_ticket(&reference))
                 .collect::<Result<Vec<_>, _>>()?;
             let documents = {
-                let mut stmt = tx.prepare(&format!("SELECT d.id, {}, d.trashed FROM plan_documents pd JOIN documents d ON d.id = pd.document_id WHERE pd.plan_id = ?1 ORDER BY d.id LIMIT ?2 OFFSET ?3", crate::documents::HEADING))?;
+                let sort = if newest_documents {
+                    "d.updated_at DESC, d.id"
+                } else {
+                    "d.id"
+                };
+                let mut stmt = tx.prepare(&format!("SELECT d.id, {}, d.trashed FROM plan_documents pd JOIN documents d ON d.id = pd.document_id WHERE pd.plan_id = ?1 ORDER BY {sort} LIMIT ?2 OFFSET ?3", crate::documents::HEADING))?;
                 stmt.query_map(params![id, bound, offset], |row| {
                     Ok(PlanDocument {
                         id: row.get(0)?,

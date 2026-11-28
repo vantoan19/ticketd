@@ -416,3 +416,35 @@ fn plan_names_are_bounded_and_archive_is_as_idempotent_as_reactivate() {
             .archived
     );
 }
+
+#[test]
+fn plan_overview_reads_newest_documents_first_and_preserves_legacy_order() {
+    let dir = tempfile::tempdir().unwrap();
+    let mut workspace = Workspace::open(dir.path().join("workspace.sqlite3")).unwrap();
+    let plan = workspace.create_plan("Plan").unwrap();
+    let mut documents = Vec::new();
+    for title in ["Design", "Verification", "Spec"] {
+        let document = workspace.create_document(Some(title), "").unwrap();
+        workspace
+            .set_plan_document(&plan.id, &document.id, true)
+            .unwrap();
+        documents.push(document);
+    }
+    documents.sort_by(|a, b| b.updated_at.cmp(&a.updated_at).then(a.id.cmp(&b.id)));
+    let overview = workspace.show_plan_overview(&plan.id).unwrap();
+    assert_eq!(
+        overview
+            .documents
+            .iter()
+            .map(|doc| &doc.id)
+            .collect::<Vec<_>>(),
+        documents.iter().map(|doc| &doc.id).collect::<Vec<_>>()
+    );
+    let legacy = workspace.show_plan(&plan.id).unwrap();
+    assert!(
+        legacy
+            .documents
+            .windows(2)
+            .all(|pair| pair[0].id < pair[1].id)
+    );
+}

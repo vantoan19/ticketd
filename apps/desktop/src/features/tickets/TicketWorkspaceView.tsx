@@ -4,6 +4,7 @@ import "@/features/chats/chats.css";
 import {
   useEffect,
   useLayoutEffect,
+  useMemo,
   useRef,
   useState,
   type ReactNode,
@@ -22,7 +23,9 @@ import {
 import { cn } from "cn";
 import { setPreference, usePreferences } from "@/lib/preferences";
 import { PlanFlow } from "@/features/plans/PlanFlow";
-import { PlanHeader } from "@/features/plans/PlanHeader";
+import { PlanHeader, type PlanMode } from "@/features/plans/PlanHeader";
+import { PlanOverview } from "@/features/plans/PlanOverview";
+import { planWorkModel } from "@/features/plans/plan-work-model";
 import { useNarrowPane } from "@/features/tickets/useNarrowPane";
 import {
   usePaneMotion,
@@ -89,7 +92,6 @@ export function TicketWorkspaceView({
     wasInbox.current = inboxMode;
     if (selected) setSelected(null);
   }, [inboxMode, selected, setSelected]);
-  const board = workspace.layout === "board" && !inboxMode;
   // This view is hidden, not unmounted, when another view opens. Leaving counts as
   // navigating, so a followed mention is not still highlighted on return.
   useEffect(() => {
@@ -102,13 +104,16 @@ export function TicketWorkspaceView({
   const workspaceRef = useRef<HTMLDivElement>(null);
   // The content panel’s width, not the window’s: collapsing the sidebar gives it back.
   const narrow = useNarrowPane(workspaceRef, STACK_MIN_WIDTH);
-  // Dependencies are temporary; ticket layouts share the remembered preference.
-  const [showDependencies, setShowDependencies] = useState(false);
+  // Overview and Flow are scoped to one visit. List and Board use the
+  // remembered layout shared with the global ticket workspace.
   const planScope = workspace.trash ? "" : workspace.navigation.plan;
-  const [shownPlan, setShownPlan] = useState(planScope);
-  if (shownPlan !== planScope) {
-    setShownPlan(planScope);
-    setShowDependencies(false);
+  const [planView, setPlanView] = useState<
+    "overview" | "tickets" | "dependencies"
+  >("overview");
+  const [shownNavigation, setShownNavigation] = useState(workspace.navigation);
+  if (shownNavigation !== workspace.navigation) {
+    setShownNavigation(workspace.navigation);
+    setPlanView("overview");
   }
   useEffect(() => {
     // A new Plan opens with its title in view, not where the last one scrolled.
@@ -118,25 +123,52 @@ export function TicketWorkspaceView({
       node = node.parentElement
     )
       node.scrollTop = 0;
-    // The rows scroll in their own element inside the list pane.
-    const rows = listRef.current?.querySelector(".ticket-scroll");
+    const rows = listRef.current?.querySelector(
+      ".ticket-scroll, .plan-overview-scroll",
+    );
     if (rows) rows.scrollTop = 0;
-  }, [planScope]);
+  }, [workspace.navigation]);
   const planState = usePlanView(planScope);
   const scopedPlan = workspace.plans.find((item) => item.id === planScope);
-  // The Plan header's Filters menu and the list's chip row share one state.
   const filtersMenu = useFiltersMenu();
-  const dependenciesOpen = showDependencies && scopedPlan;
-  const showTickets = () => {
-    setShowDependencies(false);
-    setNarrowDetail(selected !== null);
+  const dependenciesOpen =
+    planView === "dependencies" && scopedPlan && !inboxMode;
+  const overviewOpen = planView === "overview" && scopedPlan && !inboxMode;
+  const ticketLayout = overviewOpen ? "list" : workspace.layout;
+  const board = ticketLayout === "board" && !inboxMode;
+  const overviewMembers = overviewOpen ? planState.view?.members : undefined;
+  const overviewWork = useMemo(
+    () => (overviewMembers ? planWorkModel(overviewMembers) : null),
+    [overviewMembers],
+  );
+  const overviewOrder = useMemo(
+    () =>
+      overviewWork
+        ? Object.values(overviewWork.sections)
+            .flat()
+            .map(({ ticket }) => ticket.reference)
+        : [],
+    [overviewWork],
+  );
+  const overviewIndex = selected ? overviewOrder.indexOf(selected) : -1;
+  const overviewPosition =
+    overviewIndex < 0
+      ? null
+      : { index: overviewIndex + 1, total: overviewOrder.length };
+  const openAdjacent = (direction: 1 | -1) => {
+    if (!overviewOpen) return workspace.openAdjacent(direction);
+    if (overviewIndex < 0) return;
+    const target = overviewOrder[overviewIndex + direction];
+    if (target) setSelected(target);
   };
-  const setPlanMode = (mode: "list" | "board" | "dependencies") => {
-    if (mode === "dependencies") {
-      setShowDependencies(true);
-      setNarrowDetail(true);
-    } else if (setPreference("ticketLayout", mode)) showTickets();
-    else
+  const setPlanMode = (mode: PlanMode) => {
+    if (mode === "overview" || mode === "dependencies") {
+      setPlanView(mode);
+      setNarrowDetail(mode === "dependencies" || selected !== null);
+    } else if (setPreference("ticketLayout", mode)) {
+      setPlanView("tickets");
+      setNarrowDetail(selected !== null);
+    } else
       workspace.setError(
         "Could not remember ticket layout. Check local storage and try again.",
       );
@@ -148,7 +180,7 @@ export function TicketWorkspaceView({
   });
   const boardSplit = useDefaultLayout({ id: "ticketd.workspace.board.v1" });
   const inboxSplit = useDefaultLayout({ id: "ticketd.workspace.inbox.v1" });
-  const splitMode = inboxMode ? "inbox" : workspace.layout;
+  const splitMode = inboxMode ? "inbox" : ticketLayout;
   const groupRef = useGroupRef();
   const listPanelRef = usePanelRef();
   const activeSplit = useRef<"inbox" | "list" | "board">(splitMode);
@@ -173,6 +205,10 @@ export function TicketWorkspaceView({
     null,
   );
   const boardScrollLeft = useRef<number | null>(null);
+  const overviewTrigger = useRef<{
+    reference: string;
+    element: HTMLElement;
+  } | null>(null);
   useLayoutEffect(() => {
     if (focusPane.current === "detail")
       document.getElementById("detail-heading")?.focus();
@@ -184,13 +220,22 @@ export function TicketWorkspaceView({
         board.scrollLeft = boardScrollLeft.current;
       // Closing clears selection before this effect runs. Keep the ticket being
       // viewed at return time, including navigation within details, independently.
-      const target = reference
-        ? listRef.current?.querySelector<HTMLButtonElement>(
-            workspace.layout === "board"
-              ? `[data-board-reference="${reference}"]`
-              : `[data-ticket-reference="${reference}"]`,
-          )
-        : null;
+      const trigger = overviewTrigger.current;
+      const target =
+        reference &&
+        overviewOpen &&
+        trigger?.reference === reference &&
+        listRef.current?.contains(trigger.element)
+          ? trigger.element
+          : reference
+            ? listRef.current?.querySelector<HTMLElement>(
+                overviewOpen
+                  ? `[data-overview-reference="${reference}"]`
+                  : board
+                    ? `[data-board-reference="${reference}"]`
+                    : `[data-ticket-reference="${reference}"]`,
+              )
+            : null;
       (target ?? document.getElementById("tickets-heading"))?.focus({
         preventScroll: true,
       });
@@ -228,10 +273,6 @@ export function TicketWorkspaceView({
     return () => void host?.style.removeProperty("--pane-leaving-width");
   }, [leaving, narrow, board, paneWidths]);
   // The document owns J/K and Escape unless editing or an overlay owns them.
-  const peekState = useRef({ peek, selected });
-  useEffect(() => {
-    peekState.current = { peek, selected };
-  });
   useEffect(() => {
     if (!selected) return;
     const onKey = (event: KeyboardEvent) => {
@@ -256,13 +297,13 @@ export function TicketWorkspaceView({
         return;
       event.preventDefault();
       if (event.key === "Escape") {
-        focusPane.current = { reference: peekState.current.selected };
+        focusPane.current = { reference: selected };
         setSelected(null);
-      } else workspace.openAdjacent(event.key === "j" ? 1 : -1);
+      } else openAdjacent(event.key === "j" ? 1 : -1);
     };
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
-  }, [selected, setSelected, workspace]);
+  });
   const [previousNarrow, setPreviousNarrow] = useState(narrow);
   if (previousNarrow !== narrow) {
     setPreviousNarrow(narrow);
@@ -298,7 +339,13 @@ export function TicketWorkspaceView({
             plan={scopedPlan}
             plans={workspace.plans}
             state={planState}
-            mode={dependenciesOpen ? "dependencies" : workspace.layout}
+            mode={
+              overviewOpen
+                ? "overview"
+                : dependenciesOpen
+                  ? "dependencies"
+                  : workspace.layout
+            }
             onModeChange={setPlanMode}
             controls={
               <PlanListControls
@@ -314,7 +361,7 @@ export function TicketWorkspaceView({
             id={scopedPlan.id}
             revision={workspace.revision}
             onOpen={(reference) => {
-              showTickets();
+              setPlanView("tickets");
               setSelected(reference);
               setNarrowDetail(true);
             }}
@@ -371,33 +418,50 @@ export function TicketWorkspaceView({
             }
             defaultSize={inboxMode ? 392 : 360}
           >
-            {inbox ?? (
-              <TicketListPane
-                workspace={workspace}
-                bulk={bulk}
-                listRef={listRef}
-                planState={planState}
-                projectNotice={projectNotice}
-                {...(scopedPlan && { filtersMenu })}
-                onCreate={onCreate}
-                onOpen={(reference) => {
-                  if (workspace.layout === "board")
-                    boardScrollLeft.current =
-                      listRef.current?.querySelector(".ticket-board")
-                        ?.scrollLeft ?? 0;
-                  setShowDependencies(false);
-                  setSelected(reference);
-                  setNarrowDetail(true);
-                  if (narrow) focusPane.current = "detail";
-                  // The Open tickets preference: a ticket opened from the list may
-                  // take the full width. Narrow windows already show it that way.
-                  else if (!board && openTickets === "expanded") {
-                    setExpanded(true);
-                    focusPane.current = "detail";
-                  }
-                }}
-              />
-            )}
+            {inbox ??
+              (overviewOpen ? (
+                <PlanOverview
+                  key={overviewOpen.id}
+                  plan={overviewOpen}
+                  state={planState}
+                  work={overviewWork}
+                  paneRef={listRef}
+                  selected={selected}
+                  onOpen={(reference, trigger) => {
+                    overviewTrigger.current = trigger
+                      ? { reference, element: trigger }
+                      : null;
+                    setSelected(reference);
+                    setNarrowDetail(true);
+                    if (narrow) focusPane.current = "detail";
+                  }}
+                />
+              ) : (
+                <TicketListPane
+                  workspace={workspace}
+                  bulk={bulk}
+                  listRef={listRef}
+                  planState={planState}
+                  projectNotice={projectNotice}
+                  {...(scopedPlan && { filtersMenu })}
+                  onCreate={onCreate}
+                  onOpen={(reference) => {
+                    if (workspace.layout === "board")
+                      boardScrollLeft.current =
+                        listRef.current?.querySelector(".ticket-board")
+                          ?.scrollLeft ?? 0;
+                    setSelected(reference);
+                    setNarrowDetail(true);
+                    if (narrow) focusPane.current = "detail";
+                    // The Open tickets preference: a ticket opened from the list may
+                    // take the full width. Narrow windows already show it that way.
+                    else if (!board && openTickets === "expanded") {
+                      setExpanded(true);
+                      focusPane.current = "detail";
+                    }
+                  }}
+                />
+              ))}
           </ResizablePanel>
           <ResizableHandle
             overlay
@@ -437,6 +501,13 @@ export function TicketWorkspaceView({
               hidden={inboxMode && !!triage?.chatId}
               leaving={detailLeaving}
               {...(inboxMode && { context: "inbox" as const })}
+              {...(overviewOpen && {
+                overview: {
+                  position: overviewPosition,
+                  onAdjacent: openAdjacent,
+                  loaded: overviewWork !== null,
+                },
+              })}
               expanded={expanded}
               inboxTarget={inboxTarget}
               onExpand={() => {
