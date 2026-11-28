@@ -4589,6 +4589,42 @@ test("Full access is one pick away in a Chat and shows on the trigger once in ef
   ).toBeTruthy();
 });
 
+test("a follow-up queues while Full access is waiting for the next turn", async () => {
+  await open(
+    one({
+      id: "c1",
+      title: "Limiter",
+      activity: "working",
+      steering: { available: true },
+      settings: {
+        permission: {
+          current: "own",
+          options: [
+            option("own", "Codex settings", true),
+            {
+              ...option("full-access", "Full access"),
+              permission: "full_access",
+            },
+          ],
+          changeable: true,
+          applies_from: "next_turn",
+          change: { value: "full-access", state: "held" },
+        },
+      },
+    }),
+  );
+  expect(button("Queue")).toHaveProperty("disabled", true);
+  expect(
+    button("Permissions: Full access, applies on the next turn"),
+  ).toBeTruthy();
+  type("Continue with Full access", "Queue for Codex");
+  fireEvent.keyDown(composer("Queue for Codex"), { key: "Enter" });
+
+  const queue = await screen.findByRole("list", { name: "Queued messages" });
+  expect(within(queue).getByText("Continue with Full access")).toBeTruthy();
+  expect(within(queue).queryByRole("button", { name: "Send now" })).toBeNull();
+});
+
 test("a refused change names its choice after the options go, and Stop clears it (#387 M16)", async () => {
   const client = await open(
     one({

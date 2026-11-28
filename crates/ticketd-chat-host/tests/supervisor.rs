@@ -4248,6 +4248,41 @@ fn setting_changes(f: &Fixture) -> Vec<SettingChange> {
 }
 
 #[tokio::test(start_paused = true)]
+async fn a_message_sent_after_picking_full_access_starts_a_new_turn_with_it() {
+    let f = Fixture::new(FakeAdapter::codex());
+    f.send("Start under the current permissions").await;
+    f.emit(EventKind::SettingsState(settings("ask"))).await;
+    let held = f
+        .host
+        .change_setting(&f.chat.id, SettingKey::Permission, "full")
+        .await
+        .unwrap();
+    assert_eq!(held, SettingChangeState::Held);
+
+    let follow_up = f.send("Continue with Full access").await;
+    assert_eq!(
+        f.submits().len(),
+        1,
+        "the follow-up must wait for a new turn"
+    );
+    assert_eq!(f.queued(), ["Continue with Full access"]);
+    assert!(matches!(
+        f.host.send_queued_now(&f.chat.id, &follow_up.id).await,
+        Err(HostError::Working)
+    ));
+
+    f.emit(turn_ended(turn_1(), TurnOutcome::Completed)).await;
+    let written = f.fake.written();
+    let [Written::Setting(change), Written::Submit(submitted)] = &written[1..] else {
+        panic!("the permission change must precede the follow-up: {written:?}");
+    };
+    assert_eq!(change.setting, SettingKey::Permission);
+    assert_eq!(change.value, "full");
+    assert_eq!(submitted.kind, SubmissionKind::StartTurn);
+    assert_eq!(submitted.text, "Continue with Full access");
+}
+
+#[tokio::test(start_paused = true)]
 async fn a_setting_changed_during_a_turn_is_held_until_it_ends() {
     let f = Fixture::new(FakeAdapter::codex());
     f.send("Start").await;

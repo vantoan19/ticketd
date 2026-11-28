@@ -915,6 +915,20 @@ impl Supervisor {
         })
     }
 
+    /// Steering keeps the running turn's permissions. Hold new input for a new turn
+    /// while the person has a permission change waiting.
+    fn permission_change_pending(&self) -> bool {
+        self.runtime.as_ref().is_some_and(|runtime| {
+            runtime.setting_changes.iter().any(|change| {
+                change.setting == SettingKey::Permission
+                    && matches!(
+                        change.state,
+                        SettingChangeState::Held | SettingChangeState::Sent
+                    )
+            })
+        })
+    }
+
     // ------------------------------------------------------------------
     // Commands
     // ------------------------------------------------------------------
@@ -1360,6 +1374,7 @@ impl Supervisor {
         self.recover_storage()?;
         let has_images = attachments.iter().any(ChatAttachmentContent::is_image);
         let can_steer = self.active.is_some()
+            && !self.permission_change_pending()
             && self.steering().is_some()
             && !(has_images && self.images_refused(true));
         if !attachments.is_empty() {
@@ -1594,7 +1609,8 @@ impl Supervisor {
         if let Some(detail) = &self.storage_failed {
             return Err(HostError::StorageFailed(detail.clone()));
         }
-        if self.active.is_some() && self.steering().is_none() {
+        if self.active.is_some() && (self.steering().is_none() || self.permission_change_pending())
+        {
             return Err(HostError::Working);
         }
         let chat = self.chat_id.clone();
@@ -2888,10 +2904,11 @@ impl Supervisor {
             return;
         }
         if !idle
-            && self
-                .direct
-                .iter()
-                .all(|(input, intent)| self.waits_for_new_turn(input, *intent))
+            && (self.permission_change_pending()
+                || self
+                    .direct
+                    .iter()
+                    .all(|(input, intent)| self.waits_for_new_turn(input, *intent)))
         {
             // During a turn only steering input can go out, so the workspace is not
             // read for every event of a streaming turn.
