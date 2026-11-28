@@ -437,6 +437,7 @@ pub(crate) fn undo_send_back(
             Mode::Single,
         )?;
         activities::delete(scope, &id, &sent.activity.id)?;
+        inbox::remove_activity_entries(scope, &id, &sent.activity.id)?;
         read_ticket(scope, reference)
     })
 }

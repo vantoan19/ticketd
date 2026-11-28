@@ -382,6 +382,7 @@ fn send_back_moves_the_review_and_posts_the_persons_update_together() {
     assert!(workspace.activities(reference, 10, 0).unwrap().is_empty());
     assert_eq!(workspace.ticket_history(reference).unwrap().len(), 1);
 
+    workspace.set_following(reference, true).unwrap();
     let report = workspace
         .add_activity(reference, "Implemented the rail.", Some("codex"))
         .unwrap();
@@ -408,6 +409,12 @@ fn send_back_moves_the_review_and_posts_the_persons_update_together() {
     assert_eq!(updates.len(), 2);
     assert_eq!(updates[1].brief, "Handle a narrow window.");
     assert!(updates[1].editing_agent.is_none());
+    let inbox = workspace.inbox(20, 0).unwrap();
+    assert!(
+        inbox
+            .iter()
+            .any(|entry| entry.kind == "activity" && entry.from_value == updates[1].id)
+    );
     assert_eq!(
         workspace.show_ticket(reference).unwrap().status,
         Status::InProgress
@@ -426,6 +433,13 @@ fn send_back_moves_the_review_and_posts_the_persons_update_together() {
     let restored = workspace.write(Some("undo"), undo()).unwrap();
     assert_eq!(workspace.write(Some("undo"), undo()).unwrap(), restored);
     assert!(matches!(restored, WriteResult::Ticket(ticket) if ticket.status == Status::InReview));
+    let inbox = workspace.inbox(20, 0).unwrap();
+    let update_notices: Vec<_> = inbox
+        .iter()
+        .filter(|entry| entry.kind == "activity")
+        .map(|entry| entry.from_value.as_str())
+        .collect();
+    assert_eq!(update_notices, vec![report.id.as_str()]);
     assert_eq!(
         workspace.activities(reference, 10, 0).unwrap(),
         vec![report]
