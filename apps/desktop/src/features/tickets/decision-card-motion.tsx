@@ -87,15 +87,13 @@ export function DecisionCardContent({
   return (
     <div className="ticket-decision-content" ref={outer}>
       <div className="ticket-decision-measure" ref={sizing}>
-        {transition.duration === 0 ? (
-          <div className="ticket-decision-layer">{children}</div>
-        ) : (
-          <Presence initial={false}>
-            <Layer key={state} transition={transition}>
-              {children}
-            </Layer>
-          </Presence>
-        )}
+        {/* Keep the focused control mounted when the input guard's duration
+            changes between instant and animated motion. */}
+        <Presence initial={false}>
+          <Layer key={state} transition={transition}>
+            {children}
+          </Layer>
+        </Presence>
       </div>
     </div>
   );

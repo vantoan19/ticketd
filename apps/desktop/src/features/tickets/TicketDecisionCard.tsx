@@ -324,6 +324,7 @@ export function TicketDecisionCard({
             <Button asChild variant="outline" size="compact">
               <a
                 ref={next}
+                className="ticket-review-focus"
                 href={`ticketd://ticket/${nextReference}`}
                 onClick={(event) => {
                   event.preventDefault();
@@ -336,7 +337,11 @@ export function TicketDecisionCard({
             </Button>
           </div>
         ) : (
-          <p ref={nothing} tabIndex={-1} className="ticket-decision-byline">
+          <p
+            ref={nothing}
+            tabIndex={-1}
+            className="ticket-decision-byline ticket-review-focus"
+          >
             Nothing else in review
           </p>
         )}
