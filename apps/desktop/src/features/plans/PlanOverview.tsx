@@ -21,6 +21,7 @@ import { plansClient, type Plan, type View } from "@/lib/api/plans";
 import { compactAgo, formatDateTime } from "@/lib/format";
 import { matchesShortcut } from "@/lib/shortcuts";
 import { PlanDocuments } from "./PlanDocuments";
+import { PlanEmptyState } from "./PlanEmptyState";
 import { PlanOverviewChanges } from "./PlanOverviewChanges";
 import { PlanOverviewFiles } from "./PlanOverviewFiles";
 import { PlanOverviewSections } from "./PlanOverviewSections";
@@ -111,42 +112,46 @@ export function PlanOverview({
               <FailureState failure={loadError} onRetry={reload} />
             ) : view && work ? (
               <>
-                {view.members.length > 0 && (
-                  <div className="plan-overview-progress">
-                    <PlanOverviewProgress view={view} work={work} />
-                    <PlanOverviewStrip
-                      strip={work.strip}
+                {view.members.length > 0 ? (
+                  <>
+                    <div className="plan-overview-progress">
+                      <PlanOverviewProgress view={view} work={work} />
+                      <PlanOverviewStrip
+                        strip={work.strip}
+                        selected={selected}
+                        onOpen={onOpen}
+                      />
+                    </div>
+                    <PlanOverviewWrapUp
+                      view={view}
+                      plans={plans}
+                      state={state}
+                    />
+                    <PlanOverviewSections
+                      work={work}
+                      updates={view.latest_updates}
+                      statusSince={view.status_since}
+                      projects={projects}
+                      selected={selected}
+                      onOpen={onOpen}
+                      files={files.byTicket}
+                      onOpenFiles={files.openGroup}
+                    />
+                    <PlanOverviewFiles
+                      archived={current.archived}
+                      state={files}
+                      onOpenTicket={onOpen}
+                    />
+                    <PlanOverviewChanges
+                      plan={current}
                       selected={selected}
                       onOpen={onOpen}
                     />
-                  </div>
-                )}
-                <PlanOverviewWrapUp view={view} plans={plans} state={state} />
-                {view.members.length > 0 && (
-                  <PlanOverviewSections
-                    work={work}
-                    updates={view.latest_updates}
-                    statusSince={view.status_since}
-                    projects={projects}
-                    selected={selected}
-                    onOpen={onOpen}
-                    files={files.byTicket}
-                    onOpenFiles={files.openGroup}
-                  />
-                )}
-                {/* PlanEmptyState */}
-                {view.members.length > 0 && (
-                  <PlanOverviewFiles
-                    archived={current.archived}
-                    state={files}
-                    onOpenTicket={onOpen}
-                  />
-                )}
-                {view.members.length > 0 && (
-                  <PlanOverviewChanges
-                    plan={current}
-                    selected={selected}
-                    onOpen={onOpen}
+                  </>
+                ) : (
+                  <PlanEmptyState
+                    view={view}
+                    onAdd={() => state.setAdding(true)}
                   />
                 )}
                 <PlanDocuments view={view} state={state} />
