@@ -1,11 +1,7 @@
-import {
-  plansClient,
-  type Plan,
-  type PlanCounts,
-  type View,
-} from "@/lib/api/plans";
+import { plansClient, type PlanCounts } from "@/lib/api/plans";
+import { read, useRead } from "@/lib/workspace-reads";
 import { flowPlanMembers, PlanMemberWindow } from "./plan-members";
-import { planWrapUp } from "./plan-work-model";
+import { planWrapUp, type PlanWorkTicket } from "./plan-work-model";
 
 type PlanIndexDetails = {
   ready: number;
@@ -19,46 +15,28 @@ export type PlanIndexData = {
   details: PlanIndexDetails | null;
 };
 
-/** Counts come from the whole Plan, even when its dependency read is bounded. */
-export async function readPlanIndexData(
-  plan: Plan,
-): Promise<{ data: PlanIndexData; error?: unknown }> {
-  const [summary, membership] = await Promise.allSettled([
-    plansClient.show(plan.id, 0, 0, false),
-    flowPlanMembers(plan.id),
+async function readPlanIndexData(
+  id: string,
+  archived: boolean,
+): Promise<PlanIndexData> {
+  const [summary, membership] = await Promise.all([
+    plansClient.show(id, 0, 0, false),
+    flowPlanMembers(id).catch((reason: unknown) => {
+      if (reason instanceof PlanMemberWindow) return null;
+      throw reason;
+    }),
   ]);
-  if (summary.status === "rejected")
-    return {
-      data: { counts: undefined, details: null },
-      error: summary.reason,
-    };
-  let { counts } = summary.value;
-  let members: View["members"] | Awaited<ReturnType<typeof flowPlanMembers>>;
-  if (membership.status === "fulfilled") {
-    members = membership.value;
-  } else if (membership.reason instanceof PlanMemberWindow) {
-    // Flow bounds its projection. The full Plan read supplies counts and
-    // all prerequisites together from one snapshot when that projection omits any.
-    try {
-      ({ counts, members } = await plansClient.show(plan.id));
-    } catch (error) {
-      return { data: { counts, details: null }, error };
-    }
-  } else {
-    return { data: { counts, details: null }, error: membership.reason };
-  }
+  // Flow bounds its projection. The full Plan read supplies counts and all
+  // prerequisites together from one snapshot when the projection omits any.
+  const complete = membership === null ? await plansClient.show(id) : null;
+  const counts = complete?.counts ?? summary.counts;
+  const members = complete?.members ?? membership ?? [];
   const total = Object.values(counts).reduce((a, b) => a + b, 0);
   if (
     members.length !== total ||
     new Set(members.map((member) => member.reference)).size !== total
-  ) {
-    return {
-      data: { counts, details: null },
-      error: new Error(
-        "The Plan changed while its member details were loading.",
-      ),
-    };
-  }
+  )
+    throw new Error("The Plan changed while its member details were loading.");
   // The member update timestamp includes ticket changes, history and Activities.
   const updated = members.reduce<string | null>((latest, member) => {
     const updatedAt = member.updated_at;
@@ -69,16 +47,24 @@ export async function readPlanIndexData(
       : latest;
   }, null);
   return {
-    data: {
-      counts,
-      details: {
-        ready: members.filter((member) => member.availability === "Ready")
-          .length,
-        blocked: members.filter((member) => member.availability === "Blocked")
-          .length,
-        wrapUp: planWrapUp(plan.archived, members) !== null,
-        updated,
-      },
+    counts,
+    details: {
+      ready: members.filter((member) => member.availability === "Ready").length,
+      blocked: members.filter((member) => member.availability === "Blocked")
+        .length,
+      wrapUp: planWrapUp<PlanWorkTicket>(archived, members) !== null,
+      updated,
     },
   };
+}
+
+const planIndexRead = read({
+  key: "plan-index-row",
+  call: ({ id, archived }: { id: string; archived: boolean }) =>
+    readPlanIndexData(id, archived),
+  failure: "load Plan details",
+});
+
+export function usePlanIndexData(id: string, archived: boolean) {
+  return useRead(planIndexRead, { id, archived });
 }

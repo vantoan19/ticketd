@@ -1,4 +1,11 @@
-import { useEffect, useMemo, useState } from "react";
+import {
+  useCallback,
+  useEffect,
+  useLayoutEffect,
+  useMemo,
+  useState,
+  type ReactNode,
+} from "react";
 import { ArchiveRestore, Layers, Plus } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { enter } from "@/components/ui/enter";
@@ -15,9 +22,8 @@ import { Tooltip } from "@/components/ui/tooltip";
 import { NewPlanDialog } from "./NewPlanDialog";
 import { FailureAlert, FailureState } from "@/components/ui/failure-alert";
 import type { FailureDescription } from "@/lib/api/describe-failure";
-import { useWorkspaceChange } from "@/lib/workspace-change";
 import { PlanIndexRow, PlanIndexRowSkeleton } from "./PlanIndexRow";
-import { readPlanIndexData, type PlanIndexData } from "./plan-index-data";
+import { usePlanIndexData, type PlanIndexData } from "./plan-index-data";
 import "./plan-index.css";
 /**
  * The Plans page (DESIGN.md section 10): a management page with "New Plan"
@@ -195,10 +201,14 @@ function LoadingPlans({ count }: { count: number }) {
   );
 }
 
-type Rows = {
-  order: string[];
-  byId: Map<string, PlanIndexData>;
+const unknownPlanData: PlanIndexData = { counts: undefined, details: null };
+
+type RowObservation = {
+  answered: boolean;
+  review: boolean;
+  updated: number;
   failure: FailureDescription | null;
+  retry: () => Promise<void>;
 };
 
 function PlanIndexRows({
@@ -214,105 +224,139 @@ function PlanIndexRows({
   pending: string;
   reactivate: (plan: Plan) => Promise<void>;
 }) {
-  const change = useWorkspaceChange();
-  const [attempt, setAttempt] = useState(0);
-  const [rows, setRows] = useState<Rows | null>(null);
-  useEffect(() => {
-    let live = true;
-    void Promise.all(
-      plans.map(
-        async (plan) => [plan.id, await readPlanIndexData(plan)] as const,
-      ),
-    ).then((results) => {
-      if (!live) return;
-      setRows((previous) => {
-        const byId = new Map(
-          results.map(([id, result]) => {
-            const lastGood = previous?.byId.get(id);
-            return [
-              id,
-              "error" in result && lastGood?.counts ? lastGood : result.data,
-            ];
-          }),
-        );
-        const kept = previous?.order.filter((id) => byId.has(id)) ?? [];
-        const pinned = new Set(kept);
-        const arrived = plans
-          .filter((plan) => !pinned.has(plan.id))
-          .sort((a, b) => {
-            const left = byId.get(a.id);
-            const right = byId.get(b.id);
-            return (
-              Number((right?.counts?.in_review ?? 0) > 0) -
-                Number((left?.counts?.in_review ?? 0) > 0) ||
-              (Date.parse(right?.details?.updated ?? "") || 0) -
-                (Date.parse(left?.details?.updated ?? "") || 0)
-            );
-          });
-        const failed = results.find(([, result]) => "error" in result);
-        return {
-          order: [...kept, ...arrived.map((plan) => plan.id)],
-          byId,
-          failure: failed
-            ? describeFailure(failed[1].error, "load Plan details")
-            : null,
-        };
-      });
+  const [observations, setObservations] = useState(
+    () => new Map<string, RowObservation>(),
+  );
+  const observe = useCallback((id: string, row: RowObservation) => {
+    setObservations((previous) => new Map(previous).set(id, row));
+  }, []);
+  const [pinnedOrder, setPinnedOrder] = useState<string[]>([]);
+  const current = new Map(plans.map((plan) => [plan.id, plan] as const));
+  const pinned = new Set(pinnedOrder);
+  const arrived = plans.filter((plan) => !pinned.has(plan.id));
+  const awaitingArrivals = arrived.some(
+    (plan) => !observations.get(plan.id)?.answered,
+  );
+  if (!awaitingArrivals && arrived.length) {
+    arrived.sort((a, b) => {
+      const left = observations.get(a.id);
+      const right = observations.get(b.id);
+      return (
+        Number(right?.review ?? false) - Number(left?.review ?? false) ||
+        (right?.updated ?? 0) - (left?.updated ?? 0)
+      );
     });
-    return () => {
-      live = false;
-    };
-  }, [plans, change, attempt]);
+    setPinnedOrder([...pinnedOrder, ...arrived.map((plan) => plan.id)]);
+  }
+  const loading = pinnedOrder.length === 0 && awaitingArrivals;
+  const order = [
+    ...pinnedOrder.filter((id) => current.has(id)),
+    ...arrived.map((plan) => plan.id),
+  ];
+  const failed = plans
+    .map((plan) => observations.get(plan.id))
+    .filter((row) => row !== undefined && row.failure !== null);
+  const retryable = failed.filter((row) => row.failure?.action === "retry");
+  const failure = (retryable[0] ?? failed[0])?.failure;
 
-  if (!rows) return <LoadingPlans count={Math.min(plans.length, 8)} />;
-  const current = new Map(plans.map((plan) => [plan.id, plan]));
   return (
     <>
-      {rows.failure && (
+      {loading && <LoadingPlans count={Math.min(plans.length, 8)} />}
+      {!loading && failure && (
         <FailureAlert
           size="compact"
-          failure={rows.failure}
-          onRetry={() => setAttempt((value) => value + 1)}
+          failure={failure}
+          onRetry={() => void Promise.all(retryable.map((row) => row.retry()))}
         />
       )}
       <ul
-        className="plan-index-list"
+        className={loading ? undefined : "plan-index-list"}
+        hidden={loading}
         role="list"
         aria-label={archived ? "Archived Plans" : "Active Plans"}
       >
-        {rows.order.map((id, index) => {
+        {order.map((id, index) => {
           const plan = current.get(id);
-          const data = rows.byId.get(id);
-          if (!plan || !data) return null;
+          if (!plan) return null;
           return (
-            <li key={id} {...enter(index + 1)}>
-              <PlanIndexRow plan={plan} data={data} onOpen={() => onOpen(id)}>
-                {archived && (
-                  <span className="plan-index-action">
-                    <Tooltip
-                      content="Reactivate Plan"
-                      shortcut={shortcutLabel("list-open")}
+            <ReadPlanIndexRow
+              key={id}
+              plan={plan}
+              step={index + 1}
+              onOpen={() => onOpen(id)}
+              observe={observe}
+            >
+              {archived && (
+                <span className="plan-index-action">
+                  <Tooltip
+                    content="Reactivate Plan"
+                    shortcut={shortcutLabel("list-open")}
+                  >
+                    <Button
+                      variant="outline"
+                      size="sm"
+                      disabled={pending === id}
+                      aria-label={`Reactivate ${plan.name}`}
+                      onClick={() => void reactivate(plan)}
                     >
-                      <Button
-                        variant="outline"
-                        size="sm"
-                        disabled={pending === id}
-                        aria-label={`Reactivate ${plan.name}`}
-                        onClick={() => void reactivate(plan)}
-                      >
-                        <ArchiveRestore data-icon="inline-start" />{" "}
-                        <span className="plan-index-action-label">
-                          Reactivate
-                        </span>
-                      </Button>
-                    </Tooltip>
-                  </span>
-                )}
-              </PlanIndexRow>
-            </li>
+                      <ArchiveRestore data-icon="inline-start" />{" "}
+                      <span className="plan-index-action-label">
+                        Reactivate
+                      </span>
+                    </Button>
+                  </Tooltip>
+                </span>
+              )}
+            </ReadPlanIndexRow>
           );
         })}
       </ul>
     </>
+  );
+}
+
+function ReadPlanIndexRow({
+  plan,
+  step,
+  onOpen,
+  observe,
+  children,
+}: {
+  plan: Plan;
+  step: number;
+  onOpen: () => void;
+  observe: (id: string, row: RowObservation) => void;
+  children: ReactNode;
+}) {
+  const { value, failure, retry, current } = usePlanIndexData(
+    plan.id,
+    plan.archived,
+  );
+  // The page needs enough information to sort a new row and show its Retry.
+  // The row itself reads the data from the shared cache.
+  useLayoutEffect(() => {
+    observe(plan.id, {
+      answered: current || failure !== null,
+      review: (value?.counts?.in_review ?? 0) > 0,
+      updated: Date.parse(value?.details?.updated ?? "") || 0,
+      failure,
+      retry,
+    });
+  }, [current, failure, observe, plan.id, retry, value]);
+
+  return (
+    <li {...enter(step)}>
+      {value || failure ? (
+        <PlanIndexRow
+          plan={plan}
+          data={value ?? unknownPlanData}
+          onOpen={onOpen}
+        >
+          {children}
+        </PlanIndexRow>
+      ) : (
+        <PlanIndexRowSkeleton />
+      )}
+    </li>
   );
 }

@@ -10,7 +10,9 @@ import {
 } from "@testing-library/react";
 import { afterEach, expect, test, vi } from "vitest";
 import { setPreference } from "@/lib/preferences";
-import { WorkspaceChangeProvider } from "@/lib/workspace-change";
+import { Visibility } from "@/lib/workspace-reads";
+import { fakeChangeSignal } from "@/lib/workspace-reads/fake-signal";
+import { TestReads } from "@/lib/workspace-reads/testing";
 import { StatusLineRegion } from "@/components/ui/status-line";
 import { PlanList } from "./PlanList";
 
@@ -41,21 +43,24 @@ function plansPage(
     purpose: string;
   }[] = [],
   props: Partial<Parameters<typeof PlanList>[0]> = {},
-  revision = 0,
+  signal = fakeChangeSignal(),
+  hidden = false,
 ) {
   return (
-    <WorkspaceChangeProvider value={revision}>
-      <StatusLineRegion>
-        <PlanList
-          plans={plans}
-          archived={archived}
-          onOpen={() => {}}
-          onArchivedChange={() => {}}
-          refresh={async () => {}}
-          {...props}
-        />
-      </StatusLineRegion>
-    </WorkspaceChangeProvider>
+    <TestReads signal={signal}>
+      <Visibility hidden={hidden}>
+        <StatusLineRegion>
+          <PlanList
+            plans={plans}
+            archived={archived}
+            onOpen={() => {}}
+            onArchivedChange={() => {}}
+            refresh={async () => {}}
+            {...props}
+          />
+        </StatusLineRegion>
+      </Visibility>
+    </TestReads>
   );
 }
 
@@ -364,7 +369,8 @@ test("Plans first sort reviews then the newest change, and keep their positions 
       return null;
     },
   );
-  const page = list(false, plans);
+  const signal = fakeChangeSignal();
+  const { unmount } = list(false, plans, {}, signal);
   const rows = await screen.findByRole("list", { name: "Active Plans" });
   function order(group: HTMLElement) {
     return within(group)
@@ -376,13 +382,13 @@ test("Plans first sort reviews then the newest change, and keep their positions 
   );
   expect(order(rows)).toEqual(firstOrder);
   updated = true;
-  page.rerender(plansPage(false, plans, {}, 1));
+  act(() => signal.change());
   await within(rows).findByRole("button", {
     name: "Open Plan Launch",
     description: /1 in review/,
   });
   expect(order(rows)).toEqual(firstOrder);
-  page.unmount();
+  unmount();
   list(false, plans);
   const reopened = await screen.findByRole("list", { name: "Active Plans" });
   expect(order(reopened)).toEqual(
@@ -413,20 +419,99 @@ test("Plan row loading shows progress once ready and a failed refresh keeps the 
     return null;
   });
   const plans = [launch];
-  const page = list(false, plans);
+  const signal = fakeChangeSignal();
+  const page = list(false, plans, {}, signal);
   expect(screen.getByRole("status", { name: "Loading Plans" })).toBeTruthy();
   resolveMembers({ items: [member("T-1", "In review")], omitted: false });
   await screen.findByText("1 in review");
   fail = true;
-  page.rerender(plansPage(false, plans, {}, 1));
+  act(() => signal.change());
   await screen.findByText("Couldn't load Plan details.");
   expect(screen.getByText("1 in review")).toBeTruthy();
   expect(screen.getByText("0 of 1")).toBeTruthy();
+  const failedReads = bridge.invoke.mock.calls.length;
+  page.rerender(plansPage(false, plans, {}, signal, true));
+  page.rerender(plansPage(false, plans, {}, signal));
+  await act(async () => {});
+  expect(bridge.invoke).toHaveBeenCalledTimes(failedReads);
+
   fail = false;
   fireEvent.click(screen.getByRole("button", { name: "Retry" }));
   await waitFor(() =>
     expect(screen.queryByText("Couldn't load Plan details.")).toBeNull(),
   );
+});
+
+test("a failed Plan row preserves the other row's counts and retry only rereads the failure", async () => {
+  const docs = { ...launch, id: "docs", name: "Docs" };
+  let fail = true;
+  bridge.invoke.mockImplementation(
+    async (
+      command: string,
+      args: { id?: string; filter?: { plan: string } },
+    ) => {
+      if (command === "show_plan")
+        return {
+          plan: args.id === docs.id ? docs : launch,
+          counts: { ...emptyCounts, todo: 1 },
+          members: [],
+        };
+      if (command === "find_tickets_with_updates") {
+        if (fail && args.filter?.plan === docs.id)
+          throw new Error("Member read failed");
+        return { items: [member("T-1", "Todo", "Ready")], omitted: false };
+      }
+      return null;
+    },
+  );
+  list(false, [launch, docs]);
+  expect(
+    await screen.findByRole("button", {
+      name: "Open Plan Launch",
+      description: "1 ready. 0 of 1 done",
+    }),
+  ).toBeTruthy();
+  expect(
+    screen.getByRole("button", {
+      name: "Open Plan Docs",
+      description: "Plan details unavailable",
+    }),
+  ).toBeTruthy();
+
+  fail = false;
+  fireEvent.click(screen.getByRole("button", { name: "Retry" }));
+  await screen.findByRole("button", {
+    name: "Open Plan Docs",
+    description: "1 ready. 0 of 1 done",
+  });
+  const healthyReads = bridge.invoke.mock.calls.filter(
+    ([command, args]) => command === "show_plan" && args.id === launch.id,
+  );
+  expect(healthyReads).toHaveLength(1);
+});
+
+test("Plan details catch up once when a hidden page is shown", async () => {
+  bridge.invoke.mockImplementation(async (command: string) => {
+    if (command === "show_plan")
+      return { plan: launch, counts: { ...emptyCounts, todo: 1 }, members: [] };
+    if (command === "find_tickets_with_updates")
+      return { items: [member("T-1", "Todo", "Ready")], omitted: false };
+    return null;
+  });
+  const signal = fakeChangeSignal();
+  const plans = [launch];
+  const page = list(false, plans, {}, signal);
+  await screen.findByText("1 ready");
+  const initial = bridge.invoke.mock.calls.length;
+  page.rerender(plansPage(false, plans, {}, signal, true));
+  await act(async () => {
+    signal.change();
+    signal.change();
+  });
+  expect(bridge.invoke).toHaveBeenCalledTimes(initial);
+
+  page.rerender(plansPage(false, plans, {}, signal));
+  await waitFor(() => expect(bridge.invoke).toHaveBeenCalledTimes(initial + 2));
 });
 
 test("a Plan that moved is unread unless it needs attention", async () => {
@@ -453,7 +538,8 @@ test("a Plan that moved is unread unless it needs attention", async () => {
       };
     return null;
   });
-  const view = list(false, [launch]);
+  const signal = fakeChangeSignal();
+  list(false, [launch], {}, signal);
   const name = "Open Plan Launch";
   expect(
     await screen.findByRole("button", {
@@ -462,7 +548,7 @@ test("a Plan that moved is unread unless it needs attention", async () => {
     }),
   ).toBeTruthy();
   reviewing = true;
-  view.rerender(plansPage(false, [launch], {}, 1));
+  act(() => signal.change());
   expect(
     await screen.findByRole("button", {
       name,
