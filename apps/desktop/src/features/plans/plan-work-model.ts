@@ -1,4 +1,4 @@
-import type { FlowTicketMetadata, Ticket } from "@/lib/api/client";
+import type { Ticket } from "@/lib/api/client";
 
 export type PlanWorkTicket = Pick<
   Ticket,
@@ -83,7 +83,7 @@ function flowOrder<T extends PlanWorkTicket>(
   tickets: readonly T[],
   dependents: Map<string, string[]>,
 ) {
-  // The existing Flow and Next up rank by immediate open dependents.
+  // Flow ranks by immediate open dependents.
   return [...tickets].sort(
     (a, b) =>
       rankInFlow(a) - rankInFlow(b) ||
@@ -322,17 +322,29 @@ export function planFlow<T extends PlanWorkTicket>(members: readonly T[]) {
   return { lanes, edges, undrawn, reason };
 }
 
-/** The Plans page uses the existing Flow ranking and skips unavailable sources. */
-export function planNextUp<
-  T extends PlanWorkTicket & Pick<FlowTicketMetadata, "source">,
->(members: readonly T[]) {
-  const { open, dependents } = indexPlanWork(members);
-  const ready = open.filter((ticket) => groupOf(ticket) === "Ready");
-  return {
-    next: flowOrder(ready, dependents).find(
-      (ticket) => !ticket.source?.unavailable,
-    ),
-    ready: ready.length,
-    blocked: open.filter((ticket) => groupOf(ticket) === "Blocked").length,
-  };
+/** Pass complete membership and prerequisites. An empty result means no work is left. */
+export function planWrapUp<T extends PlanWorkTicket>(
+  archived: boolean,
+  members: readonly T[],
+): T[] | null {
+  const visible = members.filter((ticket) => !ticket.trashed);
+  if (archived || visible.length === 0) return null;
+  const references = new Set(members.map((ticket) => ticket.reference));
+  const open = visible.filter((ticket) => !isClosed(ticket.status));
+  for (const ticket of open) {
+    if (groupOf(ticket) !== "Blocked") return null;
+    const blockers = ticket.prerequisites.filter(
+      (blocker) => blocker.unresolved,
+    );
+    // The projection excludes trashed members but their edges still block work.
+    // Without their membership we cannot establish that the blocker is outside.
+    if (
+      !blockers.length ||
+      blockers.some(
+        (blocker) => blocker.trashed || references.has(blocker.reference),
+      )
+    )
+      return null;
+  }
+  return open;
 }

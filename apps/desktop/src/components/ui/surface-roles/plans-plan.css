@@ -13,33 +13,27 @@
 .plan-index-list {
   list-style: none;
 }
+.plan-index-open {
+  border-radius: inherit;
+}
+.plan-index-open:focus-visible {
+  outline: 2px solid var(--ring);
+  outline-offset: -2px;
+}
+.plan-index-name,
+.plan-index-count {
+  font-size: var(--text-ui);
+  line-height: var(--text-ui-line);
+}
 .plan-index-name {
-  white-space: nowrap;
+  font-weight: 500;
 }
-.plan-card-description p {
-  white-space: nowrap;
+.plan-index-state,
+.plan-index-time {
+  font-size: var(--text-meta);
+  line-height: var(--text-meta-line);
 }
-.plan-card-failure {
-  white-space: nowrap;
-}
-.plan-card-summary {
-  white-space: nowrap;
-}
-.plan-card-next .ui-record-link {
-  white-space: nowrap;
-}
-.plan-card-ready {
-  white-space: nowrap;
-}
-@media (max-width: 640px) {
-  .plan-card-description p {
-    white-space: normal;
-  }
-  .plan-card-failure {
-    white-space: normal;
-  }
-}
-
-.plan-card-title > .plan-card-caption {
-  white-space: nowrap;
+.plan-index-row[data-archived] .plan-index-name,
+.plan-index-row[data-archived] .plan-index-count {
+  color: var(--muted-foreground);
 }

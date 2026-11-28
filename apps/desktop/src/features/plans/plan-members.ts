@@ -5,7 +5,7 @@ const MEMBER_LIMIT = 500;
 export class PlanMemberWindow extends Error {
   constructor() {
     super(
-      "This Plan exceeds the complete Flow metadata window. No lanes or next ticket were inferred from incomplete membership or prerequisites.",
+      "This Plan exceeds the complete Flow metadata window. Some membership or prerequisite details are unavailable.",
     );
   }
 }

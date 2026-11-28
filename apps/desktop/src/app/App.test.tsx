@@ -5298,7 +5298,7 @@ test("checked rows keep their live-update positions through idle until selection
   expect(screen.getByRole("heading", { name: "Done" })).toBeTruthy();
 });
 
-test("Plans cards join full counts, Flow-ordered Ready work, newest update and spec", async () => {
+test("Plans rows show counts, status words and the latest member change", async () => {
   const tickets = [
     bulkTicket(2, {
       title: "Ready second",
@@ -5395,78 +5395,60 @@ test("Plans cards join full counts, Flow-ordered Ready work, newest update and s
   );
   render(<App />);
   fireEvent.click(await screen.findByRole("button", { name: "Plans" }));
-  const cards = await screen.findByRole("list", { name: "Active Plans" });
-  expect(await within(cards).findByText("4 of 10 done")).toBeTruthy();
-  expect(within(cards).getByText("1 canceled, not counted")).toBeTruthy();
-  expect(within(cards).getByText("2 duplicates, not counted")).toBeTruthy();
+  const rows = await screen.findByRole("list", { name: "Active Plans" });
+  expect(within(rows).getByText("4 of 10")).toBeTruthy();
   expect(
-    await within(cards).findByRole("button", { name: /T-KQ9 Ready first/ }),
+    within(rows).getByText("1 in review · 2 in progress · 2 ready · 1 blocked"),
   ).toBeTruthy();
-  expect(within(cards).queryByText("Ready second")).toBeNull();
-  expect(within(cards).getByText("Desktop app")).toBeTruthy();
-  expect(
-    within(cards).getByText("2 ready, 1 blocked", { exact: false }),
-  ).toBeTruthy();
-  expect(within(cards).getByText("Launch specification")).toBeTruthy();
-  expect(cards.querySelector("time")?.getAttribute("datetime")).toBe(
+  expect(within(rows).queryByText("Desktop app")).toBeNull();
+  expect(within(rows).queryByText("Ship together")).toBeNull();
+  expect(within(rows).queryByText("Launch specification")).toBeNull();
+  expect(rows.querySelector("time")?.getAttribute("datetime")).toBe(
     "2026-02-01T00:00:00Z",
   );
   fireEvent.click(
-    within(cards).getByRole("button", { name: /T-KQ9 Ready first/ }),
+    within(rows).getByRole("button", { name: "Open Plan Launch cards" }),
   );
-  expect(await screen.findByRole("heading", { name: "T-KQ9" })).toBeTruthy();
+  expect(
+    await screen.findByRole("heading", { name: "Launch cards" }),
+  ).toBeTruthy();
 });
 
-test("a long Next up title keeps its ticket, Plan and spec separately keyboard reachable", async () => {
-  const title = "A very long next ticket title ".repeat(15).trim();
-  const ticket = bulkTicket(15, { title, availability: "Ready" });
-  const plan = {
-    id: "P-next",
-    name: "Next release",
-    archived: false,
-    spec_document_id: "next-spec",
-  };
+test("the sidebar names a Plan's review count and completion alongside its scope", async () => {
+  const review = { id: "P-review", name: "Review now", archived: false };
+  const working = { id: "P-working", name: "Working now", archived: false };
   bridge.invoke.mockImplementation(
     (command: string, args: Record<string, unknown>) => {
-      if (command === "list_plans") return [plan];
-      if (command === "show_plan")
+      if (command === "list_plans") return [review, working];
+      if (command === "show_plan") {
+        const plan = args.id === review.id ? review : working;
         return {
           plan,
-          counts: counted({ todo: 1 }),
-          members: [ticket],
-          documents: [
-            { id: "next-spec", heading: "Next specification", trashed: false },
-          ],
+          counts: counted({
+            done: 2,
+            in_review: plan === review ? 1 : 0,
+            in_progress: plan === working ? 1 : 0,
+          }),
+          members: [],
         };
-      if (command === "find_tickets") return [ticket];
-      if (command === "show_ticket") return ticket;
+      }
       return bridgeDefault(command, args);
     },
   );
   render(<App />);
-  const user = userEvent.setup();
-  await user.click(await screen.findByRole("button", { name: "Plans" }));
-  const cards = await screen.findByRole("list", { name: "Active Plans" });
-  const openPlan = within(cards).getByRole("button", {
-    name: "Open Plan Next release",
-  });
-  const next = await within(cards).findByRole("button", {
-    name: `T-KQ15 ${title}`,
-  });
-  openPlan.focus();
-  await user.tab();
-  expect(document.activeElement).toBe(next);
-  expect(within(cards).getByText("Ready", { exact: true })).toBeTruthy();
-  await user.tab();
-  expect(document.activeElement).toBe(
-    within(cards).getByRole("button", { name: "Next specification" }),
-  );
-  await user.tab({ shift: true });
-  await user.keyboard("{Enter}");
-  expect(await screen.findByRole("heading", { name: "T-KQ15" })).toBeTruthy();
-  expect(screen.getByDisplayValue(title)).toBe(
-    screen.getByRole("textbox", { name: "Title" }),
-  );
+  const scopes = await screen.findByRole("navigation", { name: "Plan scopes" });
+  expect(
+    await within(scopes).findByRole("button", {
+      name: review.name,
+      description: "1 in review · 2/3 completed",
+    }),
+  ).toBeTruthy();
+  expect(
+    within(scopes).getByRole("button", {
+      name: working.name,
+      description: "2/3 completed",
+    }),
+  ).toBeTruthy();
 });
 
 test("New Plan is reachable from the palette and its registered page key", async () => {
@@ -5485,7 +5467,7 @@ test("New Plan is reachable from the palette and its registered page key", async
   expect(await screen.findByRole("dialog", { name: "New Plan" })).toBeTruthy();
 });
 
-test("Plans with no Ready work keep canceled-only progress explicit without inventing a time", async () => {
+test("a canceled-only Plan can be archived and has no invented time", async () => {
   bridge.invoke.mockImplementation(
     (command: string, args: Record<string, unknown>) => {
       if (command === "list_plans")
@@ -5522,9 +5504,8 @@ test("Plans with no Ready work keep canceled-only progress explicit without inve
   render(<App />);
   fireEvent.click(await screen.findByRole("button", { name: "Plans" }));
   const cards = await screen.findByRole("list", { name: "Active Plans" });
-  expect(await within(cards).findByText("0 of 0 done")).toBeTruthy();
-  expect(await within(cards).findByText("No Ready tickets")).toBeTruthy();
-  expect(within(cards).getByText("2 canceled, not counted")).toBeTruthy();
+  expect(within(cards).getByText("0 of 0")).toBeTruthy();
+  expect(within(cards).getByText("All done · ready to archive")).toBeTruthy();
   expect(cards.querySelector("time")).toBeNull();
   fireEvent.click(
     within(cards).getByRole("button", { name: "Open Plan Stopped work" }),
@@ -6369,8 +6350,9 @@ test("Flow refuses to invent lanes when a Plan exceeds its bounded member window
   render(<App />);
   fireEvent.click(await screen.findByRole("button", { name: "Plans" }));
   const cards = await screen.findByRole("list", { name: "Active Plans" });
-  await within(cards).findByText("Couldn't load next ticket");
-  expect(within(cards).queryByText("No Ready tickets")).toBeNull();
+  expect(within(cards).getByText("0 of 501")).toBeTruthy();
+  expect(within(cards).getByText("501 to do")).toBeTruthy();
+  expect(within(cards).queryByText("Ready to wrap up")).toBeNull();
   fireEvent.click(
     within(cards).getByRole("button", { name: "Open Plan Bounded flow" }),
   );
@@ -14981,7 +14963,7 @@ test("scrolling Inbox group headings preserves the focused triage entry and keyb
 });
 
 test.each(["unavailable", "mixed", "none"])(
-  "Plan Next up distinguishes %s Ready work without contradicting Core counts",
+  "Plan rows describe %s Ready work using Core availability",
   async (state) => {
     const plan = {
       id: "source-next-plan",
@@ -15019,31 +15001,10 @@ test.each(["unavailable", "mixed", "none"])(
     });
     fireEvent.click(screen.getByRole("button", { name: "Plans" }));
     const cards = await screen.findByRole("list", { name: "Active Plans" });
-    await within(cards).findByText(`0 of ${members.length} done`);
-    if (state === "unavailable") {
-      expect(
-        await within(cards).findByText("Ready work has unavailable sources"),
-      ).toBeTruthy();
-      expect(within(cards).getByText(/1 ready, 0 blocked/)).toBeTruthy();
-      expect(within(cards).queryByText("No Ready tickets")).toBeNull();
-    } else if (state === "mixed") {
-      expect(
-        await within(cards).findByRole("button", {
-          name: "T-KQ2 Available Ready work",
-        }),
-      ).toBeTruthy();
-      expect(within(cards).getByText(/2 ready, 0 blocked/)).toBeTruthy();
-      expect(
-        within(cards).queryByText("Ready work has unavailable sources"),
-      ).toBeNull();
-    } else {
-      expect(await within(cards).findByText("No Ready tickets")).toBeTruthy();
-      expect(within(cards).getByText(/0 ready, 1 blocked/)).toBeTruthy();
-    }
-    expect(
-      within(cards).queryByRole("button", {
-        name: "T-KQ3 Unavailable Ready work",
-      }),
-    ).toBeNull();
+    expect(within(cards).getByText(`0 of ${members.length}`)).toBeTruthy();
+    const stateLabel =
+      state === "none" ? "1 blocked" : `${members.length} ready`;
+    expect(within(cards).getByText(stateLabel)).toBeTruthy();
+    expect(within(cards).queryByText("Ready to wrap up")).toBeNull();
   },
 );
