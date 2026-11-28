@@ -109,9 +109,6 @@
   font-size: var(--text-caption);
   white-space: nowrap;
 }
-.source-description-toggle {
-  color: var(--link-foreground);
-}
 .source-card-actions .ui-button {
   font-size: var(--text-caption);
 }

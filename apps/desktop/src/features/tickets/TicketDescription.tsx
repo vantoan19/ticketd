@@ -11,7 +11,7 @@ import {
 import { ChevronDown, ChevronRight, ChevronUp, X } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
-import { isMacPlatform } from "@/lib/platform";
+import { matchesShortcut } from "@/lib/shortcuts";
 import { MarkdownDocument } from "@/features/markdown/MarkdownDocument";
 import { describeTicketMarkdown } from "./description-folds";
 import { findDescription, type DescriptionMatch } from "./description-find";
@@ -64,7 +64,6 @@ function Fold({
         type="button"
         variant="ghost"
         size="compact"
-        className="ticket-description-fold-button"
         aria-expanded={open}
         aria-controls={id}
         onClick={onToggle}
@@ -137,12 +136,7 @@ function TicketDescriptionReading({ ticketId, ...markdown }: Props) {
         event.defaultPrevented ||
         event.isComposing ||
         !inView() ||
-        event.key.toLowerCase() !== "f" ||
-        event.altKey ||
-        event.shiftKey ||
-        (isMacPlatform()
-          ? !event.metaKey || event.ctrlKey
-          : !event.ctrlKey || event.metaKey)
+        !matchesShortcut(event, "ticket-find-description")
       )
         return;
       if (
@@ -208,7 +202,12 @@ function TicketDescriptionReading({ ticketId, ...markdown }: Props) {
   useLayoutEffect(() => {
     if (!currentMatch) return;
     const { block, range } = currentMatch;
-    revealInDetail(block);
+    revealInDetail(
+      block,
+      typeof range.getBoundingClientRect === "function"
+        ? range.getBoundingClientRect()
+        : undefined,
+    );
     if (typeof Highlight !== "undefined" && CSS.highlights) {
       CSS.highlights.set("ticket-description-find", new Highlight(range));
       return () => {
@@ -279,11 +278,13 @@ function TicketDescriptionReading({ ticketId, ...markdown }: Props) {
           }}
         >
           <Input
-            className="ticket-description-find-input"
+            className="h-7"
             ref={input}
             type="search"
             aria-label="Find in description"
             placeholder="Find in description"
+            autoComplete="off"
+            spellCheck={false}
             value={search.query}
             onChange={(event) => find(event.target.value)}
             onKeyDown={(event) => {

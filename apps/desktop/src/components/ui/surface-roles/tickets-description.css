@@ -69,11 +69,16 @@
   outline-offset: -2px;
 }
 
+.ticket-description-find {
+  background-color: var(--background);
+}
+
 .ticket-description-find-count {
   font-size: var(--text-caption);
   color: var(--muted-foreground);
 }
 
 .ticket-description ::highlight(ticket-description-find) {
-  background-color: var(--accent);
+  background-color: var(--foreground);
+  color: var(--background);
 }

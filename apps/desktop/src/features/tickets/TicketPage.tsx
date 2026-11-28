@@ -16,7 +16,7 @@ import {
 import { useLinkedWork } from "@/features/tickets/useLinkedWork";
 import { Activity } from "@/features/tickets/Activity";
 import { SourceConversation } from "@/features/tickets/SourceConversation";
-import { MarkdownDocument } from "@/features/markdown/MarkdownDocument";
+import { TicketDescription } from "./TicketDescription";
 import { ReadOnlyTitle, SourceDescription } from "./ReadOnlySource";
 import { SourceUnavailableNotice } from "@/features/tickets/SourceUnavailableNotice";
 import { NeedsReviewNotice } from "@/features/sync-review/NeedsReviewNotice";
@@ -235,7 +235,8 @@ export function TicketPage({
                   <p className="sr-only">Description</p>
                   <div className="markdown-preview description-document">
                     {ticket.body.trim() ? (
-                      <MarkdownDocument
+                      <TicketDescription
+                        ticketId={ticket.id}
                         source={ticket.body}
                         select={select}
                         revision={revision}

@@ -1,11 +1,5 @@
 import { Card, CardHeader } from "@/components/ui/card";
-import {
-  useId,
-  useLayoutEffect,
-  useRef,
-  useState,
-  type ReactNode,
-} from "react";
+import { useState, type ReactNode } from "react";
 import { LockKeyhole } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { StatusDot } from "@/components/ui/status-dot";
@@ -15,7 +9,7 @@ import {
   PopoverContent,
   PopoverTrigger,
 } from "@/components/ui/popover";
-import { MarkdownDocument } from "@/features/markdown/MarkdownDocument";
+import { TicketDescription } from "./TicketDescription";
 import type { Ticket, TicketSource } from "@/lib/api/client";
 import { SourceLink } from "./SourceLink";
 import { SourceRail } from "./SourceRail";
@@ -79,20 +73,7 @@ export function SourceDescription({
   revision: number;
   refresh?: () => Promise<void>;
 }) {
-  const bodyId = useId();
   const [open, setOpen] = useState(false);
-  const [expanded, setExpanded] = useState(false);
-  const [long, setLong] = useState(false);
-  const content = useRef<HTMLDivElement>(null);
-  useLayoutEffect(() => {
-    const node = content.current;
-    if (!node) return;
-    const measure = () => setLong(node.scrollHeight > 260);
-    measure();
-    const observer = new ResizeObserver(measure);
-    observer.observe(node);
-    return () => observer.disconnect();
-  }, [ticket.body]);
   const label = source.unavailable ? "Open" : "Edit";
   const state = sourceState(source);
   return (
@@ -148,41 +129,23 @@ export function SourceDescription({
             </span>
           </CardHeader>
           <div
-            id={bodyId}
-            className="source-description-clip"
-            data-collapsed={(long && !expanded) || undefined}
+            className="markdown-preview description-document"
             onClick={(event) => {
               if (
                 !(event.target instanceof Element) ||
-                event.target.closest("a, button, input")
+                event.target.closest("a, button, input, [role=search]")
               )
                 return;
               setOpen(true);
             }}
           >
-            <div
-              ref={content}
-              className="markdown-preview description-document"
-            >
-              <MarkdownDocument
-                source={ticket.body}
-                select={select}
-                revision={revision}
-              />
-            </div>
+            <TicketDescription
+              ticketId={ticket.id}
+              source={ticket.body}
+              select={select}
+              revision={revision}
+            />
           </div>
-          {long && (
-            <Button
-              variant="link"
-              size="sm"
-              aria-expanded={expanded}
-              aria-controls={bodyId}
-              className="source-description-toggle"
-              onClick={() => setExpanded(!expanded)}
-            >
-              {expanded ? "Show less" : "Show full description"}
-            </Button>
-          )}
         </section>
       </Card>
       <Explanation source={source} field="description">

@@ -7,6 +7,11 @@ import { EmptyState } from "@/components/ui/empty-state";
 import { Alert, AlertActions, AlertDescription } from "@/components/ui/alert";
 import "./description.css";
 import { TicketDescription } from "./TicketDescription";
+import {
+  TICKET_DESCRIPTION_REVEAL,
+  revealTicketDescription,
+  type TicketDescriptionReveal,
+} from "./description-navigation";
 import { MarkdownDocument } from "@/features/markdown/MarkdownDocument";
 import { chatSource } from "@/features/chats/quotes";
 import { LazyMarkdownEditor } from "@/features/markdown/LazyMarkdownEditor";
@@ -292,6 +297,32 @@ function RecoveredTicketEditor({
   const [savedField, setSavedField] = useState("Changes");
   const bodyRef = useRef<HTMLDivElement>(null);
   const documentRef = useRef<HTMLDivElement>(null);
+  const readingTarget = useRef<TicketDescriptionReveal["target"] | null>(null);
+  useEffect(() => {
+    if (!editingBody) {
+      const target = readingTarget.current;
+      if (target !== null) {
+        readingTarget.current = null;
+        revealTicketDescription(ticketId, target);
+      }
+      return;
+    }
+    function reveal(event: Event) {
+      const { detail } = event as CustomEvent<TicketDescriptionReveal>;
+      if (
+        detail?.ticketId !== ticketId ||
+        !bodyRef.current ||
+        bodyRef.current.closest("[hidden], [inert], [data-graph]")
+      )
+        return;
+      // The draft stays in the editor state. The reader can reveal the saved
+      // or edited Markdown as soon as it mounts.
+      readingTarget.current = detail.target;
+      setBodyMode("reading");
+    }
+    window.addEventListener(TICKET_DESCRIPTION_REVEAL, reveal);
+    return () => window.removeEventListener(TICKET_DESCRIPTION_REVEAL, reveal);
+  }, [editingBody, ticketId]);
   const noteRef = useRef<HTMLParagraphElement>(null);
   // A mention is revealed once. It is dropped when the person starts editing, when
   // the saved text changes under it, or when the next navigation clears it, so
