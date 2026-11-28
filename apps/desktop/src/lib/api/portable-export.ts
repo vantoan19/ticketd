@@ -44,3 +44,9 @@ export async function exportMarkdown(
     await invoke("export_markdown_with_files", { source, output }),
   );
 }
+
+export async function ticketExportMarkdown(reference: string): Promise<string> {
+  return z
+    .string()
+    .parse(await invoke("ticket_export_markdown", { reference }));
+}

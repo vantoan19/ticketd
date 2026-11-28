@@ -184,40 +184,44 @@ test("the local reading column runs title, description, then Linked without a du
   expect(rail.contains(title)).toBe(false);
 });
 
-test("Follow lives in the header while a scheduled reminder stays in the context line", async () => {
+test("F follows the ticket while a scheduled reminder stays in the context line", async () => {
   reminder = "2030-01-01T12:00:00Z";
   renderDetails();
   const rail = await screen.findByRole("group", {
     name: "Ticket properties",
   });
-  const header = document.querySelector(".detail-header") as HTMLElement;
-  const follow = await within(header).findByRole("button", { name: "Follow" });
-  expect(follow.getAttribute("aria-pressed")).toBe("false");
-  fireEvent.click(follow);
-  await waitFor(() =>
-    expect(
-      within(header)
-        .getByRole("button", { name: "Follow" })
-        .getAttribute("aria-pressed"),
-    ).toBe("true"),
+  fireEvent.keyDown(screen.getByRole("heading", { name: "T-KQ1" }), {
+    key: "f",
+  });
+  expect(bridge.invoke).toHaveBeenCalledWith(
+    "set_following",
+    expect.objectContaining({ reference: "T-KQ1", following: true }),
   );
-  // Visible words follow the state; the name stays "Follow".
-  expect(follow.getAttribute("aria-pressed")).toBe("true");
   expect(
     await within(rail).findByRole("button", {
       name: /^Manage reminder, scheduled/,
     }),
   ).toBeTruthy();
   expect(within(rail).queryByRole("button", { name: /Follow/ })).toBeNull();
+  fireEvent.keyDown(screen.getByRole("button", { name: "Ticket actions" }), {
+    key: "Enter",
+  });
   expect(
-    within(header).queryByRole("button", { name: /Manage reminder/ }),
-  ).toBeNull();
+    await screen.findByRole(
+      "menuitemcheckbox",
+      {
+        name: "Follow",
+        checked: true,
+      },
+      { timeout: 1500 },
+    ),
+  ).toBeTruthy();
 });
 
 test("the header shows the list position with Previous and Next", async () => {
   renderDetails();
-  const header = document.querySelector(".detail-header") as HTMLElement;
-  expect(within(header).getByText("2 of 11")).toBeTruthy();
+  const header = screen.getByRole("banner");
+  expect(within(header).getByText("2 of 11 todo")).toBeTruthy();
   expect(
     (
       within(header).getByRole("button", {

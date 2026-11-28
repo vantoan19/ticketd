@@ -3898,18 +3898,6 @@ kbd,
   box-shadow: var(--shadow-card);
 }
 
-.ticket-header-updated {
-  display: inline-flex;
-  gap: 8px;
-  white-space: nowrap;
-  color: var(--muted-foreground);
-  font-size: var(--text-caption);
-  line-height: var(--text-caption-line);
-}
-:where(:is(.ticket-detail, .chat-pane)[data-width~="max-599"])
-  .ticket-header-updated {
-  display: none;
-}
 .ticket-detail[data-expanded] .editor-title textarea,
 .ticket-detail[data-expanded] .detail-title {
   font-size: var(--text-section);

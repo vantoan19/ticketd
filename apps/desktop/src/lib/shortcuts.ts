@@ -293,6 +293,7 @@ export const SHORTCUTS = [
       ["ticket-plan", "L", "Move to Plan"],
       ["ticket-tags", "T", "Edit tags"],
       ["ticket-reminder", "H", "Remind me"],
+      ["ticket-follow", "F", "Follow ticket"],
       ["ticket-update", "R", "Write an update"],
     ] as const
   ).map(([id, key, label]) => ({

@@ -135,6 +135,7 @@
 /* Clamped at 240px: the place gives way with an ellipsis, the number stays. */
 .header-source-link {
   min-width: 0;
+  min-height: 28px;
   overflow: hidden;
 }
 .header-source-place {
@@ -216,6 +217,7 @@
 .ticket-header-title {
   min-width: 0;
   overflow: hidden;
+  white-space: nowrap;
   text-overflow: ellipsis;
 }
 

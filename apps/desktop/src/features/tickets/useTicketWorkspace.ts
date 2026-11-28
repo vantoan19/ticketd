@@ -22,6 +22,7 @@ import {
   type SourceEntry,
   type SourceHealth,
 } from "@/lib/api/sources";
+import { statusCountKey, type TicketStatus } from "@/lib/statuses";
 import { loadPreferences, usePreferences } from "@/lib/preferences";
 import {
   describeFailure,
@@ -63,6 +64,11 @@ type View = "tickets" | "projects" | "plans" | "settings" | "inbox";
  */
 export type FollowedMention = MentionTarget & { key: number; ready: boolean };
 export type TicketWorkspace = ReturnType<typeof useTicketWorkspace>;
+export type TicketListPosition = {
+  index: number;
+  total: number;
+  statusGroup?: { index: number; total: number; status: TicketStatus };
+};
 function markReady(
   mention: FollowedMention | null,
   reference: string | null,
@@ -558,8 +564,25 @@ export function useTicketWorkspace(
     (item) => item.reference === selected,
   );
   /** The selected ticket's place in the whole result. */
-  const position =
-    selectedIndex >= 0 ? { index: selectedIndex + 1, total } : null;
+  const selectedStatus = tickets[selectedIndex]?.status;
+  let position: TicketListPosition | null = null;
+  if (selectedStatus) {
+    const group = tickets.filter(({ status }) => status === selectedStatus);
+    position = {
+      index: selectedIndex + 1,
+      total,
+      statusGroup: {
+        status: selectedStatus,
+        index: group.findIndex(({ reference }) => reference === selected) + 1,
+        // Counts include later pages. A just-saved status can move the row
+        // before those counts refresh, so the loaded group is the minimum.
+        total: Math.max(
+          group.length,
+          counts?.[statusCountKey[selectedStatus]] ?? 0,
+        ),
+      },
+    };
+  }
   function openAdjacent(direction: 1 | -1) {
     if (selectedIndex < 0) return;
     const next = tickets[selectedIndex + direction];

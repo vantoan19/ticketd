@@ -2659,7 +2659,7 @@ test("the sidebar footer follows persisted source health and keeps the list", as
   expect(within(footer).getByText(/GitHub synced/)).toBeTruthy();
 });
 
-test("Previous and Next follow the visible list across groups and keep the selection", async () => {
+test("the header counts within a status while J and K walk the whole list", async () => {
   const tickets = [
     bulkTicket(2, { status: "In progress", availability: null }),
     bulkTicket(1),
@@ -2673,18 +2673,24 @@ test("Previous and Next follow the visible list across groups and keep the selec
   });
   fireEvent.click(screen.getByRole("button", { name: /First/ }));
   await act(async () => {});
-  expect(screen.getByText("2 of 3")).toBeTruthy();
-  fireEvent.click(screen.getByRole("button", { name: "Next ticket" }));
+  expect(screen.getByText("1 of 2 todo")).toBeTruthy();
+  fireEvent.keyDown(screen.getByRole("heading", { name: "T-KQ1" }), {
+    key: "j",
+  });
   await act(async () => {});
-  expect(screen.getByText("3 of 3")).toBeTruthy();
+  expect(screen.getByText("2 of 2 todo")).toBeTruthy();
   expect(
     (screen.getByRole("button", { name: "Next ticket" }) as HTMLButtonElement)
       .disabled,
   ).toBe(true);
-  fireEvent.click(screen.getByRole("button", { name: "Previous ticket" }));
-  fireEvent.click(screen.getByRole("button", { name: "Previous ticket" }));
+  fireEvent.keyDown(screen.getByRole("heading", { name: "T-KQ3" }), {
+    key: "k",
+  });
+  fireEvent.keyDown(screen.getByRole("heading", { name: "T-KQ1" }), {
+    key: "k",
+  });
   await act(async () => {});
-  expect(screen.getByText("1 of 3")).toBeTruthy();
+  expect(screen.getByText("1 of 1 in progress")).toBeTruthy();
   expect(
     screen.getByRole("button", { name: /Second/ }).getAttribute("aria-pressed"),
   ).toBe("true");
@@ -2826,8 +2832,6 @@ test("Next at the end of a page opens the first ticket of the next page", async 
       title: `Ticket ${offset + index + 1}`,
     }));
   const rows = (offset: number) => page(offset, offset === 0 ? 50 : 10);
-  const position = () =>
-    document.querySelector(".list-position-text")?.textContent;
   let offset = 0;
   await renderBulk({
     find_tickets: (args: { filter: { offset: number } }) => {
@@ -2844,7 +2848,7 @@ test("Next at the end of a page opens the first ticket of the next page", async 
   });
   fireEvent.click(screen.getByRole("button", { name: /Ticket 50/ }));
   await act(async () => {});
-  expect(position()).toBe("50 of 60");
+  expect(screen.getByText("50 of 60 todo")).toBeTruthy();
   const nextTicket = screen.getByRole("button", { name: "Next ticket" });
   nextTicket.focus();
   fireEvent.click(nextTicket);
@@ -2852,7 +2856,7 @@ test("Next at the end of a page opens the first ticket of the next page", async 
     await vi.advanceTimersByTimeAsync(10);
   });
   expect(offset).toBe(50);
-  expect(position()).toBe("51 of 60");
+  expect(screen.getByText("51 of 60 todo")).toBeTruthy();
   // Keyboard focus stays on the control across the page edge.
   expect(document.activeElement).toBe(
     screen.getByRole("button", { name: "Next ticket" }),
@@ -9077,7 +9081,11 @@ test.each([
       expect(document.activeElement).toBe(requestTitle);
       const failure = screen.getByRole("alert");
       expect(within(failure).getByText("Answer not sent")).toBeTruthy();
-      expect(screen.getByText("npm test -- board")).toBeTruthy();
+      expect(
+        within(screen.getByRole("region", { name: "Triage Chat" })).getByText(
+          "npm test -- board",
+        ),
+      ).toBeTruthy();
       const details = within(failure).getByRole("button", { name: "Details" });
       await user.click(details);
       const popup = await screen.findByRole("dialog", {
@@ -10050,7 +10058,24 @@ test.each(["ready", "trashed"] as const)(
     expect(screen.queryByRole("button", { name: "Set up ticketd" })).toBeNull();
   },
 );
-test("header Follow keeps failures in the pane status line, retries and respects read-only state", async () => {
+test("the ticket actions Reminder and H open the same choices", async () => {
+  paletteTickets();
+  render(<App />);
+  fireEvent.click(await screen.findByRole("button", { name: /Open Ticket/ }));
+  const actions = await screen.findByRole("button", { name: "Ticket actions" });
+  fireEvent.keyDown(actions, { key: "Enter" });
+  fireEvent.click(await screen.findByRole("menuitem", { name: "Remind me…" }));
+  expect(await screen.findByText("Reminder of T-KQ1")).toBeTruthy();
+  const palette = screen.getByRole("combobox", {
+    name: "Search tickets and destinations",
+  });
+  fireEvent.keyDown(palette, { key: "Escape" });
+  await vi.waitFor(() => expect(document.activeElement).toBe(actions));
+  fireEvent.keyDown(actions, { key: "h" });
+  expect(await screen.findByText("Reminder of T-KQ1")).toBeTruthy();
+});
+
+test("menu Follow keeps failures in the pane status line, retries and respects read-only state", async () => {
   const current = bulkTicket(1, { title: "Follow outcome" });
   let following = false;
   let failed = true;
@@ -10071,31 +10096,33 @@ test("header Follow keeps failures in the pane status line, retries and respects
   fireEvent.click(
     await screen.findByRole("button", { name: /Follow outcome/ }),
   );
-  const follow = await screen.findByRole("button", { name: "Follow" });
-  const header = follow.closest("header");
-  expect(header).toBeTruthy();
-  expect(
-    within(
-      screen.getByRole("group", { name: "Ticket properties" }),
-    ).queryByRole("button", { name: "Follow" }),
-  ).toBeNull();
-  fireEvent.click(follow);
+  async function openFollow(checked: boolean) {
+    const actions = await screen.findByRole("button", {
+      name: "Ticket actions",
+    });
+    fireEvent.keyDown(actions, { key: "Enter" });
+    return screen.findByRole("menuitemcheckbox", { name: "Follow", checked });
+  }
+  fireEvent.click(await openFollow(false));
   const retry = await screen.findByRole("button", { name: "Retry" });
-  expect(follow.closest("header")).toBe(header);
-  expect(header?.querySelector('[role="alert"]')).toBeNull();
-  expect(follow.getAttribute("aria-pressed")).toBe("false");
+  expect(
+    within(screen.getByRole("region", { name: "T-KQ1" })).queryByRole(
+      "button",
+      { name: "Follow" },
+    ),
+  ).toBeNull();
   failed = false;
   fireEvent.click(retry);
-  await vi.waitFor(() =>
-    expect(follow.getAttribute("aria-pressed")).toBe("true"),
-  );
+  const followed = await openFollow(true);
+  expect(followed.getAttribute("aria-checked")).toBe("true");
   following = false;
-  await vi.waitFor(
-    () => expect(follow.getAttribute("aria-pressed")).toBe("false"),
+  const unfollowed = await screen.findByRole(
+    "menuitemcheckbox",
+    { name: "Follow", checked: false },
     { timeout: 3000 },
   );
   act(() => reportWorkspaceFailure("workspace_read_only", "Read only"));
-  expect(follow.hasAttribute("disabled")).toBe(true);
+  expect(unfollowed.getAttribute("aria-disabled")).toBe("true");
 });
 
 test("New ticket expands without replacing the rich draft and creates once from a focused property", async () => {

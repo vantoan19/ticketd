@@ -10,7 +10,10 @@ export function useCopy() {
   const [error, setError] = useState("");
   const timer = useRef<number | undefined>(undefined);
   useEffect(() => () => window.clearTimeout(timer.current), []);
-  async function copy(label: string, text: string): Promise<boolean> {
+  async function copy(
+    label: string,
+    text: string | Promise<string>,
+  ): Promise<boolean> {
     const failure = await writeClipboard(text);
     window.clearTimeout(timer.current);
     if (failure === null) {
