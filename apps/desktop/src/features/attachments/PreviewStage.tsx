@@ -179,7 +179,7 @@ export function PreviewStage({
         family={type.family}
         label={label}
         title="Deleting permanently"
-        sentence="ticketd started deleting its stored copy. Finish deleting it from the Attachments library."
+        sentence="ticketd started deleting its stored copy. Finish deleting it from Files."
       />
     );
   else if (preview.missing)

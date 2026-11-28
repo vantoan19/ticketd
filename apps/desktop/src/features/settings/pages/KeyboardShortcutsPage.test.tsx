@@ -85,6 +85,13 @@ test("a shared condition is said once, in its group's caption", () => {
   expect(screen.getByText("In the update composer.")).toBeTruthy();
 });
 
+test("the Lists shortcuts name the Files view", () => {
+  render(<KeyboardShortcutsPage />);
+  const lists = screen.getByRole("region", { name: "Lists" });
+  expect(within(lists).getByText("Move between files")).toBeTruthy();
+  expect(within(lists).getByText("Back to Files")).toBeTruthy();
+});
+
 test("the First run group is gone, and so are its two guide keys", () => {
   render(<KeyboardShortcutsPage />);
   expect(screen.queryByRole("region", { name: "First run" })).toBeNull();
@@ -200,7 +207,7 @@ test("Chat-only keys are hidden while Chat is off and shown when it is on", () =
     expect(screen.queryByText(label)).toBeNull();
   expect(screen.getByText("Go to Documents")).toBeTruthy();
   expect(
-    screen.getByText(/In ticket lists and boards, the Inbox, Attachments/),
+    screen.getByText(/In ticket lists and boards, the Inbox, Files/),
   ).toBeTruthy();
   unmount();
 

@@ -135,7 +135,7 @@ function describe(status: SyncStatus, now: number): Line {
         items: [
           {
             icon: <CloudDownload />,
-            text: `${count} ${count === 1 ? "Attachment" : "Attachments"} downloading`,
+            text: `${count} ${count === 1 ? "file" : "files"} downloading`,
           },
         ],
       };

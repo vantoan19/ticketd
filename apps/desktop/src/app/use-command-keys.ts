@@ -8,6 +8,7 @@ export type GoTo =
   | "chats"
   | "automations"
   | "documents"
+  | "attachments"
   | "projects"
   | "plans"
   | "settings"

@@ -60,6 +60,7 @@ import {
   CircleCheck,
   MessagesSquare,
   Files,
+  Paperclip,
   Layers,
   Settings,
   Trash2,
@@ -94,18 +95,25 @@ import { useTicketSearch } from "@/features/tickets/useTicketSearch";
 import { StatusIcon } from "@/features/tickets/StatusIcon";
 import type { GoTo } from "./use-command-keys";
 
-const targets = [
+const targets: {
+  id: GoTo;
+  label: string;
+  icon: typeof Inbox;
+  key?: ShortcutId;
+  alias?: string;
+}[] = [
   { id: "inbox", label: "Inbox", icon: Inbox, key: "go-inbox" },
   { id: "all", label: "All tickets", icon: ListTodo, key: "go-all" },
   { id: "ready", label: "Ready", icon: CircleCheck, key: "go-ready" },
   { id: "chats", label: "Chats", icon: MessagesSquare, key: "go-chats" },
   { id: "automations", label: "Automations", icon: Layers },
   { id: "documents", label: "Documents", icon: Files, key: "go-documents" },
+  { id: "attachments", label: "Files", icon: Paperclip, alias: "Attachments" },
   { id: "projects", label: "Projects", icon: Folder },
   { id: "plans", label: "Plans", icon: Layers },
   { id: "settings", label: "Settings", icon: Settings, key: "go-settings" },
   { id: "trash", label: "Trash", icon: Trash2, key: "go-trash" },
-] satisfies { id: GoTo; label: string; icon: typeof Inbox; key?: ShortcutId }[];
+];
 
 export function CommandPalette({
   pageZoom = null,
@@ -852,7 +860,7 @@ export function CommandPalette({
                 </CommandGroup>
               )}
               {!scope && attachmentCommands && (
-                <CommandGroup heading="Attachments actions">
+                <CommandGroup heading="Files actions">
                   {[
                     {
                       id: "attachments-search",
@@ -876,11 +884,16 @@ export function CommandPalette({
                     },
                     {
                       id: "attachments-back",
-                      label: "Back to Attachments",
+                      label: "Back to Files",
+                      alias: "Back to Attachments",
                       run: attachmentCommands.back,
                     },
                   ]
-                    .filter((command) => matches(command.label))
+                    .filter(
+                      (command) =>
+                        matches(command.label) ||
+                        (command.alias && matches(command.alias)),
+                    )
                     .map((command) => (
                       <CommandItem
                         key={command.id}
@@ -981,10 +994,13 @@ export function CommandPalette({
               {!scope && (
                 <CommandGroup heading="Go to">
                   {targets
-                    .filter((target) => matches(target.label))
+                    .filter(
+                      (target) =>
+                        matches(target.label) ||
+                        (target.alias && matches(target.alias)),
+                    )
                     .map((target) => {
-                      const keys =
-                        "key" in target ? shortcut(target.key) : null;
+                      const keys = target.key ? shortcut(target.key) : null;
                       return (
                         <CommandItem
                           key={target.id}

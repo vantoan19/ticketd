@@ -287,11 +287,11 @@ test("library searches core metadata and state and opens the chosen stable file"
   fireEvent.change(screen.getByRole("searchbox", { name: "Search files" }), {
     target: { value: "no match" },
   });
-  await screen.findByText("No attachments match “no match”");
+  await screen.findByText("No files match “no match”");
   expect(screen.queryByRole("list", { name: "Files" })).toBeNull();
   // The empty state's Clear search, not the search field's own clear button.
   const empty = screen
-    .getByText("No attachments match “no match”")
+    .getByText("No files match “no match”")
     .closest<HTMLElement>('[data-slot="empty-state"]')!;
   fireEvent.click(within(empty).getByRole("button", { name: "Clear search" }));
   expect(await screen.findByRole("button", { name: "Trace" })).toBeTruthy();
@@ -312,7 +312,7 @@ test("adding files to the library offers storage without an insertion into nowhe
   expect(screen.getByRole("button", { name: "Choose files" })).toBeTruthy();
 });
 
-test("the library opens its storage settings from the header menu", async () => {
+test("the library opens Files settings from the header menu", async () => {
   vi.mocked(invoke).mockResolvedValue([]);
   const settings = vi.fn();
   render(
@@ -320,9 +320,9 @@ test("the library opens its storage settings from the header menu", async () => 
       <AttachmentLibrary />
     </SettingsNavigation.Provider>,
   );
-  await screen.findByText("No attachments yet");
+  await screen.findByText("No files yet");
   await openMenu("More library actions");
-  fireEvent.click(screen.getByRole("menuitem", { name: "Storage settings" }));
+  fireEvent.click(screen.getByRole("menuitem", { name: "Files settings" }));
   expect(settings).toHaveBeenCalledWith("files");
 });
 
@@ -374,8 +374,8 @@ test("usage stays compact in the row without labeling recovery as unused", async
 test("an empty library says so, with no table, paging or Clean up over nothing", async () => {
   vi.mocked(invoke).mockResolvedValue([]);
   render(<AttachmentLibrary />);
-  expect(await screen.findByText("No attachments yet")).toBeTruthy();
-  expect(screen.queryByText(/No attachments match/)).toBeNull();
+  expect(await screen.findByText("No files yet")).toBeTruthy();
+  expect(screen.queryByText(/No files match/)).toBeNull();
   expect(screen.queryByRole("list", { name: "Files" })).toBeNull();
   expect(screen.queryByRole("button", { name: /Show \d+ more/ })).toBeNull();
   expect(screen.queryByRole("button", { name: "Search files" })).toBeNull();

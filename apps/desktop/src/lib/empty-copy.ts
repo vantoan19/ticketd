@@ -119,11 +119,11 @@ const COPY = {
     sentence: "Documents you move to Trash wait here.",
   },
   attachments: {
-    title: "No attachments yet",
+    title: "No files yet",
     sentence: "Files you attach to tickets and Documents appear here.",
   },
   "attachments-search": {
-    title: "No attachments match “{query}”",
+    title: "No files match “{query}”",
     sentence: "Searched names and metadata in {name}.",
     action: "Clear search",
   },
