@@ -25,7 +25,11 @@ import {
 import { StatusDot } from "@/components/ui/status-dot";
 import { CrossfadeText } from "@/components/ui/motion";
 import { ofTotal } from "@/lib/format";
-import { ariaKeyShortcuts, shortcutLabel } from "@/lib/shortcuts";
+import {
+  ariaKeyShortcuts,
+  matchesShortcut,
+  shortcutLabel,
+} from "@/lib/shortcuts";
 import {
   ticketCommandActions,
   type TicketCommandScope,
@@ -42,12 +46,10 @@ import { orderBlockers, type LinkedWorkState } from "./useLinkedWork";
 
 function addBlockerKey(event: KeyboardEvent, addBlocker: () => void) {
   if (
-    event.key.toLowerCase() !== "b" ||
-    event.altKey ||
-    event.ctrlKey ||
-    event.metaKey ||
-    event.shiftKey ||
-    event.repeat
+    event.defaultPrevented ||
+    event.nativeEvent.isComposing ||
+    event.repeat ||
+    !matchesShortcut(event, "ticket-add-blocker")
   )
     return;
   event.preventDefault();
@@ -129,9 +131,12 @@ export function TicketBlockersPopover({
                   variant="ghost"
                   size="sm"
                   onClick={addBlocker}
-                  aria-keyshortcuts="B"
+                  aria-keyshortcuts={ariaKeyShortcuts("ticket-add-blocker")}
                 >
-                  Add a blocker <Kbd aria-hidden="true">B</Kbd>
+                  Add a blocker{" "}
+                  <Kbd aria-hidden="true">
+                    {shortcutLabel("ticket-add-blocker")}
+                  </Kbd>
                 </Button>
               </>
             )}
@@ -532,10 +537,14 @@ export function TicketContextLine({
         <DropdownMenuItem
           key={kind}
           onSelect={() => work.openLink(kind)}
-          {...(kind === "blocked_by" && { "aria-keyshortcuts": "B" })}
+          {...(kind === "blocked_by" && {
+            "aria-keyshortcuts": ariaKeyShortcuts("ticket-add-blocker"),
+          })}
         >
           {label}
-          {kind === "blocked_by" && <Kbd aria-hidden="true">B</Kbd>}
+          {kind === "blocked_by" && (
+            <Kbd aria-hidden="true">{shortcutLabel("ticket-add-blocker")}</Kbd>
+          )}
         </DropdownMenuItem>
       ))}
       {additionalActions && (

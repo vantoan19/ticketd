@@ -254,14 +254,16 @@ export function TicketDecisionCard({
 
   const reviewKey = useEffectEvent((event: KeyboardEvent) => {
     const target = event.target;
-    const pane = card.current?.closest(".ticket-detail, .detail-content");
+    const pane =
+      card.current?.closest(".ticket-detail") ??
+      card.current?.closest(".detail-content");
     if (
       event.defaultPrevented ||
       event.isComposing ||
       event.repeat ||
       !(target instanceof Element) ||
       !pane?.contains(target) ||
-      pane.closest("[hidden], [inert]") ||
+      target.closest("[hidden], [inert]") ||
       target.closest(
         "input, textarea, select, [contenteditable]:not([contenteditable=false]), [role=textbox]",
       ) ||
@@ -306,7 +308,7 @@ export function TicketDecisionCard({
   useLayoutEffect(() => {
     onRepresentedUpdate(representedUpdate);
   }, [onRepresentedUpdate, representedUpdate]);
-  if (decided && decision) {
+  if (decided && decision && agentState?.kind !== "request") {
     panel = (
       <DecisionPanel state={decision.kind === "done" ? "Done" : "Sent back"}>
         <p className="ticket-decision-title">

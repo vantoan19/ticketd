@@ -78,3 +78,7 @@
   text-overflow: ellipsis;
   white-space: nowrap;
 }
+
+.ticket-decision-row.ticket-approval-choices {
+  align-items: flex-start;
+}

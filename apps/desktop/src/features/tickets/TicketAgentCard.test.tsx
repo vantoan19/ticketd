@@ -17,6 +17,8 @@ import {
 } from "@/features/chats/use-chats";
 import { ticketAgentFixtures } from "@/features/chats/ticket-agent-fixtures";
 import { bridgeDefault, unknownCommands } from "@/test/bridge-defaults";
+import { StatusLineRegion } from "@/components/ui/status-line";
+import { isMacPlatform } from "@/lib/platform";
 import { TestReads } from "@/lib/workspace-reads/testing";
 import type { Ticket } from "@/lib/api/client";
 import { TicketDetails } from "./TicketDetails";
@@ -40,6 +42,7 @@ let linked: ChatSummary[];
 let agents: ReturnType<typeof ticketAgentFixtures>["one"];
 let items: object[];
 let answerFailure: boolean;
+let changedTicket: Ticket | null;
 
 function summary(
   rank: ChatSummary["status"]["rank"],
@@ -75,7 +78,11 @@ const request = {
   command: "npm test -- rate-limit",
   options: [
     { id: "host-once", label: "Allow once" },
-    { id: "host-session", label: "Allow for this session" },
+    {
+      id: "host-session",
+      label: "Allow for this session",
+      warning: "Future commands of this kind will run without asking first.",
+    },
     { id: "host-deny", label: "Deny" },
   ],
   state: "pending",
@@ -86,9 +93,12 @@ beforeEach(() => {
   agents = [];
   items = [];
   answerFailure = false;
+  changedTicket = null;
   requestChat.mockClear();
   bridge.invoke.mockImplementation(
     async (command: string, args?: { reference?: string }) => {
+      if (command === "change_ticket" && changedTicket) return changedTicket;
+      if (command === "show_ticket" && changedTicket) return changedTicket;
       if (command === "chat_harness_catalog") return [];
       if (command === "chat_ticket_agents") return agents;
       if (command === "chat_linked_to") return linked;
@@ -171,19 +181,21 @@ function open(record: Ticket) {
         }}
       >
         <TestReads primed={{ ticket: record }}>
-          <TicketDetails
-            mention={null}
-            selected={selection}
-            expanded={false}
-            onExpand={vi.fn()}
-            onReturn={vi.fn()}
-            setSelected={select}
-            opened={selection ? [selection] : []}
-            onMentionReady={vi.fn()}
-            onClearMention={vi.fn()}
-            projects={[]}
-            plans={[]}
-          />
+          <StatusLineRegion>
+            <TicketDetails
+              mention={null}
+              selected={selection}
+              expanded={false}
+              onExpand={vi.fn()}
+              onReturn={vi.fn()}
+              setSelected={select}
+              opened={selection ? [selection] : []}
+              onMentionReady={vi.fn()}
+              onClearMention={vi.fn()}
+              projects={[]}
+              plans={[]}
+            />
+          </StatusLineRegion>
         </TestReads>
       </ChatFeatureContext>
     </ChatClientContext>
@@ -236,6 +248,7 @@ test("a rejected answer stays on the request and can be retried with the same ho
   );
   const allow = await card.findByRole("button", { name: "Allow in this Chat" });
   expect(card.getByText("/work/other-folder")).toBeTruthy();
+  expect(card.getByText(request.options[1]!.warning!)).toBeTruthy();
   fireEvent.click(allow);
   expect(
     await card.findByText("Answer not sent · Pick again to retry"),
@@ -433,4 +446,48 @@ test("working and approval stay in the header when the ticket opened without a c
   expect(
     await screen.findByRole("region", { name: "Request from an agent" }),
   ).toBeTruthy();
+});
+
+test("review shortcuts work from a focused button in the ticket header", async () => {
+  open({ ...ticket, status: "In review" });
+  await screen.findByRole("region", { name: "Ready for review" });
+  const headerControl = screen.getByRole("button", { name: "Copy reference" });
+  headerControl.focus();
+  fireEvent.keyDown(headerControl, { key: "b" });
+  const reason = await screen.findByRole("textbox", {
+    name: "What needs to change?",
+  });
+  expect(document.activeElement).toBe(reason);
+  fireEvent.keyDown(reason, { key: "Escape" });
+  changedTicket = { ...ticket, status: "Done" };
+  headerControl.focus();
+  fireEvent.keyDown(headerControl, {
+    key: "Enter",
+    ...(isMacPlatform() ? { metaKey: true } : { ctrlKey: true }),
+  });
+  expect(await screen.findByText("Done · just now · by you")).toBeTruthy();
+});
+
+test("an approval arriving after a review decision takes the card while Undo remains available", async () => {
+  const reopen = open({ ...ticket, status: "In review" });
+  const move = await screen.findByRole("button", { name: "Move to Done" });
+  changedTicket = { ...ticket, status: "Done" };
+  fireEvent.click(move);
+  await screen.findByText("Done · just now · by you");
+
+  linked = [summary("approval")];
+  items = [request];
+  reopen(1);
+  const card = await screen.findByRole("region", {
+    name: "Request from an agent",
+  });
+  expect(
+    await within(card).findByRole("button", { name: "Allow once" }),
+  ).toBeTruthy();
+  expect(screen.queryByRole("region", { name: "Done" })).toBeNull();
+  expect(screen.getByRole("button", { name: "Undo" })).toBeTruthy();
+
+  linked = [summary("done")];
+  reopen(2);
+  expect(await screen.findByText("Done · just now · by you")).toBeTruthy();
 });

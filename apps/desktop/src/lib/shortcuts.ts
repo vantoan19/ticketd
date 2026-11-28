@@ -337,6 +337,13 @@ export const SHORTCUTS = [
     note: "On a Ready for review card, outside a menu or text field.",
   },
   {
+    id: "ticket-add-blocker",
+    keys: [["B"]],
+    scope: "Ticket",
+    label: "Add a blocker",
+    note: "In the Add ticket property menu or the blockers popover.",
+  },
+  {
     id: "ticket-review-send-back-submit",
     keys: [["Mod", "Enter"]],
     scope: "Ticket",
