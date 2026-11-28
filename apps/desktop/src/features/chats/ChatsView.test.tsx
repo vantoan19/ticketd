@@ -2533,6 +2533,32 @@ test("a view that missed changes resyncs from a snapshot instead of showing a br
   );
 });
 
+test("a reconnect keeps the first prompt of a Chat that opened empty", async () => {
+  const client = await open(one({ id: "c1", title: "Empty Chat" }));
+  const message = (id: string, text: string): TranscriptItem => ({
+    id,
+    at,
+    kind: "user",
+    text,
+    delivery: "delivered",
+  });
+  act(() => client.push("c1", message("first", "The original prompt")));
+  expect(conversation().getByText("The original prompt")).toBeTruthy();
+
+  act(() => {
+    for (let index = 0; index < 200; index += 1) {
+      client.push("c1", message(`later-${index}`, `Later message ${index}`));
+    }
+    client.dropChanges("c1", 1);
+    client.push("c1", message("missed", "An update missed by the feed"));
+    client.push("c1", message("latest", "The latest message"));
+  });
+
+  expect(await conversation().findByText("The latest message")).toBeTruthy();
+  expect(conversation().getByText("The original prompt")).toBeTruthy();
+  expect(conversation().getByText("An update missed by the feed")).toBeTruthy();
+});
+
 test("a large transcript keeps up with many small streamed updates", async () => {
   const history: TranscriptItem[] = Array.from({ length: 300 }, (_, index) =>
     index % 2

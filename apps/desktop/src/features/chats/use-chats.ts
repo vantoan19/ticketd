@@ -158,11 +158,10 @@ export function useChat(id: string) {
 
     function open(earlier = false) {
       opening = true;
-      const start = latest?.history_start;
-      const request =
-        start == null
-          ? client.openChat(id)
-          : client.openChat(id, start, earlier);
+      // An empty snapshot still starts at the beginning of the Chat.
+      const request = latest
+        ? client.openChat(id, latest.history_start ?? 0, earlier)
+        : client.openChat(id);
       request.then(
         (opened) => {
           if (!current) return;
