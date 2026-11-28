@@ -21,7 +21,7 @@
   max-width: 100%;
 }
 .plan-overview-changes [data-slot="reference"] {
-  flex: 0 0 62px;
+  inline-size: 62px;
 }
 .plan-overview-changes [data-slot="record-title"] {
   display: flex;
