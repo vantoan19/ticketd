@@ -2042,7 +2042,14 @@ impl Workspace {
                     Some(&destination),
                 )?
                 .ok_or(Error::InvalidProjectRemote)?;
-                if current.revision != started.source.revision {
+                if current.revision != started.source.revision
+                    || !current
+                        .derived
+                        .publication
+                        .destinations
+                        .iter()
+                        .any(|allowed| allowed.eq_ignore_ascii_case(&started.request.destination))
+                {
                     return Ok(false);
                 }
             }
@@ -3453,7 +3460,10 @@ fn complete_attempt(
         .optional()?;
     // An explicit recovery can select how to refresh the verified issue
     // without attributing the historical create to that connection.
-    if let Some(connection_id) = connection_id.as_deref().or(sent.recovery_connection) {
+    if let Some(connection_id) = connection_id.as_deref().or(sent
+        .recovery_connection
+        .filter(|id| *id != super::GITHUB_INTEGRATION))
+    {
         // Adoption cascades discovery's affinity. The connection that confirmed
         // publication takes precedence over the one that happened to import it.
         transaction.execute(
@@ -3462,6 +3472,23 @@ fn complete_attempt(
             params![sent.ticket_id, connection_id],
         )?;
         super::bind_ticket(transaction, sent.ticket_id, connection_id)?;
+    } else if identity.provider == super::GITHUB_INTEGRATION {
+        let host: Option<String> = transaction
+            .query_row(
+                "SELECT destination_host FROM publication_attempts WHERE id = ?1
+             AND (EXISTS (SELECT 1 FROM github_publication_context WHERE attempt_id = ?1) OR ?2)",
+                params![
+                    sent.attempt_id,
+                    sent.recovery_connection == Some(super::GITHUB_INTEGRATION)
+                ],
+                |row| row.get::<_, Option<String>>(0),
+            )
+            .optional()?
+            .flatten();
+        if let Some(host) = host {
+            let repository = format!("{host}/{}", sent.destination);
+            super::github_integration::bind_ticket(transaction, sent.ticket_id, &repository)?;
+        }
     }
     // An issue that is already closed (attached after the fact) brings its
     // closure with it, as a refresh would apply it.

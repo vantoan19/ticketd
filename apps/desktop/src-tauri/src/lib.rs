@@ -2387,6 +2387,7 @@ pub fn run() -> Result<(), tauri::Error> {
         ))
         .manage(sources.clone())
         .manage(github_commands::GithubSignIns::default())
+        .manage(github_commands::GithubReadinessChecks::default())
         .manage(sync_commands::SyncHost {
             scheduler: std::sync::Arc::clone(&sync),
             started,

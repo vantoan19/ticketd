@@ -66,8 +66,8 @@ pub(crate) use github::{
 };
 pub(crate) use github_integration::migrate as migrate_github_integration;
 pub use github_integration::{
-    GITHUB_INTEGRATION, GithubHost, GithubIntegration, GithubMigrationNotice, GithubReadiness,
-    GithubRepository, GithubRepositoryRule, VerifiedGithubLogin, sign_in_github,
+    GITHUB_INTEGRATION, GithubHost, GithubIntegration, GithubMigrationNotice, GithubProjectSite,
+    GithubReadiness, GithubRepository, GithubRepositoryRule, VerifiedGithubLogin, sign_in_github,
 };
 pub use presentation::{
     FieldPresentation, IssueName, PullRequestLink, SignInGuidance, SourceDescription,
@@ -1385,6 +1385,22 @@ impl ConfiguredSource {
     }
 
     fn check(&self, engine: &Engine) -> Result<(Engine, ConnectionCheck), SourceError> {
+        if self.github_integration
+            && github::account_database_id(&self.account_key).is_some()
+            && self.saved.config.contains_key("account")
+        {
+            // Environment-only credentials have no named gh login. The
+            // ambient workflow is safe only if it proves the recorded account ID.
+            let mut ambient = self.clone();
+            ambient.saved.config.remove("account");
+            if let Ok(checked) = ambient.check_credentials(engine) {
+                return Ok(checked);
+            }
+        }
+        self.check_credentials(engine)
+    }
+
+    fn check_credentials(&self, engine: &Engine) -> Result<(Engine, ConnectionCheck), SourceError> {
         let scoped = self.bind(engine);
         self.verify_effective_site(&scoped)?;
         let scoped = scoped.with_workflow_credentials(&self.saved.provider, &self.saved.config)?;
@@ -1483,7 +1499,7 @@ const CONFIGURED_SOURCE: &str = "SELECT id, name, provider, configuration, accou
      FROM source_connections WHERE (?1 IS NULL OR id = ?1) ORDER BY rowid";
 
 fn configured_source(connection: &Connection, id: &str) -> Result<Option<ConfiguredSource>, Error> {
-    if github_integration::repository_job(id).is_some() {
+    if github_integration::GithubRefreshJob::parse(id).is_some() {
         return Ok(github_integration::refresh_jobs(connection)?
             .into_iter()
             .find(|job| job.saved.id == id));
@@ -1616,22 +1632,11 @@ fn selected_connection(
             |row| row.get(0),
         )
         .optional()?;
-    if provider == GITHUB_INTEGRATION && affinity.is_none() {
-        let repository = if let Some(enterprise) = part.strip_prefix('@') {
-            enterprise.to_owned()
-        } else {
-            format!("github.com/{part}")
-        };
-        let routed = connection.query_row(
-            "SELECT EXISTS(SELECT 1 FROM github_repository_rules r WHERE r.repository = ?1
-             AND NOT EXISTS(SELECT 1 FROM github_legacy_repository_rules l WHERE l.repository = r.repository AND l.resolved = 0))",
-            [&repository], |row| row.get::<_, bool>(0),
-        )?;
-        if routed {
-            return Ok(Some(github_integration::job_id(
-                &repository.to_ascii_lowercase(),
-            )));
-        }
+    if provider == GITHUB_INTEGRATION
+        && affinity.is_none()
+        && let Some(job) = github_integration::selected_job(connection, ticket_id, part)?
+    {
+        return Ok(Some(job));
     }
     Ok(select_connection(
         &configured_sources(connection)?,
@@ -1643,11 +1648,14 @@ fn selected_connection(
 }
 
 fn bind_ticket(connection: &Connection, ticket_id: &str, id: &str) -> Result<(), Error> {
-    if github_integration::repository_job(id).is_some() {
-        connection.execute(
-            "DELETE FROM source_connection_removals WHERE ticket_id = ?1",
-            [ticket_id],
-        )?;
+    if let Some(job) = github_integration::GithubRefreshJob::parse(id) {
+        if let github_integration::GithubRefreshJob::Rule(repository) = job {
+            github_integration::bind_ticket(connection, ticket_id, repository)?;
+            connection.execute(
+                "DELETE FROM source_connection_removals WHERE ticket_id = ?1",
+                [ticket_id],
+            )?;
+        }
         return Ok(());
     }
     connection.execute(
@@ -1756,7 +1764,7 @@ pub(crate) fn retain_connections(
         |row| row.get(0),
     )?;
     let has_github_settings = current.query_row(
-        "SELECT EXISTS(SELECT 1 FROM github_repository_rules UNION SELECT 1 FROM github_legacy_accounts UNION SELECT 1 FROM github_project_logins)",
+        "SELECT EXISTS(SELECT 1 FROM github_repository_rules UNION SELECT 1 FROM github_legacy_accounts UNION SELECT 1 FROM github_project_logins UNION SELECT 1 FROM github_ticket_bindings)",
         [], |row| row.get::<_, bool>(0),
     )?;
     if !has_connections && !has_removals && !has_reservations && !has_github_settings {

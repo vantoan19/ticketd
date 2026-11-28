@@ -1,14 +1,52 @@
-use std::{collections::HashMap, sync::Mutex};
+use std::{
+    collections::HashMap,
+    sync::Mutex,
+    time::{Duration, Instant},
+};
 
 use tauri::{Manager, State, Webview, ipc::JavaScriptChannelId};
 use tauri_plugin_opener::OpenerExt;
 use ticketd_core::source::{
-    DiscoveryPreview, GithubHost, GithubIntegration, GithubRepository, GithubRepositoryRule,
-    SourceError, sign_in_github,
+    DiscoveryPreview, Engine, GithubHost, GithubIntegration, GithubRepository,
+    GithubRepositoryRule, SourceError, sign_in_github,
 };
 use tokio::sync::watch;
 
 use crate::{SourceFailure, SourceRegistry, open_workspace, source_task};
+
+#[derive(Clone, Default)]
+pub(crate) struct GithubReadinessChecks(
+    std::sync::Arc<Mutex<HashMap<String, (Instant, GithubHost)>>>,
+);
+
+impl GithubReadinessChecks {
+    fn check(
+        &self,
+        engine: &Engine,
+        host: &str,
+        retry: bool,
+    ) -> Result<GithubHost, ticketd_core::Error> {
+        const REUSE: Duration = Duration::from_secs(60);
+        if !retry
+            && let Ok(checks) = self.0.lock()
+            && let Some((checked, readiness)) = checks.get(host)
+            && checked.elapsed() < REUSE
+        {
+            return Ok(readiness.clone());
+        }
+        let started = Instant::now();
+        let readiness = GithubHost::check(engine, host)?;
+        if let Ok(mut checks) = self.0.lock() {
+            if let Some((checked, newer)) = checks.get(&readiness.host)
+                && *checked > started
+            {
+                return Ok(newer.clone());
+            }
+            checks.insert(readiness.host.clone(), (started, readiness.clone()));
+        }
+        Ok(readiness)
+    }
+}
 
 #[derive(Default)]
 pub(crate) struct GithubSignIns(Mutex<HashMap<String, watch::Sender<bool>>>);
@@ -29,9 +67,16 @@ impl Drop for SignIn<'_> {
 #[tauri::command]
 pub(crate) async fn get_github_integration(
     sources: State<'_, SourceRegistry>,
+    readiness: State<'_, GithubReadinessChecks>,
 ) -> Result<GithubIntegration, SourceFailure> {
-    source_task(sources, |registry| {
-        Ok(open_workspace()?.github_integration(&registry.engine()?)?)
+    let readiness = readiness.inner().clone();
+    source_task(sources, move |registry| {
+        let engine = registry.engine()?;
+        Ok(
+            open_workspace()?.github_integration_with_readiness(&engine, |host| {
+                readiness.check(&engine, host, false)
+            })?,
+        )
     })
     .await
 }
@@ -39,10 +84,12 @@ pub(crate) async fn get_github_integration(
 #[tauri::command]
 pub(crate) async fn get_github_host_readiness(
     sources: State<'_, SourceRegistry>,
+    readiness: State<'_, GithubReadinessChecks>,
     host: String,
 ) -> Result<GithubHost, SourceFailure> {
+    let readiness = readiness.inner().clone();
     source_task(sources, move |registry| {
-        Ok(open_workspace()?.github_host_readiness(&registry.engine()?, &host)?)
+        Ok(readiness.check(&registry.engine()?, &host, true)?)
     })
     .await
 }
@@ -104,6 +151,7 @@ pub(crate) async fn start_github_sign_in(
     host: String,
     codes: JavaScriptChannelId,
     sessions: State<'_, GithubSignIns>,
+    readiness: State<'_, GithubReadinessChecks>,
 ) -> Result<GithubHost, SourceFailure> {
     let host = host.trim().to_ascii_lowercase();
     let (cancel, pending) = watch::channel(false);
@@ -137,8 +185,9 @@ pub(crate) async fn start_github_sign_in(
         },
     )
     .await?;
+    let readiness = readiness.inner().clone();
     source_task(webview.state(), move |registry| {
-        Ok(open_workspace()?.github_host_readiness(&registry.engine()?, &host)?)
+        Ok(readiness.check(&registry.engine()?, &host, true)?)
     })
     .await
 }

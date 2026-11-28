@@ -20,6 +20,7 @@
 //! ticket's content, status or ownership, and it has no grace period.
 //! A rate limit is *delayed*, not unavailable.
 
+use super::github_integration::GithubRefreshJob;
 use std::collections::{BTreeSet, HashSet};
 
 use chrono::{DateTime, Datelike, SecondsFormat, TimeDelta, Timelike, Utc};
@@ -190,10 +191,15 @@ pub(super) fn scoped_partition(partition: &str, scope: &str) -> String {
 // Both refresh jobs persist the same observations. Repository rules keep their
 // own status rows and lifetimes, independently of extension connections.
 fn status_location(id: &str) -> (&'static str, &'static str, &str) {
-    super::github_integration::repository_job(id).map_or(
-        ("source_connection_status", "connection_id", id),
-        |repository| ("github_repository_status", "repository", repository),
-    )
+    match GithubRefreshJob::parse(id) {
+        Some(GithubRefreshJob::Rule(repository)) => {
+            ("github_repository_status", "repository", repository)
+        }
+        Some(GithubRefreshJob::Tracked(_) | GithubRefreshJob::Legacy(_)) => {
+            ("github_tracked_status", "job_id", id)
+        }
+        None => ("source_connection_status", "connection_id", id),
+    }
 }
 
 /// The parts of `provider` that have been read. For a source read before they
@@ -367,13 +373,14 @@ impl Workspace {
              FROM (SELECT provider FROM source_status UNION SELECT provider FROM external_identities) p
              LEFT JOIN source_status s ON s.provider = p.provider
                AND NOT EXISTS (SELECT 1 FROM source_connections c WHERE c.provider = p.provider)
-             WHERE p.provider <> 'github' OR NOT EXISTS (SELECT 1 FROM github_repository_rules)
+             WHERE p.provider <> 'github' OR NOT EXISTS (SELECT 1 FROM github_repository_rules UNION ALL SELECT 1 FROM github_tracked_status)
              UNION ALL
              SELECT 'github', s.last_attempt_at, s.last_refreshed_at, s.error_code, s.error_message,
                     s.failing_since, s.retry_after, s.partial_message, s.last_checked_tickets, NULL
-             FROM (SELECT 1 WHERE EXISTS (SELECT 1 FROM github_repository_rules))
+             FROM (SELECT 1 WHERE EXISTS (SELECT 1 FROM github_repository_rules UNION ALL SELECT 1 FROM github_tracked_status))
              LEFT JOIN (
-                SELECT * FROM github_repository_status ORDER BY last_attempt_at DESC, repository LIMIT 1
+                SELECT * FROM github_repository_status UNION ALL SELECT * FROM github_tracked_status
+                ORDER BY last_attempt_at DESC, repository LIMIT 1
              ) s
              ORDER BY 1, 10",
         )?;
@@ -385,7 +392,7 @@ impl Workspace {
                 .map(|source| source.saved.id.clone());
             let public_id = id
                 .as_ref()
-                .filter(|id| super::github_integration::repository_job(id).is_none())
+                .filter(|id| GithubRefreshJob::parse(id).is_none())
                 .cloned();
             let count = counts.entry((ticket.provider, public_id)).or_default();
             count.0 += 1;
@@ -449,19 +456,25 @@ impl Workspace {
 
     pub(super) fn source_schedule(&self) -> Result<Vec<(String, u64)>, Error> {
         self.read(|workspace| {
-            let mut statement = workspace.connection.prepare(
-                "SELECT c.id, CAST(strftime('%s', s.retry_after) AS INTEGER)
-                 FROM source_connections c LEFT JOIN source_connection_status s ON s.connection_id = c.id
-                 UNION ALL
-                 SELECT 'github:' || r.repository, CAST(strftime('%s', s.retry_after) AS INTEGER)
-                 FROM github_repository_rules r LEFT JOIN github_repository_status s USING(repository)",
+            let connection = &workspace.connection;
+            let mut jobs = super::refresh_sources_configuration(connection)?
+                .into_iter().map(|job| job.saved.id).collect::<Vec<_>>();
+            // A migration may need an account check even when none of its rules
+            // has been verified yet and there are no tracked issues to refresh.
+            let mut statement = connection.prepare_cached(
+                "SELECT DISTINCT r.repository FROM github_repository_rules r
+                 JOIN github_legacy_repository_rules l USING(repository) WHERE l.resolved = 0",
             )?;
-            Ok(statement
-                .query_map([], |row| {
-                    let hold: Option<i64> = row.get(1)?;
-                    Ok((row.get(0)?, hold.and_then(|time| u64::try_from(time).ok()).unwrap_or(0)))
-                })?
-                .collect::<Result<Vec<_>, _>>()?)
+            let pending = statement.query_map([], |row| row.get::<_, String>(0))?
+                .collect::<Result<Vec<_>, _>>()?;
+            jobs.extend(pending.iter().map(|rule| GithubRefreshJob::Rule(rule).id()));
+            jobs.into_iter().map(|job| {
+                let (table, key, id) = status_location(&job);
+                let hold = connection.prepare_cached(&format!(
+                    "SELECT CAST(strftime('%s', retry_after) AS INTEGER) FROM {table} WHERE {key} = ?1",
+                ))?.query_row([id], |row| row.get::<_, Option<i64>>(0)).optional()?.flatten();
+                Ok((job, hold.and_then(|time| u64::try_from(time).ok()).unwrap_or(0)))
+            }).collect()
         })
     }
 
@@ -470,7 +483,7 @@ impl Workspace {
     pub fn source_hold_until(&self) -> Result<Option<u64>, Error> {
         let epoch: Option<i64> = self.connection.query_row(
             "SELECT MAX(CAST(strftime('%s', retry_after) AS INTEGER))
-             FROM (SELECT retry_after FROM source_connection_status UNION ALL SELECT retry_after FROM github_repository_status)
+             FROM (SELECT retry_after FROM source_connection_status UNION ALL SELECT retry_after FROM github_repository_status UNION ALL SELECT retry_after FROM github_tracked_status)
              WHERE retry_after IS NOT NULL",
             [],
             |row| row.get(0),

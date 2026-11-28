@@ -16,7 +16,6 @@ use crate::{
 
 pub const GITHUB_INTEGRATION: &str = "github";
 const PUBLIC_HOST: &str = "github.com";
-pub(super) const REPOSITORY_JOB_PREFIX: &str = "github:";
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct GithubRepositoryRule {
@@ -60,12 +59,27 @@ pub struct GithubHost {
     pub message: Option<String>,
 }
 
+impl GithubHost {
+    pub fn check(engine: &Engine, host: &str) -> Result<Self, Error> {
+        Ok(host_readiness(engine, &normalized_host(host)?))
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+pub struct GithubProjectSite {
+    pub project: SourceRepositoryProject,
+    pub host: String,
+    pub login: Option<String>,
+}
+
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 pub struct GithubIntegration {
     pub id: &'static str,
     pub hosts: Vec<GithubHost>,
     pub repositories: Vec<GithubRepository>,
     pub migration_notices: Vec<GithubMigrationNotice>,
+    pub project_sites_without_rules: Vec<GithubProjectSite>,
+    pub has_tracked_tickets: bool,
 }
 
 pub(crate) fn migrate(connection: &Connection) -> Result<(), Error> {
@@ -103,6 +117,17 @@ pub(crate) fn migrate(connection: &Connection) -> Result<(), Error> {
          CREATE TABLE github_legacy_ticket_bindings (
            ticket_id TEXT PRIMARY KEY REFERENCES external_identities(ticket_id) ON UPDATE CASCADE ON DELETE CASCADE,
            connection_id TEXT NOT NULL REFERENCES github_legacy_accounts(connection_id) ON DELETE CASCADE
+         );
+         CREATE TABLE github_ticket_bindings (
+           ticket_id TEXT PRIMARY KEY REFERENCES external_identities(ticket_id) ON UPDATE CASCADE ON DELETE CASCADE,
+           repository TEXT NOT NULL COLLATE NOCASE
+         );
+         CREATE INDEX github_ticket_bindings_repository ON github_ticket_bindings(repository);
+         CREATE TABLE github_tracked_status (
+           job_id TEXT PRIMARY KEY,
+           last_attempt_at TEXT, last_refreshed_at TEXT, error_code TEXT, error_message TEXT,
+           failing_since TEXT, retry_after TEXT, partial_message TEXT, last_checked_tickets INTEGER,
+           read_partitions TEXT
          );
          CREATE TABLE github_publication_context (
            attempt_id TEXT PRIMARY KEY REFERENCES publication_attempts(id) ON DELETE CASCADE,
@@ -195,6 +220,17 @@ pub(crate) fn migrate(connection: &Connection) -> Result<(), Error> {
              FROM github_legacy_status s WHERE connection_id = ?1",
             params![id, repository, partition, scoped],
         )?;
+    }
+    for table in [
+        "github_repository_rules",
+        "github_repository_status",
+        "github_project_logins",
+        "github_legacy_repository_rules",
+        "github_ticket_bindings",
+        "github_tracked_status",
+        "github_publication_context",
+    ] {
+        crate::change_token::track(connection, table)?;
     }
     // The migration ladder disables foreign keys until every step has run.
     connection.execute_batch(
@@ -411,6 +447,7 @@ impl From<ConnectionInfo> for VerifiedGithubLogin {
 #[derive(Clone)]
 struct LegacyRule {
     repository: String,
+    connection_id: String,
     host: String,
     login: String,
     account_key: String,
@@ -446,7 +483,7 @@ impl LegacyRule {
 
 fn pending_rules(connection: &Connection) -> Result<Vec<LegacyRule>, Error> {
     let mut statement = connection.prepare(
-        "SELECT r.repository,a.host,a.login,a.account_key,r.assignee,r.labels
+        "SELECT r.repository,a.host,a.login,a.account_key,r.assignee,r.labels,a.connection_id
          FROM github_legacy_repository_rules r JOIN github_legacy_accounts a USING(connection_id)
          WHERE r.resolved = 0 ORDER BY r.repository, a.connection_id",
     )?;
@@ -459,9 +496,51 @@ fn pending_rules(connection: &Connection) -> Result<Vec<LegacyRule>, Error> {
                 account_key: row.get(3)?,
                 assignee: row.get(4)?,
                 labels: row.get(5)?,
+                connection_id: row.get(6)?,
             })
         })?
         .collect::<Result<_, _>>()?)
+}
+
+// Legacy observations can only describe these filters under the same account.
+// Separate the latest attempt from the latest successful read so one failed
+// connection does not erase another connection's confirmed coverage.
+fn carry_legacy_observations(
+    connection: &Connection,
+    rule: &GithubRepositoryRule,
+    candidates: &[&LegacyRule],
+) -> Result<(), Error> {
+    if candidates.is_empty() {
+        return Ok(());
+    }
+    let (host, name) = repository_parts(&rule.repository)?;
+    let partition = github::partition_name(Some(host), name);
+    let config = rule_configuration(rule, None)?;
+    let derived =
+        github::legacy_derived_configuration(GITHUB_INTEGRATION, host, &config).unwrap_or_default();
+    let scoped = super::freshness::scoped_partition(&partition, &derived.discovery_scope);
+    let ids = serde_json::to_string(
+        &candidates
+            .iter()
+            .map(|candidate| &candidate.connection_id)
+            .collect::<Vec<_>>(),
+    )?;
+    connection.execute(
+        "WITH observed AS (SELECT * FROM github_legacy_status WHERE connection_id IN (SELECT value FROM json_each(?1))),
+              attempt AS (SELECT * FROM observed ORDER BY last_attempt_at DESC, connection_id LIMIT 1),
+              success AS (SELECT * FROM observed WHERE last_refreshed_at IS NOT NULL
+                          ORDER BY last_refreshed_at DESC, connection_id LIMIT 1)
+         INSERT OR REPLACE INTO github_repository_status
+         SELECT ?2, a.last_attempt_at, s.last_refreshed_at, a.error_code, a.error_message,
+                a.failing_since, a.retry_after, a.partial_message,
+                COALESCE(a.last_checked_tickets, s.last_checked_tickets),
+                CASE WHEN EXISTS(SELECT 1 FROM observed o, json_each(o.read_partitions) WHERE value IN (?3,?4))
+                     THEN json_array(?4)
+                     WHEN s.connection_id IS NOT NULL AND s.read_partitions IS NULL AND ?5 = 1 THEN NULL ELSE '[]' END
+         FROM attempt a LEFT JOIN success s ON true",
+        params![ids, rule.repository, partition, scoped, candidates.len()],
+    )?;
+    Ok(())
 }
 
 impl Workspace {
@@ -470,33 +549,103 @@ impl Workspace {
     }
 
     pub fn github_integration(&mut self, engine: &Engine) -> Result<GithubIntegration, Error> {
+        self.github_integration_with_readiness(engine, |host| GithubHost::check(engine, host))
+    }
+
+    /// Reads current local settings, letting the desktop reuse recent host checks.
+    pub fn github_integration_with_readiness(
+        &mut self,
+        engine: &Engine,
+        readiness: impl FnMut(&str) -> Result<GithubHost, Error>,
+    ) -> Result<GithubIntegration, Error> {
         let mut statement = self.connection.prepare(
             "SELECT host FROM github_repository_rules UNION SELECT host FROM github_project_logins
-             UNION SELECT host FROM github_legacy_accounts UNION SELECT 'github.com' ORDER BY 1",
+             UNION SELECT host FROM github_legacy_accounts
+             UNION SELECT substr(repository, 1, instr(repository, '/') - 1) FROM github_ticket_bindings
+             UNION SELECT 'github.com' ORDER BY 1",
         )?;
         let names = statement
             .query_map([], |row| row.get::<_, String>(0))?
             .collect::<Result<Vec<_>, _>>()?;
         drop(statement);
-        let hosts: Vec<_> = names
+        let hosts = names
             .iter()
-            .map(|host| host_readiness(engine, host))
-            .collect();
+            .map(String::as_str)
+            .map(readiness)
+            .collect::<Result<Vec<_>, _>>()?;
         let migration_notices = self.reconcile_github_migration(|host, login| {
             checked_host(engine, host, login)
                 .ok()
                 .map(|(_, account)| account.into())
         })?;
+        let repositories = self.github_repositories()?;
+        let mut project_sites_without_rules = Vec::new();
+        for project in self.list_projects()? {
+            let Some((hostname, _)) = project
+                .remote
+                .as_deref()
+                .and_then(|remote| remote.split_once('/'))
+            else {
+                continue;
+            };
+            if project.archived {
+                continue;
+            }
+            let matching_hosts: Vec<_> = hosts
+                .iter()
+                .map(|host| host.host.as_str())
+                .filter(|host| github::site_host(host) == hostname)
+                .collect();
+            let sites = if matching_hosts.is_empty() {
+                vec![hostname]
+            } else {
+                matching_hosts
+            };
+            for host in sites {
+                if repositories.iter().any(|entry| {
+                    entry
+                        .project
+                        .as_ref()
+                        .is_some_and(|route| route.id == project.id)
+                        && entry
+                            .rule
+                            .repository
+                            .split_once('/')
+                            .is_some_and(|(site, _)| site == host)
+                }) {
+                    continue;
+                }
+                project_sites_without_rules.push(GithubProjectSite {
+                    login: project_login(&self.connection, Some(&project.id), host)?,
+                    project: SourceRepositoryProject {
+                        id: project.id.clone(),
+                        name: project.name.clone(),
+                    },
+                    host: host.into(),
+                });
+            }
+        }
+        let has_tracked_tickets: bool = self.connection.query_row(
+            "SELECT EXISTS(SELECT 1 FROM external_identities i
+             JOIN external_ownership o USING(ticket_id)
+             LEFT JOIN source_connection_removals removed USING(ticket_id)
+             WHERE i.provider = 'github' AND o.authority = 'external' AND removed.ticket_id IS NULL
+               AND (EXISTS (SELECT 1 FROM github_ticket_bindings b WHERE b.ticket_id = i.ticket_id)
+                 OR EXISTS (SELECT 1 FROM github_legacy_ticket_bindings b WHERE b.ticket_id = i.ticket_id)))",
+            [], |row| row.get(0),
+        )?;
         Ok(GithubIntegration {
             id: GITHUB_INTEGRATION,
             hosts,
-            repositories: self.github_repositories()?,
+            repositories,
             migration_notices,
+            project_sites_without_rules,
+            has_tracked_tickets,
         })
     }
 
     pub fn github_host_readiness(&self, engine: &Engine, host: &str) -> Result<GithubHost, Error> {
-        Ok(host_readiness(engine, &normalized_host(host)?))
+        GithubHost::check(engine, host)
     }
 
     /// Resolve device-local migration candidates against a verified snapshot. The
@@ -542,11 +691,19 @@ impl Workspace {
                     Some("Previous GitHub connections saved different filters. Review and save the filters to resume import.".into())
                 } else if !super::ValueFormat::Handle.is_valid(&rule.login) {
                     Some("The previous GitHub login could not be identified. Review the Project login and save the filters to resume import.".into())
-                } else if group.iter().any(|other| !rule.same_account(other)) {
+                } else if group.iter().any(|other| !rule.same_account(other))
+                    && active
+                        .get(&rule.host)
+                        .and_then(Option::as_ref)
+                        .is_none_or(|login| !group.iter().all(|candidate| candidate.matches(login)))
+                {
                     Some("Previous GitHub connections used different logins for this repository. Review the Project login and save the filters to resume import.".into())
                 } else if let Some(Some(login)) = active.get(&rule.host) {
                     if rule.matches(login) {
-                        None
+                        let (_, pin) = repository_route(transaction, repository)?;
+                        pin.filter(|pin| !pin.eq_ignore_ascii_case(&login.login)).map(|_| format!(
+                            "The previous GitHub login {} differs from the Project's selected login. Review the Project login and save the filters to resume import.", rule.login
+                        ))
                     } else if let Some(project) = project_route(transaction, repository)? {
                         let named = named
                             .get(&(rule.host.clone(), rule.login.to_ascii_lowercase()))
@@ -593,6 +750,15 @@ impl Workspace {
                         message,
                     });
                 } else {
+                    carry_legacy_observations(
+                        transaction,
+                        &GithubRepositoryRule {
+                            repository: repository.clone(),
+                            assignee: rule.assignee.clone(),
+                            labels: serde_json::from_str(&rule.labels)?,
+                        },
+                        &group.iter().collect::<Vec<_>>(),
+                    )?;
                     transaction.execute("UPDATE github_legacy_repository_rules SET resolved = 1 WHERE repository = ?1", [repository])?;
                 }
             }
@@ -630,16 +796,26 @@ impl Workspace {
             .transpose()?;
         write_scope::run(&self.connection, |transaction| {
             projects::ensure_active(transaction, project)?;
-            if let Some(login) = &verified {
+            let changed = if let Some(login) = &verified {
                 transaction.execute(
                     "INSERT INTO github_project_logins VALUES (?1,?2,?3)
-                     ON CONFLICT(project_id,host) DO UPDATE SET login = excluded.login",
+                     ON CONFLICT(project_id,host) DO UPDATE SET login = excluded.login
+                     WHERE github_project_logins.login <> excluded.login COLLATE NOCASE",
                     params![project, host, login],
-                )?;
+                )?
             } else {
                 transaction.execute(
                     "DELETE FROM github_project_logins WHERE project_id = ?1 AND host = ?2",
                     params![project, host],
+                )?
+            };
+            if changed > 0 {
+                transaction.execute(
+                    "DELETE FROM github_repository_status WHERE repository IN (
+                       SELECT r.repository FROM github_repository_rules r JOIN projects p ON p.id = ?1
+                       WHERE r.host = ?2 AND p.remote = ?3 || '/' || substr(r.repository, length(r.host) + 2) COLLATE NOCASE
+                     )",
+                    params![project, host, github::site_host(&host)],
                 )?;
             }
             Ok(())
@@ -652,7 +828,7 @@ impl Workspace {
         rule: GithubRepositoryRule,
     ) -> Result<DiscoveryPreview, Error> {
         self.check_github_repository(engine, &normalized_rule(rule)?)
-            .map(|(preview, _)| preview)
+            .map(|(preview, _, _)| preview)
     }
 
     pub fn save_github_repository(
@@ -661,12 +837,25 @@ impl Workspace {
         rule: GithubRepositoryRule,
     ) -> Result<GithubRepository, Error> {
         let rule = normalized_rule(rule)?;
-        let (_, route) = self.check_github_repository(engine, &rule)?;
+        let (_, route, checked) = self.check_github_repository(engine, &rule)?;
+        let verified: VerifiedGithubLogin = checked.into();
         write_scope::run(&self.connection, |transaction| {
             if repository_route(transaction, &rule.repository)? != route {
                 return Err(stale_source());
             }
+            let labels = serde_json::to_string(&rule.labels)?;
+            let pending = pending_rules(transaction)?;
+            let matching = pending
+                .iter()
+                .filter(|candidate| {
+                    candidate.repository == rule.repository
+                        && candidate.assignee == rule.assignee
+                        && candidate.labels == labels
+                        && candidate.matches(&verified)
+                })
+                .collect::<Vec<_>>();
             save_rule(transaction, &rule)?;
+            carry_legacy_observations(transaction, &rule, &matching)?;
             repositories(transaction)?
                 .into_iter()
                 .find(|entry| entry.rule.repository == rule.repository)
@@ -678,7 +867,7 @@ impl Workspace {
         &self,
         engine: &Engine,
         rule: &GithubRepositoryRule,
-    ) -> Result<(DiscoveryPreview, RepositoryRoute), Error> {
+    ) -> Result<(DiscoveryPreview, RepositoryRoute, ConnectionInfo), Error> {
         let route = read_scope::run(&self.connection, |connection| {
             repository_route(connection, &rule.repository)
         })?;
@@ -689,12 +878,12 @@ impl Workspace {
             .with_workflow_credentials(GITHUB_INTEGRATION, &config)?;
         config.remove(github::SITE_CONFIG);
         let validated = scoped.validate_configuration(GITHUB_INTEGRATION, &config)?;
-        let (preview, _, _) =
+        let (preview, _, checked) =
             self.preview_source_with_config(&scoped, GITHUB_INTEGRATION, &validated)?;
         if scoped.issue_site(GITHUB_INTEGRATION)? != Some(host) {
             return Err(Error::InvalidProjectRemote);
         }
-        Ok((preview, route))
+        Ok((preview, route, checked))
     }
 
     pub fn remove_github_repository(&mut self, repository: &str) -> Result<(), Error> {
@@ -711,14 +900,33 @@ impl Workspace {
                 "UPDATE github_legacy_repository_rules SET resolved = 1 WHERE repository = ?1",
                 [&repository],
             )?;
+            transaction.execute(
+                "DELETE FROM github_tracked_status WHERE job_id = ?1",
+                [GithubRefreshJob::Tracked(&repository).id()],
+            )?;
             let (host, name) = repository_parts(&repository)?;
             let partition = github::partition_name(Some(host), name);
             transaction.execute(
                 "INSERT INTO source_connection_removals (ticket_id, removed_at)
                  SELECT i.ticket_id, strftime('%Y-%m-%dT%H:%M:%fZ','now') FROM external_identities i
                  JOIN external_ownership o USING(ticket_id)
-                 WHERE i.provider = 'github' AND (i.partition = ?2 COLLATE NOCASE OR (i.partition IS NULL AND i.repository = ?1 COLLATE NOCASE))
-                   AND o.authority = 'external' ON CONFLICT DO NOTHING",
+                 LEFT JOIN github_ticket_bindings b USING(ticket_id)
+                 LEFT JOIN github_legacy_ticket_bindings l USING(ticket_id)
+                 WHERE i.provider = 'github' AND o.authority = 'external' AND (
+                   i.partition = ?2 COLLATE NOCASE OR (i.partition IS NULL AND i.repository = ?1 COLLATE NOCASE)
+                   OR (b.repository = ?1 AND NOT EXISTS (SELECT 1 FROM github_repository_rules r
+                       WHERE r.repository = CASE WHEN substr(i.partition, 1, 1) = '@'
+                         THEN substr(i.partition, 2) ELSE 'github.com/' || i.partition END))
+                   OR (b.repository IS NULL AND EXISTS (
+                         SELECT 1 FROM github_legacy_repository_rules rr
+                         WHERE rr.connection_id = l.connection_id AND rr.repository = ?1)
+                       AND NOT EXISTS (
+                         SELECT 1 FROM github_legacy_repository_rules rr JOIN github_repository_rules r USING(repository)
+                         WHERE rr.connection_id = l.connection_id)
+                       AND NOT EXISTS (SELECT 1 FROM github_repository_rules r
+                         WHERE r.repository = CASE WHEN substr(i.partition, 1, 1) = '@'
+                           THEN substr(i.partition, 2) ELSE 'github.com/' || i.partition END))
+                 ) ON CONFLICT DO NOTHING",
                 params![repository, partition],
             )?;
             Ok(())
@@ -741,6 +949,11 @@ fn repository_route(connection: &Connection, repository: &str) -> Result<Reposit
 
 pub(super) fn save_rule(connection: &Connection, rule: &GithubRepositoryRule) -> Result<(), Error> {
     let (host, name) = repository_parts(&rule.repository)?;
+    connection.execute(
+        "DELETE FROM github_repository_status WHERE repository = ?1 AND EXISTS (
+           SELECT 1 FROM github_legacy_repository_rules WHERE repository = ?1 AND resolved = 0)",
+        [&rule.repository],
+    )?;
     let labels = serde_json::to_string(&rule.labels)?;
     let updated = connection.execute(
         "INSERT INTO github_repository_rules VALUES (?1,?2,?3,?4,?5,strftime('%Y-%m-%dT%H:%M:%fZ','now'))
@@ -756,8 +969,9 @@ pub(super) fn save_rule(connection: &Connection, rule: &GithubRepositoryRule) ->
         let partition = github::partition_name(Some(host), name);
         connection.execute(
             "DELETE FROM source_connection_removals WHERE ticket_id IN
-             (SELECT ticket_id FROM external_identities WHERE provider = 'github' AND partition = ?1 COLLATE NOCASE)",
-            [&partition],
+             (SELECT i.ticket_id FROM external_identities i LEFT JOIN github_ticket_bindings b USING(ticket_id)
+              WHERE i.provider = 'github' AND (i.partition = ?1 COLLATE NOCASE OR b.repository = ?2))",
+            params![partition, rule.repository],
         )?;
         connection.execute(
             "UPDATE source_sync SET discovery_matches = NULL WHERE ticket_id IN
@@ -776,9 +990,12 @@ fn repositories(connection: &Connection) -> Result<Vec<GithubRepository>, Error>
     let mut statement = connection.prepare(
         "SELECT r.repository, r.assignee, r.labels, s.last_refreshed_at,s.error_code,s.error_message,
                 (SELECT count(*) FROM external_identities i JOIN external_ownership o USING(ticket_id)
-                 JOIN tickets t ON t.id = i.ticket_id
+                 JOIN tickets t ON t.id = i.ticket_id LEFT JOIN github_ticket_bindings b USING(ticket_id)
                  WHERE i.provider = 'github'
-                   AND (CASE WHEN r.host = 'github.com' THEN substr(r.repository, 12) ELSE '@' || r.repository END) = i.partition COLLATE NOCASE
+                   AND ((CASE WHEN r.host = 'github.com' THEN substr(r.repository, 12) ELSE '@' || r.repository END) = i.partition COLLATE NOCASE
+                     OR (b.repository = r.repository AND NOT EXISTS (SELECT 1 FROM github_repository_rules other
+                       WHERE other.repository = CASE WHEN substr(i.partition, 1, 1) = '@'
+                         THEN substr(i.partition, 2) ELSE 'github.com/' || i.partition END)))
                    AND o.authority = 'external' AND t.trashed = 0)
          FROM github_repository_rules r LEFT JOIN github_repository_status s USING(repository)
          ORDER BY r.repository",
@@ -790,6 +1007,11 @@ fn repositories(connection: &Connection) -> Result<Vec<GithubRepository>, Error>
         let (project, project_login) = repository_route(connection, &repository)?;
         let error_code: Option<String> = row.get(4)?;
         let error_message: Option<String> = row.get(5)?;
+        let legacy_failure = if error_code.is_none() {
+            pending_legacy_failure(connection, &repository)?
+        } else {
+            None
+        };
         repositories.push(GithubRepository {
             rule: GithubRepositoryRule {
                 repository,
@@ -800,30 +1022,147 @@ fn repositories(connection: &Connection) -> Result<Vec<GithubRepository>, Error>
             project_login,
             tracked_tickets: row.get(6)?,
             last_refreshed_at: row.get(3)?,
-            error: error_code.map(|code| SourceFailure {
-                code,
-                message: error_message.unwrap_or_default(),
-            }),
+            error: error_code
+                .map(|code| SourceFailure {
+                    code,
+                    message: error_message.unwrap_or_default(),
+                })
+                .or(legacy_failure),
         });
     }
     Ok(repositories)
 }
 
-pub(super) fn repository_job(id: &str) -> Option<&str> {
-    id.strip_prefix(REPOSITORY_JOB_PREFIX)
+fn pending_legacy_failure(
+    connection: &Connection,
+    repository: &str,
+) -> Result<Option<SourceFailure>, Error> {
+    let mut statement = connection.prepare_cached(
+        "SELECT a.login, s.error_code, s.error_message FROM github_legacy_repository_rules r
+         JOIN github_legacy_accounts a USING(connection_id) JOIN github_legacy_status s USING(connection_id)
+         WHERE r.repository = ?1 AND r.resolved = 0 AND s.error_code IS NOT NULL
+         ORDER BY s.last_attempt_at DESC, r.connection_id",
+    )?;
+    let mut rows = statement.query([repository])?;
+    let mut code = None;
+    let mut messages = Vec::new();
+    while let Some(row) = rows.next()? {
+        if code.is_none() {
+            code = Some(row.get(1)?);
+        }
+        let login: String = row.get(0)?;
+        let message: Option<String> = row.get(2)?;
+        if let Some(message) = message {
+            let detail = format!("Previous GitHub login {login}: {message}");
+            if !messages.contains(&detail) {
+                messages.push(detail);
+            }
+        }
+    }
+    Ok(code.map(|code| SourceFailure {
+        code,
+        message: messages.join("\n"),
+    }))
 }
 
-pub(super) fn job_id(repository: &str) -> String {
-    format!("{REPOSITORY_JOB_PREFIX}{repository}")
+#[derive(Clone, Copy, PartialEq, Eq)]
+pub(super) enum GithubRefreshJob<'a> {
+    Rule(&'a str),
+    Tracked(&'a str),
+    Legacy(&'a str),
+}
+
+impl<'a> GithubRefreshJob<'a> {
+    const RULE_PREFIX: &str = "github:";
+    const TRACKED_PREFIX: &str = "github-tracked:";
+    const LEGACY_PREFIX: &str = "github-legacy:";
+
+    pub(super) fn parse(id: &'a str) -> Option<Self> {
+        if let Some(repository) = id.strip_prefix(Self::RULE_PREFIX) {
+            Some(Self::Rule(repository))
+        } else if let Some(repository) = id.strip_prefix(Self::TRACKED_PREFIX) {
+            Some(Self::Tracked(repository))
+        } else {
+            id.strip_prefix(Self::LEGACY_PREFIX).map(Self::Legacy)
+        }
+    }
+
+    pub(super) fn id(self) -> String {
+        let (prefix, subject) = match self {
+            Self::Rule(repository) => (Self::RULE_PREFIX, repository),
+            Self::Tracked(repository) => (Self::TRACKED_PREFIX, repository),
+            Self::Legacy(connection) => (Self::LEGACY_PREFIX, connection),
+        };
+        format!("{prefix}{subject}")
+    }
+
+    pub(super) fn discover(self) -> bool {
+        matches!(self, Self::Rule(_))
+    }
+}
+
+pub(super) fn repository_for_partition(partition: &str) -> String {
+    partition
+        .strip_prefix('@')
+        .map_or_else(|| format!("{PUBLIC_HOST}/{partition}"), str::to_owned)
+        .to_ascii_lowercase()
+}
+
+pub(super) fn tracked_job<'a>(
+    repository: Option<&'a str>,
+    legacy: Option<&'a str>,
+) -> Option<GithubRefreshJob<'a>> {
+    repository
+        .map(GithubRefreshJob::Tracked)
+        .or_else(|| legacy.map(GithubRefreshJob::Legacy))
+}
+
+const NO_PENDING_RULE: &str = "NOT EXISTS (
+    SELECT 1 FROM github_legacy_repository_rules l WHERE l.repository = r.repository AND l.resolved = 0)";
+
+pub(super) fn selected_job(
+    connection: &Connection,
+    ticket_id: &str,
+    partition: &str,
+) -> Result<Option<String>, Error> {
+    let repository = repository_for_partition(partition);
+    let has_rule: bool = connection.query_row(
+        &format!("SELECT EXISTS(SELECT 1 FROM github_repository_rules r WHERE r.repository = ?1 AND {NO_PENDING_RULE})"),
+        [&repository], |row| row.get(0),
+    )?;
+    if has_rule {
+        return Ok(Some(GithubRefreshJob::Rule(&repository).id()));
+    }
+    let bindings: (Option<String>, Option<String>) = connection.query_row(
+        "SELECT b.repository, l.connection_id FROM external_identities i
+         LEFT JOIN github_ticket_bindings b USING(ticket_id)
+         LEFT JOIN github_legacy_ticket_bindings l USING(ticket_id) WHERE i.ticket_id = ?1",
+        [ticket_id],
+        |row| Ok((row.get(0)?, row.get(1)?)),
+    )?;
+    Ok(tracked_job(bindings.0.as_deref(), bindings.1.as_deref()).map(GithubRefreshJob::id))
+}
+
+pub(super) fn bind_ticket(
+    connection: &Connection,
+    ticket_id: &str,
+    repository: &str,
+) -> Result<(), Error> {
+    connection.execute(
+        "INSERT INTO github_ticket_bindings (ticket_id, repository)
+         SELECT ?1, ?2 FROM external_ownership WHERE ticket_id = ?1 AND authority = 'external'
+         ON CONFLICT(ticket_id) DO UPDATE SET repository = excluded.repository
+         WHERE github_ticket_bindings.repository <> excluded.repository",
+        params![ticket_id, repository],
+    )?;
+    Ok(())
 }
 
 pub(super) fn refresh_jobs(connection: &Connection) -> Result<Vec<ConfiguredSource>, Error> {
-    let mut statement = connection.prepare(
+    let mut statement = connection.prepare(&format!(
         "SELECT r.repository, r.assignee, r.labels, r.revision, r.saved_at
-         FROM github_repository_rules r WHERE NOT EXISTS (
-             SELECT 1 FROM github_legacy_repository_rules l WHERE l.repository = r.repository AND l.resolved = 0)
-         ORDER BY r.repository",
-    )?;
+         FROM github_repository_rules r WHERE {NO_PENDING_RULE} ORDER BY r.repository",
+    ))?;
     let mut rows = statement.query([])?;
     let mut jobs = Vec::new();
     while let Some(row) = rows.next()? {
@@ -841,7 +1180,7 @@ pub(super) fn refresh_jobs(connection: &Connection) -> Result<Vec<ConfiguredSour
         let revision = serde_json::to_string(&(saved_revision, &login))?;
         jobs.push(ConfiguredSource {
             saved: SavedSource {
-                id: job_id(&rule.repository),
+                id: GithubRefreshJob::Rule(&rule.repository).id(),
                 name: rule.repository.clone(),
                 provider: GITHUB_INTEGRATION.into(),
                 config: config.clone(),
@@ -863,6 +1202,57 @@ pub(super) fn refresh_jobs(connection: &Connection) -> Result<Vec<ConfiguredSour
             account_key: String::new(),
             github_integration: true,
         });
+    }
+    let mut statement = connection.prepare(&format!(
+        "SELECT b.repository, a.connection_id, a.host, a.login, a.account_key, MIN(i.locator)
+         FROM external_identities i JOIN external_ownership o USING(ticket_id)
+         LEFT JOIN source_connection_removals removed USING(ticket_id)
+         LEFT JOIN source_connection_tickets c USING(ticket_id)
+         LEFT JOIN github_ticket_bindings b USING(ticket_id)
+         LEFT JOIN github_legacy_ticket_bindings l USING(ticket_id)
+         LEFT JOIN github_legacy_accounts a ON a.connection_id = l.connection_id AND b.repository IS NULL
+         WHERE i.provider = 'github' AND o.authority = 'external' AND removed.ticket_id IS NULL
+           AND c.ticket_id IS NULL AND (b.ticket_id IS NOT NULL OR a.connection_id IS NOT NULL)
+           AND NOT EXISTS (SELECT 1 FROM github_repository_rules r
+               WHERE r.repository = CASE WHEN substr(i.partition, 1, 1) = '@'
+                 THEN substr(i.partition, 2) ELSE 'github.com/' || i.partition END
+                 AND {NO_PENDING_RULE})
+         GROUP BY b.repository, a.connection_id, a.host, a.login, a.account_key
+         ORDER BY b.repository, a.connection_id",
+    ))?;
+    let mut rows = statement.query([])?;
+    while let Some(row) = rows.next()? {
+        let repository: Option<String> = row.get(0)?;
+        let legacy: Option<String> = row.get(1)?;
+        let Some(job) = tracked_job(repository.as_deref(), legacy.as_deref()) else {
+            continue;
+        };
+        let (host, login, account_key, name): (String, Option<String>, String, String) = match job {
+            GithubRefreshJob::Tracked(repository) => {
+                let (host, name) = repository_parts(repository)?;
+                (
+                    host.into(),
+                    repository_route(connection, repository)?.1,
+                    String::new(),
+                    name.into(),
+                )
+            }
+            GithubRefreshJob::Legacy(_) => {
+                let locator: String = row.get(5)?;
+                let Ok((name, _)) = github::split_locator(&locator) else {
+                    continue;
+                };
+                (row.get(2)?, row.get(3)?, row.get(4)?, name.into())
+            }
+            GithubRefreshJob::Rule(_) => continue,
+        };
+        let revision = serde_json::to_string(&(&host, &login, &account_key))?;
+        let mut source = workflow_source(&host, login, account_key, &[name], revision);
+        // A connector request still needs a schema-valid configuration; this
+        // job owns only the issues explicitly bound to it.
+        source.derived.partitions.clear();
+        source.saved.id = job.id();
+        jobs.push(source);
     }
     Ok(jobs)
 }
@@ -984,6 +1374,8 @@ pub(super) fn forget_device_settings(connection: &Connection) -> Result<(), Erro
             "DELETE FROM github_repository_status;
              DELETE FROM github_repository_rules;
              DELETE FROM github_project_logins;
+             DELETE FROM github_ticket_bindings;
+             DELETE FROM github_tracked_status;
              DELETE FROM github_legacy_ticket_bindings;
              DELETE FROM github_legacy_status;
              DELETE FROM github_legacy_repository_rules;
@@ -1000,6 +1392,7 @@ pub(super) fn retain_device_settings(
     for (table, width, guard) in [
         ("github_repository_rules", 6, ""),
         ("github_repository_status", 10, ""),
+        ("github_tracked_status", 10, ""),
         ("github_legacy_accounts", 5, ""),
         ("github_legacy_status", 10, ""),
         ("github_legacy_repository_rules", 5, ""),
@@ -1024,16 +1417,25 @@ pub(super) fn retain_device_settings(
             insert.execute(rusqlite::params_from_iter(values))?;
         }
     }
-    let mut statement = current.prepare(
-        "SELECT b.ticket_id, b.connection_id, i.external_id FROM github_legacy_ticket_bindings b JOIN external_identities i USING(ticket_id)",
-    )?;
-    let mut rows = statement.query([])?;
-    while let Some(row) = rows.next()? {
-        restored.execute(
-            "INSERT INTO github_legacy_ticket_bindings (ticket_id,connection_id)
+    for (table, affinity) in [
+        ("github_ticket_bindings", "repository"),
+        ("github_legacy_ticket_bindings", "connection_id"),
+    ] {
+        let mut statement = current.prepare(&format!(
+            "SELECT b.ticket_id, b.{affinity}, i.external_id FROM {table} b JOIN external_identities i USING(ticket_id)",
+        ))?;
+        let mut rows = statement.query([])?;
+        let mut insert = restored.prepare(&format!(
+            "INSERT INTO {table} (ticket_id,{affinity})
              SELECT ticket_id, ?2 FROM external_identities WHERE ticket_id = ?1 AND provider = 'github' AND external_id = ?3",
-            params![row.get::<_, String>(0)?, row.get::<_, String>(1)?, row.get::<_, String>(2)?],
-        )?;
+        ))?;
+        while let Some(row) = rows.next()? {
+            insert.execute(params![
+                row.get::<_, String>(0)?,
+                row.get::<_, String>(1)?,
+                row.get::<_, String>(2)?
+            ])?;
+        }
     }
     Ok(())
 }

@@ -1197,17 +1197,23 @@ no tracker clock, only a complete listing with no issues in its destination
 can clear the attempt as not created. A listing with issues can still supply
 candidates for review.
 
-Format 106 copies GitHub rules, refresh observations, and original publication
-context from Source connections. It leaves ticket identity and authority
-in place. An active-login check after migration proposes or applies Project
+Format 106 copies GitHub rules, refresh observations, ticket bindings, and
+original publication context from Source connections. It leaves ticket
+identity and authority in place. When legacy connections overlap, their
+observations remain separate until the account and filters match the selected
+rule. Only matching observations can establish discovery coverage. An active-login check after migration proposes or applies Project
 login choices. Conflicting filters, unverifiable accounts, and repositories
 without an active Project can keep their migration notices until reviewed.
 The migration ladder performs its writes without starting the GitHub CLI.
 
-External identity uses the provider and its stable opaque ID. A device refreshes
-a GitHub issue through its saved repository rule. An extension uses the local
-discovery connection or the first saved connection that covers the issue's
-part. Tickets outside local source settings keep their cached source content.
+External identity uses the provider and its stable opaque ID. A GitHub issue
+uses its saved repository rule when one applies. Device-local ticket bindings
+keep previously tracked issues current after publication or a repository
+transfer outside the import rules. A refresh routed through a ticket binding
+reads tracked issues only. An explicit repository removal stops refresh for
+its tickets and keeps their cached source content and local work. An extension
+uses the local discovery connection or the first saved connection that covers
+the issue's part.
 Repository rules, Project login choices, extension settings, discovery
 affinity and refresh scheduling stay off portable backups, SQLite exports and
 Workspace sync. A restore keeps the destination device's settings. The private copy taken before a migration

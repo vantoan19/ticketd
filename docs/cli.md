@@ -78,13 +78,15 @@ ticketd source github repository github.com/OWNER/NAME --label bug --preview
 ticketd source github repository github.com/OWNER/NAME --label bug
 ticketd source github refresh
 ticketd source github project-login PROJECT_ID --host github.com --login LOGIN
+ticketd source github project-login PROJECT_ID --host github.com --clear
 ticketd source github remove github.com/OWNER/NAME
 ```
 
 For GitHub backfill, use `project connect-source PROJECT_ID` with `--preview`
 and then `--expect FINGERPRINT`. A GitHub publication uses the ticket's Project
 remote or a saved repository. Use `--provider github` to choose GitHub when
-several sources support publication.
+several sources support publication. A published ticket continues to refresh
+when its Project remote has no import rule. Add a rule to bring in other issues.
 
 ```sh
 ticketd source publish T-KQ12 --provider github --preview
@@ -111,8 +113,10 @@ host, refresh that host again after confirming the legacy ticket's link.
 ## Recover an unresolved publication
 
 Run `ticketd source resolve T-KQ12` to review the attempt. GitHub recovery
-verifies the original GitHub CLI login on the hostname and port that received
-the create request. Extension recovery uses the original connection.
+verifies the original GitHub account on the hostname and port that received
+the create request. It can use the active GitHub CLI credential, including one
+supplied by `GH_TOKEN` or `GH_ENTERPRISE_TOKEN`, only if its account ID matches
+the one recorded before sending. Extension recovery uses the original connection.
 
 For an older GitHub attempt with an unknown host or port, independently verify
 the original site and record it using `--confirm-host`. For a nondefault port

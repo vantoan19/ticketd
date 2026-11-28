@@ -22,6 +22,7 @@
 //! short savepoint afterwards, so no network call happens while the database
 //! is locked.
 
+use super::github_integration::{GithubRefreshJob, repository_for_partition, tracked_job};
 use std::{
     collections::{BTreeMap, HashMap, HashSet},
     ops::ControlFlow,
@@ -337,7 +338,7 @@ impl RefreshReport {
             if failure
                 .connection_id
                 .as_deref()
-                .and_then(super::github_integration::repository_job)
+                .and_then(GithubRefreshJob::parse)
                 .is_some()
             {
                 failure.connection_id = None;
@@ -1203,6 +1204,8 @@ pub(super) struct Tracked {
     opened_at: Option<String>,
     pub(super) partition: String,
     affinity: Option<String>,
+    github_repository: Option<String>,
+    github_legacy_account: Option<String>,
     pub(super) error_code: Option<String>,
     removed: bool,
 }
@@ -1216,6 +1219,22 @@ impl Tracked {
     ) -> Option<&'a super::ConfiguredSource> {
         if self.removed {
             return None;
+        }
+        if self.provider == github::PROVIDER && self.affinity.is_none() {
+            let repository = repository_for_partition(&self.partition);
+            let rule = GithubRefreshJob::Rule(&repository);
+            let tracked = tracked_job(
+                self.github_repository.as_deref(),
+                self.github_legacy_account.as_deref(),
+            );
+            let find = |job| {
+                sources
+                    .iter()
+                    .find(|source| GithubRefreshJob::parse(&source.saved.id) == Some(job))
+            };
+            if let Some(source) = find(rule).or_else(|| tracked.and_then(find)) {
+                return Some(source);
+            }
         }
         super::select_connection(
             sources,
@@ -1467,7 +1486,7 @@ impl Workspace {
             &ticket.partition,
         )?
         .map(|id| {
-            if super::github_integration::repository_job(&id).is_some() {
+            if GithubRefreshJob::parse(&id).is_some() {
                 super::GITHUB_INTEGRATION.into()
             } else {
                 id
@@ -1485,15 +1504,7 @@ impl Workspace {
         if id == super::GITHUB_INTEGRATION
             && super::configured_source(&self.connection, id)?.is_none()
         {
-            let mut statement = self
-                .connection
-                .prepare("SELECT repository FROM github_repository_rules")?;
-            let jobs = statement
-                .query_map([], |row| row.get::<_, String>(0))?
-                .map(|repository| repository.map(|name| super::github_integration::job_id(&name)))
-                .collect::<Result<Vec<_>, _>>()?;
-            drop(statement);
-            return self.refresh_selected(engine, options, Some(&jobs));
+            return self.refresh_selected(engine, options, Some(&[id.to_owned()]));
         }
         self.source_connection(id)?;
         self.refresh_selected(engine, options, Some(&[id.to_owned()]))
@@ -1520,10 +1531,8 @@ impl Workspace {
         let started = super::clock(&self.connection, options.now.as_deref())?;
         let tracked = tracked(&self.connection, options.ticket.as_deref())?;
         if selected.is_none_or(|ids| {
-            ids.iter().any(|id| {
-                id == super::GITHUB_INTEGRATION
-                    || super::github_integration::repository_job(id).is_some()
-            })
+            ids.iter()
+                .any(|id| id == super::GITHUB_INTEGRATION || GithubRefreshJob::parse(id).is_some())
         }) {
             self.reconcile_github_with_engine(engine)?;
         }
@@ -1735,8 +1744,7 @@ impl Workspace {
 
 fn job_selected(selection: &str, id: &str) -> bool {
     selection == id
-        || (selection == super::GITHUB_INTEGRATION
-            && super::github_integration::repository_job(id).is_some())
+        || (selection == super::GITHUB_INTEGRATION && GithubRefreshJob::parse(id).is_some())
 }
 
 fn github_identities(connection: &Connection) -> Result<HashSet<String>, Error> {
@@ -1838,7 +1846,10 @@ fn gather_discovery(
             .and_then(|checked| checked.verified.as_ref())
             .map(|checked| &checked.derived),
         engine,
-    ) {
+    ) && source_id
+        .and_then(GithubRefreshJob::parse)
+        .is_none_or(GithubRefreshJob::discover)
+    {
         // A part read under narrower rules is new to a broader discovery.
         let scope = &derived.discovery_scope;
         let scoped = |part: &str| freshness::scoped_partition(part, scope);
@@ -2492,8 +2503,10 @@ fn gather_conversations(
 
 pub(super) fn tracked(connection: &Connection, only: Option<&str>) -> Result<Vec<Tracked>, Error> {
     let mut statement = connection.prepare(
-            "SELECT t.id, t.reference, i.provider, i.external_id, i.locator, i.partition, c.connection_id, s.last_error_code, r.ticket_id IS NOT NULL, s.external_created_at FROM external_identities i \
+            "SELECT t.id, t.reference, i.provider, i.external_id, i.locator, i.partition, c.connection_id, s.last_error_code, r.ticket_id IS NOT NULL, s.external_created_at, b.repository, l.connection_id FROM external_identities i \
              LEFT JOIN source_connection_tickets c ON c.ticket_id = i.ticket_id \
+             LEFT JOIN github_ticket_bindings b ON b.ticket_id = i.ticket_id \
+             LEFT JOIN github_legacy_ticket_bindings l ON l.ticket_id = i.ticket_id \
              LEFT JOIN source_sync s ON s.ticket_id = i.ticket_id \
              LEFT JOIN source_connection_removals r ON r.ticket_id = i.ticket_id \
              JOIN external_ownership o ON o.ticket_id = i.ticket_id AND o.authority = 'external' \
@@ -2519,6 +2532,8 @@ pub(super) fn tracked(connection: &Connection, only: Option<&str>) -> Result<Vec
                 locator,
                 opened_at: row.get(9)?,
                 affinity: row.get(6)?,
+                github_repository: row.get(10)?,
+                github_legacy_account: row.get(11)?,
                 error_code: row.get(7)?,
                 removed: row.get(8)?,
             })
@@ -2667,7 +2682,7 @@ impl Workspace {
                             refreshed_at: now.to_owned(),
                         });
                     }
-                    if super::github_integration::repository_job(&current.saved.id).is_some() {
+                    if GithubRefreshJob::parse(&current.saved.id).is_some() {
                         continue;
                     }
                     let derived = &verified.derived;

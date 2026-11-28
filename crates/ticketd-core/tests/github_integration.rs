@@ -141,3 +141,69 @@ fn upgrades_github_connections_and_preserves_tickets_and_recovery() {
         repositories
     );
 }
+
+#[test]
+fn overlapping_legacy_rules_keep_failures_and_only_share_coverage_for_the_same_account() {
+    let directory = tempfile::tempdir().unwrap();
+    let path = directory.path().join("workspace.sqlite3");
+    ticketd_core::create_workspace_at_format_version(&path, 105).unwrap();
+    let fixture = Connection::open(&path).unwrap();
+    fixture.execute_batch(
+        "INSERT INTO source_connections
+           (id, name, provider, site, configuration, account, account_key, contract_version, saved_at, revision)
+         VALUES
+           ('one','One','github','','{\"repositories\":[\"owner/same\",\"owner/conflict\"]}','sam','id:1',2,'2026-01-01T00:00:00Z','one'),
+           ('two','Two','github','','{\"repositories\":[\"owner/same\"]}','SAM','sam',2,'2026-01-01T00:00:00Z','two'),
+           ('three','Three','github','','{\"repositories\":[\"owner/conflict\"]}','pat','id:2',2,'2026-01-01T00:00:00Z','three');
+         INSERT INTO source_connection_status
+           (connection_id,last_attempt_at,last_refreshed_at,error_code,error_message,last_checked_tickets,read_partitions)
+         VALUES
+           ('one','2026-01-04T00:00:00Z','2026-01-04T00:00:00Z',NULL,NULL,3,'[\"owner/same\",\"owner/conflict\"]'),
+           ('two','2026-01-05T00:00:00Z',NULL,'unavailable','Offline',NULL,NULL),
+           ('three','2026-01-06T00:00:00Z',NULL,'unauthenticated','Sign in again',NULL,NULL);",
+    ).unwrap();
+    drop(fixture);
+
+    let mut workspace = Workspace::open(path).unwrap();
+    let repositories = workspace.github_repositories().unwrap();
+    assert!(
+        repositories[0]
+            .error
+            .as_ref()
+            .unwrap()
+            .message
+            .contains("pat: Sign in again")
+    );
+    assert_eq!(repositories[0].last_refreshed_at, None);
+    assert!(
+        repositories[1]
+            .error
+            .as_ref()
+            .unwrap()
+            .message
+            .contains("SAM: Offline")
+    );
+    let token = workspace.change_token().unwrap();
+    let notices = workspace
+        .reconcile_github_migration(|_, login| {
+            login.is_none().then(|| VerifiedGithubLogin {
+                login: "sam".into(),
+                account_id: Some("id:1".into()),
+            })
+        })
+        .unwrap();
+    assert!(workspace.change_token().unwrap() > token);
+    assert_eq!(notices.len(), 1);
+    assert_eq!(notices[0].repository, "github.com/owner/conflict");
+    let repositories = workspace.github_repositories().unwrap();
+    assert_eq!(repositories[0].last_refreshed_at, None);
+    assert_eq!(
+        repositories[1].last_refreshed_at.as_deref(),
+        Some("2026-01-04T00:00:00Z")
+    );
+    assert_eq!(repositories[1].error.as_ref().unwrap().message, "Offline");
+    assert_eq!(
+        workspace.source_statuses().unwrap()[0].last_checked_tickets,
+        Some(3)
+    );
+}

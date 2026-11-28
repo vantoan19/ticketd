@@ -255,6 +255,14 @@ const OMITTED_TABLES: &[(&str, &str)] = &[
         "github_legacy_ticket_bindings",
         "device-local GitHub discovery affinity before migration",
     ),
+    (
+        "github_ticket_bindings",
+        "device-local GitHub ticket refresh bindings",
+    ),
+    (
+        "github_tracked_status",
+        "device-local refresh status for GitHub tickets outside import rules",
+    ),
     ("last_backup", "device-local record of the last backup"),
     ("plan_graph_fts", "a search index derived from Plans"),
     (

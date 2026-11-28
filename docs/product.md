@@ -456,8 +456,13 @@ system's secure store.
 GitHub Issues is built in as one integration per device. It uses the GitHub
 CLI login for each repository host. Settings › Ticket sources shows one GitHub
 row, the sign-in state for its hosts and the repository list. Each repository
-has its own assignee and label filters. A Project can choose a different login
-already signed into the GitHub CLI on that host. Removing a repository stops
+has its own assignee and label filters. To use an Enterprise host for the first
+repository, choose **Add a repository**, enter its host and any nondefault
+port, then choose **Check sign-in**. Sign in opens the browser and shows the
+one-time code. Open a repository to choose a different login already signed
+into the GitHub CLI for its Project, or choose **Use active login** to clear
+that choice. Projects without an import rule appear under **Project logins**.
+Removing a repository stops
 import and refresh for its tickets, which keep their last synced content and
 local work. Adding it again resumes refresh of the existing tickets.
 Linear ships with the desktop app as a ticket source extension. Extensions use the same ticket authority and refresh
@@ -517,7 +522,9 @@ the TypeScript example and conformance. [Write a ticket source extension](ticket
   issue exists. Resolve an uncertain result before retrying to avoid creating a
   second issue. Local Activities, Plan membership,
   dependencies, and subtickets are not published, and workspace-only attachment
-  links block publication until removed. Ongoing synchronization is inbound only.
+  links block publication until removed. GitHub refresh keeps the published
+  ticket up to date even without an import rule for its repository. Only an
+  import rule brings in additional issues. Ongoing synchronization is inbound only.
   Linear publishes to one of the connection’s selected teams. Desktop shows the
   team name and key. On the CLI, pass the team UUID from `--preview` as
   `--destination` when more than one team is configured. The Linear key must
