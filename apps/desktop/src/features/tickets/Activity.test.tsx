@@ -247,6 +247,7 @@ test("does not duplicate an unloaded target when its page is later loaded", asyn
   bridge.invoke.mockImplementation(
     async (command: string, args?: { offset: number }) => {
       if (command === "get_activity") return selected;
+      if (command === "activity_update_count") return 51;
       if (command === "activity_feed")
         return (args?.offset ? [selected] : firstPage).map((activity) => ({
           type: "authored",
@@ -265,16 +266,19 @@ test("does not duplicate an unloaded target when its page is later loaded", asyn
       target={{ id: "older", key: 1 }}
     />,
   );
-  const note = await screen.findByLabelText("Selected update");
-  expect(note.closest("ol")).not.toBeNull();
+  const timeline = await screen.findByRole("list", {
+    name: "Activity timeline",
+  });
+  await within(timeline).findByLabelText("Selected update");
   fireEvent.click(
-    await screen.findByRole("button", { name: "Show more activity" }),
+    await screen.findByRole("button", { name: "48 earlier updates" }),
   );
   await waitFor(() =>
     expect(bridge.invoke).toHaveBeenCalledWith("activity_feed", {
       reference: "T-KQ1",
       limit: 50,
       offset: 50,
+      updatesOnly: true,
     }),
   );
   await waitFor(() =>
@@ -921,12 +925,14 @@ test("shows more activity a page at a time, and a change re-reads every page sho
   const signal = fakeChangeSignal();
   bridge.invoke.mockImplementation(
     async (command: string, args?: { offset: number }) => {
+      if (command === "activity_update_count") return 53;
       if (command === "activity_feed")
         return args!.offset === 0 ? page(0, 50) : page(50, 3);
       throw new Error(`Unexpected ${command}`);
     },
   );
   render(<Activity {...props} reference="T-KQ90" signal={signal} />);
+  fireEvent.click(screen.getByRole("radio", { name: "All" }));
   await screen.findByText("Update 0");
   // The read gives no total, so a full page can only say "at least 50".
   expect(screen.getByRole("heading", { name: "Activity 50+" })).toBeTruthy();
@@ -938,7 +944,11 @@ test("shows more activity a page at a time, and a change re-reads every page sho
   ).toBeNull();
   const offsets = () =>
     bridge.invoke.mock.calls
-      .filter(([command]) => command === "activity_feed")
+      .filter(
+        ([command, args]) =>
+          command === "activity_feed" &&
+          !(args as { updatesOnly?: boolean }).updatesOnly,
+      )
       .map(([, args]) => (args as { offset: number }).offset);
   expect(offsets()).toEqual([0, 50]);
   await act(async () => signal.change());
@@ -969,7 +979,11 @@ test("posting an update reads the feed again once", async () => {
   fireEvent.click(screen.getByRole("button", { name: "Post update" }));
   await screen.findByText("Update 0");
   expect(
-    bridge.invoke.mock.calls.filter(([command]) => command === "activity_feed"),
+    bridge.invoke.mock.calls.filter(
+      ([command, args]) =>
+        command === "activity_feed" &&
+        Boolean((args as { updatesOnly?: boolean }).updatesOnly),
+    ),
   ).toHaveLength(2);
 });
 

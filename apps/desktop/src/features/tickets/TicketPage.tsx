@@ -36,10 +36,12 @@ import { useTicketTrash } from "@/features/tickets/use-ticket-trash";
 import type { Project } from "@/lib/api/client";
 import { useOpenTicket } from "./open-ticket";
 import { TicketDecisionCard, type ReviewQueue } from "./TicketDecisionCard";
+import { useTicketSeenTime } from "./ticket-seen-time";
 import { revealTicketDescription } from "./description-navigation";
 import { plural } from "@/lib/format";
 import { useWorkspaceChange } from "@/lib/workspace-change";
 import type { Plan } from "@/lib/api/plans";
+import type { LatestUpdate } from "@/lib/api/progress";
 
 type NoteTarget = { id: string; key: number };
 
@@ -50,6 +52,7 @@ export function TicketPage({
   rail = false,
   swap = false,
   leaving = false,
+  reading = active && !leaving,
   readReviewQueue,
   projects,
   plans,
@@ -66,6 +69,7 @@ export function TicketPage({
   swap?: boolean;
   /** Not the open ticket any more, kept on screen for one exit while it fades out. */
   leaving?: boolean;
+  reading?: boolean;
   readReviewQueue?: (() => Promise<ReviewQueue>) | undefined;
   projects: Project[];
   plans: Plan[];
@@ -81,6 +85,9 @@ export function TicketPage({
   // Readers not yet on the Open Ticket (the source's conversation, rendered
   // Markdown, the editor's conflict check) follow the Workspace's change.
   const revision = useWorkspaceChange();
+  const seenTime = useTicketSeenTime(ticket.id, reading);
+  const [representedUpdate, setRepresentedUpdate] =
+    useState<LatestUpdate | null>(null);
   const [updateTarget, setUpdateTarget] = useState<NoteTarget | null>(null);
   const work = useLinkedWork();
   const trash = useTicketTrash(changed);
@@ -170,6 +177,7 @@ export function TicketPage({
       {!rail && properties()}
       <TicketDecisionCard
         active={active && !leaving}
+        seenTime={seenTime}
         readReviewQueue={readReviewQueue}
         blockerCount={blockerCount}
         blockers={
@@ -188,6 +196,7 @@ export function TicketPage({
         doneFallback={<TicketClosingLine />}
         onOpenUpdate={(id) => setUpdateTarget({ id, key: Date.now() })}
         onEvidence={() => setShowEvidenceRequest((count) => count + 1)}
+        onRepresentedUpdate={setRepresentedUpdate}
         select={select}
         onAcceptance={() => revealTicketDescription(ticket.id, "acceptance")}
       />
@@ -348,6 +357,8 @@ export function TicketPage({
           select={select}
           foldEmpty
           latestNoteId={ticket.latest_update?.activity_id}
+          representedUpdate={representedUpdate}
+          seenTime={seenTime}
           sourceName={source?.provider_name}
         />
       </div>

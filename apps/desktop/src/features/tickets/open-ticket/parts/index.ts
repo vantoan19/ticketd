@@ -1,5 +1,10 @@
 import type { Ticket } from "@/lib/api/client";
-import { useActivity, useActivityNote, useLatestUpdate } from "./activity";
+import {
+  useActivity,
+  useActivityNote,
+  useActivityUpdateCount,
+  useLatestUpdate,
+} from "./activity";
 import { useFollowing, useReminder } from "./attention";
 import { useBacklinks, useDocumentBacklinks } from "./backlinks";
 import { useEvidence } from "./evidence";
@@ -22,6 +27,7 @@ const declared = {
   linkedWork: useLinkedWork,
   evidence: useEvidence,
   activity: useActivity,
+  activityUpdateCount: useActivityUpdateCount,
   activityNote: useActivityNote,
   latestUpdate: useLatestUpdate,
   reminder: useReminder,

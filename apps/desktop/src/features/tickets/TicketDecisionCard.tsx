@@ -48,6 +48,8 @@ import { AgentContext } from "./ticket-agent-context";
 import { TicketAgentCard } from "./TicketAgentCard";
 import { agentCardName } from "./ticket-agent-state";
 import { DecisionCardContent } from "./decision-card-motion";
+import { NewUpdateDot } from "./NewUpdateDot";
+import { isNewUpdate } from "./ticket-seen-time";
 import "./ticket-decision-card.css";
 
 export type ReviewQueue = readonly Pick<Ticket, "reference" | "status">[];
@@ -58,9 +60,11 @@ type ReviewDecision = (
 
 export function TicketDecisionCard({
   active,
+  seenTime,
   onAcceptance,
   onEvidence,
   onOpenUpdate,
+  onRepresentedUpdate,
   blockerCount,
   blockers,
   doneFallback,
@@ -68,9 +72,11 @@ export function TicketDecisionCard({
   readReviewQueue,
 }: {
   active: boolean;
+  seenTime: number | null;
   onAcceptance: (offset: number) => void;
   onEvidence: () => void;
   onOpenUpdate: (id: string) => void;
+  onRepresentedUpdate: (update: LatestUpdate | null) => void;
   blockerCount: number;
   blockers: ReactNode;
   doneFallback?: ReactNode;
@@ -84,11 +90,11 @@ export function TicketDecisionCard({
   const recovery = useDraftRecovery();
   const recoveryReady = useContext(DraftRecoveryReadyContext);
   const latestUpdate = useOpenTicket("latestUpdate");
-  const reviewerAgent =
-    (latestUpdate.value === undefined
-      ? ticket.progress_summary
-      : latestUpdate.value
-    )?.editing_agent ?? "the agent";
+  const update =
+    latestUpdate.value === undefined
+      ? (ticket.progress_summary ?? null)
+      : latestUpdate.value;
+  const reviewerAgent = update?.editing_agent ?? "the agent";
   const [decision, setDecision] = useState<ReviewDecision | null>(null);
   const [draft, setDraft] = useState<SendBackDraft | null>(null);
   const [pending, setPending] = useState(false);
@@ -295,6 +301,11 @@ export function TicketDecisionCard({
     ticket.status === "In progress" &&
     (agent?.reference !== reference || agent.ready);
   let panel: ReactNode = null;
+  const representedUpdate =
+    !decided && !agentState && (review || latest) ? update : null;
+  useLayoutEffect(() => {
+    onRepresentedUpdate(representedUpdate);
+  }, [onRepresentedUpdate, representedUpdate]);
   if (decided && decision) {
     panel = (
       <DecisionPanel state={decision.kind === "done" ? "Done" : "Sent back"}>
@@ -358,7 +369,9 @@ export function TicketDecisionCard({
           onAcceptance={onAcceptance}
           select={select}
           blockers={blockers}
-          latest={latestUpdate}
+          update={update}
+          loading={latestUpdate.value === undefined && !latestUpdate.failure}
+          newUpdate={update !== null && isNewUpdate(update, seenTime)}
         />
         {review && <TicketReviewProof onEvidence={onEvidence} />}
         {latest && (
@@ -460,17 +473,19 @@ function TicketReport({
   review,
   onAcceptance,
   select,
-  latest,
+  update,
+  loading,
+  newUpdate,
 }: {
   review: boolean;
   blockers: ReactNode;
   onAcceptance: (offset: number) => void;
   select: (reference: string) => void;
-  latest: { value: LatestUpdate | null | undefined; failure: unknown };
+  update: LatestUpdate | null;
+  loading: boolean;
+  newUpdate: boolean;
 }) {
   const { record: ticket } = useOpenTicket();
-  const update =
-    latest.value === undefined ? ticket.progress_summary : latest.value;
   const full = useOpenTicket(
     "activityNote",
     update?.brief.truncated ? update.activity_id : undefined,
@@ -496,6 +511,7 @@ function TicketReport({
             <strong>{name}</strong>
             <span aria-hidden="true">·</span>
             <Time value={update.reported_at} />
+            {newUpdate && <NewUpdateDot />}
           </div>
           <div className="ticket-decision-report">
             <Clamp key={update.activity_id} lines={4}>
@@ -508,7 +524,7 @@ function TicketReport({
         </>
       ) : (
         <p className="ticket-decision-byline">
-          {latest.value === undefined && !latest.failure
+          {loading
             ? "Loading update…"
             : review
               ? "No report yet"

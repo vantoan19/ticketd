@@ -934,6 +934,26 @@ impl Workspace {
         })
     }
 
+    /// The authored part of the feed, in the same newest-first order.
+    pub fn activity_updates(
+        &self,
+        reference: &str,
+        limit: u32,
+        offset: u32,
+    ) -> Result<Vec<ActivityFeedEntry>, Error> {
+        self.read(|_| {
+            let id = relationships::id(&self.connection, reference)?;
+            activities::newest(&self.connection, &id, limit, offset)
+        })
+    }
+
+    pub fn activity_update_count(&self, reference: &str) -> Result<u32, Error> {
+        self.read(|_| {
+            let id = relationships::id(&self.connection, reference)?;
+            activities::count(&self.connection, &id)
+        })
+    }
+
     pub fn activity(&self, reference: &str, id: &str) -> Result<Activity, Error> {
         self.read(|_| {
             let ticket = self.show_ticket(reference)?;

@@ -245,6 +245,27 @@ pub(crate) fn migrate_updates(tx: &Transaction<'_>) -> Result<(), Error> {
     Ok(())
 }
 
+pub(crate) fn newest(
+    conn: &Connection,
+    ticket: &str,
+    limit: u32,
+    offset: u32,
+) -> Result<Vec<ActivityFeedEntry>, Error> {
+    let mut statement = conn.prepare("SELECT id, ticket_id, brief, reported_at, updated_at, editing_agent, supporting_document_id FROM activities WHERE ticket_id = ?1 ORDER BY reported_at DESC, number DESC LIMIT ?2 OFFSET ?3")?;
+    Ok(statement
+        .query_map(params![ticket, limit.clamp(1, 100), offset], row)?
+        .map(|activity| activity.map(|activity| ActivityFeedEntry::Authored { activity }))
+        .collect::<Result<Vec<_>, _>>()?)
+}
+
+pub(crate) fn count(conn: &Connection, ticket: &str) -> Result<u32, Error> {
+    Ok(conn.query_row(
+        "SELECT COUNT(*) FROM activities WHERE ticket_id = ?1",
+        [ticket],
+        |row| row.get(0),
+    )?)
+}
+
 /// One item in a ticket's chronological activity feed.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(tag = "type", rename_all = "snake_case")]

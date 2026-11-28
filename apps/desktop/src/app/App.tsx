@@ -1,3 +1,4 @@
+import { windowQuittingEvent } from "@/lib/api/window";
 import { ticketUnavailable } from "@/features/tickets/inboxModel";
 import type { ProjectSourceSetup } from "@/features/projects/ConnectProjectSource";
 import { ProjectRemoteNote } from "@/features/projects/ProjectRemoteNote";
@@ -247,6 +248,7 @@ function UpdateShell() {
       beforeInstall={async () => {
         window.dispatchEvent(new Event("ticketd:window-closing"));
         await recovery.flush();
+        window.dispatchEvent(new Event(windowQuittingEvent));
       }}
     >
       <AppContent />
