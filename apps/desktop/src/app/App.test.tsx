@@ -6354,7 +6354,7 @@ test("Flow refuses to invent lanes when a Plan exceeds its bounded member window
   fireEvent.click(await screen.findByRole("button", { name: "Plans" }));
   const cards = await screen.findByRole("list", { name: "Active Plans" });
   expect(within(cards).getByText("0 of 501")).toBeTruthy();
-  expect(within(cards).getByText("501 to do")).toBeTruthy();
+  expect(within(cards).getByText("501 ready")).toBeTruthy();
   expect(within(cards).queryByText("Ready to wrap up")).toBeNull();
   fireEvent.click(
     within(cards).getByRole("button", { name: "Open Plan Bounded flow" }),
