@@ -14,6 +14,7 @@ use crate::{
 use super::{ANTIGRAVITY, runtime, settings};
 
 const PROMPT: &str = include_str!("../../tests/fixtures/antigravity/prompt.jsonl");
+const SUB_AGENT: &str = include_str!("../../tests/fixtures/antigravity/sub_agent.jsonl");
 const QUESTION: &str = include_str!("../../tests/fixtures/antigravity/question.jsonl");
 const MODES: &str = include_str!("../../tests/fixtures/antigravity/session-modes.jsonl");
 const RESUME: &str = include_str!("../../tests/fixtures/antigravity/resume-own-settings.jsonl");
@@ -220,7 +221,9 @@ async fn inspection_skips_non_executable_candidates_and_probes_first_executable(
 fn recorded(fixture: &str) -> Vec<Value> {
     fixture
         .lines()
-        .map(|line| serde_json::from_str(line).unwrap())
+        .map(|line| serde_json::from_str::<Value>(line).unwrap())
+        // A fixture's note and marks say where it came from, not what was said.
+        .filter(|frame| frame.get("client").is_some() || frame.get("server").is_some())
         .collect()
 }
 
@@ -445,6 +448,63 @@ async fn recorded_acp_turn_uses_a_plain_prompt_and_finishes_on_its_reply() {
         kind,
         EventKind::TurnEnded {
             outcome: TurnOutcome::Completed,
+            ..
+        }
+    )));
+    opened.runtime.close().await;
+}
+
+#[tokio::test]
+async fn a_failed_prompt_does_not_say_its_sub_agents_completed() {
+    let (mut peer, mut opened) = open(SUB_AGENT, SessionStart::New, settings::OWN).await;
+    assert_eq!(
+        opened.runtime.submit(start_turn("failing")).await,
+        DispatchOutcome::Written
+    );
+    let outgoing = peer.written().await;
+    let frames = recorded(SUB_AGENT);
+    let prompt_index = frames
+        .iter()
+        .position(|frame| frame["client"]["method"] == "session/prompt")
+        .unwrap();
+    // Up to the sub-agent's first call: it is running.
+    for entry in &frames[prompt_index + 1..] {
+        let Some(update) = entry.get("server") else {
+            continue;
+        };
+        send(&mut peer, update).await;
+        let call = &update["params"]["update"];
+        if call["sessionUpdate"] == "tool_call"
+            && call["toolCallId"]
+                .as_str()
+                .is_some_and(|id| id.contains(':'))
+        {
+            break;
+        }
+    }
+    send(
+        &mut peer,
+        &json!({"jsonrpc": "2.0", "id": outgoing["id"],
+            "error": {"code": -32603, "message": "Synthetic internal error"}}),
+    )
+    .await;
+    let events = drain(&mut opened.events).await;
+    assert!(
+        events
+            .iter()
+            .any(|kind| matches!(kind, EventKind::SubAgentStarted(_))),
+        "{events:?}"
+    );
+    assert!(
+        !events
+            .iter()
+            .any(|kind| matches!(kind, EventKind::SubAgentEnded { .. })),
+        "{events:?}"
+    );
+    assert!(events.iter().any(|kind| matches!(
+        kind,
+        EventKind::TurnEnded {
+            outcome: TurnOutcome::Failed(_),
             ..
         }
     )));
@@ -1896,7 +1956,7 @@ use std::sync::Arc;
 
 use async_trait::async_trait;
 
-use crate::conformance::{NewTurn, Provider};
+use crate::conformance::{NewTurn, Provider, SubAgentApprovals, SubAgentFrames};
 use crate::{EventStream, HarnessRuntime, NativeRequestId, NativeTurnId, RuntimeGeneration};
 
 struct AcpProvider {
@@ -1950,6 +2010,68 @@ impl Provider for AcpProvider {
 
     fn events(&mut self) -> &mut EventStream {
         &mut self.opened.events
+    }
+
+    fn sub_agent_frames(&self) -> SubAgentFrames {
+        SubAgentFrames::EndWithThePrompt
+    }
+
+    fn sub_agent_approvals(&self) -> SubAgentApprovals {
+        SubAgentApprovals::EndsWithTheTurn
+    }
+
+    async fn play_sub_agent_approval(&mut self, _id: &str) -> NativeRequestId {
+        // A child conversation's command asks, named by the prefix of its tool call.
+        let frames = recorded(RESUME);
+        let mut permission = frames
+            .iter()
+            .find(|frame| frame["server"]["method"] == "session/request_permission")
+            .unwrap()["server"]
+            .clone();
+        permission["params"]["toolCall"]["toolCallId"] = json!("child_1:call_1");
+        send(&mut self.peer, &permission).await;
+        drain(&mut self.opened.events)
+            .await
+            .into_iter()
+            .find_map(|kind| match kind {
+                EventKind::InteractionRequested(request) => {
+                    assert_eq!(
+                        request.owner,
+                        Some(crate::NativeSubAgentId::new("child_1")),
+                        "it names the child conversation"
+                    );
+                    Some(request.request)
+                }
+                _ => None,
+            })
+            .expect("agy asked on the child's behalf")
+    }
+
+    async fn end_parent_turn(&mut self, _id: &str) {
+        let id = self.prompt.take().expect("a prompt in flight")["id"].clone();
+        send(
+            &mut self.peer,
+            &json!({"jsonrpc":"2.0","id":id,"result":{"stopReason":"end_turn","usage":{
+                "inputTokens":1,"outputTokens":1,"cachedReadTokens":0,"cachedWriteTokens":0,
+                "thoughtTokens":0,"totalTokens":2}}}),
+        )
+        .await;
+    }
+
+    async fn play_sub_agent_at_rest(&mut self) {
+        // The frames of a sub-agent's tool call, named by its prefix, after the prompt
+        // that held it has ended: nothing of it is a turn or a sub-agent.
+        for frame in [
+            json!({"jsonrpc":"2.0","method":"session/update","params":{"sessionId":"session-1","update":{
+                "sessionUpdate":"tool_call","toolCallId":"child_1:call_1","title":"Read rate-limit.ts",
+                "kind":"read","status":"in_progress","rawInput":{"AbsolutePath":"/work/chat-1/src/rate-limit.ts"}
+            }}}),
+            json!({"jsonrpc":"2.0","method":"session/update","params":{"sessionId":"session-1","update":{
+                "sessionUpdate":"tool_call_update","toolCallId":"child_1:call_1","status":"completed"
+            }}}),
+        ] {
+            send(&mut self.peer, &frame).await;
+        }
     }
 
     async fn start_turn(&mut self, id: &str) -> DispatchOutcome {

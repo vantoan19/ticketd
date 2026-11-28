@@ -161,6 +161,42 @@ pub struct HarnessDescriptor {
     pub resume: ResumePolicy,
     pub unattended: UnattendedSupport,
     pub permissions: &'static [PermissionChoice],
+    /// What the harness lets ticketd show and do of the sub-agents it starts.
+    pub sub_agents: SubAgentSupport,
+}
+
+/// What a harness reports about the sub-agents it starts, and what ticketd can do to them
+/// (ADR 0022). A view offers only what is declared here.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct SubAgentSupport {
+    /// It starts sub-agents ticketd can show. When false, nothing below is offered.
+    pub supported: bool,
+    /// It reports what a sub-agent was asked.
+    pub brief: bool,
+    /// It reports a sub-agent's own messages.
+    pub text: bool,
+    /// It reports a sub-agent's own reasoning.
+    pub reasoning: bool,
+    /// It reports the model a sub-agent runs on; when false the view names the harness.
+    pub model: bool,
+    /// It reports when a sub-agent finishes.
+    pub end: bool,
+    /// One sub-agent can be stopped without the others, while it runs in the background
+    /// (a foreground one ends with its turn).
+    pub stop: bool,
+    /// A sub-agent that was lost can be resumed.
+    pub resume: bool,
+    /// The harness never resumes the main agent when a sub-agent finishes, so ticketd
+    /// sends the message that does.
+    pub wake: bool,
+    /// The environment variable the harness sets on each command it runs, naming that one
+    /// command (Codex's `CODEX_TOOL_CALL_ID`, which is the command Step's item ID). The CLI
+    /// records it with a write, so the write is credited to the exact agent that ran the
+    /// command. `None`: the harness gives no such key.
+    pub call_variable: Option<&'static str>,
+    /// Where the key is inside the variable's value when that is JSON, as the object keys
+    /// to follow (Antigravity: `tool`, `toolCall`, `id`). Empty: the value is the key.
+    pub call_key_path: &'static [&'static str],
 }
 
 pub static CLAUDE_CODE: HarnessDescriptor = HarnessDescriptor {
@@ -220,6 +256,22 @@ pub static CLAUDE_CODE: HarnessDescriptor = HarnessDescriptor {
             is_default: false,
         },
     ],
+    // Stop one goes through the SDK's `stopTask`, for sub-agents in the background only.
+    sub_agents: SubAgentSupport {
+        supported: true,
+        brief: true,
+        text: true,
+        reasoning: true,
+        model: true,
+        end: true,
+        stop: true,
+        resume: true,
+        wake: false,
+        // Claude Code gives a sub-agent's command no key of its own: its writes are
+        // credited by commit order.
+        call_variable: None,
+        call_key_path: &[],
+    },
 };
 
 pub static CODEX: HarnessDescriptor = HarnessDescriptor {
@@ -266,6 +318,22 @@ pub static CODEX: HarnessDescriptor = HarnessDescriptor {
             is_default: false,
         },
     ],
+    // Codex does not report what a child was asked.
+    // Stop one interrupts the child's own turn and cleans its terminals.
+    sub_agents: SubAgentSupport {
+        supported: true,
+        brief: false,
+        text: true,
+        // A child's reasoning items are not mapped; only its messages are.
+        reasoning: false,
+        model: true,
+        end: true,
+        stop: true,
+        resume: false,
+        wake: true,
+        call_variable: Some("CODEX_TOOL_CALL_ID"),
+        call_key_path: &[],
+    },
 };
 
 pub static ANTIGRAVITY: HarnessDescriptor = HarnessDescriptor {
@@ -329,9 +397,47 @@ pub static ANTIGRAVITY: HarnessDescriptor = HarnessDescriptor {
             is_default: false,
         },
     ],
+    // Antigravity reports neither a sub-agent's messages or reasoning nor when it ends. It
+    // names no model for a sub-agent, which runs with the Chat's: ticketd records that one.
+    sub_agents: SubAgentSupport {
+        supported: true,
+        brief: true,
+        text: false,
+        reasoning: false,
+        model: true,
+        end: false,
+        // `session/cancel` ends everything; there is no stop for one child.
+        stop: false,
+        resume: false,
+        wake: false,
+        // `ANTIGRAVITY_SOURCE_METADATA` is JSON that carries the ID of the tool call that
+        // runs the command (the ID a sub-agent's Step has after its `<childId>:` prefix).
+        call_variable: Some("ANTIGRAVITY_SOURCE_METADATA"),
+        call_key_path: &["tool", "toolCall", "id"],
+    },
 };
 
 pub static HARNESS_DESCRIPTORS: &[&HarnessDescriptor] = &[&CLAUDE_CODE, &CODEX, &ANTIGRAVITY];
+
+/// The key the harness that ran this command gave it, read from the environment through
+/// `read` (which returns a variable's value, if it has one): the first declared variable
+/// that is set and holds a key. A JSON value names its key by the descriptor's path; a
+/// value that does not hold one names nothing.
+pub fn call_key(read: impl Fn(&str) -> Option<String>) -> Option<String> {
+    HARNESS_DESCRIPTORS.iter().find_map(|descriptor| {
+        let support = &descriptor.sub_agents;
+        let value = read(support.call_variable?)?;
+        if support.call_key_path.is_empty() {
+            return Some(value);
+        }
+        let mut found = &serde_json::from_str::<serde_json::Value>(&value).ok()?;
+        for key in support.call_key_path {
+            found = found.get(key)?;
+        }
+        let key = found.as_str()?.trim();
+        (!key.is_empty()).then(|| key.to_owned())
+    })
+}
 
 pub fn descriptor(key: &str) -> Option<&'static HarnessDescriptor> {
     find_descriptor(HARNESS_DESCRIPTORS, key)
@@ -351,6 +457,37 @@ pub fn find_descriptor<'a>(
 mod tests {
     use super::*;
 
+    fn environment<'a>(name: &'a str, value: &'a str) -> impl Fn(&str) -> Option<String> + 'a {
+        move |asked| (asked == name).then(|| value.to_owned())
+    }
+
+    #[test]
+    fn a_plain_call_variable_is_the_key() {
+        let read = environment("CODEX_TOOL_CALL_ID", "exec-1");
+        assert_eq!(call_key(read).as_deref(), Some("exec-1"));
+    }
+
+    #[test]
+    fn a_json_call_variable_gives_the_key_its_path_names() {
+        let metadata = r#"{"tool":{"conversationId":"c-1", "stepIndex":3, "toolCall":{"id":"call_7", "name":"run_command"}}}"#;
+        let read = environment("ANTIGRAVITY_SOURCE_METADATA", metadata);
+        assert_eq!(call_key(read).as_deref(), Some("call_7"));
+    }
+
+    #[test]
+    fn a_value_that_holds_no_key_names_nothing() {
+        for value in [
+            "not json",
+            "{}",
+            r#"{"tool":{"toolCall":{}}}"#,
+            r#"{"tool":{"toolCall":{"id":"  "}}}"#,
+            r#"{"tool":{"toolCall":{"id":7}}}"#,
+        ] {
+            let read = environment("ANTIGRAVITY_SOURCE_METADATA", value);
+            assert_eq!(call_key(read), None, "{value}");
+        }
+    }
+
     /// Every mode a Chat can pick says in one sentence what it can touch, so the
     /// Permissions menu never shows a bare name next to a described one.
     #[test]
@@ -364,5 +501,69 @@ mod tests {
                 assert_eq!(text.matches(". ").count(), 0, "one sentence: {text}");
             }
         }
+    }
+
+    /// What each harness declares of its sub-agents, in one place (ADR 0022, ADR 0029): a
+    /// view and the write credit offer only what is declared here, so a changed value is
+    /// a decision to make on purpose, with the table.
+    #[test]
+    fn the_three_harnesses_declare_what_they_report_and_allow_of_sub_agents() {
+        // support, brief, text, reasoning, model, end, stop one, resume, wake
+        type Flags = (bool, bool, bool, bool, bool, bool, bool, bool, bool);
+        let flags = |support: &SubAgentSupport| -> Flags {
+            (
+                support.supported,
+                support.brief,
+                support.text,
+                support.reasoning,
+                support.model,
+                support.end,
+                support.stop,
+                support.resume,
+                support.wake,
+            )
+        };
+        let declared = |key: &str| &descriptor(key).expect("a harness").sub_agents;
+
+        // Claude Code reports everything, stops a background sub-agent through the SDK, and
+        // resumes the main agent by itself, so ticketd never wakes it; its commands carry
+        // no per-call key.
+        let claude = declared("claude-code");
+        assert_eq!(
+            flags(claude),
+            (true, true, true, true, true, true, true, true, false)
+        );
+        assert_eq!(
+            (claude.call_variable, claude.call_key_path),
+            (None, &[][..])
+        );
+
+        // Codex does not say what a child was asked or its reasoning, cannot resume a lost
+        // one, never resumes an idle main agent (ticketd wakes it), and names the command.
+        let codex = declared("codex");
+        assert_eq!(
+            flags(codex),
+            (true, false, true, false, true, true, true, false, true)
+        );
+        assert_eq!(
+            (codex.call_variable, codex.call_key_path),
+            (Some("CODEX_TOOL_CALL_ID"), &[][..])
+        );
+
+        // Antigravity says what a child was asked and its model (the Chat's own), and
+        // nothing of its words, reasoning or end; it cannot stop one alone; the key of a
+        // command is inside a JSON value.
+        let antigravity = declared("antigravity");
+        assert_eq!(
+            flags(antigravity),
+            (true, true, false, false, true, false, false, false, false)
+        );
+        assert_eq!(
+            (antigravity.call_variable, antigravity.call_key_path),
+            (
+                Some("ANTIGRAVITY_SOURCE_METADATA"),
+                &["tool", "toolCall", "id"][..]
+            )
+        );
     }
 }

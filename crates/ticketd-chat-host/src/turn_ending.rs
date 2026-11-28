@@ -59,6 +59,8 @@ impl StopReason {
             HostError::Core(_)
             | HostError::StorageFailed(_)
             | HostError::InteractionExpired
+            | HostError::SubAgentGone
+            | HostError::SubAgentNotStopped(_)
             | HostError::ContactLost
             | HostError::PermissionRestartCleanupUnconfirmed
             | HostError::Harness(_)
@@ -322,6 +324,7 @@ pub(crate) fn recorded_turn(position: i64, ending: &TurnEnding) -> ChatTurn {
         ending: key,
         started_at: String::new(),
         ended_at: None,
+        origin: None,
     }
 }
 

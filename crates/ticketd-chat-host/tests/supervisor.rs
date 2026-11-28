@@ -239,6 +239,7 @@ impl Fixture {
         self.emit(EventKind::InteractionRequested(InteractionRequest {
             request: NativeRequestId::new("approval-1"),
             turn: None,
+            owner: None,
             item: None,
             kind: InteractionKind::Approval {
                 description: "Run cargo test".to_owned(),
@@ -513,7 +514,11 @@ async fn a_claude_like_harness_never_acknowledges_a_new_turn_so_it_stays_unconfi
 
     // Processing correlates the input with a turn, which is only known now. It is
     // evidence the input arrived, not an acknowledgment.
-    f.emit(EventKind::TurnStarted { turn: turn_1() }).await;
+    f.emit(EventKind::TurnStarted {
+        turn: turn_1(),
+        origin: None,
+    })
+    .await;
     f.emit(EventKind::SubmissionEvidence {
         submission: SubmissionId(attempt.id),
         evidence: DeliveryEvidence::Processing { turn: turn_1() },
@@ -803,6 +808,7 @@ async fn incompatible_answers_leave_a_native_approval_waiting_for_its_option() {
     f.emit(EventKind::InteractionRequested(InteractionRequest {
         request: request.clone(),
         turn: None,
+        owner: None,
         item: None,
         kind: InteractionKind::NativeApproval {
             description: "Read the fixtures".to_owned(),
@@ -3483,7 +3489,7 @@ async fn storage_recovery_after_chat_off_and_on_keeps_the_lost_turns_receipt() {
     let [receipt] = receipts.as_slice() else {
         panic!("expected one Turn receipt, got {receipts:?}");
     };
-    assert_eq!(receipt.turn_id, turn_id);
+    assert_eq!(receipt.turn_id.as_deref(), Some(turn_id.as_str()));
     assert!(matches!(
         problem_after_enabling,
         Some(ChatProblem::StorageFailed { .. })
@@ -3634,7 +3640,7 @@ async fn storage_recovery_keeps_the_observed_turn_ending_and_its_receipt() {
         let [receipt] = receipts.as_slice() else {
             panic!("expected one Turn receipt, got {receipts:?}");
         };
-        assert_eq!(receipt.turn_id, turn_id);
+        assert_eq!(receipt.turn_id.as_deref(), Some(turn_id.as_str()));
         assert_eq!(
             serde_json::from_str::<Vec<ChatAgentChange>>(&receipt.input).unwrap(),
             [
@@ -3685,7 +3691,8 @@ async fn a_chat_write_before_the_first_turn_event_is_kept_in_its_transcript() {
     assert_eq!(turn.ended_at.as_deref(), Some(turn.started_at.as_str()));
     let changes = f.items().into_iter().find_map(|item| match item {
         ChatItem::Tool(tool)
-            if tool.name == AGENT_CHANGES_RECORD_NAME && tool.turn_id == turn.id =>
+            if tool.name == AGENT_CHANGES_RECORD_NAME
+                && tool.turn_id.as_deref() == Some(turn.id.as_str()) =>
         {
             Some(serde_json::from_str::<Vec<ticketd_core::ChatAgentChange>>(&tool.input).unwrap())
         }
@@ -4193,6 +4200,7 @@ async fn reasoning_plan_and_files_are_kept_with_their_turn_each_replacing_the_la
 
 fn settings(permission: &str) -> HarnessSettings {
     let option = |id: &str, kind| SettingOption {
+        resolved: None,
         id: id.to_owned(),
         label: id.to_owned(),
         description: None,
@@ -4237,6 +4245,42 @@ fn setting_changes(f: &Fixture) -> Vec<SettingChange> {
             _ => None,
         })
         .collect()
+}
+
+#[tokio::test(start_paused = true)]
+async fn a_message_sent_after_picking_full_access_starts_a_new_turn_with_it() {
+    let f = Fixture::new(FakeAdapter::codex());
+    f.send("Start under the current permissions").await;
+    f.emit(EventKind::SettingsState(settings("ask"))).await;
+    let held = f
+        .host
+        .change_setting(&f.chat.id, SettingKey::Permission, "full")
+        .await
+        .unwrap();
+    assert_eq!(held, SettingChangeState::Held);
+    assert_eq!(f.live().await.steering, None);
+
+    let follow_up = f.send("Continue with Full access").await;
+    assert_eq!(
+        f.submits().len(),
+        1,
+        "the follow-up must wait for a new turn"
+    );
+    assert_eq!(f.queued(), ["Continue with Full access"]);
+    assert!(matches!(
+        f.host.send_queued_now(&f.chat.id, &follow_up.id).await,
+        Err(HostError::Working)
+    ));
+
+    f.emit(turn_ended(turn_1(), TurnOutcome::Completed)).await;
+    let written = f.fake.written();
+    let [Written::Setting(change), Written::Submit(submitted)] = &written[1..] else {
+        panic!("the permission change must precede the follow-up: {written:?}");
+    };
+    assert_eq!(change.setting, SettingKey::Permission);
+    assert_eq!(change.value, "full");
+    assert_eq!(submitted.kind, SubmissionKind::StartTurn);
+    assert_eq!(submitted.text, "Continue with Full access");
 }
 
 #[tokio::test(start_paused = true)]
@@ -4981,6 +5025,7 @@ async fn a_permission_restart_without_a_native_session_retires_the_old_runtime()
     f.emit(EventKind::InteractionRequested(InteractionRequest {
         request: NativeRequestId::new("late-approval"),
         turn: Some(turn_1()),
+        owner: None,
         item: None,
         kind: InteractionKind::Approval {
             description: "Approve the old runtime's request".to_owned(),
@@ -5180,6 +5225,7 @@ async fn an_unconfirmed_permission_restart_rechecks_the_old_runtime_before_recov
     f.emit(EventKind::InteractionRequested(InteractionRequest {
         request: NativeRequestId::new("late-approval"),
         turn: Some(turn_1()),
+        owner: None,
         item: None,
         kind: InteractionKind::Approval {
             description: "Approve the previous runtime's request".to_owned(),
@@ -5607,6 +5653,7 @@ async fn turning_chat_off_and_on_keeps_waiting_for_the_previous_permission_runti
     f.emit(EventKind::InteractionRequested(InteractionRequest {
         request: NativeRequestId::new("late-approval"),
         turn: Some(turn_1()),
+        owner: None,
         item: None,
         kind: InteractionKind::Approval {
             description: "Approve the previous runtime's request".to_owned(),

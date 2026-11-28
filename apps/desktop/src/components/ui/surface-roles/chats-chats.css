@@ -847,3 +847,127 @@ button.chat-steps:hover .chat-step-command {
   line-height: inherit;
   color: inherit;
 }
+
+/* Sub-agents (#609). A sub-agent's row is a step row: [bot] Title · suffix ›.
+   The title gives way with an ellipsis; the clock or outcome never does. */
+.chat-subagent {
+  text-align: left;
+  color: var(--muted-foreground);
+}
+.chat-subagent-title {
+  color: var(--foreground);
+}
+.chat-subagent .chat-step-suffix {
+  font-variant-numeric: tabular-nums;
+}
+.chat-subagent [data-outcome] {
+  font-weight: 500;
+  color: var(--foreground);
+}
+.chat-brief {
+  border-left: 2px solid var(--border);
+}
+.chat-brief-source {
+  color: var(--muted-foreground);
+  font-size: var(--text-caption);
+  line-height: 16px;
+}
+.chat-brief-text {
+  color: var(--foreground);
+}
+.chat-brief-text[data-unreported] {
+  color: var(--muted-foreground);
+}
+.chat-brief-more {
+  color: var(--muted-foreground);
+  font-size: var(--text-caption);
+  line-height: 16px;
+}
+.chat-subagent-mark {
+  color: var(--muted-foreground);
+}
+.chat-end-marker {
+  color: var(--muted-foreground);
+}
+.chat-subagent-foot {
+  color: var(--muted-foreground);
+}
+.chat-subagent-foot-words {
+  font-variant-numeric: tabular-nums;
+}
+.chat-subagent-pill .chat-plan-pill-count {
+  color: var(--foreground);
+}
+.chat-subagent-pill .chat-plan-pill-now {
+  font-variant-numeric: tabular-nums;
+}
+.chat-subagent-list {
+  list-style: none;
+}
+.chat-subagent-list li {
+  border-radius: var(--radius);
+}
+.chat-subagent-list li:hover,
+.chat-subagent-list li:has(:focus-visible) {
+  background: var(--accent);
+}
+.chat-subagent-item {
+  text-align: left;
+  color: var(--foreground);
+}
+.chat-subagent-item .chat-subagent-time {
+  color: var(--muted-foreground);
+  font-variant-numeric: tabular-nums;
+}
+.chat-subagent-list li > [data-size="icon-row-action"] {
+  visibility: hidden;
+}
+.chat-subagent-list li:hover > [data-size="icon-row-action"],
+.chat-subagent-list li:focus-within > [data-size="icon-row-action"] {
+  visibility: visible;
+}
+@media (hover: none) {
+  .chat-subagent-list li > [data-size="icon-row-action"] {
+    visibility: visible;
+  }
+}
+.chat-started {
+  color: var(--muted-foreground);
+  font-size: var(--text-ui);
+  line-height: 20px;
+}
+.chat-started .chat-row-icon {
+  color: var(--muted-foreground);
+}
+.chat-started-link {
+  color: var(--muted-foreground);
+  text-decoration: underline;
+  text-decoration-color: var(--border);
+  text-underline-offset: 3px;
+}
+.chat-started-link:hover {
+  color: var(--foreground);
+}
+.chat-restart-notice-title {
+  font-weight: 500;
+  color: var(--foreground);
+}
+.chat-restart-notice .chat-restart-notice-body {
+  color: var(--muted-foreground);
+  font-size: var(--text-caption);
+  line-height: 16px;
+}
+.chat-note-caption {
+  color: var(--muted-foreground);
+}
+.chat-note-sent .chat-brief-text {
+  color: var(--muted-foreground);
+  font-size: var(--text-caption);
+  line-height: 16px;
+}
+.chat-needs-elsewhere {
+  color: var(--foreground);
+}
+.chat-needs-elsewhere strong {
+  font-weight: 500;
+}

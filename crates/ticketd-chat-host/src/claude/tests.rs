@@ -14,7 +14,7 @@ use tokio::time::{sleep, timeout};
 
 use super::runtime::{Options, open_over, probe, probe_options};
 use super::{BRIDGE_SIDECAR_NAME, ClaudeAdapter, candidates, locate, verdict};
-use crate::conformance::{NewTurn, Provider};
+use crate::conformance::{NewTurn, Provider, SubAgentApprovals, SubAgentFrames};
 use crate::install::{LaunchEnvironment, Os};
 use crate::outcome::read_end;
 use crate::scripted::{Peer, brief, pipes};
@@ -458,6 +458,34 @@ async fn cancellation_invalidates_answers_even_when_one_is_already_on_its_way() 
             "turn-ended local-turn-1 Failed(Other) [\"sub-1\"]"
         ]
     );
+}
+
+#[tokio::test(start_paused = true)]
+async fn a_refused_input_does_not_hide_the_origin_of_the_turn_the_harness_starts_by_itself() {
+    let (mut peer, runtime, mut events) = open().await;
+    let refusal = |command: &Value| {
+        json!({"v": 1, "event": "command_rejected", "id": command["id"],
+            "code": "turn_active", "message": "a turn is active"})
+    };
+    let (outcome, ()) = tokio::join!(runtime.submit(start_turn("sub-1", "hello")), async {
+        let command = peer.written().await;
+        peer.send(&format!("{}\n", refusal(&command))).await;
+    });
+    assert!(matches!(outcome, DispatchOutcome::Rejected { .. }));
+    drain(&mut events).await;
+    // The bridge does not hold the input, so output with none behind it is the harness's.
+    let output = json!({"v": 1, "event": "assistant_content", "generation": 7,
+        "parent_tool_use_id": null, "model": "claude-haiku-5-5",
+        "blocks": [{"type": "text", "text": "Back."}]});
+    peer.send(&format!("{output}\n")).await;
+    let started = drain(&mut events)
+        .await
+        .into_iter()
+        .find_map(|event| match event {
+            EventKind::TurnStarted { origin, .. } => Some(origin),
+            _ => None,
+        });
+    assert!(matches!(started, Some(Some(_))), "{started:?}");
 }
 
 #[tokio::test(start_paused = true)]
@@ -1233,7 +1261,7 @@ fn an_agent_with_every_switch_off_may_still_run_the_ticketd_cli_and_nothing_else
             "allowed_tools": CLI_RULES,
             "disallowed_tools": [
                 "Read", "Glob", "Grep", "LSP", "Edit", "Write", "NotebookEdit", "WebFetch",
-                "WebSearch"
+                "WebSearch", "Agent"
             ],
             "max_turns": 40,
         })
@@ -1270,8 +1298,42 @@ fn an_agent_that_edits_files_may_read_the_files_it_changes() {
     assert_eq!(options["allowed_tools"], json!(expected));
     assert_eq!(
         options["disallowed_tools"],
-        json!(["Glob", "Grep", "LSP", "WebFetch", "WebSearch"])
+        json!(["Glob", "Grep", "LSP", "WebFetch", "WebSearch", "Agent"])
     );
+}
+
+/// #613: an Automation's agent cannot start sub-agents, whatever its switches say:
+/// Claude Code's `Agent` tool needs no approval, so "don't ask" alone never stops it.
+/// A deny rule removes it, and also applies inside a sub-agent.
+#[test]
+fn no_switch_lets_an_agent_start_sub_agents() {
+    for on in [false, true] {
+        let mut unattended = reader_that_tests();
+        unattended.tools = ticketd_core::AutomationAgentTools {
+            read_files: on,
+            edit_files: on,
+            run_commands: on,
+            any_command: on,
+            allowed_commands: vec!["npm test".into()],
+            use_web: on,
+        };
+        let options = super::unattended_options(&unattended);
+        assert!(
+            options["disallowed_tools"]
+                .as_array()
+                .unwrap()
+                .contains(&json!("Agent")),
+            "switches {on}"
+        );
+        assert!(
+            !options["allowed_tools"]
+                .as_array()
+                .unwrap()
+                .iter()
+                .any(|rule| rule.as_str().is_some_and(|rule| rule.starts_with("Agent"))),
+            "switches {on}"
+        );
+    }
 }
 
 /// #387 3B1: no switch allows a file tool by its bare name, which Claude Code reads
@@ -1457,6 +1519,600 @@ fn a_tool_that_failed_after_a_stop_is_reported_as_such() {
         )),
         "{events:?}"
     );
+}
+
+/// What a sub-agent's frames and task events become, one at a time.
+mod sub_agents {
+    use super::*;
+    use crate::{NativeSubAgentId, SubAgentOutcome, SubAgentStopper};
+    use serde_json::Value;
+
+    use crate::claude::session::Session;
+
+    fn turn_origin(events: &[EventKind]) -> Option<Option<crate::TurnOrigin>> {
+        events.iter().find_map(|event| match event {
+            EventKind::TurnStarted { origin, .. } => Some(origin.clone()),
+            _ => None,
+        })
+    }
+
+    #[test]
+    fn output_with_no_input_behind_it_is_a_turn_the_harness_started_and_names_the_last_sub_agent_to_finish()
+     {
+        let mut session = Session::default();
+        session.event("sub_agent_started", &started("t1", "toolu_a", true));
+        let (events, _) = session
+            .event(
+                "sub_agent_ended",
+                &json!({"task_id": "t1", "run_id": "r1", "tool_use_id": "toolu_a", "status": "completed"}),
+            )
+            .expect("modeled");
+        assert!(turn_origin(&events).is_none(), "ending opens no turn");
+        let (events, _) = session
+            .event(
+                "assistant_content",
+                &json!({"parent_tool_use_id": null, "model": "claude-haiku-5-5",
+                        "blocks": [{"type": "text", "text": "Done."}]}),
+            )
+            .expect("modeled");
+        let origin = turn_origin(&events)
+            .expect("a turn opened")
+            .expect("and it says who started it");
+        assert_eq!(origin.by, crate::TurnStarter::Harness);
+        assert_eq!(origin.sub_agent, Some(NativeSubAgentId::new("t1")));
+    }
+
+    #[test]
+    fn output_at_rest_with_no_sub_agent_finished_names_none() {
+        // Claude Code also resumes by itself after a background shell or monitor, which are
+        // Steps, not sub-agents: the turn is the harness's and no sub-agent finished.
+        let mut session = Session::default();
+        let (events, _) = session
+            .event(
+                "assistant_content",
+                &json!({"parent_tool_use_id": null, "model": "claude-haiku-5-5",
+                        "blocks": [{"type": "text", "text": "The build finished."}]}),
+            )
+            .expect("modeled");
+        let origin = turn_origin(&events)
+            .expect("a turn opened")
+            .expect("and it says the harness started it");
+        assert_eq!(origin.by, crate::TurnStarter::Harness);
+        assert_eq!(origin.sub_agent, None);
+
+        // A sub-agent that was stopped, or that finished before the turn that ended,
+        // is not the one this turn follows.
+        let mut session = Session::default();
+        session.event("sub_agent_started", &started("t1", "toolu_a", true));
+        session.event(
+            "sub_agent_ended",
+            &json!({"task_id": "t1", "run_id": "r1", "tool_use_id": "toolu_a", "status": "stopped"}),
+        );
+        let (events, _) = session
+            .event(
+                "assistant_content",
+                &json!({"parent_tool_use_id": null, "model": "claude-haiku-5-5",
+                        "blocks": [{"type": "text", "text": "Stopped."}]}),
+            )
+            .expect("modeled");
+        let origin = turn_origin(&events).flatten().expect("labelled");
+        assert_eq!(origin.sub_agent, None);
+    }
+
+    #[test]
+    fn a_turn_the_persons_input_started_is_not_labelled_even_when_its_output_comes_first() {
+        let mut session = Session::default();
+        session.input_written("sub-1");
+        let (events, _) = session
+            .event(
+                "assistant_content",
+                &json!({"parent_tool_use_id": null, "model": "claude-haiku-5-5",
+                        "blocks": [{"type": "text", "text": "Here"}]}),
+            )
+            .expect("modeled");
+        assert_eq!(turn_origin(&events), Some(None));
+        // Nor one whose input the harness shows processing first.
+        let mut session = Session::default();
+        session.input_written("sub-2");
+        let (events, _) = session
+            .event("input_processing", &json!({"submission_ids": ["sub-2"]}))
+            .expect("modeled");
+        assert_eq!(turn_origin(&events), Some(None));
+    }
+
+    fn started(task: &str, tool_use: &str, background: bool) -> Value {
+        json!({"task_id": task, "run_id": "r1", "tool_use_id": tool_use, "parent_task_id": null,
+               "description": "Look", "subagent_type": "Explore", "background": background,
+               "prompt": "Look around.", "spawn_depth": 1})
+    }
+
+    fn ends(events: &[EventKind]) -> Vec<(String, SubAgentOutcome)> {
+        events
+            .iter()
+            .filter_map(|event| match event {
+                EventKind::SubAgentEnded {
+                    sub_agent, outcome, ..
+                } => Some((sub_agent.0.clone(), *outcome)),
+                _ => None,
+            })
+            .collect()
+    }
+
+    #[test]
+    fn a_sub_agents_frames_open_no_turn_and_are_its_own() {
+        let mut session = Session::default();
+        session.event("sub_agent_started", &started("t1", "toolu_a", false));
+        let (events, _) = session
+            .event(
+                "assistant_content",
+                &json!({"parent_tool_use_id": "toolu_a", "model": "claude-haiku-5-5",
+                        "blocks": [{"type": "tool_use", "id": "toolu_r", "name": "Read", "input": {"file_path": "a"}}]}),
+            )
+            .expect("modeled");
+        assert!(session.active_turn().is_none(), "no turn was opened");
+        assert!(
+            !events
+                .iter()
+                .any(|event| matches!(event, EventKind::TurnStarted { .. }))
+        );
+        // The model it reports is passed on once, then the Step is its own.
+        assert!(
+            matches!(&events[0], EventKind::SubAgentUpdated { native: Some(model), .. }
+            if model == &json!({"model": "claude-haiku-5-5"}))
+        );
+        assert!(
+            matches!(&events[1], EventKind::SubAgentToolUpdated { sub_agent, title, .. }
+            if sub_agent == &NativeSubAgentId::new("t1") && title == "Read")
+        );
+        // Thinking of a sub-agent is its own reasoning, and opens no turn.
+        let (more, _) = session
+            .event("thinking", &json!({"phase": "started", "index": 0, "redacted": false, "at": 1, "parent_tool_use_id": "toolu_a"}))
+            .expect("modeled");
+        assert!(
+            matches!(more.as_slice(), [EventKind::SubAgentReasoningUpdated { sub_agent, running: true, .. }]
+            if sub_agent == &NativeSubAgentId::new("t1")),
+            "{more:?}"
+        );
+        assert!(session.active_turn().is_none());
+    }
+
+    fn said(tool_use: &str, block: Value) -> Value {
+        json!({"parent_tool_use_id": tool_use, "model": "claude-haiku-5-5", "blocks": [block]})
+    }
+
+    fn messages(events: &[EventKind]) -> Vec<String> {
+        events
+            .iter()
+            .filter_map(|event| match event {
+                EventKind::SubAgentMessage { text, .. } => Some(text.clone()),
+                _ => None,
+            })
+            .collect()
+    }
+
+    #[test]
+    fn a_sub_agents_text_is_its_message_and_never_the_main_agents_reply() {
+        let mut session = Session::default();
+        session.event("sub_agent_started", &started("t1", "toolu_a", false));
+        let (events, _) = session
+            .event(
+                "assistant_content",
+                &said(
+                    "toolu_a",
+                    json!({"type": "text", "text": "Looking at the limiter."}),
+                ),
+            )
+            .expect("modeled");
+        assert_eq!(messages(&events), ["Looking at the limiter."]);
+        assert!(
+            !events.iter().any(|event| matches!(
+                event,
+                EventKind::MessageCompleted { .. } | EventKind::TurnStarted { .. }
+            )),
+            "{events:?}"
+        );
+        // Its stream deltas are not shown: the message comes whole.
+        let (deltas, _) = session
+            .event("delta", &json!({"kind": "text", "text": "Look", "index": 0, "parent_tool_use_id": "toolu_a"}))
+            .expect("modeled");
+        assert!(deltas.is_empty(), "{deltas:?}");
+    }
+
+    #[test]
+    fn a_sub_agents_final_report_is_stored_once_whether_a_message_said_it_or_only_the_notification()
+    {
+        let ended = |summary: &str| json!({"task_id": "t1", "run_id": "r1", "tool_use_id": "toolu_a", "status": "completed", "reason": null, "summary": summary});
+        // A message already said it: the notification repeats it.
+        let mut session = Session::default();
+        session.event("sub_agent_started", &started("t1", "toolu_a", false));
+        session.event(
+            "assistant_content",
+            &said(
+                "toolu_a",
+                json!({"type": "text", "text": "The limit is 5."}),
+            ),
+        );
+        let (events, _) = session
+            .event("sub_agent_ended", &ended("The limit is 5.\n"))
+            .expect("modeled");
+        assert!(messages(&events).is_empty(), "{events:?}");
+        // No message said it: the notification is the report.
+        let mut session = Session::default();
+        session.event("sub_agent_started", &started("t1", "toolu_a", false));
+        let (events, _) = session
+            .event("sub_agent_ended", &ended("The limit is 5."))
+            .expect("modeled");
+        assert_eq!(messages(&events), ["The limit is 5."]);
+        // A failed or stopped run has no report to keep.
+        let mut session = Session::default();
+        session.event("sub_agent_started", &started("t1", "toolu_a", false));
+        let (events, _) = session
+            .event(
+                "sub_agent_ended",
+                &json!({"task_id": "t1", "run_id": "r1", "status": "stopped", "reason": null, "summary": "Stopped."}),
+            )
+            .expect("modeled");
+        assert!(messages(&events).is_empty(), "{events:?}");
+    }
+
+    #[test]
+    fn what_a_sub_agent_said_and_thought_before_its_task_is_announced_is_kept_for_it() {
+        let mut session = Session::default();
+        session.event(
+            "thinking",
+            &json!({"phase": "started", "index": 0, "redacted": false, "at": 1, "parent_tool_use_id": "toolu_a"}),
+        );
+        let (held, _) = session
+            .event(
+                "assistant_content",
+                &said("toolu_a", json!({"type": "text", "text": "Early words."})),
+            )
+            .expect("modeled");
+        assert!(held.is_empty() && session.active_turn().is_none());
+        let (events, _) = session
+            .event("sub_agent_started", &started("t1", "toolu_a", false))
+            .expect("modeled");
+        assert_eq!(messages(&events), ["Early words."]);
+        assert!(events.iter().any(|event| matches!(
+            event,
+            EventKind::SubAgentReasoningUpdated { running: true, .. }
+        )));
+    }
+
+    #[test]
+    fn a_sub_agents_edits_are_its_runs_files_and_leave_the_turns_alone() {
+        let mut session = Session::default();
+        session.event("sub_agent_started", &started("t1", "toolu_a", false));
+        let (events, _) = session
+            .event(
+                "assistant_content",
+                &said("toolu_a", json!({"type": "tool_use", "id": "toolu_w", "name": "Write", "input": {"file_path": "/work/a.txt", "content": "x"}})),
+            )
+            .expect("modeled");
+        assert!(
+            events.iter().any(|event| matches!(event, EventKind::SubAgentFilesChanged { files, .. } if files.len() == 1)),
+            "{events:?}"
+        );
+        assert!(
+            !events
+                .iter()
+                .any(|event| matches!(event, EventKind::FilesChanged { .. })),
+            "{events:?}"
+        );
+        let (done, _) = session
+            .event(
+                "tool_result",
+                &json!({"tool_use_id": "toolu_w", "parent_tool_use_id": "toolu_a", "is_error": false, "text": "ok", "outcome": {"kind": "file", "change": "create", "added_lines": 1, "removed_lines": 0}}),
+            )
+            .expect("modeled");
+        assert!(
+            done.iter().any(|event| matches!(event, EventKind::SubAgentFilesChanged { files, .. } if files[0].confirmed)),
+            "{done:?}"
+        );
+        assert!(
+            !done
+                .iter()
+                .any(|event| matches!(event, EventKind::FilesChanged { .. })),
+            "{done:?}"
+        );
+    }
+
+    #[test]
+    fn a_foreground_sub_agent_ends_when_its_call_returns_and_a_background_one_does_not() {
+        let mut session = Session::default();
+        session.event(
+            "assistant_content",
+            &json!({"parent_tool_use_id": null, "blocks": [
+            {"type": "tool_use", "id": "toolu_a", "name": "Agent", "input": {}},
+            {"type": "tool_use", "id": "toolu_b", "name": "Agent", "input": {}}]}),
+        );
+        session.event("sub_agent_started", &started("fore", "toolu_a", false));
+        session.event("sub_agent_started", &started("back", "toolu_b", true));
+        let result = |id: &str, failed: bool| json!({"tool_use_id": id, "parent_tool_use_id": null, "is_error": failed, "text": "x"});
+        let (events, _) = session
+            .event("tool_result", &result("toolu_a", false))
+            .expect("modeled");
+        assert_eq!(
+            ends(&events),
+            [("fore".to_owned(), SubAgentOutcome::Completed)]
+        );
+        // The background launch returns at once and goes on.
+        let (events, _) = session
+            .event("tool_result", &result("toolu_b", false))
+            .expect("modeled");
+        assert!(ends(&events).is_empty());
+    }
+
+    #[test]
+    fn a_stopped_sub_agent_was_stopped_by_the_person_after_stop_and_by_the_main_agent_otherwise() {
+        let stopped = |session: &mut Session| {
+            session.event("sub_agent_started", &started("t1", "toolu_a", true));
+            let (events, _) = session
+                .event(
+                    "sub_agent_ended",
+                    &json!({"task_id": "t1", "run_id": "r1", "tool_use_id": "toolu_a", "status": "stopped", "reason": null, "summary": ""}),
+                )
+                .expect("modeled");
+            ends(&events)
+        };
+        assert_eq!(
+            stopped(&mut Session::default()),
+            [(
+                "t1".to_owned(),
+                SubAgentOutcome::Stopped(SubAgentStopper::MainAgent)
+            )]
+        );
+        let mut session = Session::default();
+        // Stop asks the open turn to end.
+        session.event("input_processing", &json!({"submission_ids": []}));
+        session.interrupt_written();
+        assert_eq!(
+            stopped(&mut session),
+            [(
+                "t1".to_owned(),
+                SubAgentOutcome::Stopped(SubAgentStopper::Person)
+            )]
+        );
+    }
+
+    #[test]
+    fn a_failed_task_update_carries_what_went_wrong() {
+        let mut session = Session::default();
+        session.event("sub_agent_started", &started("t1", "toolu_a", false));
+        let (events, _) = session
+            .event(
+                "sub_agent_updated",
+                &json!({"task_id": "t1", "run_id": "r1", "status": "failed", "description": null, "background": null, "error": "output limit"}),
+            )
+            .expect("modeled");
+        assert!(matches!(events.as_slice(),
+            [EventKind::SubAgentEnded { outcome: SubAgentOutcome::Failed, detail: Some(detail), .. }]
+            if detail == "output limit"));
+    }
+
+    #[test]
+    fn frames_waiting_for_their_task_are_bounded_by_bytes_and_the_budget_is_given_back() {
+        use crate::claude::session::HELD_BYTES;
+        let big = |tool_use: &str| {
+            said(
+                tool_use,
+                json!({"type": "text", "text": "x".repeat(128 * 1024)}),
+            )
+        };
+        let mut session = Session::default();
+        // Twice the budget from one tool use: far under the count limits.
+        for _ in 0..(2 * HELD_BYTES / (128 * 1024)) {
+            session.event("assistant_content", &big("toolu_x"));
+        }
+        let (events, _) = session
+            .event("sub_agent_started", &started("t1", "toolu_x", true))
+            .expect("modeled");
+        let replayed: usize = messages(&events).iter().map(String::len).sum();
+        assert!(replayed > 0, "ordinary early frames are still replayed");
+        assert!(replayed <= HELD_BYTES, "{replayed} bytes were held");
+        // What was replayed was given back: a later frame is held again.
+        session.event("assistant_content", &big("toolu_late"));
+        let (events, _) = session
+            .event("sub_agent_started", &started("t_late", "toolu_late", true))
+            .expect("modeled");
+        assert_eq!(messages(&events).len(), 1, "{events:?}");
+    }
+
+    #[test]
+    fn a_late_frame_of_a_superseded_launch_is_dropped_and_the_resumed_one_routes_normally() {
+        let launch = |tool_use: &str, run: &str| {
+            json!({"task_id": "t1", "run_id": run, "tool_use_id": tool_use, "parent_task_id": null,
+                   "description": "Look", "subagent_type": "Explore", "background": true,
+                   "prompt": "Look around.", "spawn_depth": 1})
+        };
+        let mut session = Session::default();
+        session.event("sub_agent_started", &launch("toolu_a", "r1"));
+        session.event("sub_agent_started", &launch("toolu_b", "r2"));
+        let (events, _) = session
+            .event(
+                "assistant_content",
+                &said("toolu_a", json!({"type": "text", "text": "Stale."})),
+            )
+            .expect("modeled");
+        assert!(messages(&events).is_empty(), "{events:?}");
+        let (events, _) = session
+            .event("thinking", &json!({"phase": "started", "index": 0, "redacted": false, "at": 1, "parent_tool_use_id": "toolu_a"}))
+            .expect("modeled");
+        assert!(events.is_empty(), "{events:?}");
+        let (events, _) = session
+            .event(
+                "assistant_content",
+                &said("toolu_b", json!({"type": "text", "text": "Fresh."})),
+            )
+            .expect("modeled");
+        assert_eq!(messages(&events), ["Fresh."]);
+        let (events, _) = session
+            .event("thinking", &json!({"phase": "started", "index": 0, "redacted": false, "at": 1, "parent_tool_use_id": "toolu_b"}))
+            .expect("modeled");
+        assert!(
+            matches!(events.as_slice(), [EventKind::SubAgentReasoningUpdated { run, .. }] if run.as_deref() == Some("r2")),
+            "{events:?}"
+        );
+    }
+
+    #[test]
+    fn a_late_frame_of_a_launch_that_named_no_run_is_dropped_after_a_resume() {
+        let launch = |tool_use: &str, run: Value| {
+            json!({"task_id": "t1", "run_id": run, "tool_use_id": tool_use, "parent_task_id": null,
+                   "description": "Look", "subagent_type": "Explore", "background": true,
+                   "prompt": "Look around.", "spawn_depth": 1})
+        };
+        let mut session = Session::default();
+        session.event("sub_agent_started", &launch("toolu_a", Value::Null));
+        session.event("sub_agent_started", &launch("toolu_b", json!("r2")));
+        let (events, _) = session
+            .event(
+                "assistant_content",
+                &said("toolu_a", json!({"type": "text", "text": "Stale."})),
+            )
+            .expect("modeled");
+        assert!(messages(&events).is_empty(), "{events:?}");
+        let (events, _) = session
+            .event("thinking", &json!({"phase": "started", "index": 0, "redacted": false, "at": 1, "parent_tool_use_id": "toolu_a"}))
+            .expect("modeled");
+        assert!(events.is_empty(), "{events:?}");
+        let (events, _) = session
+            .event(
+                "assistant_content",
+                &said("toolu_b", json!({"type": "text", "text": "Fresh."})),
+            )
+            .expect("modeled");
+        assert_eq!(messages(&events), ["Fresh."]);
+    }
+
+    #[test]
+    fn a_question_a_sub_agent_asks_is_its_own_and_goes_with_it() {
+        let mut session = Session::default();
+        session.event("sub_agent_started", &started("t1", "toolu_a", true));
+        let asked = json!({
+            "request_id": "q1", "tool_use_id": "toolu_ask", "agent_id": "t1",
+            "questions": [{"question": "Which color?", "options": [{"label": "Blue"}]}],
+        });
+        let (events, _) = session.event("question_request", &asked).expect("modeled");
+        assert!(
+            !events
+                .iter()
+                .any(|event| matches!(event, EventKind::TurnStarted { .. })),
+            "{events:?}"
+        );
+        let Some(EventKind::InteractionRequested(request)) = events.last() else {
+            panic!("{events:?}");
+        };
+        assert_eq!(request.owner, Some(NativeSubAgentId::new("t1")));
+        assert_eq!(request.turn, None);
+        // It stays answerable until the sub-agent ends, then it is withdrawn.
+        let (events, _) = session
+            .event(
+                "sub_agent_ended",
+                &json!({"task_id": "t1", "run_id": "r1", "tool_use_id": "toolu_a", "status": "completed"}),
+            )
+            .expect("modeled");
+        assert!(
+            events.iter().any(|event| matches!(event,
+                EventKind::InteractionResolved { request, .. } if request.0 == "q1")),
+            "{events:?}"
+        );
+    }
+
+    #[test]
+    fn a_new_runs_report_is_not_dropped_for_repeating_the_last_runs() {
+        let launch = |run: &str| {
+            json!({"task_id": "t1", "run_id": run, "tool_use_id": "toolu_a", "parent_task_id": null,
+                   "description": "Look", "subagent_type": "Explore", "background": true,
+                   "prompt": "Look around.", "spawn_depth": 1})
+        };
+        let ended = |run: &str| {
+            json!({"task_id": "t1", "run_id": run, "tool_use_id": "toolu_a", "status": "completed",
+                   "reason": null, "summary": "No changes."})
+        };
+        let mut session = Session::default();
+        session.event("sub_agent_started", &launch("r1"));
+        let (events, _) = session
+            .event("sub_agent_ended", &ended("r1"))
+            .expect("modeled");
+        assert_eq!(messages(&events), ["No changes."]);
+        session.event("sub_agent_started", &launch("r2"));
+        let (events, _) = session
+            .event("sub_agent_ended", &ended("r2"))
+            .expect("modeled");
+        assert_eq!(messages(&events), ["No changes."]);
+        // The same run's repeat is still said once.
+        let (events, _) = session
+            .event("sub_agent_ended", &ended("r2"))
+            .expect("modeled");
+        assert!(messages(&events).is_empty(), "{events:?}");
+    }
+
+    #[test]
+    fn a_denial_for_a_background_sub_agents_tool_outlives_the_turn() {
+        use crate::{ApprovalDecision, InteractionAnswer, NativeRequestId, ToolStatus};
+        let mut session = Session::default();
+        session.event("sub_agent_started", &started("t1", "toolu_a", true));
+        session.event(
+            "assistant_content",
+            &said(
+                "toolu_a",
+                json!({"type": "tool_use", "id": "toolu_r", "name": "Bash", "input": {"command": "rm -rf x"}}),
+            ),
+        );
+        session.event(
+            "permission_request",
+            &json!({"request_id": "req-1", "tool_name": "Bash", "tool_use_id": "toolu_r",
+                    "agent_id": "t1", "input": {"command": "rm -rf x"}}),
+        );
+        session
+            .answer(
+                &NativeRequestId::new("req-1"),
+                &InteractionAnswer::Approval(ApprovalDecision::Deny),
+            )
+            .expect("live");
+        session.event(
+            "assistant_content",
+            &json!({"parent_tool_use_id": null, "blocks": [{"type": "text", "text": "Waiting."}]}),
+        );
+        session.event(
+            "turn_result",
+            &json!({"subtype": "success", "submission_ids": []}),
+        );
+        let (events, _) = session
+            .event(
+                "tool_result",
+                &json!({"tool_use_id": "toolu_r", "parent_tool_use_id": "toolu_a", "is_error": true, "text": "denied"}),
+            )
+            .expect("modeled");
+        assert!(
+            events.iter().any(|event| matches!(
+                event,
+                EventKind::SubAgentToolUpdated {
+                    status: ToolStatus::Declined,
+                    ..
+                }
+            )),
+            "{events:?}"
+        );
+    }
+
+    #[test]
+    fn frames_that_wait_for_their_task_are_dropped_with_the_turn_not_kept_for_ever() {
+        let mut session = Session::default();
+        session.event(
+            "assistant_content",
+            &json!({"parent_tool_use_id": "toolu_x", "blocks": [{"type": "tool_use", "id": "toolu_r", "name": "Read", "input": {}}]}),
+        );
+        session.event(
+            "turn_result",
+            &json!({"subtype": "success", "submission_ids": []}),
+        );
+        let (events, _) = session
+            .event("sub_agent_started", &started("t1", "toolu_x", false))
+            .expect("modeled");
+        assert_eq!(events.len(), 1, "{events:?}");
+    }
 }
 
 fn recorded_step_frames() -> impl Iterator<Item = Value> {
@@ -2002,6 +2658,63 @@ impl Provider for Bridge {
 
     fn events(&mut self) -> &mut EventStream {
         &mut self.events
+    }
+
+    fn sub_agent_frames(&self) -> SubAgentFrames {
+        SubAgentFrames::Separate
+    }
+
+    fn sub_agent_approvals(&self) -> SubAgentApprovals {
+        SubAgentApprovals::Owned
+    }
+
+    async fn play_sub_agent_approval(&mut self, _id: &str) -> NativeRequestId {
+        self.peer.load(
+            r#"{"server":{"v":1,"event":"sub_agent_started","generation":7,"task_id":"task_bg","run_id":"run_bg_1","tool_use_id":"toolu_bg","parent_task_id":null,"description":"Check limiter test coverage","subagent_type":"general-purpose","background":true,"prompt":"Run the tests.","prompt_truncated":false,"spawn_depth":1}}
+{"server":{"v":1,"event":"permission_request","generation":7,"request_id":"7-2","tool_name":"Bash","tool_use_id":"toolu_bg_test","input":{"command":"npm test"},"title":null,"display_name":"Bash","description":null,"decision_reason":null,"blocked_path":null,"agent_id":"task_bg","default_to_no":false,"can_remember":true}}"#,
+        );
+        self.peer.play().await;
+        let shown = drain(&mut self.events).await;
+        shown
+            .into_iter()
+            .find_map(|event| match event {
+                EventKind::InteractionRequested(request) => {
+                    assert_eq!(request.turn, None, "a sub-agent's request has no turn");
+                    assert_eq!(
+                        request.owner,
+                        Some(crate::NativeSubAgentId::new("task_bg")),
+                        "it names the sub-agent"
+                    );
+                    Some(request.request)
+                }
+                _ => None,
+            })
+            .expect("the bridge asked on the sub-agent's behalf")
+    }
+
+    async fn end_parent_turn(&mut self, id: &str) {
+        self.peer.load(&format!(
+            r#"{{"server":{{"v":1,"event":"turn_result","generation":7,"correlation":"uuid","submission_ids":["{id}"],"unmatched_uuids":[],"pending_submission_ids":[],"subtype":"success","is_error":false,"result_text":"ok","errors":[],"stop_reason":"end_turn","terminal_reason":"completed","denials":[],"queued_turn_count":0,"num_turns":1,"duration_ms":1,"session_id":"sess-1"}}}}"#
+        ));
+        self.peer.play().await;
+    }
+
+    async fn end_sub_agent(&mut self) {
+        self.peer.load(
+            r#"{"server":{"v":1,"event":"sub_agent_ended","generation":7,"task_id":"task_bg","run_id":"run_bg_1","tool_use_id":"toolu_bg","status":"stopped","reason":null,"summary":"Stopped."}}"#,
+        );
+        self.peer.play().await;
+    }
+
+    async fn play_sub_agent_at_rest(&mut self) {
+        self.peer.load(
+            r#"{"server":{"v":1,"event":"sub_agent_started","generation":7,"task_id":"task_bg","run_id":"run_bg_1","tool_use_id":"toolu_bg","parent_task_id":null,"description":"Find limiter bypasses","subagent_type":"Explore","background":true,"prompt":"Look for ways around the rate limiter.","prompt_truncated":false,"spawn_depth":1}}
+{"server":{"v":1,"event":"assistant_content","generation":7,"uuid":"uuid-bg1","message_id":"msg-bg1","parent_tool_use_id":"toolu_bg","model":"claude-haiku-5-5","blocks":[{"type":"tool_use","id":"toolu_bg_read","name":"Read","input":{"file_path":"/work/chat-1/src/api/rate-limit.ts"}}],"error":null,"aborted":false}}
+{"server":{"v":1,"event":"tool_result","generation":7,"tool_use_id":"toolu_bg_read","parent_tool_use_id":"toolu_bg","is_error":false,"text":"1\texport const LIMIT = 5;","truncated":false,"outcome":null}}
+{"server":{"v":1,"event":"sub_agent_ended","generation":7,"task_id":"task_bg","run_id":"run_bg_1","tool_use_id":"toolu_bg","status":"completed","reason":null,"summary":"Done."}}
+"#,
+        );
+        self.peer.play().await;
     }
 
     async fn start_turn(&mut self, id: &str) -> DispatchOutcome {

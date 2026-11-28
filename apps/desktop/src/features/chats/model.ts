@@ -8,10 +8,12 @@ import type {
   RecordChange,
   Step,
   StepTarget,
+  SubAgent,
   TicketdCall,
   TranscriptItem,
   ItemOf,
 } from "@/features/chats/client";
+import { changeHeld, changePending } from "@/features/chats/composer-settings";
 import { scopeIsPath } from "@/features/chats/files";
 import {
   count,
@@ -558,6 +560,8 @@ export type TurnRow =
       items: ItemOf<"marker">[];
       kept?: false;
     }
+  /** One run of a direct sub-agent, kept visible under a folded turn like a receipt. */
+  | { kind: "sub_agent"; key: string; item: ItemOf<"sub_agent">; kept: true }
   /** #367: a reasoning row, and a plan that finished every step. */
   | { kind: "reasoning"; key: string; item: ItemOf<"reasoning">; kept?: false }
   | { kind: "plan"; key: string; item: ItemOf<"plan">; kept?: false };
@@ -607,7 +611,17 @@ export type Turn = {
 export type { Stretch, TurnBlock } from "@/features/chats/stretch";
 
 export type TranscriptPart =
-  { kind: "item"; item: TranscriptItem } | { kind: "turn"; turn: Turn };
+  | { kind: "item"; item: TranscriptItem }
+  | { kind: "turn"; turn: Turn }
+  /** A quiet line between a sub-agent's runs ("Resumed by the main agent"). */
+  | { kind: "divider"; key: string; label: string }
+  /** Where the person's message would be: the turn after it was not started by the person. */
+  | {
+      kind: "started";
+      key: string;
+      by: "harness" | "ticketd";
+      subAgent: string | undefined;
+    };
 
 // Fresh history skips attachment-only messages in the desktop command.
 export function canPickHistoryMessage(item: TranscriptItem): boolean {
@@ -649,6 +663,18 @@ const TURN_WORDS = {
   failed: ["Failed after", "Failed"],
   unconfirmed: ["Stop not confirmed after", "Stop not confirmed"],
 } as const;
+
+/** A sub-agent view's work line: contact lost reads as such, not as "Stopped". */
+export const SUB_AGENT_WORDS = {
+  lost: ["Contact lost after", "Contact lost"],
+} as const;
+/** The same, for a harness that never says when a sub-agent finishes (Antigravity). */
+export const SUB_AGENT_ENDS_WITH_TURN = {
+  lost: SUB_AGENT_WORDS.lost,
+  ended: ["Ended with the turn after", "Ended with the turn"],
+} as const;
+export type SubAgentWords =
+  typeof SUB_AGENT_WORDS | typeof SUB_AGENT_ENDS_WITH_TURN;
 
 const PROBLEM_COUNTS = [
   ["failed", "failed"],
@@ -746,7 +772,9 @@ function rowsOf(members: TranscriptItem[], running: Step["state"]) {
     flush();
     // The host told the decision on the step it was asked for.
     if (item.kind === "request" && item.folded) continue;
-    if (item.kind === "response")
+    if (item.kind === "sub_agent")
+      rows.push({ kind: "sub_agent", key: item.id, item, kept: true });
+    else if (item.kind === "response")
       rows.push({ kind: "response", key: item.id, item });
     else if (item.kind === "reasoning") {
       if (reasoningShown(item))
@@ -835,8 +863,10 @@ export function workedFor(
  */
 export function turns(
   items: TranscriptItem[],
-  chat: Pick<ChatState, "activity" | "problem">,
+  chat: Pick<ChatState, "activity" | "problem"> &
+    Partial<Pick<ChatState, "turn_running">>,
   now = Date.now(),
+  agent?: SubAgentWords,
 ): TranscriptPart[] {
   const timings = new Map<string, ItemOf<"turn">>();
   for (const item of items)
@@ -844,7 +874,14 @@ export function turns(
   const parts: (TranscriptPart | Segment)[] = [];
   let open: Segment | undefined;
   for (const item of items) {
-    if (item.kind === "turn") continue;
+    if (item.kind === "turn") {
+      // A turn the person did not start has no message to open it: it opens its own segment, even before its first row.
+      if (item.origin && open?.turnId !== item.turn_id) {
+        open = { steer: false, members: [], turnId: item.turn_id };
+        parts.push(open);
+      }
+      continue;
+    }
     if (item.kind === "request" && item.state === "pending") continue;
     if (item.kind === "user" || item.kind === "session") {
       // A steer ends the segment it joined; the turn goes on in a new one.
@@ -877,12 +914,27 @@ export function turns(
   const last = lastOf(parts, (part) => !("kind" in part));
   const unconfirmedStop =
     chat.problem?.kind === "stop_unconfirmed" && !chat.problem.past;
-  const live = chat.activity === "working" || chat.activity === "waiting";
+  const live =
+    (chat.activity === "working" || chat.activity === "waiting") &&
+    chat.turn_running !== false;
   return parts.flatMap((part): TranscriptPart[] => {
     if ("kind" in part) return [part];
     const first = part.members[0];
-    if (first === undefined) return [];
     const timing = part.turnId ? timings.get(part.turnId) : undefined;
+    if (first === undefined) {
+      // Started, and nothing of its work has come yet: only the line that says why.
+      const origin = timing?.origin;
+      return origin
+        ? [
+            {
+              kind: "started",
+              key: `started:${timing.id}`,
+              by: origin.by,
+              subAgent: origin.sub_agent ?? undefined,
+            },
+          ]
+        : [];
+    }
     const active = timing ? timing.outcome === "active" : part === last && live;
     // A segment a steer ended folds while its turn goes on.
     const ongoing = active && !part.until;
@@ -898,10 +950,23 @@ export function turns(
       until: part.until,
       // Only an unconfirmed stop is measured against now.
       now: unconfirmed ? now : undefined,
+      agent,
     };
+    // A turn the person did not start has a line where the message would be.
+    const origin = !part.steer ? timing?.origin : undefined;
+    const startedBy: TranscriptPart[] = origin
+      ? [
+          {
+            kind: "started",
+            key: `started:${timing?.id ?? first.id}`,
+            by: origin.by,
+            subAgent: origin.sub_agent ?? undefined,
+          },
+        ]
+      : [];
     const cached = builtTurns.get(first);
     if (cached && sameInputs(cached.inputs, inputs))
-      return [{ kind: "turn", turn: cached.turn }];
+      return [...startedBy, { kind: "turn", turn: cached.turn }];
     const { rows, steps, net } = rowsOf(
       part.members,
       !active ? "not_finished" : unconfirmedStop ? "unknown" : "running",
@@ -953,11 +1018,15 @@ export function turns(
       ? TURN_WORDS.unconfirmed
       : outcome === "failed"
         ? TURN_WORDS.failed
-        : outcome === "stopped" || outcome === "quit" || outcome === "lost"
-          ? TURN_WORDS.stopped
-          : part.steer
-            ? TURN_WORDS.continued
-            : TURN_WORDS.worked;
+        : outcome === "lost" && agent
+          ? agent.lost
+          : outcome === "stopped" || outcome === "quit" || outcome === "lost"
+            ? TURN_WORDS.stopped
+            : outcome === "completed" && agent && "ended" in agent
+              ? agent.ended
+              : part.steer
+                ? TURN_WORDS.continued
+                : TURN_WORDS.worked;
     const counts = PROBLEM_COUNTS.flatMap(([state, word]) => {
       // A count already said by the row's own outcome is not said again.
       if (state === "failed" && words === TURN_WORDS.failed) return [];
@@ -997,7 +1066,7 @@ export function turns(
       ids: part.members.map((item) => item.id),
     };
     builtTurns.set(first, { inputs, turn });
-    return [{ kind: "turn", turn }];
+    return [...startedBy, { kind: "turn", turn }];
   });
 }
 
@@ -1011,6 +1080,7 @@ type TurnInputs = {
   started: string | undefined;
   until: string | undefined;
   now: number | undefined;
+  agent: SubAgentWords | undefined;
 };
 
 const sameInputs = (a: TurnInputs, b: TurnInputs) =>
@@ -1021,6 +1091,7 @@ const sameInputs = (a: TurnInputs, b: TurnInputs) =>
   a.started === b.started &&
   a.until === b.until &&
   a.now === b.now &&
+  a.agent === b.agent &&
   a.members.length === b.members.length &&
   a.members.every((item, index) => item === b.members[index]);
 
@@ -1035,9 +1106,15 @@ const builtTurns = new WeakMap<
  * Requests and stopping are said before it.
  */
 export function turnStatus(
-  chat: Pick<ChatState, "activity" | "problem">,
+  chat: Pick<ChatState, "activity" | "problem"> &
+    Partial<Pick<ChatState, "turn_running" | "sub_agents">>,
   items: TranscriptItem[],
 ) {
+  // Work goes on after the reply: said once, never each sub-agent's start or end.
+  if (isLive(chat) && chat.turn_running === false && chat.sub_agents) {
+    const n = runningAgents({ sub_agents: chat.sub_agents });
+    if (n > 0) return `${n} ${n === 1 ? "sub-agent" : "sub-agents"} running`;
+  }
   if (chat.activity === "working") return "Working";
   if (chat.activity === "waiting") return "Waiting for you";
   const last = lastOf(turns(items, chat), (part) => part.kind === "turn");
@@ -1138,9 +1215,35 @@ export const needsYou = (status: ChatStatus) =>
 export const emphasised = (status: ChatStatus) =>
   needsYou(status) || status.unseen;
 
-/** A turn is in progress, so it can be stopped. */
-export function isLive(chat: ChatState) {
+/** The Chat has work going on, so Stop is offered. */
+export function isLive(chat: Pick<ChatState, "activity">) {
   return chat.activity === "working" || chat.activity === "waiting";
+}
+
+/**
+ * A main-agent turn runs. False while only sub-agents run after the reply: the
+ * message box then starts a turn instead of steering, and nothing "works" in
+ * the transcript, where the strip is the live signal.
+ */
+export function turnRuns(chat: Pick<ChatState, "activity" | "turn_running">) {
+  return isLive(chat) && chat.turn_running !== false;
+}
+
+/** How many sub-agents run now, nested ones too. */
+export const runningAgents = (chat: Pick<ChatState, "sub_agents">) =>
+  chat.sub_agents.filter((agent) => agent.status === "running").length;
+
+/**
+ * What Stop in the composer says it stops: "Stop 2 sub-agents" while only they
+ * run, "Stop the turn and 2 sub-agents" while both do, else "Stop".
+ */
+export function stopWords(
+  chat: Pick<ChatState, "activity" | "turn_running" | "sub_agents">,
+) {
+  const n = runningAgents(chat);
+  if (n === 0) return "Stop";
+  const agents = `${n} ${n === 1 ? "sub-agent" : "sub-agents"}`;
+  return turnRuns(chat) ? `Stop the turn and ${agents}` : `Stop ${agents}`;
 }
 
 /**
@@ -1152,12 +1255,17 @@ export function asStarting(
   chat: ChatState,
   items: readonly TranscriptItem[],
 ): ChatState {
-  if (isLive(chat) || chat.problem || !chat.has_composer) return chat;
+  if (turnRuns(chat) || chat.problem || !chat.has_composer) return chat;
   const sending = items.some(
     (item) => item.kind === "user" && item.delivery === "sending",
   );
   return sending
-    ? { ...chat, activity: "working", opening: chat.opening ?? "start" }
+    ? {
+        ...chat,
+        activity: "working",
+        turn_running: null,
+        opening: chat.opening ?? "start",
+      }
     : chat;
 }
 
@@ -1196,7 +1304,7 @@ export function composerControls(
 ): ComposerControls {
   const typed = text.trim() !== "" || hasAttachments;
   const blocked = blocksSend(chat.problem);
-  if (!isLive(chat)) return { send: "send", enabled: typed && !blocked };
+  if (!turnRuns(chat)) return { send: "send", enabled: typed && !blocked };
   if (answering) return { send: "send", enabled: typed && !chat.stopping };
   // Stopping: Send waits for the turn to end; queueing stays possible.
   if (chat.stopping) return { send: "send", enabled: false, queues: typed };
@@ -1205,9 +1313,13 @@ export function composerControls(
       send: "queue",
       enabled: typed,
       queues: typed,
-      effect: chat.steering.available
-        ? "The running turn can't take these images, so this waits for the turn to end."
-        : `${chat.harness.name} can't steer, so this waits for the turn to end.`,
+      effect:
+        changeHeld(chat.settings?.permission) ||
+        changePending(chat.settings?.permission)
+          ? "Your message will use the new permissions when the next turn starts."
+          : chat.steering.available
+            ? "The running turn can't take these images, so this waits for the turn to end."
+            : `${chat.harness.name} can't steer, so this waits for the turn to end.`,
     };
   return {
     send: "steer",
@@ -1225,13 +1337,36 @@ export type PendingRequest = Extract<TranscriptItem, { kind: "request" }>;
  * the question itself. It names the request group and is what arrives in the
  * live announcement.
  */
-export function requestLabel(request: PendingRequest, name?: RecordName) {
+export function requestLabel(
+  request: PendingRequest,
+  name?: RecordName,
+  /** The sub-agent that asks: an approval's title begins with its name. */
+  asker?: string,
+) {
   if (request.request === "question") return request.subject || request.title;
+  const by = asker ? `${cutTitle(asker)} ` : "";
   if (request.ticketd?.length)
-    return `${request.title} ${partsText(ticketdParts(request.ticketd, 2, name, true))}`;
+    return `${by}${request.title} ${partsText(ticketdParts(request.ticketd, 2, name, true))}`;
   return request.subject
-    ? `${request.title} ${request.subject}`
-    : request.title;
+    ? `${by}${request.title} ${request.subject}`
+    : `${by}${request.title}`;
+}
+
+/** A sub-agent's title as a request names it: cut at about 40 characters. */
+export function cutTitle(title: string, limit = 40) {
+  return title.length > limit
+    ? `${title.slice(0, limit - 1).trimEnd()}…`
+    : title;
+}
+
+/** The sub-agent a pending request is for, when it has one the Chat knows. */
+export function askerOf(
+  request: PendingRequest,
+  agents: readonly SubAgent[],
+): SubAgent | undefined {
+  return request.owner
+    ? agents.find((agent) => agent.id === request.owner)
+    : undefined;
 }
 
 /** What the message box says it will do with what is typed. */
@@ -1242,7 +1377,7 @@ export function composerPlaceholder(
   hasImages = false,
 ) {
   const harness = chat.harness.name;
-  if (!isLive(chat) || chat.stopping) return `Message ${harness}`;
+  if (!turnRuns(chat) || chat.stopping) return `Message ${harness}`;
   if (answering) return "Answer, or pick above";
   if (!canSteer(chat, hasImages)) return `Queue for ${harness}`;
   return afterDeny ? `Tell ${harness} what to do instead` : `Steer ${harness}`;
@@ -1566,3 +1701,127 @@ export const plainOutput = (output: string) => output.replace(ANSI, "");
 
 /** The word naming a Chat's rank, for one-line summaries such as a ticket's Chats line. */
 export const statusLabel = (status: ChatStatus) => status.label ?? status.word;
+
+/** The main agent's own items: everything no sub-agent owns. */
+export const mainItems = (items: TranscriptItem[]) =>
+  items.some((item) => item.owner)
+    ? items.filter((item) => !item.owner)
+    : items;
+
+/** How a sub-agent run reads aloud and in a row's suffix, by its status. */
+const SUB_AGENT_STATE_WORDS = {
+  running: "working",
+  completed: "finished",
+  failed: "failed",
+  stopped: "stopped",
+  lost: "contact lost",
+} as const;
+
+type RunLike = Pick<
+  ItemOf<"sub_agent">,
+  "status" | "run" | "started_at" | "ended_at"
+>;
+
+/** What a row's suffix says after the title, in order; outcome words weigh 500. */
+export function subAgentSuffix(
+  run: RunLike,
+  record: Pick<SubAgent, "capabilities"> | undefined,
+  now: number,
+): { text: string; outcome?: boolean }[] {
+  const parts: { text: string; outcome?: boolean }[] = [];
+  if (run.run > 1) parts.push({ text: "Resumed" });
+  const clock = subAgentClock(run, now);
+  switch (run.status) {
+    case "failed":
+      parts.push({ text: "Failed", outcome: true });
+      break;
+    case "stopped":
+      parts.push({ text: "Stopped", outcome: true });
+      break;
+    case "lost":
+      parts.push({ text: "Contact lost", outcome: true });
+      break;
+    case "completed":
+      if (record && !record.capabilities.end)
+        parts.push({ text: "Ended with the turn" });
+      else if (clock) parts.push({ text: clock });
+      break;
+    case "running":
+      if (clock) parts.push({ text: clock });
+      break;
+  }
+  return parts;
+}
+
+/** The run's clock: how long it has run, or how long it ran; nothing before a second. */
+export function subAgentClock(run: RunLike, now: number) {
+  const from = time(run.started_at);
+  const to = run.status === "running" ? now : time(run.ended_at ?? undefined);
+  return from !== undefined && to !== undefined && to - from >= 1000
+    ? duration(to - from)
+    : undefined;
+}
+
+/** "Sub-agent Find limiter bypasses, working, 2m 10s": a row's accessible name. */
+export function subAgentLabel(
+  title: string,
+  run: RunLike,
+  record: Pick<SubAgent, "capabilities"> | undefined,
+  now: number,
+) {
+  const ended =
+    run.status === "completed" && record && !record.capabilities.end;
+  const word = ended
+    ? "ended with the turn"
+    : SUB_AGENT_STATE_WORDS[run.status];
+  // An outcome word (failed, stopped, contact lost) says it all: no clock after it.
+  const clock =
+    run.status === "running" || run.status === "completed"
+      ? subAgentClock(run, now)
+      : undefined;
+  return `Sub-agent ${title}, ${word}${clock && !ended ? `, ${clock}` : ""}`;
+}
+
+/** What a marker says: why a turn stopped or failed, or a note from ticketd. */
+export function markerText(
+  item: ItemOf<"marker">,
+  harness: string,
+  detailShown: boolean,
+) {
+  const detail = item.message ? ` ${sentence(item.message)}` : "";
+  switch (item.reason) {
+    case "stopped":
+      return `You stopped this turn. Edits already made are kept.${detail}`;
+    case "quit":
+      return `Stopped when ticketd quit. Edits already made are kept.${detail}`;
+    case "turned_off":
+      return `Stopped when Chat was turned off. Edits already made are kept.${detail}`;
+    case "restore":
+      return `Stopped when a backup was restored. Edits already made are kept.${detail}`;
+    case "taken_over":
+      return `You took this run over. Edits already made are kept.${detail}`;
+    case "time_limit":
+      return `Stopped at the run's time limit. Edits already made are kept.${detail}`;
+    case "run_ended":
+      return `Stopped when its run step ended. Edits already made are kept.${detail}`;
+    case "trashed":
+      return `Stopped when the Chat was moved to the trash. Edits already made are kept.${detail}`;
+    case "explicit_resume":
+      return `Stopped when the Chat was resumed. Edits already made are kept.${detail}`;
+    case "storage_failed":
+      return `Stopped when Chat storage failed. Edits already made are kept.${detail}`;
+    case "stop_unconfirmed":
+      return `ticketd asked ${harness} to stop but it didn't confirm. It may still be running.${detail}`;
+    case "failed": {
+      const reason = detailShown ? "" : detail || ` ${harness} gave no reason.`;
+      return `This turn failed.${reason} What it finished before that is kept.`;
+    }
+    case "sub_agents_stopped": {
+      const n = item.count ?? 1;
+      return `You stopped ${n} ${n === 1 ? "sub-agent" : "sub-agents"}.`;
+    }
+    case "note":
+    case "warning":
+      return item.message ?? "";
+  }
+}

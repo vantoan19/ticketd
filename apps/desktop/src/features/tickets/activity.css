@@ -11,6 +11,12 @@
   align-items: center;
   gap: 6px;
   min-width: 0;
+  max-width: 100%;
+}
+/* Every part keeps its width but the credit chip, which gives way with an
+   ellipsis, so the time and Latest never sit under it. */
+.activity-author > * {
+  flex: none;
 }
 .activity-author > :last-child {
   min-width: 0;
@@ -153,6 +159,28 @@
 
 .activity-composer > .markdown-editor .cm-content {
   padding-block: 12px;
+}
+
+/* An Activity credited to a sub-agent: a quiet second name after its author. */
+.activity-author > .activity-subagent {
+  flex: 0 1 auto;
+}
+.activity-subagent > span {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.activity-subagent {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  min-width: 0;
+}
+.activity-subagent svg {
+  width: 14px;
+  height: 14px;
+  flex-shrink: 0;
 }
 
 /* In the timeline a picture stops at 240px tall; a click opens the viewer. */

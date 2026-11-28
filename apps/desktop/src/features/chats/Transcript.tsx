@@ -29,6 +29,8 @@ import {
   LoaderCircle,
   MessageSquareText,
   Pencil,
+  CornerDownRight,
+  RotateCcw,
   Search,
   Square,
   SquarePlus,
@@ -55,7 +57,9 @@ import {
   type TranscriptItem,
   type ItemOf,
   type LinkedRecord,
+  type SubAgent,
 } from "@/features/chats/client";
+import { NoteCaption } from "@/features/chats/SubAgentNotices";
 import {
   FilesSummary,
   PlanCard,
@@ -70,8 +74,10 @@ import {
   stepWords,
   targetLines,
   failureMarkerMatches,
+  markerText,
   workedFor,
   isLive,
+  turnRuns,
   lastOf,
   recordNamer,
   type RecordName,
@@ -81,7 +87,6 @@ import {
   type TurnRow,
   type ViewStep,
   goneWords,
-  sentence,
   turnClock,
   turnSpanText,
 } from "@/features/chats/model";
@@ -110,6 +115,18 @@ import {
 } from "@/features/chats/use-arrivals";
 import { Presence, Appear, Shimmer } from "@/components/ui/motion";
 import { useReading } from "@/features/chats/use-transcript-scroll";
+import { useNow } from "@/features/chats/use-now";
+import { SubAgentRow } from "@/features/chats/SubAgentRow";
+import {
+  InSubAgent,
+  SubAgentsContext,
+} from "@/features/chats/sub-agent-context";
+
+/**
+ * Opens a sub-agent's view by id, from the part that names it. `opener` is that
+ * part's `data-sub-agent` value: going back returns focus to it.
+ */
+export type ShowSubAgent = (agent: string, opener: string) => void;
 
 /** What transcript items can ask of the Chat that owns them. Keep the object stable. */
 export type TranscriptActions = {
@@ -118,6 +135,10 @@ export type TranscriptActions = {
   savePlan: (plan: ItemOf<"plan">) => void;
   /** Opens a file the turn changed; rejects with the reason it could not. */
   openFile: (path: string) => Promise<void>;
+  /** Opens a sub-agent's view from the row (`origin`) that asked; focus returns there. */
+  openSubAgent?: (item: ItemOf<"sub_agent">, origin: HTMLElement) => void;
+  /** Opens a sub-agent from a line that names it ("Started by ... · Title"). */
+  showSubAgent?: ShowSubAgent;
   exportAttachment: (file: ChatAttachment) => Promise<void>;
 };
 
@@ -328,6 +349,7 @@ function UserMessage({
           </Button>
         )}
         {caption && <div className="chat-caption">{caption}</div>}
+        {item.note && <NoteCaption note={item.note} />}
       </Arrives>
     </div>
   );
@@ -390,17 +412,6 @@ function ReplyActions({
       )}
     </div>
   );
-}
-
-/** The current time, ticking each second while `on`. */
-function useNow(on: boolean) {
-  const [now, setNow] = useState(() => Date.now());
-  useEffect(() => {
-    if (!on) return;
-    const timer = window.setInterval(() => setNow(Date.now()), 1000);
-    return () => window.clearInterval(timer);
-  }, [on]);
-  return now;
 }
 
 /** A Project, Document or Plan linked to the Chat, by its title. */
@@ -581,7 +592,7 @@ function StepDetail({
 }
 
 /** One 28px line: `[icon] words`, then a chevron when it opens. */
-function RowLine({
+export function RowLine({
   icon,
   line,
   children,
@@ -978,6 +989,12 @@ function Row({
       );
     case "note":
       return <Note item={row.item} />;
+    case "sub_agent":
+      return (
+        <Arrives id={row.key}>
+          <SubAgentRow item={row.item} onOpen={actions.openSubAgent} />
+        </Arrives>
+      );
     case "warnings":
       return <Warnings items={row.items} harness={harness} />;
     case "reasoning":
@@ -1108,6 +1125,43 @@ function StretchView({
   );
 }
 
+/**
+ * What a folded turn keeps visible under its work line, in order: receipts and
+ * notes, and its sub-agents as one group, so delegated work is never hidden
+ * behind "Worked for 30s".
+ */
+function KeptRows({
+  rows,
+  children,
+}: {
+  rows: TurnRow[];
+  children: (row: TurnRow) => ReactNode;
+}) {
+  const groups: TurnRow[][] = [];
+  for (const row of rows) {
+    const last = groups.at(-1);
+    if (last && (last[0]?.kind === "sub_agent") === (row.kind === "sub_agent"))
+      last.push(row);
+    else groups.push([row]);
+  }
+  return groups.map((group) =>
+    group[0]?.kind === "sub_agent" ? (
+      <div
+        key={group[0].key}
+        className="chat-turn-rows chat-subagent-kept"
+        role="group"
+        aria-label="Sub-agents"
+      >
+        {group.map(children)}
+      </div>
+    ) : (
+      <div key={group[0]?.key} className="chat-turn-rows">
+        {group.map(children)}
+      </div>
+    ),
+  );
+}
+
 /** Fold toggles the person made, by Chat and turn; they win for the session. */
 const toggles = new Map<string, boolean>();
 
@@ -1200,6 +1254,9 @@ const TurnView = memo(function TurnView({
           ref={part}
           className="chat-turnpart"
           data-fold={showRow ? "" : undefined}
+          data-subagents={
+            turn.rows.some((each) => each.kind === "sub_agent") ? "" : undefined
+          }
           data-anchor=""
         >
           {showRow && (
@@ -1238,9 +1295,9 @@ const TurnView = memo(function TurnView({
           ) : (
             // Collapsed, receipts and notes sit under the turn row in order.
             turn.rows.some((row) => row.kept === true) && (
-              <div className="chat-turn-rows">
-                {turn.rows.filter((each) => each.kept === true).map(row)}
-              </div>
+              <KeptRows rows={turn.rows.filter((each) => each.kept === true)}>
+                {row}
+              </KeptRows>
             )
           )}
         </div>
@@ -1331,45 +1388,6 @@ function TurnTime({ turn }: { turn: Turn }) {
   );
 }
 
-function markerText(
-  item: ItemOf<"marker">,
-  harness: string,
-  detailShown: boolean,
-) {
-  const detail = item.message ? ` ${sentence(item.message)}` : "";
-  switch (item.reason) {
-    case "stopped":
-      return `You stopped this turn. Edits already made are kept.${detail}`;
-    case "quit":
-      return `Stopped when ticketd quit. Edits already made are kept.${detail}`;
-    case "turned_off":
-      return `Stopped when Chat was turned off. Edits already made are kept.${detail}`;
-    case "restore":
-      return `Stopped when a backup was restored. Edits already made are kept.${detail}`;
-    case "taken_over":
-      return `You took this run over. Edits already made are kept.${detail}`;
-    case "time_limit":
-      return `Stopped at the run's time limit. Edits already made are kept.${detail}`;
-    case "run_ended":
-      return `Stopped when its run step ended. Edits already made are kept.${detail}`;
-    case "trashed":
-      return `Stopped when the Chat was moved to the trash. Edits already made are kept.${detail}`;
-    case "explicit_resume":
-      return `Stopped when the Chat was resumed. Edits already made are kept.${detail}`;
-    case "storage_failed":
-      return `Stopped when Chat storage failed. Edits already made are kept.${detail}`;
-    case "stop_unconfirmed":
-      return `ticketd asked ${harness} to stop but it didn't confirm. It may still be running.${detail}`;
-    case "failed": {
-      const reason = detailShown ? "" : detail || ` ${harness} gave no reason.`;
-      return `This turn failed.${reason} What it finished before that is kept.`;
-    }
-    case "note":
-    case "warning":
-      return item.message ?? "";
-  }
-}
-
 function StopMarker({
   item,
   harness,
@@ -1379,11 +1397,27 @@ function StopMarker({
   harness: string;
   detailShown?: boolean;
 }) {
+  const subAgent = useContext(InSubAgent);
+  const words = markerText(item, harness, detailShown);
+  // Stop all with no turn: the same quiet row a sub-agent's ending has.
+  if (item.reason === "sub_agents_stopped")
+    return (
+      <p className="chat-line chat-end-marker">
+        <span className="chat-row-icon" aria-hidden="true">
+          <Square size={12} fill="currentColor" className="chat-stop-mark" />
+        </span>
+        <span>{words}</span>
+      </p>
+    );
   return (
     <p className="chat-line">
       {/* Filled, the stop sign does not read as an empty checkbox. */}
       <Square size={12} fill="currentColor" aria-hidden />
-      <span>{markerText(item, harness, detailShown)}</span>
+      <span>
+        {subAgent
+          ? words.replace("This turn failed.", "This sub-agent failed.")
+          : words}
+      </span>
     </p>
   );
 }
@@ -1459,6 +1493,54 @@ const Item = memo(function Item({
       return null;
   }
 });
+
+/**
+ * Where a message would be, when the person did not start the turn: "Started by
+ * Claude Code: sub-agent finished · Title". The title opens that sub-agent. A turn the
+ * harness started with no sub-agent finished (it resumed after a background command) only
+ * says who started it; ticketd's wake always follows a sub-agent that finished.
+ */
+function StartedLine({
+  by,
+  finished,
+  agent,
+  opener,
+  onOpen,
+}: {
+  by: string;
+  finished: boolean;
+  agent: SubAgent | undefined;
+  opener: string;
+  onOpen: ShowSubAgent | undefined;
+}) {
+  return (
+    <div className="chat-part" data-kind="started" data-anchor="">
+      <p className="chat-started">
+        <span className="chat-row-icon" aria-hidden="true">
+          <CornerDownRight size={16} />
+        </span>
+        <span>
+          {finished
+            ? `Started by ${by}: sub-agent finished`
+            : `Started by ${by}`}
+        </span>
+        {agent && (
+          <>
+            <span aria-hidden="true">·</span>
+            <button
+              type="button"
+              className="chat-started-link"
+              data-sub-agent={opener}
+              onClick={() => onOpen?.(agent.id, opener)}
+            >
+              {agent.title}
+            </button>
+          </>
+        )}
+      </p>
+    </div>
+  );
+}
 
 /**
  * The live line: the spinner and what the turn is doing, shown only while no step
@@ -1632,11 +1714,20 @@ export function Transcript({
   newFrom,
   markerRef,
   contentRef,
+  lead,
+  trail,
+  readOnly: readOnlyView = false,
 }: {
+  /** A view that only reads (a sub-agent's): nothing in it saves or sends. */
+  readOnly?: boolean;
   chat: ChatState;
   items: TranscriptItem[];
   parts: TranscriptPart[];
   actions: TranscriptActions;
+  /** Before the first part: a sub-agent view's brief. */
+  lead?: ReactNode;
+  /** After the last part: how a sub-agent ended. */
+  trail?: ReactNode;
   /** Set while picking history; holds the chosen message ids. */
   picked?: ReadonlySet<string> | undefined;
   onPick?: (id: string, include: boolean) => void;
@@ -1645,7 +1736,7 @@ export function Transcript({
   contentRef?: Ref<HTMLDivElement>;
 }) {
   const harness = chat.harness.name;
-  const readOnly = chat.retention === "trashed";
+  const readOnly = readOnlyView || chat.retention === "trashed";
   const client = useChatClient();
   const chatId = chat.id;
   const folder = chat.folder.name;
@@ -1679,11 +1770,15 @@ export function Transcript({
             ...part.turn.rows.map((row) => row.key),
             ...(part.turn.final ? [part.turn.final.id] : []),
           ]
-        : [part.item.id],
+        : part.kind === "item"
+          ? [part.item.id]
+          : [],
     ),
     chat.catching_up,
   );
-  const working = chat.activity === "working";
+  // Only sub-agents run after the reply: the strip is the live signal, not a working line.
+  const turnOn = turnRuns(chat);
+  const working = chat.activity === "working" && turnOn;
   const opening = working && Boolean(chat.opening);
   const waiting = useMemo(
     () => steersAwaitingRead(items, working),
@@ -1741,118 +1836,158 @@ export function Transcript({
   // Words are streaming in now: the newest thing in the Chat is a response still arriving.
   const newest = lastOf(items, (item) => item.kind !== "turn");
   const writing = newest?.kind === "response" && newest.state === "streaming";
+  const agentsRun = parts.some(
+    (part) =>
+      part.kind === "turn" &&
+      part.turn.live &&
+      part.turn.rows.some(
+        (row) => row.kind === "sub_agent" && row.item.status === "running",
+      ),
+  );
   const empty = items.length === 0 && !chat.catching_up && !isLive(chat);
   const asking = items.some(
     (item) => item.kind === "request" && item.state === "pending",
   );
   return (
     <ArrivalsContext value={arrivals}>
-      <ChatFilesContext.Provider value={files}>
-        <SentLinksContext.Provider value={sentLinks}>
-          <UserMessageContext.Provider value={userMessages}>
-            <div className="chat-col" ref={contentRef}>
-              {empty && !readOnly && (
-                <p className="chat-empty">Say what you want done.</p>
-              )}
-              {parts.map((part) => {
-                const marker = newFrom !== undefined &&
-                  (part.kind === "turn"
-                    ? part.turn.ids.includes(newFrom)
-                    : part.item.id === newFrom) && (
-                    <NewMarker key="new" markerRef={markerRef ?? null} />
-                  );
-                return part.kind === "turn" ? (
-                  <Fragment key={part.turn.key}>
-                    {marker}
-                    <TurnView
-                      turn={part.turn}
-                      chatId={chat.id}
-                      harness={harness}
-                      readOnly={readOnly}
-                      actions={actions}
-                      live={live}
-                    />
-                  </Fragment>
-                ) : (
-                  <Fragment key={part.item.id}>
-                    {marker}
-                    <div
-                      className="chat-part"
-                      data-kind={part.item.kind}
-                      data-anchor=""
-                      data-seen={part.item.id}
-                    >
-                      <Item
-                        item={part.item}
+      <SubAgentsContext value={chat.sub_agents}>
+        <ChatFilesContext.Provider value={files}>
+          <SentLinksContext.Provider value={sentLinks}>
+            <UserMessageContext.Provider value={userMessages}>
+              <div className="chat-col" ref={contentRef}>
+                {empty && !readOnly && (
+                  <p className="chat-empty">Say what you want done.</p>
+                )}
+                {lead}
+                {parts.map((part) => {
+                  if (part.kind === "divider")
+                    return (
+                      <div
+                        key={part.key}
+                        className="chat-line chat-note chat-run-divider"
+                        role="separator"
+                        aria-label={part.label}
+                        data-anchor=""
+                      >
+                        <RotateCcw size={16} aria-hidden />
+                        <span>{part.label}</span>
+                      </div>
+                    );
+                  if (part.kind === "started")
+                    return (
+                      <StartedLine
+                        key={part.key}
+                        by={part.by === "ticketd" ? "ticketd" : harness}
+                        finished={
+                          part.by === "ticketd" || part.subAgent !== undefined
+                        }
+                        agent={chat.sub_agents.find(
+                          (one) => one.id === part.subAgent,
+                        )}
+                        opener={part.key}
+                        onOpen={actions.showSubAgent}
+                      />
+                    );
+                  const marker = newFrom !== undefined &&
+                    (part.kind === "turn"
+                      ? part.turn.ids.includes(newFrom)
+                      : part.item.id === newFrom) && (
+                      <NewMarker key="new" markerRef={markerRef ?? null} />
+                    );
+                  return part.kind === "turn" ? (
+                    <Fragment key={part.turn.key}>
+                      {marker}
+                      <TurnView
+                        turn={part.turn}
+                        chatId={chat.id}
                         harness={harness}
                         readOnly={readOnly}
                         actions={actions}
+                        live={live}
                       />
-                    </div>
-                  </Fragment>
-                );
-              })}
-              {chat.catching_up && (
-                <>
-                  <div
-                    className="chat-skel chat-skel-long"
-                    aria-hidden="true"
-                  />
-                  <div
-                    className="chat-skel chat-skel-short"
-                    aria-hidden="true"
-                  />
-                </>
-              )}
-              {chat.catching_up ? (
-                <WorkingLine label="Catching up…" />
-              ) : chat.activity === "waiting" ? (
-                // The dock already shows the request; the slot keeps its height.
-                chat.has_composer && asking ? (
-                  <WorkingSlot />
-                ) : (
-                  <WorkingLine label="Waiting for you" spinner={false} />
-                )
-              ) : working && chat.stopping ? (
-                <WorkingLine label="Stopping…" spinner={!stepRuns} />
-              ) : working && chat.opening ? (
-                <WorkingLine
-                  key="opening"
-                  label={
-                    chat.opening === "resume"
-                      ? `Resuming the ${harness} session…`
-                      : `Starting ${harness}…`
-                  }
-                  fromShown
-                />
-              ) : // After an unconfirmed stop the open turn row and the notice say it.
-              working &&
-                !parts.some(
-                  (part) => part.kind === "turn" && part.turn.unconfirmed,
-                ) ? (
-                <BetweenSteps running={stepRuns}>
-                  {writing ? (
-                    // Words are arriving: the one live line says so, with its own clock.
-                    <WorkingLine key="writing" label="Writing" fromShown />
-                  ) : chat.doing ? (
-                    <WorkingLine
-                      label={chat.doing.label}
-                      since={chat.doing.since}
-                      items={items}
-                    />
+                    </Fragment>
                   ) : (
-                    <WorkingLine label="Working…" />
-                  )}
-                </BetweenSteps>
-              ) : (
-                // While a step row holds the spinner the line's place is kept,
-                // so the end of the transcript does not bounce between rows.
-                working && <WorkingSlot />
-              )}
-            </div>
-          </UserMessageContext.Provider>
-        </SentLinksContext.Provider>
-      </ChatFilesContext.Provider>
+                    <Fragment key={part.item.id}>
+                      {marker}
+                      <div
+                        className="chat-part"
+                        data-kind={part.item.kind}
+                        data-anchor=""
+                        data-seen={part.item.id}
+                      >
+                        <Item
+                          item={part.item}
+                          harness={harness}
+                          readOnly={readOnly}
+                          actions={actions}
+                        />
+                      </div>
+                    </Fragment>
+                  );
+                })}
+                {trail}
+                {chat.catching_up && (
+                  <>
+                    <div
+                      className="chat-skel chat-skel-long"
+                      aria-hidden="true"
+                    />
+                    <div
+                      className="chat-skel chat-skel-short"
+                      aria-hidden="true"
+                    />
+                  </>
+                )}
+                {chat.catching_up ? (
+                  <WorkingLine label="Catching up…" />
+                ) : chat.activity === "waiting" && turnOn ? (
+                  // The dock already shows the request; the slot keeps its height.
+                  chat.has_composer && asking ? (
+                    <WorkingSlot />
+                  ) : (
+                    <WorkingLine label="Waiting for you" spinner={false} />
+                  )
+                ) : working && chat.stopping ? (
+                  <WorkingLine label="Stopping…" spinner={!stepRuns} />
+                ) : working && chat.opening ? (
+                  <WorkingLine
+                    key="opening"
+                    label={
+                      chat.opening === "resume"
+                        ? `Resuming the ${harness} session…`
+                        : `Starting ${harness}…`
+                    }
+                    fromShown
+                  />
+                ) : // After an unconfirmed stop the open turn row and the notice say it.
+                working &&
+                  !parts.some(
+                    (part) => part.kind === "turn" && part.turn.unconfirmed,
+                  ) ? (
+                  <BetweenSteps running={stepRuns}>
+                    {writing ? (
+                      // Words are arriving: the one live line says so, with its own clock.
+                      <WorkingLine key="writing" label="Writing" fromShown />
+                    ) : agentsRun ? null : chat.doing ? ( // The main agent only waits on sub-agents: their rows spin and the strip counts them, so no second line.
+                      <WorkingLine
+                        label={chat.doing.label}
+                        since={chat.doing.since}
+                        items={items}
+                      />
+                    ) : (
+                      <WorkingLine label="Working…" />
+                    )}
+                  </BetweenSteps>
+                ) : (
+                  // While a step row holds the spinner the line's place is kept,
+                  // so the end of the transcript does not bounce between rows.
+                  working && <WorkingSlot />
+                )}
+              </div>
+            </UserMessageContext.Provider>
+          </SentLinksContext.Provider>
+        </ChatFilesContext.Provider>
+      </SubAgentsContext>
     </ArrivalsContext>
   );
 }

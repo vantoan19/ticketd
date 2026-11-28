@@ -267,6 +267,11 @@ pub(super) fn unattended_options(unattended: &Unattended) -> Value {
     } else {
         disallowed.extend(web);
     }
+    // No agent starts sub-agents (#613): the `Agent` tool needs no approval, so "don't
+    // ask" does not stop it and an allowlist only auto-approves what it names. A deny
+    // rule removes the tool, and Claude Code applies it inside sub-agents too. Runs
+    // end at the first turn end, which would cut a background sub-agent off.
+    disallowed.push("Agent".to_owned());
     const SHELLS: [&str; 2] = ["Bash", "PowerShell"];
     // The ticketd CLI is always allowed, by its name, with or without `.exe`.
     for command in ["ticketd", "ticketd.exe"] {
@@ -392,6 +397,26 @@ fn capabilities() -> Capabilities {
             reason: "The bridge can add input to a running turn, but this has not been \
                      validated against a live Claude Code; follow-ups stay queued"
                 .to_owned(),
+        },
+    }
+}
+
+/// The real Claude runtime over scripted pipes, for `crate::host_script`.
+#[cfg(test)]
+pub(crate) fn scripted() -> crate::host_script::Runtime {
+    crate::host_script::Runtime {
+        real: Arc::new(ClaudeAdapter::new("/opt/claude/bridge")),
+        capabilities: capabilities(),
+        open: |io, request| {
+            Box::pin(async move {
+                runtime::open_over(
+                    io,
+                    &request,
+                    Path::new("/opt/claude/bin/claude"),
+                    Options::default(),
+                )
+                .await
+            })
         },
     }
 }

@@ -5,7 +5,7 @@ use super::{CHAT_AGENT_CHANGES_LIMIT, CHAT_AGENT_EXCERPT_LIMIT, ChatAgentChange,
 use crate::Error;
 
 const SUBMISSION_KEY: &str = "submission:";
-const FEED_HEADS: &str = "json_object(
+pub(super) const FEED_HEADS: &str = "json_object(
     'history', COALESCE((SELECT seq FROM sqlite_sequence WHERE name = 'ticket_history'), 0),
     'activities', COALESCE((SELECT seq FROM sqlite_sequence WHERE name = 'activities'), 0))";
 
@@ -152,20 +152,30 @@ fn decode_boundary(payload: Option<&str>) -> Result<Option<FeedHeads>, Error> {
 /// writes from current CLIs. When a legacy Turn lacks a recorded end boundary,
 /// its receipt keeps old tags at an exact time tie and skips these newer tags.
 /// An older reader still joins each write by its usual ID or number.
-pub(super) fn prepare_writer(connection: &Connection, chat_id: &str) -> Result<(), Error> {
+///
+/// `call_id` is the key the harness gave this one command (`CODEX_TOOL_CALL_ID`), kept
+/// with the write so the agent that ran the command can be told exactly.
+pub(super) fn prepare_writer(
+    connection: &Connection,
+    chat_id: &str,
+    call_id: Option<&str>,
+) -> Result<(), Error> {
     connection.execute_batch(
-        "CREATE TEMP TABLE IF NOT EXISTS acting_chat (id TEXT NOT NULL);
+        "CREATE TEMP TABLE IF NOT EXISTS acting_chat (id TEXT NOT NULL, call_id TEXT);
          DELETE FROM acting_chat;
          CREATE TEMP TRIGGER IF NOT EXISTS acting_chat_status AFTER INSERT ON main.ticket_history WHEN NEW.kind = 'status' BEGIN
-             INSERT INTO chat_record_writes (chat_id, history_number, activity_id)
-             SELECT id, NEW.number, X'' FROM acting_chat;
+             INSERT INTO chat_record_writes (chat_id, history_number, activity_id, call_id)
+             SELECT id, NEW.number, X'', call_id FROM acting_chat;
          END;
          CREATE TEMP TRIGGER IF NOT EXISTS acting_chat_update AFTER INSERT ON main.activities BEGIN
-             INSERT INTO chat_record_writes (chat_id, activity_id, history_number)
-             SELECT id, NEW.id, X'' FROM acting_chat;
+             INSERT INTO chat_record_writes (chat_id, activity_id, history_number, call_id)
+             SELECT id, NEW.id, X'', call_id FROM acting_chat;
          END;",
     )?;
-    connection.execute("INSERT INTO acting_chat (id) VALUES (?1)", [chat_id])?;
+    connection.execute(
+        "INSERT INTO acting_chat (id, call_id) VALUES (?1, ?2)",
+        params![chat_id, call_id],
+    )?;
     Ok(())
 }
 

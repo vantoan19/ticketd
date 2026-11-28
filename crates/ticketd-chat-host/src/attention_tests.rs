@@ -24,6 +24,7 @@ fn chat(seen_through: i64) -> Chat {
         read_through: None,
         marked_unread: false,
         muted: false,
+        restart_notice: Vec::new(),
         created_at: String::new(),
     }
 }
@@ -54,6 +55,8 @@ fn facts<'a>(chat: &'a Chat, live: &'a ChatLive, last_turn: Option<&'a ChatTurn>
         first_change: None,
         files_changed: None,
         last_response: Some("All **done**. See `x`."),
+        stopped_sub_agents: None,
+        asking: &[],
     }
 }
 
@@ -221,6 +224,62 @@ fn a_finished_turn_is_done_until_seen_then_idle_in_words() {
     assert!(!seen.unread());
 }
 
+fn approval(id: &str, command: &str) -> LiveInteraction {
+    LiveInteraction {
+        interaction_id: id.to_owned(),
+        kind: InteractionKind::Approval {
+            description: command.to_owned(),
+            reason: None,
+            decisions: Vec::new(),
+        },
+    }
+}
+
+#[test]
+fn a_sub_agents_approval_names_it_in_the_row_and_the_notification_says_the_card() {
+    let mut live = idle();
+    live.activity = crate::Activity::WaitingForYou;
+    live.sub_agents = 1;
+    live.interactions
+        .push(approval("i", "npm test -- rate-limit"));
+    let asking = [Asking {
+        interaction_id: "i".to_owned(),
+        asker: "Check limiter test coverage".to_owned(),
+        card: "Check limiter test coverage wants to run npm test -- rate-limit".to_owned(),
+    }];
+    let status = status(&Facts {
+        activity: "waiting",
+        asking: &asking,
+        ..facts(&chat(0), &live, None)
+    });
+    // It outranks the work the sub-agent is part of, and the row says who asks.
+    assert_eq!(status.rank, Rank::Approval);
+    assert_eq!(
+        status.line(),
+        "Approval needed · Check limiter test coverage"
+    );
+    assert_eq!(
+        status.notification(),
+        "Check limiter test coverage wants to run npm test -- rate-limit"
+    );
+
+    // The main agent's approval, with another request listed as a sub-agent's, keeps what
+    // it would run, and a notification says the row.
+    let mut main = idle();
+    main.interactions.push(approval("i", "npm test"));
+    let other = [Asking {
+        interaction_id: "elsewhere".to_owned(),
+        ..asking[0].clone()
+    }];
+    let status = super::status(&Facts {
+        activity: "waiting",
+        asking: &other,
+        ..facts(&chat(0), &main, None)
+    });
+    assert_eq!(status.line(), "Approval needed · npm test");
+    assert_eq!(status.notification(), status.line());
+}
+
 #[test]
 fn a_request_outranks_work_and_a_failure_waits_only_until_seen() {
     let mut live = idle();
@@ -330,6 +389,7 @@ fn done(line: &str) -> Status {
         word: "Done".to_owned(),
         label: "Done".to_owned(),
         detail: Some(line.to_owned()),
+        announcement: None,
     }
 }
 
@@ -353,6 +413,7 @@ fn done_waits_out_the_quiet_window_and_a_new_turn_cancels_it() {
         word: "Working".to_owned(),
         label: "Working".to_owned(),
         detail: None,
+        announcement: None,
     };
     // What is there at startup is not announced again.
     assert!(
@@ -404,6 +465,7 @@ fn a_chat_in_view_muted_or_with_notifications_off_is_never_announced() {
         word: "Approval needed".to_owned(),
         label: "Approval needed".to_owned(),
         detail: None,
+        announcement: None,
     };
     let idle = Status {
         rank: Rank::Idle,
@@ -411,6 +473,7 @@ fn a_chat_in_view_muted_or_with_notifications_off_is_never_announced() {
         word: "Idle".to_owned(),
         label: "Idle".to_owned(),
         detail: None,
+        announcement: None,
     };
     let open = HashSet::from(["c".to_owned()]);
     let nobody = HashSet::new();
@@ -538,4 +601,90 @@ fn a_reply_with_long_spacing_keeps_whole_words_not_a_fragment() {
     let mut row = facts(&chat, &live, Some(&ended));
     row.last_response = Some(&spaced);
     assert_eq!(seen_words(row), format!("A {}", "b".repeat(40)));
+}
+
+#[test]
+fn sub_agents_that_lost_contact_are_a_muted_line_with_no_dot_until_the_next_message_tells_the_agent()
+ {
+    let live = idle();
+    let ended = turn(5, TurnEnding::Completed);
+    let mut seen = chat(5);
+    seen.restart_notice = vec!["a".to_owned(), "b".to_owned()];
+    let status = status(&facts(&seen, &live, Some(&ended)));
+    assert_eq!(
+        (status.rank, status.word.as_str(), status.unread()),
+        (Rank::Idle, "2 sub-agents lost contact", false)
+    );
+    assert_eq!(status.detail, None);
+
+    seen.restart_notice.truncate(1);
+    assert_eq!(
+        super::status(&facts(&seen, &live, Some(&ended))).word,
+        "1 sub-agent lost contact"
+    );
+
+    // What needs the person, or has not been seen, still comes first.
+    let unseen = chat(0);
+    let mut unseen = unseen;
+    unseen.restart_notice = vec!["a".to_owned()];
+    let status = super::status(&facts(&unseen, &live, Some(&ended)));
+    assert_eq!((status.rank, status.word.as_str()), (Rank::Done, "Done"));
+    let mut working = facts(&seen, &live, Some(&ended));
+    working.activity = "working";
+    assert_eq!(super::status(&working).rank, Rank::Working);
+
+    // Told: the row says what the Chat did last again.
+    seen.restart_notice.clear();
+    assert_eq!(
+        super::status(&facts(&seen, &live, Some(&ended))).word,
+        "All done. See x."
+    );
+}
+
+/// The Chats list row and the sidebar count a working Chat's sub-agents in the words they
+/// show ("Working · 2 sub-agents"), with the singular for one and no count for none, and
+/// the word that names the rank stays "Working" for the one-line summaries.
+#[test]
+fn a_working_row_counts_the_sub_agents_that_run_in_words() {
+    for (count, line, detail) in [
+        (0, "Working", None),
+        (1, "Working · 1 sub-agent", Some("1 sub-agent")),
+        (2, "Working · 2 sub-agents", Some("2 sub-agents")),
+        (11, "Working · 11 sub-agents", Some("11 sub-agents")),
+    ] {
+        let mut live = idle();
+        live.sub_agents = count;
+        // With no turn running, sub-agents alone hold the Chat working ("waiting" is a
+        // turn that waits for a sub-agent).
+        for activity in ["working", "waiting"] {
+            let status = super::status(&Facts {
+                activity,
+                ..facts(&chat(0), &live, None)
+            });
+            assert_eq!(status.rank, Rank::Working, "{count} sub-agents, {activity}");
+            assert_eq!(status.line(), line, "{count} sub-agents, {activity}");
+            assert_eq!(status.word, "Working");
+            assert_eq!(status.label, "Working");
+            assert_eq!(status.detail.as_deref(), detail);
+            assert_eq!(status.notification(), line);
+        }
+    }
+
+    // A Chat that opens its session says so, not how many sub-agents it holds.
+    let mut live = idle();
+    live.sub_agents = 2;
+    let status = super::status(&Facts {
+        activity: "working",
+        opening: true,
+        ..facts(&chat(0), &live, None)
+    });
+    assert_eq!(status.line(), "Working · Starting");
+
+    // Not working: a Chat that rests says nothing of sub-agents it no longer runs.
+    let live = idle();
+    let status = super::status(&Facts {
+        activity: "idle",
+        ..facts(&chat(0), &live, None)
+    });
+    assert!(!status.line().contains("sub-agent"), "{}", status.line());
 }

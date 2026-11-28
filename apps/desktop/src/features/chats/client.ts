@@ -1,6 +1,7 @@
 import { createContext, useContext } from "react";
 import { z } from "zod";
 import { attachmentSchema } from "@/lib/api/attachments";
+import type { TicketAgent } from "@/features/chats/ticket-agents";
 import type { ChatAttachmentInput } from "@/features/chats/composer-attachments";
 
 /**
@@ -390,8 +391,106 @@ const requestOptionSchema = z.object({
   warning: z.string().nullish(),
 });
 
-/** `turn_id`: the turn that owns the item, when one does. */
-const item = { id: z.string(), at: z.string(), turn_id: z.string().nullish() };
+/**
+ * `turn_id`: the turn that owns the item, when one does (a sub-agent's run is a
+ * turn of its own, so its items carry the run's id). `owner`: the id of the
+ * sub-agent (`SubAgent.id`) whose work the item is; absent or null means the
+ * Chat's main agent. The main transcript shows only the main agent's items.
+ */
+const item = {
+  id: z.string(),
+  at: z.string(),
+  turn_id: z.string().nullish(),
+  owner: z.string().nullish(),
+};
+
+/** How a sub-agent, or one run of it, stands. */
+export const subAgentStatusSchema = z.enum([
+  "running",
+  "completed",
+  "failed",
+  "stopped",
+  /** ticketd quit while it ran: nothing says whether it still does. */
+  "lost",
+]);
+export type SubAgentStatus = z.infer<typeof subAgentStatusSchema>;
+
+/** Who ended a stopped sub-agent. */
+export const subAgentStopperSchema = z.enum([
+  "person",
+  "ticketd",
+  "main_agent",
+]);
+
+/** What the Chat's harness lets ticketd show of its sub-agents. Defaults are a full-featured harness. */
+export const subAgentCapabilitiesSchema = z.object({
+  /** The harness reports the prompt the sub-agent was given (Codex does not). */
+  brief: z.boolean().default(true),
+  /** It reports the sub-agent's own messages (Antigravity does not). */
+  text: z.boolean().default(true),
+  /** It reports the sub-agent's own reasoning (Codex and Antigravity do not). */
+  reasoning: z.boolean().default(true),
+  /** It reports the model the sub-agent runs on. */
+  model: z.boolean().default(true),
+  /** It reports when the sub-agent finishes (Antigravity does not: it ends with the turn). */
+  end: z.boolean().default(true),
+  /** One sub-agent can be stopped alone (Stop one). */
+  stop: z.boolean().default(false),
+  /** A lost sub-agent can be resumed by the main agent (Claude Code). */
+  resume: z.boolean().default(false),
+});
+export type SubAgentCapabilities = z.infer<typeof subAgentCapabilitiesSchema>;
+
+/**
+ * One sub-agent of a Chat: started by the Chat's harness, not by the person. It
+ * keeps one record across its runs (a resume adds a run); `status`, `started_at`
+ * and `ended_at` are those of its latest run.
+ */
+export const subAgentSchema = z.object({
+  /** Stable within the Chat; what `owner` and `parent` name. */
+  id: z.string(),
+  /** The harness's own id for it. */
+  native_id: z.string().nullish(),
+  /** The sub-agent that started this one; null or absent when the main agent did. */
+  parent: z.string().nullish(),
+  /** What the sub-agent is called: the harness's own description of the work. */
+  title: z.string(),
+  /** The kind the harness gave it ("Explore"). */
+  type: z.string().nullish(),
+  /** The model it ran, as readable words ("Claude Haiku 5.5"). */
+  model: z.string().nullish(),
+  status: subAgentStatusSchema,
+  /** Who stopped it, when `status` is `stopped`. */
+  stopped_by: subAgentStopperSchema.nullish(),
+  /**
+   * Why ticketd stopped it (`stopped_by` is `ticketd`): the host's StopReason
+   * key, such as `turned_off`, `restore`, `time_limit`, `run_ended`, `trashed`,
+   * `explicit_resume` or `storage_failed`. Absent: no reason is said.
+   */
+  stop_reason: z.string().nullish(),
+  started_at: z.string(),
+  ended_at: z.string().nullish(),
+  /** How many runs it has had: 2 or more once it was resumed. */
+  runs: z.number().int().positive().default(1),
+  /** What it was asked. `text` is absent when the harness does not report it. */
+  brief: z
+    .object({
+      text: z.string().nullish(),
+      /** Who asked: the main agent, or the sub-agent named by `parent`. */
+      source: z.enum(["main_agent", "sub_agent"]),
+    })
+    .nullish(),
+  capabilities: subAgentCapabilitiesSchema.default({
+    brief: true,
+    text: true,
+    reasoning: true,
+    model: true,
+    end: true,
+    stop: false,
+    resume: false,
+  }),
+});
+export type SubAgent = z.infer<typeof subAgentSchema>;
 
 const planStepSchema = z.object({
   text: z.string(),
@@ -422,6 +521,30 @@ const chatAttachmentSchema = z.object({
   media_type: z.string(),
 });
 export type ChatAttachment = z.infer<typeof chatAttachmentSchema>;
+/**
+ * A turn the person did not start (T-UB270): the harness resumed the main agent
+ * after a sub-agent finished ("Started by Claude Code: sub-agent finished"), or
+ * ticketd woke it ("Started by ticketd: sub-agent finished").
+ */
+export const turnOriginSchema = z.object({
+  by: z.enum(["harness", "ticketd"]),
+  /** The `SubAgent.id` whose finishing started the turn; the line's title opens it. */
+  sub_agent: z.string().nullish(),
+});
+export type TurnOrigin = z.infer<typeof turnOriginSchema>;
+
+/**
+ * What ticketd added to a message the person sent. `lost_sub_agents`: the sub-agents
+ * that lost contact when ticketd quit, and the exact `text` it told the harness.
+ */
+export const messageNoteSchema = z.object({
+  kind: z.literal("lost_sub_agents"),
+  /** `SubAgent.id`s the note names, in the order it names them. */
+  sub_agents: z.array(z.string()),
+  text: z.string(),
+});
+export type MessageNote = z.infer<typeof messageNoteSchema>;
+
 export const transcriptItemSchema = z.discriminatedUnion("kind", [
   z.object({
     ...item,
@@ -441,6 +564,8 @@ export const transcriptItemSchema = z.discriminatedUnion("kind", [
     /** Images sent with the message, kept as Attachments. */
     images: z.array(attachmentSchema).optional(),
     attachments: z.array(chatAttachmentSchema).optional(),
+    /** What ticketd added to this message, shown under it ("With a note on 2 lost sub-agents"). */
+    note: messageNoteSchema.nullish(),
   }),
   z.object({
     ...item,
@@ -481,6 +606,11 @@ export const transcriptItemSchema = z.discriminatedUnion("kind", [
       "failed",
       "lost",
     ]),
+    /**
+     * Who started the turn when the person did not. Absent: the person did, with
+     * the message that opens the turn.
+     */
+    origin: turnOriginSchema.nullish(),
   }),
   z.object({
     ...item,
@@ -528,9 +658,13 @@ export const transcriptItemSchema = z.discriminatedUnion("kind", [
       "failed",
       "note",
       "warning",
+      /** The person stopped every running sub-agent while no turn ran. */
+      "sub_agents_stopped",
     ]),
     /** Required reading for `failed` and `note`; optional detail otherwise. */
     message: z.string().nullish(),
+    /** With `sub_agents_stopped`: how many sub-agents it stopped ("You stopped 2 sub-agents."). */
+    count: z.number().int().positive().nullish(),
   }),
   z.object({
     ...item,
@@ -557,6 +691,26 @@ export const transcriptItemSchema = z.discriminatedUnion("kind", [
     text: z.string().nullish(),
     /** A heading the harness itself marked. */
     heading: z.string().nullish(),
+  }),
+  /**
+   * One run of a sub-agent, as the row in its parent's transcript says it. The
+   * row's `owner` is the parent sub-agent (absent: the main agent), so the main
+   * transcript shows only direct sub-agents. A resumed sub-agent has one row
+   * for each run, in the turn that started it.
+   */
+  z.object({
+    ...item,
+    kind: z.literal("sub_agent"),
+    /** `SubAgent.id`; the record is in `ChatState.sub_agents`. */
+    sub_agent: z.string(),
+    /** Which run of the sub-agent this row is: 1, or 2 after a resume. */
+    run: z.number().int().positive().default(1),
+    /** Where this run stands. */
+    status: subAgentStatusSchema,
+    stopped_by: subAgentStopperSchema.nullish(),
+    stop_reason: z.string().nullish(),
+    started_at: z.string(),
+    ended_at: z.string().nullish(),
   }),
   /** A turn's plan as the harness last reported it. */
   z.object({
@@ -749,6 +903,29 @@ export const chatStateSchema = z.object({
     .default([]),
   /** The last transcript item the person had in view, kept by the host: the New marker goes after it. */
   read_through: z.string().nullish(),
+  /** Every sub-agent the harness started in this Chat, oldest first. */
+  sub_agents: z.array(subAgentSchema).default([]),
+  /**
+   * Whether a main-agent turn is running. Absent or null: what `activity` says
+   * (working or waiting means a turn runs). `false` while `activity` is working
+   * or waiting means only sub-agents run: the composer says "Message {Harness}"
+   * and sends a new turn, Stop all says "Stop 2 sub-agents", and the transcript
+   * has no working line (the strip is the live signal).
+   */
+  turn_running: z.boolean().nullish(),
+  /**
+   * Set while ticketd keeps a note on lost sub-agents for the person's next
+   * message: the tray says so. Cleared when the message is sent (the note then
+   * shows on that message as `note`).
+   */
+  restart_notice: z
+    .object({
+      /** `SubAgent.id`s that lost contact when ticketd quit. */
+      sub_agents: z.array(z.string()),
+      /** The harness can resume them (Claude Code); Codex cannot. */
+      resume: z.boolean(),
+    })
+    .nullish(),
 });
 export type ChatState = z.infer<typeof chatStateSchema>;
 
@@ -944,6 +1121,11 @@ export interface ChatClient {
   ): Promise<void>;
   /** The Chats outside the trash linked to one record. Refetch on `revision`. */
   linkedTo(link: LinkRef): Promise<ChatSummary[]>;
+  /**
+   * The agents at work on one ticket, in display order (T-UB271 reads it,
+   * T-UB238 supplies it). Refetch on `revision`; an empty list is no agent at work.
+   */
+  ticketAgents(ticketId: string): Promise<TicketAgent[]>;
   /** Files and folders under `folder` matching `query`, for the composer's `@` menu. */
   folderFiles(folder: string, query: string): Promise<FolderFile[]>;
   removeQueued(id: string, queuedId: string): Promise<void>;
@@ -967,6 +1149,8 @@ export interface ChatClient {
   /** Sends one queued message now, alone: it steers the turn or starts one; a paused queue stays paused. */
   sendQueuedNow(id: string, queuedId: string): Promise<void>;
   stop(id: string): Promise<void>;
+  /** Stops one sub-agent, where its record's `capabilities.stop` allows. No confirmation. */
+  stopSubAgent(id: string, subAgent: string): Promise<void>;
   /** Rejects with a `stale` ChatError unless the request is the live one. */
   answer(id: string, requestId: string, answer: RequestAnswer): Promise<void>;
   /** The person's decision about a submission that may or may not have arrived. */

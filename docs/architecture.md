@@ -165,6 +165,25 @@ Prompt at a time and ends its Turn on the Prompt reply. It applies partial
 tool updates by native tool ID and preserves native approval choice IDs until
 a person responds.
 
+Antigravity's sub-agents are child conversations that make tool calls on the
+main agent's session, with IDs of the form `<childId>:call_...` ([ADR
+0029](adr/0029-sub-agents-are-a-lane-of-their-own-in-a-chat.md)). The adapter
+groups those calls by the prefix: a child becomes a sub-agent at its first
+call, its Steps belong to it (an approval it asks names that Step), and it never
+joins the main agent's Steps, text or reasoning. `invoke_subagent`, the main agent's own launch call,
+completes at launch and names no child, so the child's title and brief come from
+it only when exactly one launch call is open when the child appears (several
+parallel launches cannot be told apart, and a wrong brief is worse than none).
+The Chat's model is the sub-agent's. Antigravity holds the Prompt open until the
+children finish and reports neither their messages nor their end, so a
+sub-agent ends with the Prompt (Stopped by the person when the Prompt was
+cancelled) and the descriptor declares no sub-agent text, end or Stop for one.
+Updates that arrive with no Prompt in flight open nothing. The CLI credits a
+write exactly from `ANTIGRAVITY_SOURCE_METADATA`: the descriptor names the
+variable and where the tool call ID is in its JSON, and the Step whose ID ends
+with it is the writer's. Nothing reads Antigravity's files and no child is
+attached with `session/load`.
+
 During ordinary Chat resume, if Antigravity reports missing history for the
 requested Session or an unsupported resume method, the supervisor posts a
 notice and opens an empty Session without replaying the transcript. Other
@@ -193,6 +212,133 @@ interaction state. A small ordered change log supports UI reconnection. These
 records are authoritative for ticketd's history; reconstructing a Chat from all
 raw provider events is not required. Exact table names and schema are internal
 implementation details.
+
+A Step or an approval belongs to an owner, the Chat's main agent or one sub-agent
+its harness started (format 105), and its turn is optional: work a sub-agent does
+outside the main agent's turns has no turn. The owner is the harness's native ID of
+the sub-agent within the Chat, and absent for the main agent.
+
+A sub-agent is a record of its own, keyed by the Chat and that native ID. It holds the
+sub-agent that started it (for nesting), the Step that started it, whether it runs in
+the background, and the harness's own words about it (description, type, prompt and
+model) as one stored payload: title, type and model are read from the payload when a
+view is built, as Step kinds are. Each time the harness starts or resumes it is a run,
+which is a row in the Chat's history, so it shows where it began; a run knows the turn
+that was active then, how it ended and who stopped it. Output of an earlier run that
+arrives late is dropped. The Steps a sub-agent owns belong to the run they were recorded
+in, told by their position between the runs'. A foreground run ends with the turn that
+started it, the way the turn ended, and every run still going when contact is lost is
+lost. For Claude Code the bridge forwards agent-kind task events as typed events (shells,
+monitors, ambient and transcript-less tasks are not sub-agents) and tags every frame with
+the tool use that started the task. The adapter routes a tagged frame to its
+sub-agent; a frame that arrives before its task is announced waits for it. A sub-agent's
+to-do list is one of its own Steps: only the main agent's plan is the turn's.
+A sub-agent's words are its own too: an assistant message has the same optional owner
+(`chat_messages.sub_agent_id`), and so do the reasoning and files records the host keeps
+for a run (a sub-agent's edits are its run's files, never the turn's). Its messages come
+whole, not streamed, and never become the Chat's last response, the Chat list's preview
+or history a fresh session carries. Its final report is its last message: Claude Code's
+task notification repeats it, so the host stores the notification's summary only when no
+message said it.
+
+For Codex a sub-agent is a child thread of the Chat's thread, announced by a
+`subAgentActivity` item (multi-agent v2) or a `spawnAgent` call (v1). The adapter routes
+every notification by its `threadId`: a child's `turn/started` starts a run of its record
+(a later one is the next run), its `turn/completed` ends it as completed, failed or
+stopped, and none of it is a turn of the Chat or touches the thread's active turn. Codex
+children run on when their parent's turn ends or is interrupted, so they are background
+sub-agents and Stop interrupts the Chat's turn and then each child's live turn through
+`HarnessRuntime::interrupt_sub_agents`, also when no turn runs. A child's messages are
+owned assistant messages, as a Claude sub-agent's are, so nothing that reads the Chat's
+own messages takes them for the main agent's. Codex reports no brief.
+
+A sub-agent's approval lives as long as the sub-agent that asked, not the turn it arrived
+in. Claude Code names the asker in `canUseTool`'s `agentID` (the task ID the bridge
+forwards as `agent_id`), and Codex sends it on the child's own thread and turn; the adapter
+reports the request with that owner and no turn, so it opens no turn, is not refused while
+another turn runs, and no turn's end withdraws it. It is withdrawn when the sub-agent's run
+ends (the adapter reports the withdrawal first; the supervisor covers a harness that does
+not) or when the harness process goes, and the answer is written back on the harness's own
+request. The Chat is waiting for the person while one is open, with no turn running. The
+request card is worded without the asker's name ("wants to run"): the interface writes the
+sub-agent's title before it, and the Chats list row ("Approval needed · {sub-agent}") and the
+notification (the card's title) say it too. The conformance suite holds every adapter to it
+(`a_sub_agents_approval_outlives_the_parents_turn`, `a_sub_agents_approval_goes_with_its_asker`),
+each declaring its differences: Antigravity names the asker too (the child conversation in the tool call's ID), but holds the main agent's Prompt open until its children finish, so its request cannot outlive that Prompt and goes with it.
+
+A sub-agent in the background outlasts the turn that started it, so nothing it does opens or
+ends a turn, and what it ran before the turn ended finishes afterwards as its own. The
+supervisor keeps the sub-agents running in the runtime (`ChatLive.sub_agents`): the Chat is
+working while any runs (the Chats list says "Working · 2 sub-agents"; the view's
+`turn_running` is false while no turn does), and goes quiet, and is told once as Done, when
+none does and no turn runs. Claude Code resumes the main agent by itself when a background
+sub-agent finishes, seconds later, so after the last one ends the Chat stays working for a
+short grace (`WAKE_GRACE`) instead of notifying Done twice. The turn it then starts is the
+harness's, not the person's: the turn records its origin (`chat_turns.origin_by`,
+`origin_sub_agent`), a turn is only labelled so when the person has no input written that the
+harness has not shown it processing, and a failure of such a turn shows and notifies but
+does not pause the person's queue. Stop with no turn running ends the running sub-agents as
+stopped by the person, notes how many (a Chat notice carrying `sub_agents_stopped`) and ends
+the harness process, which is not lost contact (a frame the process still sends while it ends
+opens nothing). The sub-agents the harness did not report ended are recorded as stopped only
+once the process is confirmed gone; when its exit cannot be confirmed they are recorded as lost
+contact (the same goes for ticketd turning Chat off) and Stop answers that it did not stop them.
+It leaves the queue unpaused, so the next message and any later wake still go
+out; Stop during a turn interrupts it and stops every sub-agent with it.
+
+Codex never resumes the main agent when a sub-agent finishes, so ticketd does (the
+descriptor's `sub_agents.wake`). When a direct sub-agent (not a nested one) finishes or fails
+while no turn runs, or during a turn other than the one it started (Codex files a sub-agent's
+completion under the turn that started it, so no other turn, whether the person's or an
+earlier wake's, ever sees it), the supervisor remembers it and, once no turn runs and half a
+second after the first finished (`WAKE_SETTLE`, so sub-agents finishing together are covered by
+one message), sends the main agent one message as
+a new turn that is not stored as a message of the person's: the Chat's own
+`wake-N` submission. The turn it starts is recorded with origin `ticketd` and the sub-agent
+whose finish it follows, so it reads "Started by ticketd: sub-agent finished", and a failure
+of it shows and notifies but does not pause the person's queue (the same rule as for a
+harness-started turn). One wake is outstanding at a time: sub-agents that finish while it is on
+its way, or while another turn runs, wait for the next and share one message. The person's own
+input always goes first: a message they send before the wake went out starts the turn instead and carries what finished ahead of its text,
+and nothing else is sent. No wake follows a Stop, a paused queue, a Chat with a problem, a
+nested sub-agent's finish, a sub-agent stopped by the person or the main agent, a finish
+inside the turn that started the sub-agent (that turn sees it), or any Chat of an Automation run.
+A wake that cannot be delivered leaves a Chat notice and is not retried. The words are
+ticketd's own and short. For one sub-agent they are
+
+```text
+Sub-agent "Slow check" finished. Please continue.
+```
+
+(`failed` in place of `finished` when it failed), and for several
+
+```text
+Sub-agents finished: "Slow check", "Review docs" (failed). Please continue.
+```
+
+where a sub-agent is called what its row calls it. The person's message carries instead
+
+```text
+Sub-agents finished since your last message:
+- "Slow check" finished. Its last message: {what it said last, at most 1,500 characters}
+```
+
+ahead of their words, in the text sent to the harness; the stored message stays theirs.
+
+Stop one sub-agent is `HarnessRuntime::stop_sub_agent` (the person's, through
+`ChatHost::stop_sub_agent` and the `chat_stop_sub_agent` command). The supervisor offers it
+only for a sub-agent it tracks as running in the background and answers a stale view with
+`HostError::SubAgentGone`; the record never says stopped until the harness reports the
+sub-agent's end. Claude sends the bridge's `stop_task` command (the SDK's `stopTask`, which
+makes Claude Code report a task notification of status stopped); the session remembers that
+ticketd asked, so that end is the person's, and one it did not ask for (the main agent's
+`TaskStop`) is the main agent's. Codex interrupts the child's turn and the turns of the
+children it started, then asks `thread/backgroundTerminals/clean` for each, because Codex
+leaves a child's command running when its turn is interrupted (every Chat therefore opens on
+the experimental app-server API). When ticketd itself stops the harness for a `StopReason`
+other than quitting, the sub-agents still running end as stopped by ticketd with that reason.
+The view sets a sub-agent's `capabilities.stop` only where the descriptor declares Stop one
+and the sub-agent runs now in the background in a live session.
 
 The storage half of this design exists: the core's Chat workflows
 (`crates/ticketd-core/src/chats.rs`) own these records and the change log. Chat
@@ -292,6 +438,42 @@ of that harness had an observed Turn running. The host captures the receipt in
 the same transaction as the Turn end, including when contact is lost. Save as
 Document is the ordinary Document-creation workflow applied to a stored response.
 
+The same tags say which agent of the Chat wrote, so a ticket can credit a
+sub-agent (ADR 0029). The credit needs no Turn, so a background sub-agent's
+writes count too, and is read from what is stored when it is asked for. A
+harness that names each command it runs (a descriptor's `call_variable`, Codex's
+`CODEX_TOOL_CALL_ID`) has the CLI record that key with the write; the Step whose
+native ID is the key says who ran it, and a key no Step has credits the Chat
+alone. Otherwise the host tells the core which Steps are shell commands
+(`ChatObservation::ShellStep`) and the core keeps a **window** for each: the
+two feeds' heads when the Step was first seen and when it ended (`chat_step_windows`).
+A write inside one window is that Step's owner's; inside several, the one Step
+whose plain `ticketd` call (parsed from its command) could be that write, when
+only one could; anywhere else it stays with the Chat, with the sub-agent unknown.
+Commands are never changed and printed output is never matched. Only status moves
+and Activities are credited; evidence and Documents are not. Credit is
+device-local, because Chats do not sync: the interface's `credited_to` is filled
+only where the Chat is on the computer, and only for a sub-agent.
+`ticket_write_credits` and `ticket_writing_agents` read it.
+
+**The ticket label.** The desktop command `chat_ticket_agents` answers who is at
+work on a ticket: the main agent of a Chat linked to the ticket while its turn
+runs (waiting for sub-agents or for the person counts as running), and any main
+agent or sub-agent with a credited write on the ticket while it runs, even from
+a Chat not linked to it. Finished, stopped and lost sub-agents and Chats at rest
+never count. The list comes in the order the label reads it: an agent waiting for
+approval first, then Chat by Chat (the most recently active first), each Chat's
+main agent before its sub-agents, the oldest start first. A sub-agent's model is
+the one its own frames reported (Claude's `message.model`, Codex's
+`subAgentActivity.model`) in the session's own words; a main agent's is the
+model its live session reports; with none the interface names the harness. A main
+agent's `doing` is its running Step in words, else "Waiting for N sub-agents". An
+`approval` is a pending request the host still holds, read by the agent that asked.
+The desktop's watcher compares every ticket's list with the last one it announced
+and fires the overview event when the set or a field changes, on a Chat's change
+and on a change of the Workspace (a credited write from the CLI), so a label
+appears, changes and goes without a refresh.
+
 A harness process started for an Automation run also gets the run's ID in
 `TICKETD_AUTOMATION_RUN_ID`. A CLI that inherits a non-blank value logs every ticket
 change it makes as a Workspace event with actor `automation`, and such events never
@@ -301,11 +483,12 @@ trigger Automations. The value itself is not stored.
 
 The person picks how a Chat's harness asks from the permission modes its adapter
 reports, Full access among them ([ADR 0020](adr/0020-full-access-in-a-persons-chat.md)).
-A pick in New Chat opens the session with it; a change in a Chat is held while a
-turn runs and applies from the next message, like the model and effort. A reopened
-Chat keeps its mode, recorded with its settings (`reopen_with`): Claude Code is
-opened with the mode, and the effort, it last reported, and Codex with the choice
-its last turn carried. While no session runs, the Chat shows the mode its next
+A pick in New Chat opens the session with it. A permission change made during a
+turn is held until that turn ends. The host reports steering as unavailable during
+the change and queues follow-ups for the next turn. A reopened Chat keeps its
+mode in its recorded settings (`reopen_with`). Claude Code opens with the mode
+and effort it last reported. Codex opens with the choice its last turn carried.
+While no session runs, the Chat shows the mode its next
 session opens with (`HarnessAdapter::permission_before_session`, which reads the
 same record), so a Chat in Full access says so before its next message, and a
 change made then is kept for that session, new or resumed. A permission change is
@@ -465,7 +648,9 @@ the runner words the first message around it and cannot place them raw. The host
 model, allowed tools and turn limit. An adapter given one never asks for approval
 and never widens to full access. Claude Code runs in the Agent SDK's `dontAsk`
 permission mode with the allowed tools as its allowlist and the tools of each
-switch that is off disallowed; "Edit files" also allows `Read`, since Claude Code
+switch that is off disallowed, and the `Agent` tool always disallowed, so an
+Automation's agent starts no sub-agents (the rule applies inside sub-agents too);
+"Edit files" also allows `Read`, since Claude Code
 edits only a file it has read. File tools are kept to the step's folder, Claude
 Code's only working directory: the bridge turns on
 `permissions.blockReadsOutsideWorkingDirectories` and
@@ -482,7 +667,7 @@ Codex runs with approval policy `on-request`, and ticketd declines every approva
 request at once (with `never`, Codex reports a patch its policy rejects as no item at all, so
 the step could not fail), with no network unless the web is allowed, and with
 the person's MCP servers, plugins and apps turned off. The same overrides also switch off
-their hooks, notify program, project `AGENTS.md`, memories, sub-agents, computer and browser
+their hooks, notify program, project `AGENTS.md`, memories, sub-agents (`agents.enabled` and both `features.multi_agent` flags, since Codex picks the multi-agent version from several of them), computer and browser
 use, and Codex's bundled skills (the agent editor does not list these). The switches map as follows. "Edit
 files" off is a `readOnly` sandbox; on, a `workspaceWrite` sandbox whose only writable place
 is the step's folder. Codex can run any command inside the sandbox when both

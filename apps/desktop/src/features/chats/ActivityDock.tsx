@@ -31,14 +31,21 @@ import { Time } from "@/components/ui/time";
 import { Disclosure } from "@/components/ui/disclosure";
 import { IconButton } from "@/components/ui/icon-button";
 import { Input } from "@/components/ui/input";
-import type { ChatState, RequestAnswer } from "@/features/chats/client";
+import type {
+  ChatState,
+  RequestAnswer,
+  SubAgent,
+} from "@/features/chats/client";
+import { RecordLink } from "@/components/ui/record-link";
 import type {
   AnswerDraft,
   QuestionDrafts,
 } from "@/features/chats/question-drafts";
 import { requestChoices as choices } from "@/features/chats/dock-focus";
 import {
+  askerOf,
   canSteer,
+  cutTitle,
   recordNamer,
   requestLabel,
   ticketdParts,
@@ -48,6 +55,43 @@ import {
 
 type Queued = ChatState["queue"][number];
 
+/**
+ * How a request names the sub-agent that asks. `open` makes the name a link to
+ * its view (in the Chat); without it the name is plain text (in its own view).
+ */
+export type RequestAsker = {
+  agents: readonly SubAgent[];
+  open?: (agent: SubAgent, opener: string) => void;
+};
+
+/** The sub-agent's name where an approval's title would name the harness. */
+function AskerName({
+  request,
+  asker,
+}: {
+  request: PendingRequest;
+  asker: RequestAsker | undefined;
+}) {
+  const agent = asker && askerOf(request, asker.agents);
+  if (!asker || !agent) return null;
+  const name = cutTitle(agent.title);
+  return (
+    <>
+      {asker.open ? (
+        <RecordLink
+          data-sub-agent={`request:${request.id}`}
+          title={name === agent.title ? undefined : agent.title}
+          onClick={() => asker.open?.(agent, `request:${request.id}`)}
+        >
+          {name}
+        </RecordLink>
+      ) : (
+        <span>{name}</span>
+      )}{" "}
+    </>
+  );
+}
+
 function Request({
   request,
   position,
@@ -56,6 +100,7 @@ function Request({
   onLeave,
   onAnswered,
   name,
+  asker,
   answerInComposer,
   answerDraft,
   questionDrafts,
@@ -64,6 +109,7 @@ function Request({
   request: PendingRequest;
   /** Names the Chat's linked records by their titles. */
   name: RecordName;
+  asker?: RequestAsker;
   position: number;
   count: number;
   /** Take focus on the title when shown: the Chat was opened from its notification. */
@@ -189,6 +235,7 @@ function Request({
             requestLabel(request)
           ) : request.ticketd?.length ? (
             <>
+              <AskerName request={request} asker={asker} />
               {request.title}{" "}
               {ticketdParts(request.ticketd, 2, name, true).map(
                 (part, index) => (
@@ -205,6 +252,7 @@ function Request({
             </>
           ) : (
             <>
+              <AskerName request={request} asker={asker} />
               {request.title}
               {/* The host words the title so the subject follows inline. */}
               {request.subject && (
@@ -460,6 +508,9 @@ export function ActivityDock({
   chat,
   requests,
   plan,
+  strip,
+  lead,
+  asker,
   dockRef,
   onAnswer,
   composerQuestion,
@@ -482,6 +533,12 @@ export function ActivityDock({
   requests: PendingRequest[];
   /** The plan pill, when the turn has a plan. */
   plan?: ReactNode;
+  /** The sub-agent strip, beside the plan pill on one line. */
+  strip?: ReactNode;
+  /** Above everything else in the dock: a line saying another agent needs the person. */
+  lead?: ReactNode;
+  /** Names the sub-agent a request is for, in its title; absent: the host's words stand. */
+  asker?: RequestAsker;
   dockRef?: Ref<HTMLDivElement>;
   onAnswer: (requestId: string, answer: RequestAnswer) => Promise<void>;
   composerQuestion?: string | undefined;
@@ -505,6 +562,7 @@ export function ActivityDock({
   // fades out here while the tray closes its space (DockSlot).
   return (
     <div ref={dockRef} className="chat-activity">
+      {lead}
       {/* One request at a time: the next waits for the answered one to leave. */}
       <Presence initial={false} mode="wait">
         {request && (
@@ -520,11 +578,20 @@ export function ActivityDock({
             onLeave={onLeave}
             {...(onAnswered && { onAnswered })}
             name={recordNamer(chat.links)}
+            {...(asker && { asker })}
             focusTitle={focusRequest}
           />
         )}
       </Presence>
-      {plan && <section className="chat-activity-slot">{plan}</section>}
+      {(plan || strip) && (
+        <section
+          className="chat-activity-slot"
+          data-line={plan && strip ? "" : undefined}
+        >
+          {plan}
+          {strip}
+        </section>
+      )}
       <Presence initial={false}>
         {queue.length > 0 && (
           <QueueSection key="queue">

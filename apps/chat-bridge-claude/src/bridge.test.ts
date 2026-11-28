@@ -85,6 +85,14 @@ class FakeQuery {
     return this.interruptReply;
   }
 
+  stopped: string[] = [];
+  /** `stopTask`'s answer: undefined, or an error it throws. */
+  stopTaskError: Error | undefined;
+  stopTask = async (taskId: string) => {
+    if (this.stopTaskError) throw this.stopTaskError;
+    this.stopped.push(taskId);
+  };
+
   async initializationResult() {
     return {
       claude_code_version: "2.1.322",
@@ -883,6 +891,18 @@ describe("permissions and questions", () => {
     });
   });
 
+  it("names the sub-agent that asks a native question", async () => {
+    const h = harness();
+    const fake = await h.open();
+    fake.askPermission(
+      "AskUserQuestion",
+      { questions: [{ question: "Which format?", options: [] }] },
+      { agentID: "task_1" },
+    );
+    await settle();
+    expect(h.named("question_request")).toMatchObject([{ agent_id: "task_1" }]);
+  });
+
   it("carries a native question to the host and the answers back", async () => {
     const h = harness();
     const fake = await h.open();
@@ -901,7 +921,11 @@ describe("permissions and questions", () => {
     await settle();
     expect(h.named("permission_request")).toHaveLength(0);
     const [request] = h.named("question_request");
-    expect(request).toMatchObject({ generation: 1, questions });
+    expect(request).toMatchObject({
+      generation: 1,
+      questions,
+      agent_id: null,
+    });
 
     // A question cannot be answered as if it were a tool approval.
     await h.send({
@@ -1008,6 +1032,97 @@ describe("permissions and questions", () => {
         error: { message: "transport closed" },
       },
     ]);
+  });
+});
+
+describe("stop_task", () => {
+  it("asks the SDK to stop one task and says it asked, leaving the session and its requests alone", async () => {
+    const h = harness();
+    const fake = await h.open();
+    await h.send(submit("s1"));
+    await fake.readInput();
+    const ask = fake.askPermission("Bash", { command: "ls" });
+    await settle();
+
+    await h.send({
+      id: "one",
+      cmd: "stop_task",
+      generation: 1,
+      task_id: "task_a",
+    });
+
+    expect(fake.stopped).toEqual(["task_a"]);
+    expect(fake.interrupts).toBe(0);
+    expect(h.named("stop_task_result")).toMatchObject([
+      {
+        id: "one",
+        generation: 1,
+        task_id: "task_a",
+        outcome: "asked",
+        message: null,
+      },
+    ]);
+    // The turn and its request are untouched: only the task was asked to stop.
+    expect(h.named("request_cancelled")).toHaveLength(0);
+    expect(ask.settled()).toBeUndefined();
+  });
+
+  it("reports a stop the SDK failed as refused, with its words", async () => {
+    const h = harness();
+    const fake = await h.open();
+    fake.stopTaskError = new Error("no such task");
+    await h.send({
+      id: "one",
+      cmd: "stop_task",
+      generation: 1,
+      task_id: "task_a",
+    });
+    expect(h.named("stop_task_result")).toMatchObject([
+      {
+        id: "one",
+        task_id: "task_a",
+        outcome: "refused",
+        message: "no such task",
+      },
+    ]);
+  });
+
+  it("says so when this SDK cannot stop a task", async () => {
+    const h = harness();
+    const fake = await h.open();
+    // An SDK older than the one the bridge is built against has no `stopTask`.
+    delete (fake as { stopTask?: unknown }).stopTask;
+    await h.send({
+      id: "one",
+      cmd: "stop_task",
+      generation: 1,
+      task_id: "task_a",
+    });
+    expect(h.named("stop_task_result")).toMatchObject([
+      { id: "one", outcome: "refused" },
+    ]);
+  });
+
+  it("is strict: no task, an empty task and unknown keys are rejected, and so is another generation", async () => {
+    const h = harness();
+    await h.open();
+    await h.send({ id: "a", cmd: "stop_task", generation: 1 });
+    await h.send({ id: "b", cmd: "stop_task", generation: 1, task_id: "" });
+    await h.send({
+      id: "c",
+      cmd: "stop_task",
+      generation: 1,
+      task_id: "t",
+      all: true,
+    });
+    await h.send({ id: "d", cmd: "stop_task", generation: 2, task_id: "t" });
+    expect(h.named("command_rejected")).toMatchObject([
+      { id: "a", code: "invalid_command" },
+      { id: "b", code: "invalid_command" },
+      { id: "c", code: "invalid_command" },
+      { id: "d", code: "stale_generation" },
+    ]);
+    expect(h.named("stop_task_result")).toHaveLength(0);
   });
 });
 
@@ -1425,6 +1540,214 @@ describe("reasoning, files, context and settings", () => {
       "refused",
     ]);
     expect(h.named("setting_result").at(-1)?.message).toBe("unknown model");
+  });
+});
+
+describe("sub-agents", () => {
+  const started = (extra: Record<string, unknown> = {}) => ({
+    type: "system",
+    subtype: "task_started",
+    task_id: "agent-1",
+    run_id: "run-a",
+    tool_use_id: "toolu_agent",
+    description: "Find limiter bypasses",
+    subagent_type: "Explore",
+    task_type: "local_agent",
+    is_backgrounded: false,
+    spawn_depth: 1,
+    prompt: "Find every way a request could get past the rate limiter.",
+    ...extra,
+  });
+
+  it("forwards an agent task as typed events from its start to its end", async () => {
+    const h = harness();
+    const fake = await h.open();
+    fake.push(started());
+    fake.push({
+      type: "system",
+      subtype: "task_updated",
+      task_id: "agent-1",
+      run_id: "run-a",
+      patch: { is_backgrounded: true, status: "running" },
+    });
+    fake.push({
+      type: "system",
+      subtype: "task_notification",
+      task_id: "agent-1",
+      run_id: "run-a",
+      tool_use_id: "toolu_agent",
+      status: "completed",
+      output_file: "/ignored",
+      summary: 'Agent "Find limiter bypasses" finished',
+    });
+    await settle();
+    expect(h.named("sdk_message_unmapped")).toHaveLength(0);
+    expect(h.named("sub_agent_started")).toMatchObject([
+      {
+        generation: 1,
+        task_id: "agent-1",
+        run_id: "run-a",
+        tool_use_id: "toolu_agent",
+        parent_task_id: null,
+        description: "Find limiter bypasses",
+        subagent_type: "Explore",
+        background: false,
+        prompt: "Find every way a request could get past the rate limiter.",
+        prompt_truncated: false,
+        spawn_depth: 1,
+      },
+    ]);
+    expect(h.named("sub_agent_updated")).toMatchObject([
+      {
+        task_id: "agent-1",
+        run_id: "run-a",
+        status: "running",
+        background: true,
+        description: null,
+        error: null,
+      },
+    ]);
+    expect(h.named("sub_agent_ended")).toMatchObject([
+      {
+        task_id: "agent-1",
+        run_id: "run-a",
+        tool_use_id: "toolu_agent",
+        status: "completed",
+        reason: null,
+        summary: 'Agent "Find limiter bypasses" finished',
+      },
+    ]);
+  });
+
+  it("names the sub-agent that started a nested one", async () => {
+    const h = harness();
+    const fake = await h.open();
+    fake.push(started({ task_id: "agent-2", parent_task_id: "agent-1" }));
+    await settle();
+    expect(h.named("sub_agent_started")).toMatchObject([
+      { task_id: "agent-2", parent_task_id: "agent-1" },
+    ]);
+  });
+
+  it("keeps shells, monitors, ambient and transcript-less tasks out", async () => {
+    const h = harness();
+    const fake = await h.open();
+    fake.push({
+      type: "system",
+      subtype: "task_started",
+      task_id: "shell-1",
+      description: "npm test",
+      task_type: "local_bash",
+    });
+    fake.push(started({ task_id: "ambient-1", ambient: true }));
+    fake.push(started({ task_id: "quiet-1", skip_transcript: true }));
+    // Neither a shell's later frames nor an unknown task's name a sub-agent.
+    fake.push({
+      type: "system",
+      subtype: "task_updated",
+      task_id: "shell-1",
+      patch: { status: "completed" },
+    });
+    fake.push({
+      type: "system",
+      subtype: "task_notification",
+      task_id: "shell-1",
+      status: "completed",
+      output_file: "/x",
+      summary: "done",
+    });
+    await settle();
+    expect(h.named("sub_agent_started")).toHaveLength(0);
+    expect(h.named("sub_agent_updated")).toHaveLength(0);
+    expect(h.named("sub_agent_ended")).toHaveLength(0);
+    expect(h.named("sdk_message_unmapped")).toHaveLength(5);
+  });
+
+  it("takes a task with no type for a sub-agent only when it carries a prompt", async () => {
+    const h = harness();
+    const fake = await h.open();
+    fake.push(started({ task_id: "plain-1", task_type: undefined }));
+    fake.push(
+      started({
+        task_id: "bare-1",
+        task_type: undefined,
+        subagent_type: undefined,
+        prompt: undefined,
+      }),
+    );
+    await settle();
+    expect(h.named("sub_agent_started")).toMatchObject([
+      { task_id: "plain-1" },
+    ]);
+    expect(h.named("sdk_message_unmapped")).toHaveLength(1);
+  });
+
+  it("forwards the whole prompt up to a bound, and says when it cut it", async () => {
+    const h = harness();
+    const fake = await h.open();
+    fake.push(started({ prompt: "p".repeat(70_000) }));
+    await settle();
+    const [event] = h.named("sub_agent_started");
+    expect(event?.prompt?.length).toBe(65_536);
+    expect(event?.prompt_truncated).toBe(true);
+  });
+
+  it("reports a resumed run under the same task with its own run id", async () => {
+    const h = harness();
+    const fake = await h.open();
+    fake.push(started());
+    fake.push(started({ run_id: "run-b", is_backgrounded: true }));
+    fake.push({
+      type: "system",
+      subtype: "task_notification",
+      task_id: "agent-1",
+      run_id: "run-b",
+      status: "stopped",
+      reason: "worker_restart",
+      output_file: "/x",
+      summary: "stopped",
+    });
+    await settle();
+    expect(h.named("sub_agent_started")).toMatchObject([
+      { run_id: "run-a", background: false },
+      { run_id: "run-b", background: true },
+    ]);
+    expect(h.named("sub_agent_ended")).toMatchObject([
+      { run_id: "run-b", status: "stopped", reason: "worker_restart" },
+    ]);
+  });
+
+  it("keeps the tag and the model on a sub-agent's frames", async () => {
+    const h = harness();
+    const fake = await h.open();
+    fake.push({
+      type: "assistant",
+      uuid: "a-1",
+      parent_tool_use_id: "toolu_agent",
+      message: {
+        id: "msg_1",
+        model: "claude-haiku-test",
+        content: [
+          {
+            type: "tool_use",
+            id: "toolu_read",
+            name: "Read",
+            input: { file_path: "a" },
+          },
+        ],
+      },
+    });
+    fake.push({
+      type: "assistant",
+      uuid: "a-2",
+      parent_tool_use_id: null,
+      message: { id: "msg_2", content: [{ type: "text", text: "hi" }] },
+    });
+    await settle();
+    expect(h.named("assistant_content")).toMatchObject([
+      { parent_tool_use_id: "toolu_agent", model: "claude-haiku-test" },
+      { parent_tool_use_id: null, model: null },
+    ]);
   });
 });
 

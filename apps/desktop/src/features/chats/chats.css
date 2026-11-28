@@ -350,6 +350,7 @@
   padding-bottom: 40px;
 }
 .chat-part[data-kind="user"] + *,
+.chat-part[data-kind="brief"] + *,
 .chat-divider + .chat-turn-unit {
   margin-top: -24px;
 }
@@ -664,6 +665,13 @@
 }
 .chat-turnpart[data-fold] {
   margin-block: -8px;
+}
+/* A turn that holds sub-agent rows is always laid out. Back focuses the row that
+   opened a view; WebKit keeps the turn skipped once that focus leaves, so its
+   rows go blank and stop answering clicks until the Chat is reopened. These
+   turns are a few small rows, not the long history the rule above is for. */
+.chat-turnpart[data-subagents] {
+  content-visibility: visible;
 }
 .chat-foldline + .chat-turn-rows {
   margin-top: 8px;
@@ -1742,4 +1750,224 @@
   .chat-row-more {
     top: 4px;
   }
+}
+
+/* Sub-agents (#609). A sub-agent's row is a step row: [bot] Title · suffix ›.
+   The title gives way with an ellipsis; the clock or outcome never does. */
+.chat-subagent .chat-step-words[data-line] {
+  display: inline-flex;
+  flex-wrap: nowrap;
+  align-items: baseline;
+  min-width: 0;
+  overflow: hidden;
+}
+.chat-subagent .chat-step-words[data-line] > .chat-subagent-title {
+  flex: 0 1 auto;
+}
+.chat-subagent-title {
+  min-width: 0;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.chat-subagent .chat-step-suffix {
+  flex: none;
+  display: inline-flex;
+  gap: 0;
+  white-space: pre;
+}
+
+/* Rows stay under a folded turn's work line, like receipts. */
+.chat-subagent-kept {
+  padding-left: 16px;
+  margin-top: 4px;
+}
+
+/* A sub-agent's view: the brief the main agent gave it, in place of a message. */
+.chat-brief {
+  margin: 0;
+  padding: 2px 0 2px 12px;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+.chat-brief-text {
+  margin: 0;
+  display: -webkit-box;
+  -webkit-line-clamp: 4;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+}
+.chat-brief-text[data-open] {
+  -webkit-line-clamp: unset;
+  display: block;
+}
+.chat-brief-more {
+  align-self: flex-start;
+}
+
+/* The header's bot mark sits where a Chat's harness mark does. */
+.chat-subagent-mark {
+  display: inline-flex;
+  flex: none;
+  align-items: center;
+  justify-content: center;
+  width: 16px;
+  height: 16px;
+}
+.ui-return-crumb + .ui-return-crumb {
+  margin-left: -4px;
+}
+
+/* ticketd's own note under the brief, and how a sub-agent ended: step-style rows. */
+.chat-subagent-note {
+  margin: 0;
+}
+.chat-end-marker {
+  min-height: 28px;
+}
+.chat-end-marker .chat-stop-mark {
+  width: 10px;
+  height: 10px;
+}
+
+/* The quiet line between a sub-agent's runs. */
+.chat-run-divider {
+  align-items: center;
+  min-height: 28px;
+  margin: 0;
+}
+.chat-run-divider > svg {
+  margin-top: 0;
+}
+
+/* A sub-agent's view, in the composer's place: one 44px line, its state then Stop. */
+.chat-subagent-foot {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-height: 44px;
+  padding: 0 8px 0 16px;
+}
+.chat-subagent-foot-words {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.chat-subagent-foot .chat-spacer {
+  flex: 1;
+}
+.chat-subagent-foot .chat-stop-mark {
+  width: 10px;
+  height: 10px;
+}
+.chat-turn-unit + .chat-run-divider {
+  margin-top: -34px;
+}
+.chat-run-divider + .chat-turn-unit {
+  margin-top: -9px;
+}
+
+/* How a sub-agent ended sits 12px under its last words, as the end of a turn's parts do. */
+.chat-turn-unit + .chat-end {
+  margin-top: -28px;
+}
+
+/* The strip: one recessed pill in the tray beside the plan's; both on one line. */
+.chat-activity-slot[data-line] {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+/* The strip's list: 32px rows, nested ones 16px in; Stop shows on hover or focus. */
+.chat-subagent-list {
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+}
+.chat-subagent-list li {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  min-height: 32px;
+  padding: 0 4px 0 8px;
+}
+.chat-subagent-list li[data-depth="1"] {
+  padding-left: 24px;
+}
+.chat-subagent-item {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex: 1;
+  min-width: 0;
+  height: 32px;
+}
+.chat-subagent-item .chat-subagent-title {
+  flex: 0 1 auto;
+}
+.chat-subagent-item .chat-subagent-time {
+  flex: none;
+  margin-left: auto;
+  padding-left: 12px;
+}
+
+/* "Started by ticketd: sub-agent finished · Title": where the person's message would be,
+   16px above the work line it starts, as a message is. */
+.chat-part[data-kind="started"] + * {
+  margin-top: -24px;
+}
+.chat-started {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-height: 28px;
+  margin: 0;
+}
+
+/* The tray's neutral notice after a restart: nothing waits for the person. */
+.chat-restart-notice {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  padding: 12px 16px;
+}
+.chat-restart-notice p {
+  margin: 0;
+}
+.chat-restart-notice-title {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+.chat-restart-notice .chat-restart-notice-body {
+  margin-left: 24px;
+}
+
+/* A sent message's caption: what ticketd added to it, and the note opened under it. */
+.chat-note-caption {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+}
+.chat-note-sent {
+  max-width: 82%;
+  margin-top: 6px;
+}
+.chat-note-sent .chat-brief-text {
+  -webkit-line-clamp: unset;
+}
+
+/* The tray line that says another agent needs the person. */
+.chat-needs-elsewhere {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 10px 16px;
+}
+.chat-needs-elsewhere .chat-spacer {
+  flex: 1;
 }

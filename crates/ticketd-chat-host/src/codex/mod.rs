@@ -139,9 +139,11 @@ fn allows_shell(tools: &AutomationAgentTools) -> bool {
 /// servers, plugins (which bring servers and skills of their own) or ChatGPT apps
 /// start, and everything else a config override can switch off is off too: hooks (a
 /// `PermissionRequest` hook could allow what the session declines), the `notify`
-/// program, project AGENTS.md, memories, sub-agents, computer and browser use, the
-/// bundled skills and the skills list in the prompt (#387 L5, D4). Every key is in
-/// Codex's config schema from 0.162.1 to 0.169.
+/// program, project AGENTS.md, memories, sub-agents (every Codex version of them),
+/// computer and browser use, the bundled skills and the skills list in the prompt
+/// (#387 L5, D4). Every key is in Codex's config schema from 0.162.1 to 0.169, except
+/// the sub-agent keys `agents.enabled` and `features.multi_agent_v2` (#612), which are
+/// newer; Codex ignores an unknown override key with a warning unless strict config is on.
 /// Still applying, because no override reaches them: the person's rules, global
 /// AGENTS.md and the skills in `~/.agents/skills`.
 /// `config` is the person's configuration (`config/read`), which names their servers;
@@ -154,7 +156,13 @@ pub(super) fn personal_tools_off(config: Option<&Value>) -> Value {
         "features.apps": false,
         "features.hooks": false,
         "features.memories": false,
+        // Sub-agents (#612). Codex picks the multi-agent version from, in order,
+        // `features.multi_agent_v2`, `agents.enabled`, the model catalog, and last
+        // `features.multi_agent`, so only the first two stop a current model, and
+        // `multi_agent_v2` would override `agents.enabled`: every one is off.
+        "agents.enabled": false,
         "features.multi_agent": false,
+        "features.multi_agent_v2": false,
         "features.computer_use": false,
         "features.browser_use": false,
         "notify": [],
@@ -329,5 +337,25 @@ impl HarnessAdapter for CodexAdapter {
 
     fn record_permission(&self, recorded: Option<&str>, value: &str) -> Option<String> {
         runtime::record_choice(recorded, value)
+    }
+}
+
+/// The real Codex runtime over scripted pipes, for `crate::host_script`.
+#[cfg(test)]
+pub(crate) fn scripted() -> crate::host_script::Runtime {
+    crate::host_script::Runtime {
+        real: std::sync::Arc::new(CodexAdapter::new()),
+        capabilities: discovery::capabilities(None),
+        open: |io, request| {
+            Box::pin(async move {
+                // As the adapter's own tests: the handshake fixtures play no list requests.
+                let options = Options {
+                    client_version: "0.0.0-test".to_owned(),
+                    list_settings: false,
+                    ..Options::default()
+                };
+                runtime::open_over(io, &request, options).await
+            })
+        },
     }
 }

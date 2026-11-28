@@ -5,6 +5,7 @@ use std::path::PathBuf;
 use std::sync::Arc;
 
 use async_trait::async_trait;
+use serde_json::Value;
 use tokio::sync::{Mutex, OwnedMutexGuard, mpsc};
 
 /// Capacity of a runtime's event channel. The supervisor keeps receiving while
@@ -48,6 +49,11 @@ string_id!(
 string_id!(
     /// A live approval or question awaiting an answer in the current runtime.
     NativeRequestId
+);
+string_id!(
+    /// A sub-agent as the harness identifies it, unique within the Chat (Claude's task
+    /// ID, Codex's child thread ID, Antigravity's child conversation ID).
+    NativeSubAgentId
 );
 
 /// Identifies one provider process owned by a Chat. The supervisor assigns a new
@@ -316,6 +322,14 @@ pub struct InterruptRequest {
     pub expected_turn: NativeTurnId,
 }
 
+/// Asks the harness to stop one sub-agent and what it started, leaving the main agent and
+/// every other sub-agent running.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct StopSubAgentRequest {
+    pub generation: RuntimeGeneration,
+    pub sub_agent: NativeSubAgentId,
+}
+
 // ---------------------------------------------------------------------------
 // Command outcomes
 // ---------------------------------------------------------------------------
@@ -331,6 +345,8 @@ pub enum Refusal {
     StartUnconfirmed,
     /// No live request has this identity: never issued, already answered or withdrawn.
     UnknownRequest,
+    /// No sub-agent with this identity runs now.
+    UnknownSubAgent,
     /// The effective capabilities do not include this operation.
     Unsupported,
     /// The active harness or model explicitly excludes image input.
@@ -355,6 +371,7 @@ impl Refusal {
             Self::TurnMismatch { .. } => "the turn it was meant for had ended",
             Self::StartUnconfirmed => "the harness has not confirmed the previous message",
             Self::UnknownRequest => "the request was no longer open",
+            Self::UnknownSubAgent => "the sub-agent was no longer running",
             Self::Unsupported => "the harness can't do that here",
             Self::ImageInputUnsupported => "image input is unavailable for this Chat",
             Self::ImageInputTooLarge => "an attached image is too large for the harness",
@@ -412,6 +429,22 @@ pub enum InterruptOutcome {
     Unconfirmed,
 }
 
+/// What the harness did with a [`StopSubAgentRequest`]. The sub-agent's own end is reported
+/// as [`EventKind::SubAgentEnded`], by the person when the harness was asked to.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum StopSubAgentOutcome {
+    /// The harness was asked and took the request.
+    Asked,
+    /// The harness does not run it now.
+    NotRunning,
+    /// This harness cannot stop one sub-agent alone.
+    Unsupported,
+    /// The harness refused, or answered with a failure.
+    Refused { reason: String },
+    /// Written without an answer in time, or contact was lost.
+    Unconfirmed,
+}
+
 /// What the harness did with a [`SettingChange`].
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum SettingOutcome {
@@ -461,6 +494,10 @@ pub enum EventKind {
     },
     TurnStarted {
         turn: NativeTurnId,
+        /// Who started the turn when the person did not: the harness, resuming the main
+        /// agent by itself (naming the sub-agent whose finish it follows when it is
+        /// known), or ticketd waking it. `None`: the person's message did.
+        origin: Option<TurnOrigin>,
     },
     /// Streamed text. May be coalesced or lost; `MessageCompleted` is authoritative.
     TextDelta {
@@ -483,6 +520,61 @@ pub enum EventKind {
         status: ToolStatus,
         output: Option<String>,
         detail: Option<ProviderDetail>,
+    },
+    /// A sub-agent began, or was resumed for another run. It opens no turn: the run is
+    /// recorded in the turn that is active, if one is. A sub-agent seen again with the
+    /// same `run` changes nothing; one with another `run` is a resume.
+    SubAgentStarted(SubAgentStart),
+    /// More is known of a sub-agent: its words, or that it moved to the background.
+    SubAgentUpdated {
+        sub_agent: NativeSubAgentId,
+        run: Option<String>,
+        background: Option<bool>,
+        /// A JSON object merged over what the Chat keeps of what the harness said.
+        native: Option<Value>,
+    },
+    /// A run of a sub-agent ended. It never ends a turn.
+    SubAgentEnded {
+        sub_agent: NativeSubAgentId,
+        run: Option<String>,
+        outcome: SubAgentOutcome,
+        /// What the harness said went wrong, for a run that failed.
+        detail: Option<String>,
+    },
+    /// The latest state of one tool item of a sub-agent: a Step it owns. It belongs to
+    /// no turn of its own, so it opens none.
+    SubAgentToolUpdated {
+        sub_agent: NativeSubAgentId,
+        item: NativeItemId,
+        title: String,
+        status: ToolStatus,
+        output: Option<String>,
+        detail: Option<ProviderDetail>,
+    },
+    /// One complete message of a sub-agent, its own words and not the main agent's reply:
+    /// said in the turn that is active, if one is, and opening none.
+    SubAgentMessage {
+        sub_agent: NativeSubAgentId,
+        item: NativeItemId,
+        text: String,
+    },
+    /// The latest state of one reasoning item of a sub-agent. Times are milliseconds
+    /// since the Unix epoch. `run` is the harness's ID for the run it belongs to.
+    SubAgentReasoningUpdated {
+        sub_agent: NativeSubAgentId,
+        run: Option<String>,
+        item: NativeItemId,
+        running: bool,
+        started_at: Option<i64>,
+        ended_at: Option<i64>,
+        text: Option<String>,
+    },
+    /// The files a sub-agent's run changed, as of now: its own list, apart from the
+    /// main agent's `FilesChanged`.
+    SubAgentFilesChanged {
+        sub_agent: NativeSubAgentId,
+        run: Option<String>,
+        files: Vec<FileChange>,
     },
     InteractionRequested(InteractionRequest),
     /// The live request is gone; later answers to it are refused.
@@ -555,6 +647,53 @@ pub enum EventKind {
         summary: String,
         detail: ProviderDetail,
     },
+}
+
+/// Who started a turn the person did not, as the harness or ticketd said.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct TurnOrigin {
+    pub by: TurnStarter,
+    /// The sub-agent whose finish this turn follows, when that is known.
+    pub sub_agent: Option<NativeSubAgentId>,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum TurnStarter {
+    /// The harness resumed the main agent by itself.
+    Harness,
+    /// ticketd sent the message that woke the main agent.
+    Ticketd,
+}
+
+/// A sub-agent run beginning.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct SubAgentStart {
+    pub sub_agent: NativeSubAgentId,
+    /// The harness's ID for this run, when it names runs.
+    pub run: Option<String>,
+    /// The sub-agent that started this one; `None` when the main agent did.
+    pub parent: Option<NativeSubAgentId>,
+    /// The tool item (a Step) that started it.
+    pub tool: Option<NativeItemId>,
+    pub background: bool,
+    /// What the harness said about it, as one JSON object (`description`,
+    /// `subagent_type`, `prompt`, `model`): stored as given and read when a view is built.
+    pub native: Value,
+}
+
+/// How a sub-agent run ended, as the harness said.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum SubAgentOutcome {
+    Completed,
+    Failed,
+    /// Stopped, and by whom as far as the harness can tell.
+    Stopped(SubAgentStopper),
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum SubAgentStopper {
+    Person,
+    MainAgent,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -717,10 +856,38 @@ pub struct SettingOption {
     pub label: String,
     pub description: Option<String>,
     pub is_default: bool,
+    /// For a model option, the model id the harness says this row runs ("haiku" runs
+    /// "claude-haiku-5-5"), when it names one other than its own `id`.
+    pub resolved: Option<String>,
     /// For a permission option, what it allows, when known.
     pub permission: Option<PermissionKind>,
     /// The harness's own policy allows choosing it.
     pub allowed: bool,
+}
+
+/// The harness's own name for the model an agent reported, from the models it lists:
+/// the row with that id, else the row that runs it ("haiku" runs "claude-haiku-5-5";
+/// never the harness's `default` row, which names no model), each also when the
+/// reported id carries a date the listing leaves off. `None` when none lists it. The one
+/// rule behind every place a model is named (the ticket's label, a sub-agent's brief
+/// and tooltip).
+pub fn model_display_name(reported: &str, options: &[SettingOption]) -> Option<String> {
+    let dated = |id: &str| id.len() > 3 && reported.starts_with(id);
+    let by = |matches: &dyn Fn(&SettingOption) -> bool| {
+        options
+            .iter()
+            .filter(|option| matches(option))
+            .max_by_key(|option| option.id.len())
+    };
+    by(&|option| option.id == reported)
+        .or_else(|| {
+            by(&|option| !option.is_default && option.resolved.as_deref() == Some(reported))
+        })
+        .or_else(|| by(&|option| dated(&option.id)))
+        .or_else(|| {
+            by(&|option| !option.is_default && option.resolved.as_deref().is_some_and(dated))
+        })
+        .map(|option| option.label.clone())
 }
 
 impl SettingOption {
@@ -734,6 +901,7 @@ impl SettingOption {
             label: choice.label.to_owned(),
             description: choice.description.map(str::to_owned),
             is_default: choice.is_default,
+            resolved: None,
             permission: match choice.semantics {
                 PermissionSemantics::OwnSettings => None,
                 PermissionSemantics::Ask => Some(PermissionKind::Ask),
@@ -804,7 +972,14 @@ pub enum ToolStatus {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct InteractionRequest {
     pub request: NativeRequestId,
+    /// The turn the request arrived in. `None` for a sub-agent's request: it is not the
+    /// turn's, and does not end with it.
     pub turn: Option<NativeTurnId>,
+    /// The sub-agent that asked; `None` when the main agent did. A request lives as long
+    /// as its asker: a sub-agent's is withdrawn when that sub-agent's run ends (the
+    /// adapter then reports [`EventKind::InteractionResolved`]), never because the
+    /// turn it arrived in did.
+    pub owner: Option<NativeSubAgentId>,
     /// The tool item an approval is about, when the harness names it: its decision is
     /// told on that step.
     pub item: Option<NativeItemId>,
@@ -1116,6 +1291,22 @@ pub trait HarnessRuntime: Send + Sync + std::fmt::Debug {
 
     /// Requests interruption of the expected active turn.
     async fn interrupt(&self, request: InterruptRequest) -> InterruptOutcome;
+
+    /// Interrupts the work of every sub-agent the harness still runs, whether or not a
+    /// turn is active: a harness that keeps them running when the main agent's turn is
+    /// interrupted (Codex's child threads) must be told about each one. Each sub-agent's
+    /// own end is reported as [`EventKind::SubAgentEnded`]. Nothing to do by default.
+    async fn interrupt_sub_agents(&self, generation: RuntimeGeneration) {
+        let _ = generation;
+    }
+
+    /// Stops one sub-agent, and the sub-agents it started, whether or not a turn is active.
+    /// The harness reports each one's end as [`EventKind::SubAgentEnded`]; ticketd asked,
+    /// so it is the person's stop. A harness that cannot stop one alone says so.
+    async fn stop_sub_agent(&self, request: StopSubAgentRequest) -> StopSubAgentOutcome {
+        let _ = request;
+        StopSubAgentOutcome::Unsupported
+    }
 
     /// Changes a session setting. The supervisor calls it only between turns, so each
     /// turn runs on one set of settings.

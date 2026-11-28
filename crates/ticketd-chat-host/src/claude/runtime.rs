@@ -29,7 +29,8 @@ use crate::{
     InteractionResponse, InterruptOutcome, InterruptRequest, LoginState, NativeRequestId,
     NoticeKind, OpenRequest, OpenedRuntime, Problem, ProblemKind, ProviderDetail, Refusal,
     RespondOutcome, RuntimeEvent, RuntimeGeneration, SessionStart, SettingChange, SettingKey,
-    SettingOutcome, StartSettings, Submission, SubmissionId, SubmissionKind,
+    SettingOutcome, StartSettings, StopSubAgentOutcome, StopSubAgentRequest, Submission,
+    SubmissionId, SubmissionKind,
 };
 
 use super::attachment_refusal;
@@ -79,6 +80,8 @@ enum Kind {
     Submit(SubmissionId),
     Respond(NativeRequestId),
     Interrupt,
+    /// `stop_task`: one task asked to stop.
+    StopTask,
     /// The change asked for: once applied, it is what the session runs with.
     Setting(SettingKey, String),
 }
@@ -599,7 +602,7 @@ impl Connection {
         let id = event["id"].as_str().unwrap_or_default();
         let by_id = |command: &str, _: &Kind| command == id;
         match name {
-            "hello" | "inspection" | "options" | "interrupt_result" => {
+            "hello" | "inspection" | "options" | "interrupt_result" | "stop_task_result" => {
                 state.settle(by_id, Reply::Event(event.clone()));
             }
             "setting_result" => {
@@ -768,6 +771,10 @@ fn rejected(state: &mut State, id: &str, event: &Value) -> Vec<EventKind> {
             None => unexpected(),
         },
         Kind::Submit(submission) => {
+            // Unless the bridge still holds an earlier input of that ID, it holds nothing.
+            if code != "duplicate_submission" {
+                state.session.input_refused(&submission.0);
+            }
             if waiter_gone(command.waiter, reason.clone()) {
                 return vec![EventKind::SubmissionEvidence {
                     submission,
@@ -776,7 +783,7 @@ fn rejected(state: &mut State, id: &str, event: &Value) -> Vec<EventKind> {
             }
             Vec::new()
         }
-        Kind::Plain | Kind::Open | Kind::Interrupt | Kind::Setting(..) => {
+        Kind::Plain | Kind::Open | Kind::Interrupt | Kind::StopTask | Kind::Setting(..) => {
             waiter_gone(command.waiter, reason);
             Vec::new()
         }
@@ -1100,6 +1107,7 @@ impl HarnessRuntime for ClaudeRuntime {
                             active: Some(active.clone()),
                         });
                     }
+                    session.input_written(&submission.submission.0);
                     let mut command = json!({
                         "cmd": "submit",
                         "generation": generation,
@@ -1176,6 +1184,52 @@ impl HarnessRuntime for ClaudeRuntime {
             | CallOutcome::NotDelivered
             | CallOutcome::TimedOut
             | CallOutcome::Lost => InterruptOutcome::Unconfirmed,
+        }
+    }
+
+    /// Stops one background sub-agent through the SDK's `stopTask`. Claude Code reports
+    /// the task ended as a task notification; the session knows ticketd asked, so that end
+    /// is the person's.
+    async fn stop_sub_agent(&self, request: StopSubAgentRequest) -> StopSubAgentOutcome {
+        if self.stale(request.generation).is_some() {
+            return StopSubAgentOutcome::NotRunning;
+        }
+        let generation = self.connection.generation.0;
+        let task = request.sub_agent.0.clone();
+        let outcome = self
+            .connection
+            .call(|session| {
+                session.stop_asked(&task)?;
+                let command =
+                    json!({"cmd": "stop_task", "generation": generation, "task_id": task});
+                Ok((command, Kind::StopTask))
+            })
+            .await;
+        match outcome {
+            CallOutcome::Refused(Refusal::UnknownSubAgent | Refusal::StaleGeneration { .. }) => {
+                StopSubAgentOutcome::NotRunning
+            }
+            CallOutcome::Refused(_) => StopSubAgentOutcome::Unconfirmed,
+            CallOutcome::Event(event) if event["outcome"] == "asked" => StopSubAgentOutcome::Asked,
+            CallOutcome::Event(event) => {
+                self.connection
+                    .state()
+                    .session
+                    .stop_not_asked(&request.sub_agent.0);
+                StopSubAgentOutcome::Refused {
+                    reason: reason(&event["message"]),
+                }
+            }
+            CallOutcome::Rejected(reason) => {
+                self.connection
+                    .state()
+                    .session
+                    .stop_not_asked(&request.sub_agent.0);
+                StopSubAgentOutcome::Refused { reason }
+            }
+            CallOutcome::NotDelivered | CallOutcome::TimedOut | CallOutcome::Lost => {
+                StopSubAgentOutcome::Unconfirmed
+            }
         }
     }
 

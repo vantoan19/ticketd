@@ -271,6 +271,12 @@ impl<P: Peer> State<P> {
     }
 
     fn apply(&mut self, frame: Frame) -> (Vec<EventKind>, Option<Response>) {
+        // Once ticketd closed the connection it is done with the harness: what the process
+        // still says while it ends (a child's last frames after Stop) is not applied. The
+        // peer already dropped its state, so a late frame would open it again.
+        if self.closed {
+            return (Vec::new(), None);
+        }
         let (id, reply) = match frame {
             Frame::Reply { id, reply } => (id, reply),
             Frame::Incoming(incoming) => return self.peer.received(incoming),
