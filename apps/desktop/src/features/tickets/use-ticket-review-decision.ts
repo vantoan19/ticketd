@@ -8,7 +8,7 @@ import {
   useDraftRecovery,
 } from "@/lib/draft-recovery-context";
 import { editingBlockedReason, useWorkspaceState } from "@/lib/workspace-state";
-import { useOpenTicket } from "./open-ticket";
+import { useKnownTicket, useOpenTicket } from "./open-ticket";
 import { AgentContext } from "./ticket-agent-context";
 import { externalSource } from "./ticket-source";
 import {
@@ -32,7 +32,11 @@ export type NextReview =
 
 type ReviewDecision = (
   { kind: "done" } | { kind: "sent back"; brief: string; agent: string }
-) & { nextReview: NextReview; statusHistoryNumber: number | undefined };
+) & {
+  requestId: string;
+  nextReview: NextReview;
+  statusHistoryNumber: number | undefined;
+};
 
 type SendBackDraft = TicketUpdateDraft & { reviewNumber: number };
 
@@ -71,6 +75,7 @@ export function useTicketReviewDecision(
   readReviewQueue: ReadReviewQueue | undefined,
 ) {
   const { record: ticket, opening, changed, retry } = useOpenTicket();
+  const knownTicket = useKnownTicket();
   const { id, reference } = ticket;
   const reviewNumber = ticket.status_history_number ?? 0;
   const agent = useContext(AgentContext);
@@ -257,7 +262,11 @@ export function useTicketReviewDecision(
           }
         }
         const completionNumber = updated.status_history_number;
-        const receipt = { nextReview, statusHistoryNumber: completionNumber };
+        const receipt = {
+          requestId: request,
+          nextReview,
+          statusHistoryNumber: completionNumber,
+        };
         setDecision(
           send
             ? {
@@ -289,8 +298,17 @@ export function useTicketReviewDecision(
           ...(undo && {
             undo: async () => {
               const restored = await undo();
-              setDecision(null);
-              await changed(restored);
+              setDecision((current) =>
+                current?.requestId === request ? null : current,
+              );
+              // The restored review can already have been decided again while
+              // this reply was in flight. Refresh without refilling its old copy.
+              const current = knownTicket(reference);
+              const movedOn =
+                current === null ||
+                (current?.status_history_number ?? 0) >
+                  (restored.status_history_number ?? 0);
+              await changed(movedOn ? undefined : restored);
             },
           }),
         });

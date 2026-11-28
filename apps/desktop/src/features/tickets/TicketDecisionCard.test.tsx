@@ -17,6 +17,7 @@ import { ChatClientContext } from "@/features/chats/client";
 import { chatState, createMockChatClient } from "@/features/chats/mock-client";
 import { isMacPlatform } from "@/lib/platform";
 import type { Evidence, Ticket } from "@/lib/api/client";
+import { fakeChangeSignal } from "@/lib/workspace-reads/fake-signal";
 import { TicketPage } from "./TicketPage";
 import { AgentContext } from "./ticket-agent-context";
 import type { TicketAgentState } from "./ticket-agent-state";
@@ -204,10 +205,11 @@ function ticketView(
   reviewQueue: Ticket[],
   readReviewQueue = async () => reviewQueue,
   agentState: TicketAgentState | null = null,
+  signal?: ReturnType<typeof fakeChangeSignal>,
 ) {
   return (
     <StatusLineRegion>
-      <TestOpenTicket ticket={ticket}>
+      <TestOpenTicket ticket={ticket} {...(signal && { signal })}>
         <AgentContext.Provider
           value={
             agentState && {
@@ -343,6 +345,64 @@ test("a review decision uses the current status, stays on the ticket and offers 
     },
     requestId: expect.any(String),
   });
+});
+
+test("a delayed Undo reply leaves the newer review decision visible", async () => {
+  const signal = fakeChangeSignal();
+  const invoke = bridge.invoke.getMockImplementation()!;
+  let finishUndo!: () => void;
+  const undoPending = new Promise<void>((resolve) => {
+    finishUndo = resolve;
+  });
+  let holdRefresh = false;
+  let finishRefresh!: () => void;
+  const refreshPending = new Promise<void>((resolve) => {
+    finishRefresh = resolve;
+  });
+  bridge.invoke.mockImplementation(async (command: string, args?: object) => {
+    const result = await invoke(command, args);
+    if (
+      command === "change_ticket" &&
+      (args as { patch: { status: string } }).patch.status === "In review"
+    ) {
+      await undoPending;
+    } else if (command === "show_ticket" && holdRefresh) {
+      await refreshPending;
+    }
+    return result;
+  });
+
+  render(ticketView(vi.fn(), [ticket], undefined, null, signal));
+  fireEvent.click(await screen.findByRole("button", { name: "Move to Done" }));
+  await screen.findByRole("region", { name: "Done" });
+  fireEvent.click(screen.getByRole("button", { name: "Undo" }));
+  await waitFor(() => expect(ticket.status).toBe("In review"));
+  await act(async () => signal.change());
+
+  const reviewCard = within(
+    await screen.findByRole("region", { name: "Ready for review" }),
+  );
+  fireEvent.click(reviewCard.getByRole("button", { name: "Send back" }));
+  fireEvent.change(
+    reviewCard.getByRole("textbox", { name: "What needs to change?" }),
+    { target: { value: "Feedback for the new review." } },
+  );
+  fireEvent.click(reviewCard.getByRole("button", { name: "Send back" }));
+  await screen.findByRole("region", { name: "Sent back" });
+  holdRefresh = true;
+  try {
+    await act(async () => finishUndo());
+    const newerDecision = within(
+      screen.getByRole("region", { name: "Sent back" }),
+    );
+    expect(
+      newerDecision.getByText("Feedback for the new review."),
+    ).toBeTruthy();
+    expect(screen.getByText("Sent T-KQ1 back to In progress")).toBeTruthy();
+    expect(screen.getByRole("button", { name: "Undo" })).toBeTruthy();
+  } finally {
+    await act(async () => finishRefresh());
+  }
 });
 
 test("Reply posts an update in the card and keeps the ticket In progress", async () => {
