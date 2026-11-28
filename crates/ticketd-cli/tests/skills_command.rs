@@ -226,6 +226,7 @@ fn published_write_examples_support_retries_guards_and_atomic_dependencies() {
     );
     let guide = run(dir.path(), &["skills", "get", "writes"]);
     let mut ticket = Value::Null;
+    let mut review_update_id = Value::Null;
 
     for mut request in json_examples(&guide) {
         match request["operation"].as_str().unwrap() {
@@ -282,6 +283,43 @@ fn published_write_examples_support_retries_guards_and_atomic_dependencies() {
                 assert_eq!(
                     second["prerequisites"][0]["reference"],
                     result["value"][0]["reference"]
+                );
+            }
+            "send_back" => {
+                let reference = ticket["reference"].as_str().unwrap();
+                data(dir.path(), &["change", reference, "--status", "In review"]);
+                request["reference"] = ticket["reference"].clone();
+                let result = write_request(dir.path(), &request, "example-send-back");
+                assert_eq!(result["value"]["ticket"]["status"], "In progress");
+                assert_eq!(result["value"]["activity"]["brief"], request["brief"]);
+                assert_eq!(
+                    result,
+                    write_request(dir.path(), &request, "example-send-back")
+                );
+                review_update_id = result["value"]["activity"]["id"].clone();
+                let feed = data(dir.path(), &["activity", "list", reference]);
+                assert_eq!(
+                    feed.as_array()
+                        .unwrap()
+                        .iter()
+                        .filter(|entry| entry["activity"]["id"] == review_update_id)
+                        .count(),
+                    1
+                );
+            }
+            "undo_send_back" => {
+                let reference = ticket["reference"].as_str().unwrap();
+                request["reference"] = ticket["reference"].clone();
+                request["send_request_id"] = json!("example-send-back");
+                let result = write_request(dir.path(), &request, "example-undo-review");
+                assert_eq!(result["value"]["status"], "In review");
+                let feed = data(dir.path(), &["activity", "list", reference]);
+                assert!(
+                    !feed
+                        .as_array()
+                        .unwrap()
+                        .iter()
+                        .any(|entry| entry["activity"]["id"] == review_update_id)
                 );
             }
             operation => panic!("unexercised write example: {operation}"),

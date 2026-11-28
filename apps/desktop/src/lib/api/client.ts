@@ -600,6 +600,14 @@ export const client = {
         ),
       );
   },
+  async ticketPeekCounts(reference: string) {
+    return z
+      .object({
+        linked: z.number().int().nonnegative(),
+        files: z.number().int().nonnegative(),
+      })
+      .parse(await invoke("ticket_peek_counts", { reference }));
+  },
   /** Every relationship of a ticket as the core reports it, one page of each kind. */
   async contextualRelationships(
     reference: string,
@@ -890,10 +898,22 @@ export const client = {
       })
       .parse(await invoke("ticket_backlinks", { reference, limit: 3, offset }));
   },
-  async activityFeed(reference: string, offset: number) {
+  async activityFeed(reference: string, offset: number, updatesOnly = false) {
+    return z.array(activityFeedSchema).parse(
+      await invoke("activity_feed", {
+        reference,
+        limit: 50,
+        offset,
+        ...(updatesOnly && { updatesOnly }),
+      }),
+    );
+  },
+  async activityUpdateCount(reference: string) {
     return z
-      .array(activityFeedSchema)
-      .parse(await invoke("activity_feed", { reference, limit: 50, offset }));
+      .number()
+      .int()
+      .nonnegative()
+      .parse(await invoke("activity_update_count", { reference }));
   },
   async activity(reference: string, id: string) {
     return activitySchema

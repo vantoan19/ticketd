@@ -21,6 +21,7 @@ import { Activity } from "@/features/tickets/Activity";
 import { SourceConversation } from "@/features/tickets/SourceConversation";
 import { TicketDescription } from "./TicketDescription";
 import { TicketOutline } from "./TicketOutline";
+import { TicketPeek } from "./TicketPeek";
 import { ReadOnlyTitle, SourceDescription } from "./ReadOnlySource";
 import { SourceUnavailableNotice } from "@/features/tickets/SourceUnavailableNotice";
 import { NeedsReviewNotice } from "@/features/sync-review/NeedsReviewNotice";
@@ -36,10 +37,12 @@ import { useTicketTrash } from "@/features/tickets/use-ticket-trash";
 import type { Project } from "@/lib/api/client";
 import { useOpenTicket } from "./open-ticket";
 import { TicketDecisionCard, type ReviewQueue } from "./TicketDecisionCard";
+import { useTicketSeenTime } from "./ticket-seen-time";
 import { revealTicketDescription } from "./description-navigation";
 import { plural } from "@/lib/format";
 import { useWorkspaceChange } from "@/lib/workspace-change";
 import type { Plan } from "@/lib/api/plans";
+import type { LatestUpdate } from "@/lib/api/progress";
 
 type NoteTarget = { id: string; key: number };
 
@@ -47,9 +50,11 @@ type NoteTarget = { id: string; key: number };
 export function TicketPage({
   active,
   expanded = false,
+  openFromPeek,
   rail = false,
   swap = false,
   leaving = false,
+  reading = active && !leaving,
   readReviewQueue,
   projects,
   plans,
@@ -61,11 +66,13 @@ export function TicketPage({
   /** Only the selected ticket reads its links, evidence, and backlinks. */
   active: boolean;
   expanded?: boolean;
+  openFromPeek?: (() => void) | undefined;
   rail?: boolean;
   /** Shown after another open ticket: its document fades up once that one has left. */
   swap?: boolean;
   /** Not the open ticket any more, kept on screen for one exit while it fades out. */
   leaving?: boolean;
+  reading?: boolean;
   readReviewQueue?: (() => Promise<ReviewQueue>) | undefined;
   projects: Project[];
   plans: Plan[];
@@ -81,11 +88,20 @@ export function TicketPage({
   // Readers not yet on the Open Ticket (the source's conversation, rendered
   // Markdown, the editor's conflict check) follow the Workspace's change.
   const revision = useWorkspaceChange();
+  const seenTime = useTicketSeenTime(ticket.id, reading);
+  const [representedUpdate, setRepresentedUpdate] =
+    useState<LatestUpdate | null>(null);
   const [updateTarget, setUpdateTarget] = useState<NoteTarget | null>(null);
   const work = useLinkedWork();
   const trash = useTicketTrash(changed);
   const [evidenceRequest, setEvidenceRequest] = useState(0);
   const [showEvidenceRequest, setShowEvidenceRequest] = useState(0);
+  const showEvidenceOnExpand = useRef(false);
+  useLayoutEffect(() => {
+    if (openFromPeek || !showEvidenceOnExpand.current) return;
+    showEvidenceOnExpand.current = false;
+    setShowEvidenceRequest((count) => count + 1);
+  }, [openFromPeek]);
   const [fileAddRequest, setFileAddRequest] = useState<FileAddRequest | null>(
     null,
   );
@@ -165,34 +181,66 @@ export function TicketPage({
       }}
     />
   );
+  const decisionCard = (
+    <TicketDecisionCard
+      active={active && !leaving}
+      seenTime={seenTime}
+      onRepresentedUpdate={setRepresentedUpdate}
+      readReviewQueue={readReviewQueue}
+      blockerCount={blockerCount}
+      blockers={
+        blockerCount > 0 ? (
+          <TicketBlockersPopover
+            work={work}
+            select={select}
+            trigger={
+              <Button variant="attention" size="compact">
+                {plural(blockerCount, "blocker")} still open
+              </Button>
+            }
+          />
+        ) : null
+      }
+      doneFallback={<TicketClosingLine />}
+      onOpenUpdate={(id) => {
+        setUpdateTarget({ id, key: Date.now() });
+        openFromPeek?.();
+      }}
+      onEvidence={() => {
+        if (openFromPeek) {
+          showEvidenceOnExpand.current = true;
+          openFromPeek();
+        } else setShowEvidenceRequest((count) => count + 1);
+      }}
+      select={select}
+      onAcceptance={() => revealTicketDescription(ticket.id, "acceptance")}
+    />
+  );
   const context = (
     <>
       {!rail && properties()}
-      <TicketDecisionCard
-        active={active && !leaving}
-        readReviewQueue={readReviewQueue}
-        blockerCount={blockerCount}
-        blockers={
-          blockerCount > 0 ? (
-            <TicketBlockersPopover
-              work={work}
-              select={select}
-              trigger={
-                <Button variant="attention" size="compact">
-                  {plural(blockerCount, "blocker")} still open
-                </Button>
-              }
-            />
-          ) : null
-        }
-        doneFallback={<TicketClosingLine />}
-        onOpenUpdate={(id) => setUpdateTarget({ id, key: Date.now() })}
-        onEvidence={() => setShowEvidenceRequest((count) => count + 1)}
-        select={select}
-        onAcceptance={() => revealTicketDescription(ticket.id, "acceptance")}
-      />
+      {decisionCard}
     </>
   );
+  if (openFromPeek) {
+    return (
+      <div
+        ref={page}
+        className="detail-content"
+        hidden={!active && !leaving}
+        inert={opening || leaving}
+        aria-busy={opening}
+        data-swap={swap || undefined}
+        data-fresh={fresh || undefined}
+        data-leaving={leaving || undefined}
+      >
+        {active && !ticket.trashed && <LinkedWorkDialogs work={work} />}
+        <TicketPeek select={select} revision={revision} onOpen={openFromPeek}>
+          {decisionCard}
+        </TicketPeek>
+      </div>
+    );
+  }
   return (
     <div
       ref={page}
@@ -348,6 +396,8 @@ export function TicketPage({
           select={select}
           foldEmpty
           latestNoteId={ticket.latest_update?.activity_id}
+          representedUpdate={representedUpdate}
+          seenTime={seenTime}
           sourceName={source?.provider_name}
         />
       </div>

@@ -61,11 +61,13 @@ export function TicketDetails({
   outsideResults = false,
   readReviewQueue,
   leaving = false,
+  peek = false,
 }: {
   outsideResults?: boolean;
   readReviewQueue?: (() => Promise<ReviewQueue>) | undefined;
   /** The pane is fading out after the ticket closed: it takes no input. */
   leaving?: boolean;
+  peek?: boolean;
   hidden?: boolean;
   /** The selected ticket's place in the visible list, across pages. */
   position?: TicketListPosition | null;
@@ -152,13 +154,14 @@ export function TicketDetails({
   const pages =
     selected && !kept.includes(selected) ? [...kept, selected] : kept;
   // Pages are memoized, so what they call is the same object on every render.
-  const latest = useRef({ open, setSelected });
+  const latest = useRef({ open, setSelected, onExpand });
   useEffect(() => {
-    latest.current = { open, setSelected };
+    latest.current = { open, setSelected, onExpand };
   });
   const [pageActions] = useState<PageActions>(() => ({
     select: (reference) => latest.current.open(reference),
     mention: (target) => latest.current.setSelected(target.reference, target),
+    expand: () => latest.current.onExpand(),
   }));
   return (
     <section
@@ -235,7 +238,9 @@ export function TicketDetails({
                     key={reference}
                     reference={reference}
                     active={reference === selected}
+                    reading={reference === selected && !hidden && !leaving}
                     expanded={expanded}
+                    openFromPeek={peek ? pageActions.expand : undefined}
                     rail={expanded && !narrow}
                     hidden={hidden || reference !== selected}
                     swap={swap.swapped && reference === selected}
@@ -265,6 +270,7 @@ export function TicketDetails({
 type PageActions = {
   select: (reference: string | null) => void;
   mention: (target: MentionTarget) => void;
+  expand: () => void;
 };
 
 /**
@@ -274,7 +280,9 @@ type PageActions = {
 const OpenedPage = memo(function OpenedPage({
   reference,
   active,
+  reading,
   expanded,
+  openFromPeek,
   rail,
   hidden,
   swap,
@@ -289,7 +297,9 @@ const OpenedPage = memo(function OpenedPage({
 }: {
   reference: string;
   active: boolean;
+  reading: boolean;
   expanded: boolean;
+  openFromPeek: (() => void) | undefined;
   rail: boolean;
   hidden: boolean;
   swap: boolean;
@@ -308,7 +318,9 @@ const OpenedPage = memo(function OpenedPage({
     <OpenTicket reference={reference} seed={seed} hidden={hidden}>
       <TicketPage
         active={active}
+        reading={reading}
         expanded={expanded}
+        openFromPeek={openFromPeek}
         rail={rail}
         swap={swap}
         leaving={leaving}

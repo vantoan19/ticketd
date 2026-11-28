@@ -6,6 +6,33 @@
   gap: 16px;
   margin-top: 48px;
 }
+.activity-latest-stub {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-height: 28px;
+}
+.activity-latest-stub p {
+  flex: 1;
+  margin: 0;
+}
+.activity-latest-stub .activity-details-chip {
+  margin-top: 0;
+}
+.activity-new-divider,
+.activity-earlier {
+  margin-left: 40px;
+}
+.activity-new-divider {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+.activity-new-divider::after {
+  content: "";
+  flex: 1;
+  height: 1px;
+}
 .activity-author {
   display: inline-flex;
   align-items: center;
@@ -126,6 +153,9 @@
   display: inline-flex;
   pointer-events: none;
 }
+.activity-latest-stub:hover .activity-row-actions,
+.activity-latest-stub:focus-within .activity-row-actions,
+.activity-latest-stub[data-open] .activity-row-actions,
 .activity [data-slot="comment-row"]:hover .activity-row-actions,
 .activity [data-slot="comment-row"]:focus-within .activity-row-actions,
 .activity [data-slot="comment-row"][data-open] .activity-row-actions,

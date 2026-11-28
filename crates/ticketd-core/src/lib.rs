@@ -95,7 +95,7 @@ use serde::{Deserialize, Serialize};
 mod counts;
 mod history;
 mod readiness;
-pub use counts::{SidebarCounts, StatusCounts};
+pub use counts::{SidebarCounts, StatusCounts, TicketPeekCounts};
 mod inbox;
 pub use inbox::{AttentionEntry, InboxAttention, InboxEntry, ReminderState, ReviewState};
 mod activities;
@@ -931,6 +931,26 @@ impl Workspace {
         self.read(|_| {
             let ticket = self.show_ticket(reference)?;
             activities::feed(&self.connection, &ticket.id, limit, offset)
+        })
+    }
+
+    /// The authored part of the feed, in the same newest-first order.
+    pub fn activity_updates(
+        &self,
+        reference: &str,
+        limit: u32,
+        offset: u32,
+    ) -> Result<Vec<ActivityFeedEntry>, Error> {
+        self.read(|_| {
+            let id = relationships::id(&self.connection, reference)?;
+            activities::newest(&self.connection, &id, limit, offset)
+        })
+    }
+
+    pub fn activity_update_count(&self, reference: &str) -> Result<u32, Error> {
+        self.read(|_| {
+            let id = relationships::id(&self.connection, reference)?;
+            activities::count(&self.connection, &id)
         })
     }
 

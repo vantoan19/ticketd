@@ -13,11 +13,11 @@ const PICTURE = /!\[[^\]]*\]\(ticketd:\/\/attachment\/[^)\s]+\)/g;
 const PICTURE_LINES = 14;
 
 /**
- * How many lines of an update show before it is clamped: eight of text, later
+ * How many lines of an update show before it is clamped: a few of text, later
  * for cards, and every picture adds its own height (up to 240px) on top, so a
  * paragraph with one picture is never cut short with "Show more" under it.
  */
-export function updateClampLines(brief: string): number {
+export function updateClampLines(brief: string, textLines = 8): number {
   const pictures = brief.match(PICTURE)?.length ?? 0;
-  return (ALONE_LINK.test(brief) ? 40 : 8) + pictures * PICTURE_LINES;
+  return (ALONE_LINK.test(brief) ? 40 : textLines) + pictures * PICTURE_LINES;
 }

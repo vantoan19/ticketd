@@ -14,11 +14,13 @@ import { hasVisibleText } from "./brief-text";
 import { SegmentedControl } from "@/components/ui/segmented-control";
 import { DocumentNavigation } from "@/features/documents/navigation";
 import {
+  Fragment,
   useContext,
   useEffect,
   useLayoutEffect,
   useRef,
   useState,
+  useSyncExternalStore,
   type FormEvent,
   type KeyboardEvent,
 } from "react";
@@ -53,6 +55,7 @@ import {
 } from "@/components/ui/dropdown-menu";
 import {
   Bot,
+  ChevronRight,
   FileText,
   History,
   Link2,
@@ -84,13 +87,16 @@ import { historyIcon } from "./history-icon";
 import { attribution } from "./ticket-source";
 import type { CreditedSubAgent } from "@/lib/api/credit";
 import { useChatFeature } from "@/features/chats/use-chats";
-import { formatDateTime } from "@/lib/format";
+import { formatDateTime, plural } from "@/lib/format";
 import { ariaKeyShortcuts, shortcutLabel } from "@/lib/shortcuts";
 import { revealInDetail } from "./detail-scroll";
 import { z } from "zod";
 import { useWorkspaceChange } from "@/lib/workspace-change";
 import { editedUpdateFills, useOpenTicket } from "./open-ticket";
 import { updateClampLines } from "./update-clamp";
+import { NewUpdateDot } from "./NewUpdateDot";
+import { isNewUpdate } from "./ticket-seen-time";
+import type { LatestUpdate } from "@/lib/api/progress";
 import {
   DraftRecoveryGate,
   useDraftRecovery,
@@ -121,6 +127,32 @@ const editDraftSchema = z.object({
 const requestSchema = z.object({ payload: z.string(), id: z.string() });
 const drafts = new Map<string, Draft>();
 const noFeed: ActivityFeedEntry[] = [];
+const activityViewKey = "ticketd:activity-view";
+type ActivityView = "all" | "updates";
+const activityViewChanged = "ticketd:activity-view-changed";
+let unsavedActivityView: ActivityView | undefined;
+
+function readActivityView(): ActivityView {
+  return (
+    unsavedActivityView ??
+    (localValue(activityViewKey) === "all" ? "all" : "updates")
+  );
+}
+
+function chooseActivityView(view: ActivityView) {
+  try {
+    localStorage.setItem(activityViewKey, view);
+    unsavedActivityView = undefined;
+  } catch {
+    unsavedActivityView = view;
+  }
+  window.dispatchEvent(new Event(activityViewChanged));
+}
+
+function subscribeActivityView(change: () => void) {
+  window.addEventListener(activityViewChanged, change);
+  return () => window.removeEventListener(activityViewChanged, change);
+}
 const draftKey = (reference: string) => `ticketd:activity-draft:${reference}`;
 
 /** A failure on this device's draft storage: plain words, nothing for Details. */
@@ -191,6 +223,8 @@ type ActivityProps = {
   foldEmpty?: boolean;
   sourceName?: string | undefined;
   latestNoteId?: string | undefined;
+  representedUpdate?: LatestUpdate | null;
+  seenTime?: number | null;
   reference: string;
   ticketId?: string;
   projects: Project[];
@@ -221,6 +255,8 @@ function RecoveredActivity({
   plans = [],
   sourceName,
   latestNoteId,
+  representedUpdate,
+  seenTime = null,
   foldEmpty = false,
 }: ActivityProps) {
   const editingHarness = useEditingHarness();
@@ -238,18 +274,30 @@ function RecoveredActivity({
   const { changed, record } = useOpenTicket();
   // Unmigrated readers below (Documents, Markdown) still follow the change signal.
   const revision = useWorkspaceChange();
-  const activity = useOpenTicket("activity");
+  const view = useSyncExternalStore(subscribeActivityView, readActivityView);
+  const updates = useOpenTicket("activity", "updates", view === "updates");
+  const readHistory = view === "updates" && updates.value?.length === 0;
+  const all = useOpenTicket("activity", "all", view === "all" || readHistory);
+  const activity = view === "updates" ? updates : all;
+  const updateCount = useOpenTicket(
+    "activityUpdateCount",
+    view === "updates" && updates.more,
+  );
   const note = useOpenTicket("activityNote", targetId);
   const targetNote: AuthoredActivity | null = note.value ?? null;
   // A target whose notice was dismissed by leaving the ticket stays dismissed
   // until a new target (a new key) is opened.
   const [leftTargetKey, setLeftTargetKey] = useState<number | undefined>();
+  const [earlierOpen, setEarlierOpen] = useState(false);
   const [wasActive, setWasActive] = useState(active);
   const [wasReference, setWasReference] = useState(reference);
   if (wasActive !== active || wasReference !== reference) {
     setWasActive(active);
     setWasReference(reference);
-    if (!active || wasReference !== reference) setLeftTargetKey(targetKey);
+    if (!active || wasReference !== reference) {
+      setLeftTargetKey(targetKey);
+      setEarlierOpen(false);
+    }
   }
   const targetMissing =
     targetId !== undefined &&
@@ -261,12 +309,18 @@ function RecoveredActivity({
   const notes = feed.flatMap((item) =>
     item.type === "authored" ? [item.activity] : [],
   );
-  const history = feed.flatMap((item) =>
-    item.type === "automatic" ? [item] : [],
+  const history = (readHistory ? (all.value ?? noFeed) : feed).flatMap(
+    (item) => (item.type === "automatic" ? [item] : []),
   );
-  const loading = activity.value === undefined && activity.failure === null;
+  const loading =
+    (activity.value === undefined && activity.failure === null) ||
+    (readHistory && all.value === undefined && all.failure === null);
   const [error, setError] = useState<FailureDescription | null>(null);
-  const loadError = activity.failure ?? note.failure;
+  const loadError =
+    activity.failure ??
+    (readHistory ? all.failure : null) ??
+    note.failure ??
+    updateCount.failure;
   const [saved, setSaved] = useState<Draft>(
     () =>
       recovery.read(recoveryOwner, recoveryDraftSchema) ??
@@ -377,7 +431,6 @@ function RecoveredActivity({
   const [focusUpdate, setFocusUpdate] = useState(0);
   const [focusDetails, setFocusDetails] = useState(false);
   const replied = useRef(false);
-  const [view, setView] = useState<"all" | "updates">("all");
   const [confirmDelete, setConfirmDelete] = useState<string | null>(null);
   const openDocument = useContext(DocumentNavigation);
   useEffect(() => {
@@ -557,7 +610,7 @@ function RecoveredActivity({
   }
   // A note reached from elsewhere may be older than the loaded page. Add it to
   // the same chronological list, and replace it with the paged copy when loaded.
-  const displayedNotes =
+  const availableNotes =
     active &&
     targetNote !== null &&
     targetId !== undefined &&
@@ -565,10 +618,72 @@ function RecoveredActivity({
     !notes.some((note) => note.id === targetId)
       ? [...notes, targetNote]
       : notes;
-  const detailIds = displayedNotes.flatMap((note) =>
-    note.supporting_document_id ? [note.supporting_document_id] : [],
+  const sortedNotes = [...availableNotes].sort((a, b) =>
+    b.reported_at.localeCompare(a.reported_at),
   );
-  const detailIdsKey = detailIds.join(",");
+  const latest = sortedNotes[0];
+  // An explicit update link or a saved edit must still reach the full row.
+  const stub =
+    representedUpdate &&
+    representedUpdate.activity_id !== targetId &&
+    representedUpdate.activity_id !== edit?.id &&
+    (!latest ||
+      latest.id === representedUpdate.activity_id ||
+      latest.reported_at < representedUpdate.reported_at)
+      ? representedUpdate
+      : null;
+  const stubNote = sortedNotes.find((note) => note.id === stub?.activity_id);
+  const remaining = sortedNotes.filter((note) => note.id !== stub?.activity_id);
+  const recentNotes = remaining.slice(0, 3);
+  const totalUpdates = updateCount.value ?? notes.length;
+  const earlierCount = Math.max(
+    0,
+    totalUpdates - Number(Boolean(stubNote)) - recentNotes.length,
+  );
+  const moreEarlier =
+    updates.more &&
+    (updateCount.value === undefined || notes.length < updateCount.value);
+  const { failedMore, loadingMore, showMore } = updates;
+  useEffect(() => {
+    if (
+      active &&
+      view === "updates" &&
+      earlierOpen &&
+      moreEarlier &&
+      !failedMore &&
+      !loadingMore
+    )
+      showMore();
+  }, [
+    active,
+    view,
+    earlierOpen,
+    moreEarlier,
+    failedMore,
+    loadingMore,
+    showMore,
+  ]);
+  const displayedNotes =
+    view === "all"
+      ? sortedNotes
+      : earlierOpen
+        ? remaining
+        : remaining.filter(
+            (note) =>
+              recentNotes.includes(note) ||
+              note.id === targetId ||
+              note.id === edit?.id,
+          );
+  const firstEarlierNote = displayedNotes.find(
+    (note) => !recentNotes.includes(note),
+  );
+  const detailIds = new Set(
+    displayedNotes.flatMap((note) =>
+      note.supporting_document_id ? [note.supporting_document_id] : [],
+    ),
+  );
+  if (stub?.supporting_document_id) detailIds.add(stub.supporting_document_id);
+  const detailIdsKey = [...detailIds].join(",");
   useEffect(() => {
     if (!active || !detailIdsKey) return;
     let current = true;
@@ -655,12 +770,6 @@ function RecoveredActivity({
   const order = entries
     .map((item) => (item.type === "note" ? `n${item.note.id}` : `h${item.id}`))
     .join();
-  // The newest update still in the list, so deleting the latest one moves the label.
-  const newestNoteId = displayedNotes.reduce<AuthoredActivity | null>(
-    (best, note) =>
-      best === null || note.reported_at > best.reported_at ? note : best,
-    null,
-  )?.id;
   // An update newer than the newest already shown arrives with motion: yours
   // posted, or one an agent reports. The first list, older pages and a changed
   // filter appear without it.
@@ -811,6 +920,198 @@ function RecoveredActivity({
       </div>
     </form>
   );
+  const updateActions = {
+    disabled: pending,
+    editing: Boolean(edit),
+    confirmingId: confirmDelete,
+    failure: deleteError,
+    onReply: reply,
+    onEdit: (note: AuthoredActivity) =>
+      setEdit({ id: note.id, original: note.brief, content: note.brief }),
+    onConfirm: (id: string, open: boolean) => {
+      if (open) setDeleteError(null);
+      setConfirmDelete(open ? id : null);
+    },
+    onDelete: (id: string) => void remove(id),
+    focusReplied: () => {
+      if (!replied.current) return false;
+      replied.current = false;
+      setFocusUpdate((count) => count + 1);
+      return true;
+    },
+  };
+  const detailsFor = (id: string | null | undefined) =>
+    id && (
+      <DetailsChip info={detailDocuments[id]} open={() => openDocument?.(id)} />
+    );
+  const earlier = view === "updates" && earlierCount > 0 && (
+    <li key="earlier" className="activity-earlier">
+      <button
+        type="button"
+        className="ui-disclosure-trigger"
+        aria-expanded={earlierOpen}
+        onClick={() => setEarlierOpen(!earlierOpen)}
+      >
+        <ChevronRight aria-hidden="true" />
+        <span>{plural(earlierCount, "earlier update")}</span>
+      </button>
+    </li>
+  );
+  const firstEarlierIndex = entries.findIndex(
+    (entry) => entry.type === "note" && entry.note.id === firstEarlierNote?.id,
+  );
+  const earlierIndex =
+    firstEarlierIndex < 0 ? entries.length : firstEarlierIndex;
+  const firstNewIndex = entries.findIndex(
+    (entry) =>
+      entry.type === "note" &&
+      entry.note.id !== stub?.activity_id &&
+      isNewUpdate(entry.note, seenTime),
+  );
+  const rows = entries.map((item, index) =>
+    item.type === "note" ? (
+      item.note.id === stub?.activity_id ? null : (
+        <Fragment key={`note-${item.note.id}`}>
+          {index === firstNewIndex && (
+            <li className="activity-new-divider activity-muted">
+              <span>New since you last looked</span>
+            </li>
+          )}
+          <CommentRow
+            layoutDependency={order}
+            arriving={shownThrough !== null && item.timestamp > shownThrough}
+            icon={item.note.editing_agent ? Bot : MessageSquare}
+            mark={
+              editingHarness(item.note.editing_agent) ? (
+                <HarnessMark
+                  harness={editingHarness(item.note.editing_agent)}
+                  name={item.note.editing_agent ?? ""}
+                  decorative
+                />
+              ) : undefined
+            }
+            label={`Update by ${item.note.editing_agent ?? "you"}`}
+            ref={
+              active && item.note.id === targetId && targetNote?.id === targetId
+                ? targetRef
+                : undefined
+            }
+            tabIndex={
+              active && item.note.id === targetId && targetNote?.id === targetId
+                ? -1
+                : undefined
+            }
+            aria-label={
+              active && item.note.id === targetId && targetNote?.id === targetId
+                ? "Selected update"
+                : undefined
+            }
+            data-open={confirmDelete === item.note.id || undefined}
+            header={
+              // One line: who · when · edited, then Latest (DB-12, DB-18).
+              <span className="activity-author">
+                <strong>{item.note.editing_agent ?? "You"}</strong>
+                <SubAgentCredit
+                  credit={item.note.credited_to}
+                  reference={reference}
+                />
+                <span aria-hidden="true">·</span>
+                <Time value={item.note.reported_at} />
+                {isNewUpdate(item.note, seenTime) && <NewUpdateDot />}
+                {item.note.updated_at !== item.note.reported_at && (
+                  <>
+                    <span aria-hidden="true">·</span>
+                    <Tooltip
+                      content={`Edited ${formatDateTime(item.note.updated_at)}`}
+                    >
+                      <span tabIndex={0}>edited</span>
+                    </Tooltip>
+                  </>
+                )}
+                <Presence initial={false}>
+                  {item.note.id === (latest?.id ?? latestNoteId) && (
+                    <m.span
+                      key="latest"
+                      exit={{ opacity: 0, transition: exitTransition() }}
+                    >
+                      <Badge size="sm">Latest</Badge>
+                    </m.span>
+                  )}
+                </Presence>
+              </span>
+            }
+            actions={
+              !trashed &&
+              edit?.id !== item.note.id && (
+                <UpdateActions {...updateActions} note={item.note} />
+              )
+            }
+          >
+            {edit?.id === item.note.id ? (
+              // Edit in place: the row's body becomes the editor (DB-08).
+              editForm(edit, item.note.brief)
+            ) : (
+              <div
+                {...chatSource(`${reference} · Update`, {
+                  kind: "ticket",
+                  id: ticketId,
+                })}
+              >
+                <div className="markdown-preview activity-note">
+                  <Clamp
+                    lines={updateClampLines(
+                      item.note.brief,
+                      view === "updates" ? 6 : 8,
+                    )}
+                  >
+                    <MarkdownDocument
+                      source={item.note.brief}
+                      select={select}
+                      revision={revision}
+                      attachmentCards
+                    />
+                  </Clamp>
+                </div>
+              </div>
+            )}
+            {detailsFor(item.note.supporting_document_id)}
+          </CommentRow>
+        </Fragment>
+      )
+    ) : (
+      <EventGroup
+        key={`history-${item.id}`}
+        layoutDependency={order}
+        icon={History}
+        summary={changeSummary(item.changes)}
+        time={<Time value={item.timestamp} format="compact" />}
+      >
+        {item.changes.map((entry, index) => (
+          <EventRow
+            key={index}
+            icon={historyIcon(entry.kind, entry.to_value)}
+            time={<Time value={entry.timestamp} format="compact" />}
+            meta={
+              entry.editing_agent && (
+                <>
+                  <span className="activity-agent">
+                    {attribution(entry.editing_agent, sources)}
+                  </span>
+                  <SubAgentCredit
+                    credit={entry.credited_to}
+                    reference={reference}
+                    after
+                  />
+                </>
+              )
+            }
+          >
+            {historySentence(entry, lookups)}
+          </EventRow>
+        ))}
+      </EventGroup>
+    ),
+  );
   return (
     <section
       className="activity"
@@ -824,7 +1125,8 @@ function RecoveredActivity({
         !edit &&
         !error &&
         !loadError &&
-        !targetMissing
+        !targetMissing &&
+        !stub
       }
     >
       {/* The note is only worth saying where a source owns the ticket and could be confused for the destination. */}
@@ -834,8 +1136,8 @@ function RecoveredActivity({
         // The read gives no total, so while more is waiting the count only
         // says how many updates are loaded so far.
         count={
-          notes.length
-            ? `${notes.length}${activity.more ? "+" : ""}`
+          totalUpdates
+            ? `${totalUpdates}${activity.more && updateCount.value === undefined ? "+" : ""}`
             : undefined
         }
         caption={
@@ -846,10 +1148,10 @@ function RecoveredActivity({
             aria-label="Show activity"
             compact
             value={view}
-            onValueChange={setView}
+            onValueChange={chooseActivityView}
             options={[
-              { value: "all", label: "All" },
               { value: "updates", label: "Updates" },
+              { value: "all", label: "All" },
             ]}
           />
         }
@@ -882,7 +1184,9 @@ function RecoveredActivity({
             failure={loadError}
             onRetry={() => {
               if (activity.failure) activity.retry();
+              if (readHistory && all.failure) all.retry();
               if (note.failure) note.retry();
+              if (updateCount.failure) updateCount.retry();
             }}
           />
         )
@@ -1051,11 +1355,25 @@ function RecoveredActivity({
         !displayedNotes.some((note) => note.id === edit.id) &&
         // A recovered edit of an update not on this page is never lost.
         editForm(edit, edit.original)}
-      {loading && entries.length === 0 ? (
+      {stub && (
+        <div
+          className="activity-latest-stub activity-muted"
+          data-open={confirmDelete === stub.activity_id || undefined}
+        >
+          <p>
+            ↑ Latest update, <Time value={stub.reported_at} />, is shown above
+          </p>
+          {detailsFor(stub.supporting_document_id)}
+          {!trashed && stubNote && (
+            <UpdateActions {...updateActions} note={stubNote} />
+          )}
+        </div>
+      )}
+      {loading && entries.length === 0 && !stub ? (
         <p className="activity-muted" role="status">
           Loading activity…
         </p>
-      ) : entries.length === 0 && !error && !loadError ? (
+      ) : entries.length === 0 && !stub && !error && !loadError ? (
         // The filter can hide the history alone: say what is really empty (DB-21).
         view === "updates" && history.length > 0 ? (
           <EmptyState
@@ -1066,7 +1384,7 @@ function RecoveredActivity({
               <Button
                 variant="link"
                 size="inline"
-                onClick={() => setView("all")}
+                onClick={() => chooseActivityView("all")}
               >
                 Show all activity
               </Button>
@@ -1080,177 +1398,20 @@ function RecoveredActivity({
           />
         )
       ) : (
-        <Timeline aria-label="Activity timeline">
-          {entries.map((item) =>
-            item.type === "note" ? (
-              <CommentRow
-                key={`note-${item.note.id}`}
-                layoutDependency={order}
-                arriving={
-                  shownThrough !== null && item.timestamp > shownThrough
-                }
-                icon={item.note.editing_agent ? Bot : MessageSquare}
-                mark={
-                  editingHarness(item.note.editing_agent) ? (
-                    <HarnessMark
-                      harness={editingHarness(item.note.editing_agent)}
-                      name={item.note.editing_agent ?? ""}
-                      decorative
-                    />
-                  ) : undefined
-                }
-                label={`Update by ${item.note.editing_agent ?? "you"}`}
-                ref={
-                  active &&
-                  item.note.id === targetId &&
-                  targetNote?.id === targetId
-                    ? targetRef
-                    : undefined
-                }
-                tabIndex={
-                  active &&
-                  item.note.id === targetId &&
-                  targetNote?.id === targetId
-                    ? -1
-                    : undefined
-                }
-                aria-label={
-                  active &&
-                  item.note.id === targetId &&
-                  targetNote?.id === targetId
-                    ? "Selected update"
-                    : undefined
-                }
-                data-open={confirmDelete === item.note.id || undefined}
-                header={
-                  // One line: who · when · edited, then Latest (DB-12, DB-18).
-                  <span className="activity-author">
-                    <strong>{item.note.editing_agent ?? "You"}</strong>
-                    <SubAgentCredit
-                      credit={item.note.credited_to}
-                      reference={reference}
-                    />
-                    <span aria-hidden="true">·</span>
-                    <Time value={item.note.reported_at} />
-                    {item.note.updated_at !== item.note.reported_at && (
-                      <>
-                        <span aria-hidden="true">·</span>
-                        <Tooltip
-                          content={`Edited ${formatDateTime(item.note.updated_at)}`}
-                        >
-                          <span tabIndex={0}>edited</span>
-                        </Tooltip>
-                      </>
-                    )}
-                    <Presence initial={false}>
-                      {item.note.id === (newestNoteId ?? latestNoteId) && (
-                        <m.span
-                          key="latest"
-                          exit={{ opacity: 0, transition: exitTransition() }}
-                        >
-                          <Badge size="sm">Latest</Badge>
-                        </m.span>
-                      )}
-                    </Presence>
-                  </span>
-                }
-                actions={
-                  !trashed &&
-                  edit?.id !== item.note.id && (
-                    <UpdateActions
-                      when={formatDateTime(item.note.reported_at)}
-                      disabled={pending}
-                      editing={Boolean(edit)}
-                      confirming={confirmDelete === item.note.id}
-                      hasDetails={Boolean(item.note.supporting_document_id)}
-                      failure={deleteError}
-                      onReply={() => reply(item.note.brief)}
-                      onEdit={() =>
-                        setEdit({
-                          id: item.note.id,
-                          original: item.note.brief,
-                          content: item.note.brief,
-                        })
-                      }
-                      onConfirm={(open) => {
-                        if (open) setDeleteError(null);
-                        setConfirmDelete(open ? item.note.id : null);
-                      }}
-                      onDelete={() => void remove(item.note.id)}
-                      repliedRef={replied}
-                      focusComposer={() => setFocusUpdate((count) => count + 1)}
-                    />
-                  )
-                }
-              >
-                {edit?.id === item.note.id ? (
-                  // Edit in place: the row's body becomes the editor (DB-08).
-                  editForm(edit, item.note.brief)
-                ) : (
-                  <div
-                    {...chatSource(`${reference} · Update`, {
-                      kind: "ticket",
-                      id: ticketId,
-                    })}
-                  >
-                    <div className="markdown-preview activity-note">
-                      <Clamp lines={updateClampLines(item.note.brief)}>
-                        <MarkdownDocument
-                          source={item.note.brief}
-                          select={select}
-                          revision={revision}
-                          attachmentCards
-                        />
-                      </Clamp>
-                    </div>
-                  </div>
-                )}
-                {item.note.supporting_document_id && (
-                  <DetailsChip
-                    info={detailDocuments[item.note.supporting_document_id]}
-                    open={() =>
-                      openDocument?.(item.note.supporting_document_id!)
-                    }
-                  />
-                )}
-              </CommentRow>
-            ) : (
-              <EventGroup
-                key={`history-${item.id}`}
-                layoutDependency={order}
-                icon={History}
-                summary={changeSummary(item.changes)}
-                time={<Time value={item.timestamp} format="compact" />}
-              >
-                {item.changes.map((entry, index) => (
-                  <EventRow
-                    key={index}
-                    icon={historyIcon(entry.kind, entry.to_value)}
-                    time={<Time value={entry.timestamp} format="compact" />}
-                    meta={
-                      entry.editing_agent && (
-                        <>
-                          <span className="activity-agent">
-                            {attribution(entry.editing_agent, sources)}
-                          </span>
-                          <SubAgentCredit
-                            credit={entry.credited_to}
-                            reference={reference}
-                            after
-                          />
-                        </>
-                      )
-                    }
-                  >
-                    {historySentence(entry, lookups)}
-                  </EventRow>
-                ))}
-              </EventGroup>
-            ),
-          )}
-        </Timeline>
+        (rows.some(Boolean) || earlier) && (
+          <Timeline aria-label="Activity timeline">
+            {rows.slice(0, earlierIndex)}
+            {earlier}
+            {rows.slice(earlierIndex)}
+          </Timeline>
+        )
       )}
-      {activity.more && (
+      {view === "updates" && earlierOpen && moreEarlier && !failedMore && (
+        <p className="activity-muted" role="status">
+          Loading earlier updates…
+        </p>
+      )}
+      {view === "all" && activity.more && (
         <Pager
           noun="activity"
           loading={pending || activity.loadingMore}
@@ -1306,32 +1467,30 @@ function SubAgentCredit({
  * and focus. Delete asks in a small popover anchored to the same "…" (P7).
  */
 function UpdateActions({
-  when,
+  note,
   disabled,
   editing,
-  confirming,
-  hasDetails,
+  confirmingId,
   failure,
   onReply,
   onEdit,
   onConfirm,
   onDelete,
-  repliedRef,
-  focusComposer,
+  focusReplied,
 }: {
-  when: string;
+  note: AuthoredActivity;
   disabled: boolean;
   editing: boolean;
-  confirming: boolean;
-  hasDetails: boolean;
+  confirmingId: string | null;
   failure: FailureDescription | null;
-  onReply: () => void;
-  onEdit: () => void;
-  onConfirm: (open: boolean) => void;
-  onDelete: () => void;
-  repliedRef: React.RefObject<boolean>;
-  focusComposer: () => void;
+  onReply: (brief: string) => void;
+  onEdit: (note: AuthoredActivity) => void;
+  onConfirm: (id: string, open: boolean) => void;
+  onDelete: (id: string) => void;
+  focusReplied: () => boolean;
 }) {
+  const confirm = (open: boolean) => onConfirm(note.id, open);
+  const remove = () => onDelete(note.id);
   const requested = useRef(false);
   const [retainingTrigger, setRetainingTrigger] = useState(false);
   const cancel = useRef<HTMLButtonElement>(null);
@@ -1341,7 +1500,7 @@ function UpdateActions({
       className="activity-row-actions"
       data-retained={retainingTrigger || undefined}
     >
-      <Popover open={confirming} onOpenChange={onConfirm}>
+      <Popover open={confirmingId === note.id} onOpenChange={confirm}>
         <DropdownMenu>
           <PopoverAnchor asChild>
             <DropdownMenuTrigger asChild>
@@ -1350,7 +1509,7 @@ function UpdateActions({
                 type="button"
                 tooltipSide="top"
                 disabled={disabled}
-                label={`Actions for update from ${when}`}
+                label={`Actions for update from ${formatDateTime(note.reported_at)}`}
               >
                 <MoreHorizontal />
               </IconButton>
@@ -1362,21 +1521,20 @@ function UpdateActions({
               if (requested.current) {
                 requested.current = false;
                 event.preventDefault();
-                onConfirm(true);
+                confirm(true);
                 return;
               }
               // Focus goes to the composer, not back to the menu button.
-              if (repliedRef.current) {
-                event.preventDefault();
-                repliedRef.current = false;
-                focusComposer();
-              }
+              if (focusReplied()) event.preventDefault();
             }}
           >
-            <DropdownMenuItem disabled={editing} onSelect={onReply}>
+            <DropdownMenuItem
+              disabled={editing}
+              onSelect={() => onReply(note.brief)}
+            >
               Reply
             </DropdownMenuItem>
-            <DropdownMenuItem disabled={editing} onSelect={onEdit}>
+            <DropdownMenuItem disabled={editing} onSelect={() => onEdit(note)}>
               Edit update
             </DropdownMenuItem>
             <DropdownMenuSeparator />
@@ -1411,12 +1569,12 @@ function UpdateActions({
         >
           <p className="activity-confirm-title">Delete this update?</p>
           <p className="activity-confirm-text">
-            {hasDetails
+            {note.supporting_document_id
               ? "Its details stay in Documents."
               : "This can't be undone."}
           </p>
           {failure && (
-            <FailureAlert size="compact" failure={failure} onRetry={onDelete} />
+            <FailureAlert size="compact" failure={failure} onRetry={remove} />
           )}
           <div className="activity-confirm-actions">
             <Button
@@ -1425,7 +1583,7 @@ function UpdateActions({
               size="sm"
               ref={cancel}
               data-cancel
-              onClick={() => onConfirm(false)}
+              onClick={() => confirm(false)}
             >
               Cancel
             </Button>
@@ -1434,7 +1592,7 @@ function UpdateActions({
               variant="destructive"
               size="sm"
               disabled={disabled}
-              onClick={onDelete}
+              onClick={remove}
             >
               Delete update
             </Button>

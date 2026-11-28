@@ -28,6 +28,19 @@ const activityRead = pagedRead({
   more: "load more activity",
 });
 
+const activityUpdatesRead = pagedRead({
+  ...activityRead,
+  key: "activity-updates",
+  call: (reference: string, offset: number) =>
+    client.activityFeed(reference, offset, true),
+});
+
+const activityUpdateCountRead = read({
+  key: "activity-update-count",
+  call: (reference: string) => client.activityUpdateCount(reference),
+  failure: "count updates",
+});
+
 const activityNoteRead = read({
   key: "activity-note",
   call: (target: { reference: string; id: string }) =>
@@ -42,8 +55,25 @@ const latestUpdateRead = read({
 });
 
 /** The Ticket's feed of authored updates and recorded changes, 50 at a time. */
-export function useActivity(record: Ticket | undefined) {
-  return usePagedRead(activityRead, record?.reference ?? skip);
+export function useActivity(
+  record: Ticket | undefined,
+  view: "all" | "updates" = "all",
+  enabled = true,
+) {
+  return usePagedRead(
+    view === "updates" ? activityUpdatesRead : activityRead,
+    enabled ? (record?.reference ?? skip) : skip,
+  );
+}
+
+export function useActivityUpdateCount(
+  record: Ticket | undefined,
+  enabled: boolean,
+) {
+  return useRead(
+    activityUpdateCountRead,
+    enabled ? (record?.reference ?? skip) : skip,
+  );
 }
 
 /** One authored update by id; null when it no longer exists. Reads nothing without an id. */
@@ -87,16 +117,18 @@ export function editedUpdateFills(
       { reference: record.reference, id: note.id },
       note,
     ),
-    updatePagedRead(activityRead, record.reference, (page) =>
-      page.some(
-        (item) => item.type === "authored" && item.activity.id === note.id,
-      )
-        ? page.map((item) =>
-            item.type === "authored" && item.activity.id === note.id
-              ? { ...item, activity: note }
-              : item,
-          )
-        : page,
+    ...[activityRead, activityUpdatesRead].map((feed) =>
+      updatePagedRead(feed, record.reference, (page) =>
+        page.some(
+          (item) => item.type === "authored" && item.activity.id === note.id,
+        )
+          ? page.map((item) =>
+              item.type === "authored" && item.activity.id === note.id
+                ? { ...item, activity: note }
+                : item,
+            )
+          : page,
+      ),
     ),
   ];
 }

@@ -1,10 +1,15 @@
 import type { Ticket } from "@/lib/api/client";
-import { useActivity, useActivityNote, useLatestUpdate } from "./activity";
+import {
+  useActivity,
+  useActivityNote,
+  useActivityUpdateCount,
+  useLatestUpdate,
+} from "./activity";
 import { useFollowing, useReminder } from "./attention";
 import { useBacklinks, useDocumentBacklinks } from "./backlinks";
 import { useEvidence } from "./evidence";
 import { useAttachments, useDocuments } from "./files";
-import { useLinkedWork } from "./linked-work";
+import { useLinkedWork, usePeekCounts } from "./linked-work";
 
 /**
  * A section's data of a Ticket, for example its linked work or its evidence.
@@ -20,8 +25,10 @@ export type Part<Args extends unknown[], State> = (
 // Every part, by name. A new part is one line here; its types follow from it.
 const declared = {
   linkedWork: useLinkedWork,
+  peekCounts: usePeekCounts,
   evidence: useEvidence,
   activity: useActivity,
+  activityUpdateCount: useActivityUpdateCount,
   activityNote: useActivityNote,
   latestUpdate: useLatestUpdate,
   reminder: useReminder,
