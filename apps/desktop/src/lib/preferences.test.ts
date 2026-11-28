@@ -35,6 +35,7 @@ test("choices persist and unknown stored values fall back to defaults", () => {
     documentsView: "current",
     documentsSort: "opened",
     documentGroups: {},
+    fileGroups: {},
     setupHidden: false,
     setupFinished: false,
     settingsPage: "appearance",

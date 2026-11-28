@@ -673,11 +673,11 @@ export function WorkspaceSidebar({
                 <SidebarMenuItem>
                   <SidebarMenuButton
                     isActive={view === "attachments"}
-                    tooltip="Attachments"
+                    tooltip="Files"
                     onClick={() => setView("attachments")}
                   >
                     <Paperclip size={16} />{" "}
-                    <span className="sidebar-label">Attachments</span>
+                    <span className="sidebar-label">Files</span>
                   </SidebarMenuButton>
                 </SidebarMenuItem>
                 <SidebarMenuItem>

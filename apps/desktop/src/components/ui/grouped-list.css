@@ -1,0 +1,48 @@
+.ui-group-header {
+  margin: 0;
+  padding: 10px 8px 2px;
+}
+.ui-group-toggle {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  width: 100%;
+  min-width: 0;
+  padding: 4px 10px;
+  border: 0;
+  border-radius: var(--radius-card);
+  background: transparent;
+  color: var(--muted-foreground);
+  font: inherit;
+  font-size: var(--text-caption);
+  font-weight: 500;
+  line-height: var(--text-caption-line);
+  text-align: start;
+  cursor: pointer;
+}
+.ui-group-toggle:hover {
+  color: var(--foreground);
+}
+.ui-group-toggle:focus-visible {
+  outline: 2px solid var(--ring);
+  outline-offset: -2px;
+}
+/* A name wraps to a second line before it is cut. */
+.ui-group-name {
+  display: -webkit-box;
+  flex: 1 1 0;
+  min-width: 0;
+  overflow: hidden;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
+}
+.ui-group-toggle svg {
+  flex: none;
+  width: 14px;
+  height: 14px;
+  margin-left: -4px;
+}
+.ui-group-toggle [data-slot="count"] {
+  margin-left: auto;
+  font-weight: 400;
+}

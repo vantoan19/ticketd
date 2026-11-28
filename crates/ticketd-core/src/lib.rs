@@ -100,6 +100,8 @@ mod inbox;
 pub use inbox::{AttentionEntry, InboxAttention, InboxEntry, ReminderState, ReviewState};
 mod activities;
 mod attachment_cleanup;
+mod attachment_home;
+pub use attachment_home::{AttachmentHome, AttachmentHomePlan};
 mod attachment_library;
 pub use attachment_cleanup::AttachmentCleanupReview;
 pub use attachment_cleanup::RemoteAttachmentRemoval;

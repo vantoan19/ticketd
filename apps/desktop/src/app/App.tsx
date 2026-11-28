@@ -217,7 +217,7 @@ const VIEW_NAMES = {
   settings: "Settings",
   inbox: "Inbox",
   documents: "Documents",
-  attachments: "Attachments",
+  attachments: "Files",
   chats: "Chats",
   automations: "Automations",
 } as const;

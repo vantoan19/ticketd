@@ -57,7 +57,7 @@ export const SCOPE_CAPTIONS: Record<ShortcutScope, string> = {
   Everywhere:
     "Letter keys pause while you type or while a dialog or menu is open.",
   Lists:
-    "In ticket lists and boards, the Inbox, Attachments, Documents and the Workspace graph. A list is one stop for Tab.",
+    "In ticket lists and boards, the Inbox, Files, Documents and the Workspace graph. A list is one stop for Tab.",
   Ticket: "On the open ticket, or the focused one in a list or board.",
   Plans: "On a Plan or the Plans page, as noted.",
   Chat: "In a Chat's message box and its requests.",
@@ -167,7 +167,7 @@ export const SHORTCUTS = [
       [
         "attachments-move",
         [["↑"], ["↓"], ["J"], ["K"], ["Home"], ["End"]],
-        "Move between Attachments",
+        "Move between files",
       ],
       ["attachments-add", [["Mod", "Shift", "U"]], "Add files"],
       ["attachments-open", [["O"]], "Open file"],
@@ -182,7 +182,7 @@ export const SHORTCUTS = [
       ],
       ["attachments-find", [["Mod", "F"], ["/"]], "Find in a log or text file"],
       ["attachments-wrap", [["W"]], "Wrap or unwrap the lines of a log"],
-      ["attachments-back", [["Esc"]], "Back to Attachments"],
+      ["attachments-back", [["Esc"]], "Back to Files"],
     ] as const
   ).map(([id, keys, label]) => ({
     id,
