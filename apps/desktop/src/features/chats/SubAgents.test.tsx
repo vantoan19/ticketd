@@ -19,6 +19,7 @@ import {
 import {
   antigravityChat,
   codexChat,
+  DEMO,
   failedChat,
   subAgentFixtures,
 } from "@/features/chats/sub-agent-fixtures";
@@ -59,6 +60,35 @@ async function open(chat: MockChat) {
 
 const row = (name: RegExp | string) =>
   screen.getByRole("button", { name: name });
+
+test("a sub-agent row keeps its bot icon when the run finishes", async () => {
+  const fixtures = subAgentFixtures();
+  const client = await open(fixtures.running);
+  const running = row(/^Sub-agent Find limiter bypasses, working/);
+  const bots = running.querySelectorAll(".lucide-bot");
+  const spinners = running.querySelectorAll(".lucide-loader-circle");
+  const clock = within(running).getByText(/^\d+m(?: \d+s)?$/);
+  expect(bots).toHaveLength(1);
+  expect(spinners).toHaveLength(1);
+  expect(bots[0]?.compareDocumentPosition(clock)).toBe(
+    Node.DOCUMENT_POSITION_FOLLOWING,
+  );
+  expect(spinners[0]?.compareDocumentPosition(clock)).toBe(
+    Node.DOCUMENT_POSITION_PRECEDING,
+  );
+
+  const completed = fixtures.finished.items?.find(
+    (item) => item.kind === "sub_agent" && item.sub_agent === DEMO.bypass.id,
+  );
+  if (!completed) throw new Error("Missing completed sub-agent row");
+  act(() => client.push(fixtures.running.chat.id, completed));
+
+  const finished = await screen.findByRole("button", {
+    name: /^Sub-agent Find limiter bypasses, finished/,
+  });
+  expect(finished.querySelectorAll(".lucide-bot")).toHaveLength(1);
+  expect(finished.querySelector(".lucide-loader-circle")).toBeNull();
+});
 
 test("a Chat shows one row per direct sub-agent, with its state, and none of its work", async () => {
   await open(subAgentFixtures().finished);
