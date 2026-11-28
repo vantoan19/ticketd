@@ -49,7 +49,7 @@
   },
   "src/features/plans/PlanDocuments.tsx": {
     "shadcn/no-restyle": {
-      "count": 4
+      "count": 2
     }
   },
   "src/features/tickets/Duplicates.tsx": {

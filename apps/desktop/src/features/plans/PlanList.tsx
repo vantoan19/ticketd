@@ -277,6 +277,7 @@ function PlanIndexRows({
       )}
       <ul
         className="plan-index-list"
+        role="list"
         aria-label={archived ? "Archived Plans" : "Active Plans"}
       >
         {rows.order.map((id, index) => {
