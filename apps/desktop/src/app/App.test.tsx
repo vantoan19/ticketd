@@ -11637,7 +11637,10 @@ test("Plan Add tickets returns focus to its opener after keyboard dismissal", as
   });
   render(<App />);
   await user.click(await screen.findByRole("button", { name: /^Focus Plan/ }));
-  const add = await screen.findByRole("button", { name: "Add tickets" });
+  const switcher = await screen.findByRole("radiogroup", { name: "Plan view" });
+  const add = within(switcher.closest("header")!).getByRole("button", {
+    name: "Add tickets",
+  });
   await user.click(add);
   await screen.findByRole("dialog", { name: "Add tickets to Focus Plan" });
   await user.keyboard("{Escape}");
@@ -11834,7 +11837,12 @@ test("Plan multi-add is one retryable atomic request and Undo resumes only unfin
   });
   render(<App />);
   await user.click(await screen.findByRole("button", { name: /^Atomic Plan/ }));
-  await user.click(await screen.findByRole("button", { name: "Add tickets" }));
+  const switcher = await screen.findByRole("radiogroup", { name: "Plan view" });
+  await user.click(
+    within(switcher.closest("header")!).getByRole("button", {
+      name: "Add tickets",
+    }),
+  );
   const dialog = await screen.findByRole("dialog", {
     name: "Add tickets to Atomic Plan",
   });
@@ -14242,9 +14250,9 @@ test.each(["Plan", "Workspace"])(
           reads++;
           return {
             plan,
-            members: [],
+            members: args.includeMembers === false ? [] : members,
             documents: [],
-            counts: counted({ todo: 260 }),
+            counts: counted({ todo: members.length }),
           };
         }
         if (command === "workspace_graph") {
