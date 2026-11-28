@@ -20,6 +20,7 @@ import { plansClient, type Plan, type View } from "@/lib/api/plans";
 import { compactAgo, formatDateTime } from "@/lib/format";
 import { matchesShortcut } from "@/lib/shortcuts";
 import { PlanDocuments } from "./PlanDocuments";
+import { PlanOverviewChanges } from "./PlanOverviewChanges";
 import { PlanOverviewSections } from "./PlanOverviewSections";
 import { PlanOverviewStrip } from "./PlanOverviewStrip";
 import { planWorkModel } from "./plan-work-model";
@@ -114,7 +115,13 @@ export function PlanOverview({
                 )}
                 {/* PlanEmptyState */}
                 {/* PlanOverviewFiles */}
-                {/* PlanOverviewChanges */}
+                {view.members.length > 0 && (
+                  <PlanOverviewChanges
+                    plan={current}
+                    selected={selected}
+                    onOpen={onOpen}
+                  />
+                )}
                 <PlanDocuments view={view} state={state} />
               </>
             ) : (

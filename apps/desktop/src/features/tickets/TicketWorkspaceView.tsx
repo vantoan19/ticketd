@@ -25,6 +25,7 @@ import { setPreference, usePreferences } from "@/lib/preferences";
 import { PlanFlow } from "@/features/plans/PlanFlow";
 import { PlanHeader, type PlanMode } from "@/features/plans/PlanHeader";
 import { PlanOverview } from "@/features/plans/PlanOverview";
+import { usePlanLastLook } from "@/features/plans/plan-last-look";
 import { planWorkModel } from "@/features/plans/plan-work-model";
 import { useNarrowPane } from "@/features/tickets/useNarrowPane";
 import {
@@ -107,6 +108,7 @@ export function TicketWorkspaceView({
   // Overview and Flow are scoped to one visit. List and Board use the
   // remembered layout shared with the global ticket workspace.
   const planScope = workspace.trash ? "" : workspace.navigation.plan;
+  usePlanLastLook(hidden || inboxMode ? "" : planScope);
   const [planView, setPlanView] = useState<
     "overview" | "tickets" | "dependencies"
   >("overview");

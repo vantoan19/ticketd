@@ -4,6 +4,7 @@ import { Item } from "@/components/ui/item";
 import { Skeleton } from "@/components/ui/skeleton";
 import { StatusDot } from "@/components/ui/status-dot";
 import { Time } from "@/components/ui/time";
+import { usePreferences } from "@/lib/preferences";
 import type { Plan } from "@/lib/api/plans";
 import { PlanRing } from "./PlanProgress";
 import type { PlanIndexData } from "./plan-index-data";
@@ -42,6 +43,7 @@ export function PlanIndexRow({
   onOpen: () => void;
   children?: ReactNode;
 }) {
+  const { planLastLook } = usePreferences();
   const { counts, details } = data;
   const open = counts && counts.todo + counts.in_progress + counts.in_review;
   const finished =
@@ -52,9 +54,14 @@ export function PlanIndexRow({
   const state = planStateWords(plan.archived, data);
   const descriptionId = useId();
   const count = counts ? `${counts.done} of ${counts.done + (open ?? 0)}` : "";
-  // Since you last looked can supply the unread dot here after attention wins.
+  const unread =
+    !plan.archived &&
+    !needsAttention &&
+    Date.parse(details?.updated ?? "") >
+      Date.parse(planLastLook[plan.id] ?? "");
   const description = [
     needsAttention && "Needs attention",
+    unread && "Changed since you last looked",
     state,
     count && `${count} done`,
   ]
@@ -89,6 +96,7 @@ export function PlanIndexRow({
         )}
         <span className="plan-index-state text-muted-foreground">
           {needsAttention && <StatusDot tone="attention" size={6} />}
+          {unread && <StatusDot tone="unread" size={6} />}
           <span>{state}</span>
         </span>
         {details?.updated && (

@@ -1,0 +1,37 @@
+.plan-overview-changes {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+.plan-overview-changes [data-slot="record-link"] {
+  align-items: center;
+  min-height: 36px;
+  max-width: 100%;
+}
+.plan-overview-changes [data-slot="record-title"] {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+.plan-overview-changes [data-slot="record-title"] > svg {
+  flex: none;
+}
+.plan-overview-changes [data-slot="record-title"] > span:first-of-type {
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+:where([data-width~="max-600"])
+  .plan-overview-change
+  [data-slot="record-title"] {
+  flex-wrap: wrap;
+  gap: 0 6px;
+}
+:where([data-width~="max-600"])
+  .plan-overview-change
+  [data-slot="record-title"]
+  > span:first-of-type {
+  display: -webkit-box;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
+  white-space: normal;
+}

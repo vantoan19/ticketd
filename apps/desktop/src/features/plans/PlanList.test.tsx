@@ -9,6 +9,7 @@ import {
   within,
 } from "@testing-library/react";
 import { afterEach, expect, test, vi } from "vitest";
+import { setPreference } from "@/lib/preferences";
 import { WorkspaceChangeProvider } from "@/lib/workspace-change";
 import { StatusLineRegion } from "@/components/ui/status-line";
 import { PlanList } from "./PlanList";
@@ -17,6 +18,7 @@ const bridge = vi.hoisted(() => ({ invoke: vi.fn() }));
 vi.mock("@tauri-apps/api/core", () => bridge);
 afterEach(() => {
   cleanup();
+  localStorage.clear();
   bridge.invoke.mockReset();
 });
 
@@ -422,4 +424,46 @@ test("Plan row loading shows progress once ready and a failed refresh keeps the 
   await waitFor(() =>
     expect(screen.queryByText("Couldn't load Plan details.")).toBeNull(),
   );
+});
+
+test("a Plan that moved is unread unless it needs attention", async () => {
+  setPreference("planLastLook", { [launch.id]: "2026-01-01T00:00:00Z" });
+  let reviewing = false;
+  bridge.invoke.mockImplementation(async (command: string) => {
+    if (command === "show_plan")
+      return {
+        plan: launch,
+        counts: {
+          todo: 0,
+          in_progress: Number(!reviewing),
+          in_review: Number(reviewing),
+          done: 0,
+          canceled: 0,
+          duplicate: 0,
+        },
+        members: [],
+      };
+    if (command === "find_tickets_with_updates")
+      return {
+        items: [member("T-1", reviewing ? "In review" : "In progress")],
+        omitted: false,
+      };
+    return null;
+  });
+  const view = list(false, [launch]);
+  const name = "Open Plan Launch";
+  expect(
+    await screen.findByRole("button", {
+      name,
+      description: /Changed since you last looked.*1 in progress/,
+    }),
+  ).toBeTruthy();
+  reviewing = true;
+  view.rerender(plansPage(false, [launch], {}, 1));
+  expect(
+    await screen.findByRole("button", {
+      name,
+      description: /^Needs attention\. 1 in review/,
+    }),
+  ).toBeTruthy();
 });
