@@ -928,6 +928,38 @@ test("keeps the Overview head while the Plan loads and retries in the pane", asy
   expect(await within(overview).findByText("1 of 2 done")).toBeTruthy();
 });
 
+test("a failed Overview refresh retains work and Retry reads the Plan again", async () => {
+  tickets[0]!.availability = "Ready";
+  const respond = bridge.invoke.getMockImplementation()!;
+  let fail = false;
+  bridge.invoke.mockImplementation(async (command: string, args: never) => {
+    const input = args as Record<string, unknown> | undefined;
+    if (command === "show_plan" && !input?.limit && fail)
+      throw new Error("The workspace is busy");
+    return respond(command, args);
+  });
+
+  await openLaunch();
+  const overview = within(context());
+  const ready = overview.getByRole("region", { name: "Ready" });
+
+  fail = true;
+  fireEvent.click(overview.getByRole("button", { name: "Add purpose" }));
+  const purpose = overview.getByRole("textbox", { name: "Purpose" });
+  fireEvent.change(purpose, { target: { value: "Ship the release" } });
+  fireEvent.keyDown(purpose, { key: "Enter" });
+  const retry = await overview.findByRole("button", { name: "Retry" });
+  expect(overview.getByRole("region", { name: "Ready" })).toBe(ready);
+  expect(overview.getByText("1 of 2 done")).toBeTruthy();
+
+  fail = false;
+  fireEvent.click(retry);
+  await waitFor(() =>
+    expect(overview.queryByRole("button", { name: "Retry" })).toBeNull(),
+  );
+  expect(overview.getByText("Ship the release")).toBeTruthy();
+});
+
 test("a long purpose expands and the spec opens with a route back to its Plan", async () => {
   plans[0]!.purpose = "Make the launch safe and easy to verify. ".repeat(4);
   documents = [

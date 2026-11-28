@@ -58,11 +58,11 @@ export function usePlanView(planId: string) {
         setLoaded({ id: planId, view, error: null });
     } catch (reason: unknown) {
       if (turn === readTurn.current)
-        setLoaded({
+        setLoaded((previous) => ({
           id: planId,
-          view: null,
+          view: previous?.id === planId ? previous.view : null,
           error: describeFailure(reason, "load this Plan"),
-        });
+        }));
     }
   }, [planId]);
   // Each write report moves the shared version once, and the action reads the
