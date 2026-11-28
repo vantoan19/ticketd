@@ -5,7 +5,11 @@ import { Textarea } from "@/components/ui/textarea";
 import { useStatusLine } from "@/components/ui/use-status-line";
 import { client } from "@/lib/api/client";
 import { describeFailure } from "@/lib/api/describe-failure";
-import { ariaKeyShortcuts, matchesShortcut, shortcutLabel } from "@/lib/shortcuts";
+import {
+  ariaKeyShortcuts,
+  matchesShortcut,
+  shortcutLabel,
+} from "@/lib/shortcuts";
 import { onTicketCardReply } from "./activity-composer-request";
 import { hasVisibleText } from "./brief-text";
 import { useOpenTicket } from "./open-ticket";
@@ -58,7 +62,13 @@ export function TicketReply({
       writing.current = true;
       setPending(true);
       try {
-        await client.addActivityWithDetails(ticket.reference, brief, null, null, requestId);
+        await client.addActivityWithDetails(
+          ticket.reference,
+          brief,
+          null,
+          null,
+          requestId,
+        );
         intent.current = null;
         setDraft("");
         close();
@@ -126,13 +136,28 @@ export function TicketReply({
         onChange={(event) => setDraft(event.target.value)}
       />
       <div className="ticket-decision-row">
-        <Button size="compact" type="submit" disabled={disabled || !hasVisibleText(draft)} busy={pending}>
+        <Button
+          size="compact"
+          type="submit"
+          disabled={disabled || !hasVisibleText(draft)}
+          busy={pending}
+        >
           Post update
         </Button>
-        <Button variant="ghost" size="compact" type="button" disabled={pending} onClick={close}>
+        <Button
+          variant="ghost"
+          size="compact"
+          type="button"
+          disabled={pending}
+          onClick={close}
+        >
           Cancel
         </Button>
-        {owner && <span className="ticket-decision-byline">Not posted to {owner.provider_name}</span>}
+        {owner && (
+          <span className="ticket-decision-byline">
+            Not posted to {owner.provider_name}
+          </span>
+        )}
       </div>
     </form>
   );

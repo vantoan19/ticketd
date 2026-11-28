@@ -63,7 +63,7 @@ export function TicketPage({
   swap = false,
   leaving = false,
   outsideResults = false,
-  reviewQueue = [],
+  readReviewQueue,
   projects,
   plans,
   select,
@@ -81,7 +81,7 @@ export function TicketPage({
   leaving?: boolean;
   /** The ticket is not among the list's current results. */
   outsideResults?: boolean;
-  reviewQueue?: ReviewQueue;
+  readReviewQueue?: (() => Promise<ReviewQueue>) | undefined;
   projects: Project[];
   plans: Plan[];
   select: (reference: string | null) => void;
@@ -105,6 +105,7 @@ export function TicketPage({
   const trash = useTicketTrash(changed);
   // Evidence and Files have their add actions under the description.
   const [evidenceRequest, setEvidenceRequest] = useState(0);
+  const [showEvidenceRequest, setShowEvidenceRequest] = useState(0);
   const [fileAddRequest, setFileAddRequest] = useState<FileAddRequest | null>(
     null,
   );
@@ -382,7 +383,21 @@ export function TicketPage({
   const decisionCard = (
     <TicketDecisionCard
       active={active && !leaving}
-      reviewQueue={reviewQueue}
+      readReviewQueue={readReviewQueue}
+      blockerCount={blockedReferences.length}
+      blockers={
+        blockedReferences.length > 0 ? (
+          <Button
+            variant="attention"
+            size="compact"
+            onClick={() => work.openLink("blocked_by")}
+          >
+            {blockedReferences.length}{" "}
+            {blockedReferences.length === 1 ? "blocker" : "blockers"} still open
+          </Button>
+        ) : null
+      }
+      onEvidence={() => setShowEvidenceRequest((count) => count + 1)}
       select={select}
       onAcceptance={(offset) => {
         const heading = page.current?.querySelector<HTMLElement>(
@@ -496,6 +511,7 @@ export function TicketPage({
             trashed={ticket.trashed}
             folded
             addRequest={evidenceRequest}
+            showRequest={showEvidenceRequest}
           />
         )}
         {

@@ -415,6 +415,7 @@ const evidencePageSchema = lazySchema(() =>
   z.object({
     items: z.array(evidenceSchema),
     total: z.number().int().nonnegative(),
+    proof: z.array(evidenceSchema).default([]),
   }),
 );
 export type Evidence = z.infer<typeof evidenceSchema>;

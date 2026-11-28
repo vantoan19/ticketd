@@ -37,6 +37,7 @@ pub struct Evidence {
 pub struct EvidencePage {
     pub items: Vec<Evidence>,
     pub total: u32,
+    pub proof: Vec<Evidence>,
 }
 
 fn validate(input: &EvidenceInput) -> Result<(), Error> {
@@ -188,7 +189,25 @@ impl Workspace {
             let items = stmt
                 .query_map(params![ticket, limit.clamp(1, 100), offset], row)?
                 .collect::<Result<Vec<_>, _>>()?;
-            Ok(EvidencePage { items, total })
+            // The review card shares the evidence read. Rank over every record
+            // on the first page, since the newest PR may be behind older-page controls.
+            let proof = if offset == 0 && total > 0 {
+                let mut stmt = self.connection.prepare(
+                    "SELECT id, kind, name, value, created_at, updated_at, editing_agent
+                     FROM evidence WHERE ticket_id=?1
+                       AND kind IN ('pull_request', 'verification', 'branch')
+                     ORDER BY CASE kind
+                       WHEN 'pull_request' THEN 0
+                       WHEN 'verification' THEN 1
+                       ELSE 2
+                     END, created_at DESC, number DESC LIMIT 2",
+                )?;
+                stmt.query_map([&ticket], row)?
+                    .collect::<Result<Vec<_>, _>>()?
+            } else {
+                Vec::new()
+            };
+            Ok(EvidencePage { items, total, proof })
         })
     }
 }

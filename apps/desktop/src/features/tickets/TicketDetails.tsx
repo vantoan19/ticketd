@@ -53,11 +53,11 @@ export function TicketDetails({
   onAdjacent,
   returnLabel,
   outsideResults = false,
-  reviewQueue,
+  readReviewQueue,
   leaving = false,
 }: {
   outsideResults?: boolean;
-  reviewQueue?: ReviewQueue | undefined;
+  readReviewQueue?: (() => Promise<ReviewQueue>) | undefined;
   /** The pane is fading out after the ticket closed: it takes no input. */
   leaving?: boolean;
   hidden?: boolean;
@@ -225,7 +225,9 @@ export function TicketDetails({
                     leaving={reference === swap.leaving}
                     seed={reference === selected ? preview : undefined}
                     outsideResults={outsideResults && reference === selected}
-                    reviewQueue={reference === selected ? reviewQueue : undefined}
+                    readReviewQueue={
+                      reference === selected ? readReviewQueue : undefined
+                    }
                     projects={projects}
                     plans={plans}
                     inboxTarget={
@@ -263,7 +265,7 @@ const OpenedPage = memo(function OpenedPage({
   leaving,
   seed,
   outsideResults,
-  reviewQueue,
+  readReviewQueue,
   projects,
   plans,
   inboxTarget,
@@ -278,7 +280,7 @@ const OpenedPage = memo(function OpenedPage({
   leaving: boolean;
   seed: Ticket | undefined;
   outsideResults: boolean;
-  reviewQueue: ReviewQueue | undefined;
+  readReviewQueue: (() => Promise<ReviewQueue>) | undefined;
   projects: Project[];
   plans: Plan[];
   /** The Inbox note to show, when it is on this page. */
@@ -295,7 +297,7 @@ const OpenedPage = memo(function OpenedPage({
         swap={swap}
         leaving={leaving}
         outsideResults={outsideResults}
-        {...(reviewQueue && { reviewQueue })}
+        {...(readReviewQueue && { readReviewQueue })}
         projects={projects}
         plans={plans}
         select={actions.select}

@@ -7,7 +7,10 @@ export function requestTicketUpdate(
   if (
     preferCard &&
     !window.dispatchEvent(
-      new CustomEvent("ticketd:reply-in-card", { detail: { reference }, cancelable: true }),
+      new CustomEvent("ticketd:reply-in-card", {
+        detail: { reference },
+        cancelable: true,
+      }),
     )
   )
     return;
@@ -27,11 +30,11 @@ export function onTicketUpdate(
   return () => window.removeEventListener("ticketd:write-update", listener);
 }
 
-
 /** An idle In progress ticket lets its card handle the shortcut first. */
 export function onTicketCardReply(reference: string, open: () => void) {
   const listener = (event: Event) => {
-    if (!(event instanceof CustomEvent) || event.detail.reference !== reference) return;
+    if (!(event instanceof CustomEvent) || event.detail.reference !== reference)
+      return;
     event.preventDefault();
     open();
   };
