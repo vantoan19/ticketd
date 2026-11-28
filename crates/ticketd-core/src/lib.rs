@@ -541,6 +541,10 @@ pub struct TicketPatch {
     /// The body the editor last loaded or saved; guards a body change like `expected_title`.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub expected_body: Option<String>,
+    /// The status a person acted on. Check it in the write transaction so a
+    /// decision can never overwrite a different status set elsewhere.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub expected_status: Option<Status>,
     pub status: Option<Status>,
     pub editing_agent: Option<String>,
     #[serde(

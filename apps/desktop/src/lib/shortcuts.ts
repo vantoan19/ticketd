@@ -308,6 +308,19 @@ export const SHORTCUTS = [
     label: "Copy reference",
   },
   {
+    id: "ticket-find-description",
+    keys: [["Mod", "F"]],
+    scope: "Ticket",
+    label: "Find in the description",
+  },
+  {
+    id: "ticket-review-done",
+    keys: [["Mod", "Enter"]],
+    scope: "Ticket",
+    label: "Move a ticket in review to Done",
+    note: "On a Ready for review card, outside a text field.",
+  },
+  {
     id: "ticket-edit",
     keys: [["E"]],
     scope: "Ticket",

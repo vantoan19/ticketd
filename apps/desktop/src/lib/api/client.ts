@@ -415,6 +415,7 @@ const evidencePageSchema = lazySchema(() =>
   z.object({
     items: z.array(evidenceSchema),
     total: z.number().int().nonnegative(),
+    proof: z.array(evidenceSchema).default([]),
   }),
 );
 export type Evidence = z.infer<typeof evidenceSchema>;
@@ -1077,6 +1078,8 @@ export const client = {
       /** The title/body last loaded or saved; the core rejects a stale change. */
       expected_title?: string;
       expected_body?: string;
+      /** The status a decision applies to, checked in the same write. */
+      expected_status?: string;
       project_id?: string | null;
       status?: string;
     },

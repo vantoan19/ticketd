@@ -17,6 +17,7 @@ import type { MentionTarget } from "@/features/tickets/Backlinks";
 import type { FollowedMention } from "@/features/tickets/useTicketWorkspace";
 import type { Plan } from "@/lib/api/plans";
 import { TicketPage } from "@/features/tickets/TicketPage";
+import type { ReviewQueue } from "./TicketDecisionCard";
 import { usePageSwap } from "./use-page-swap";
 type NoteTarget = { id: string; key: number };
 type InboxTarget = { reference: string; id: string; key: number };
@@ -52,9 +53,11 @@ export function TicketDetails({
   onAdjacent,
   returnLabel,
   outsideResults = false,
+  readReviewQueue,
   leaving = false,
 }: {
   outsideResults?: boolean;
+  readReviewQueue?: (() => Promise<ReviewQueue>) | undefined;
   /** The pane is fading out after the ticket closed: it takes no input. */
   leaving?: boolean;
   hidden?: boolean;
@@ -221,6 +224,9 @@ export function TicketDetails({
                     swap={swap.swapped && reference === selected}
                     leaving={reference === swap.leaving}
                     seed={reference === selected ? preview : undefined}
+                    readReviewQueue={
+                      reference === selected ? readReviewQueue : undefined
+                    }
                     projects={projects}
                     plans={plans}
                     inboxTarget={
@@ -258,6 +264,7 @@ const OpenedPage = memo(function OpenedPage({
   seed,
   projects,
   plans,
+  readReviewQueue,
   inboxTarget,
   mention,
   actions,
@@ -271,6 +278,7 @@ const OpenedPage = memo(function OpenedPage({
   seed: Ticket | undefined;
   projects: Project[];
   plans: Plan[];
+  readReviewQueue: (() => Promise<ReviewQueue>) | undefined;
   /** The Inbox note to show, when it is on this page. */
   inboxTarget: InboxTarget | null;
   /** The mention being followed, when it is on this page. */
@@ -286,6 +294,7 @@ const OpenedPage = memo(function OpenedPage({
         leaving={leaving}
         projects={projects}
         plans={plans}
+        readReviewQueue={readReviewQueue}
         select={actions.select}
         noteTarget={newest(
           inboxTarget,

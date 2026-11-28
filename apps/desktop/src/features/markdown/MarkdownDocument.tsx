@@ -10,6 +10,7 @@ import {
   useRef,
   useLayoutEffect,
   useId,
+  type ReactNode,
 } from "react";
 import ReactMarkdown, {
   defaultUrlTransform,
@@ -17,6 +18,9 @@ import ReactMarkdown, {
   type ExtraProps,
 } from "react-markdown";
 import remarkGfm from "remark-gfm";
+import type { Position } from "unist";
+import type { Pluggable } from "unified";
+import { blockRanges, type MarkdownBlockRange } from "./block-ranges";
 import {
   DocumentNavigation,
   PlanNavigation,
@@ -59,7 +63,12 @@ const AttachmentCards = createContext(false);
 const AttachmentReplacement = createContext<
   (node: ExtraProps["node"], uri: string) => ReferenceReplacement | undefined
 >(() => undefined);
-type MdNode = { type: string; value?: string; children?: MdNode[] };
+type MdNode = {
+  type: string;
+  value?: string;
+  children?: MdNode[];
+  position?: Position;
+};
 /**
  * Raw HTML is never rendered, but it is not dropped either: `<tag>` written in a brief
  * or Document reads as the literal text the person typed.
@@ -77,7 +86,11 @@ function htmlAsText() {
         parent.type === "heading" ||
         parent.type === "tableCell"
         ? text
-        : { type: "paragraph", children: [text] };
+        : {
+            type: "paragraph",
+            children: [text],
+            ...(child.position && { position: child.position }),
+          };
     });
   };
   return (tree: MdNode) => walk(tree);
@@ -101,6 +114,16 @@ export type SectionFolding = {
   toggle: (id: string) => void;
 };
 const Folding = createContext<SectionFolding | null>(null);
+type RenderBlockRange = (start: number, children: ReactNode) => ReactNode;
+const BlockRangeRenderer = createContext<RenderBlockRange | null>(null);
+
+function BlockRange({ node, children }: ExtraProps & { children?: ReactNode }) {
+  const render = useContext(BlockRangeRenderer);
+  const start = node?.properties.dataRangeStart;
+  return render && typeof start === "number"
+    ? render(start, children)
+    : children;
+}
 const TicketNavigation = createContext<{
   select: ((reference: string) => void) | undefined;
   revision: number | undefined;
@@ -316,8 +339,14 @@ function mentionBlock(tag: string) {
       anchors && offset !== undefined && /^h[1-4]$/.test(tag)
         ? anchors.get(offset)
         : undefined;
-    const attributes =
-      outlined === undefined ? props : { ...props, id: outlined.id };
+    const attributes = {
+      ...props,
+      ...(outlined && { id: outlined.id }),
+      ...(offset !== undefined &&
+        /^h[1-6]$/.test(tag) && {
+          "data-heading-offset": offset,
+        }),
+    };
     const marked =
       mark !== null && isMentionBlock(node as PositionedNode, mark);
     if (outlined?.foldable && folding) {
@@ -424,6 +453,7 @@ const components: Components = {
     </div>
   ),
   pre: CodeBlock,
+  ...{ "markdown-block-range": BlockRange },
   ...Object.fromEntries(
     [...MENTION_BLOCKS].map((tag) => [tag, mentionBlock(tag)]),
   ),
@@ -569,6 +599,8 @@ export function MarkdownDocument({
   attachmentCards = false,
   headings,
   folding,
+  ranges,
+  renderRange,
 }: {
   source: string;
   select?: ((reference: string) => void) | undefined;
@@ -585,6 +617,9 @@ export function MarkdownDocument({
   headings?: readonly OutlineHeading[] | undefined;
   /** Folds hide the sections named here and give each foldable heading its chevron. */
   folding?: SectionFolding | undefined;
+  /** Group top-level blocks at these source offsets. */
+  ranges?: readonly MarkdownBlockRange[] | undefined;
+  renderRange?: RenderBlockRange | undefined;
 }) {
   const currentSource = useRef(source);
   const recovery = useDraftRecovery();
@@ -647,18 +682,18 @@ export function MarkdownDocument({
             ? [...remarkPlugins, [chunkFade, chunkStarts]]
             : remarkPlugins
         }
-        rehypePlugins={
-          attachmentCards
-            ? [[attachmentOrder, mentions], cardGaps]
-            : [[attachmentOrder, mentions]]
-        }
+        rehypePlugins={[
+          [attachmentOrder, mentions],
+          ...(attachmentCards ? [cardGaps] : []),
+          ...(ranges ? [[blockRanges, ranges] satisfies Pluggable] : []),
+        ]}
         urlTransform={urlTransform}
         components={components}
       >
         {source}
       </ReactMarkdown>
     ),
-    [source, chunkStarts, mentions, attachmentCards],
+    [source, chunkStarts, mentions, attachmentCards, ranges],
   );
   const anchors = useMemo(
     () => headings && new Map(headings.map((h) => [h.offset, h])),
@@ -679,7 +714,9 @@ export function MarkdownDocument({
                 <AttachmentReplacement.Provider value={replacement}>
                   <AttachmentCards.Provider value={attachmentCards}>
                     <AttachmentPlace.Provider value={place}>
-                      {rendered}
+                      <BlockRangeRenderer.Provider value={renderRange ?? null}>
+                        {rendered}
+                      </BlockRangeRenderer.Provider>
                     </AttachmentPlace.Provider>
                   </AttachmentCards.Provider>
                 </AttachmentReplacement.Provider>

@@ -674,32 +674,31 @@ test("a local child explains its independent ownership when its parent belongs t
   ).toBeTruthy();
 });
 
-test("a long source description can expand without making the field editable", () => {
-  const height = vi
-    .spyOn(HTMLElement.prototype, "scrollHeight", "get")
-    .mockReturnValue(400);
-  try {
-    render(
-      <SourceDescription
-        ticket={ticket({ body: "## Scope\n\nA long source document." })}
-        source={source()}
-        revision={0}
-        select={vi.fn()}
-      />,
-    );
-    const expand = screen.getByRole("button", {
-      name: "Show full description",
-    });
-    expect(expand.getAttribute("aria-expanded")).toBe("false");
-    fireEvent.click(expand);
-    expect(
-      screen
-        .getByRole("button", { name: "Show less" })
-        .getAttribute("aria-expanded"),
-    ).toBe("true");
-    expect(screen.getByRole("heading", { name: "Scope" })).toBeTruthy();
-    expect(screen.queryByRole("textbox")).toBeNull();
-  } finally {
-    height.mockRestore();
-  }
+test("a long source description opens its named fold without making the field editable", () => {
+  render(
+    <SourceDescription
+      ticket={ticket({
+        body: [
+          "Starting context. ".repeat(56),
+          "## Scope",
+          "Hidden source detail. ".repeat(100),
+          "## Acceptance criteria",
+          "- [ ] Verify",
+        ].join("\n\n"),
+      })}
+      source={source()}
+      revision={0}
+      select={vi.fn()}
+    />,
+  );
+  const fold = screen.getByRole("button", { name: "1 more section: Scope" });
+  expect(fold.getAttribute("aria-expanded")).toBe("false");
+  expect(
+    screen.getByRole("heading", { name: "Acceptance criteria" }),
+  ).toBeTruthy();
+  fireEvent.click(fold);
+  expect(fold.getAttribute("aria-expanded")).toBe("true");
+  expect(screen.getByRole("heading", { name: "Scope" })).toBeTruthy();
+  expect(screen.queryByRole("textbox")).toBeNull();
+  fireEvent.click(fold);
 });
