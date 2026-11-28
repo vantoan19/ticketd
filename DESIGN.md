@@ -644,7 +644,9 @@ the space below the shared pane header for tickets.
 - **Overview:** the list pane shows one centered column on `--surface`, at most
   720px wide, with 36px above, 32px at the sides, and 40px between sections.
   The Plan name uses `--text-doc-title`. Purpose edits in place and shows two
-  lines, with Show more for text over 150 characters. The spec is a quiet link.
+  lines, with Show more for text over 150 characters. Quiet links to the spec
+  and the newest pull request in the Plan's implementation evidence share one
+  line when present. The pull request shows its number and opens in the browser.
   Countable progress leads the line in ink, with nonzero swatches for In review,
   In progress, Ready and Blocked, and the last change at the right. Canceled
   and Duplicate are excluded. Loading keeps the head and shows skeletons for
@@ -664,7 +666,10 @@ the space below the shared pane header for tickets.
   Ready, Blocked and Done. Each heading has a muted count. Status icons and
   disclosure chevrons sit in the gutter. Rows are at least 36px tall, with a
   62px muted mono reference column, a single-line title, metadata and time at
-  the right. Needs you puts the reviews that unblock the most tickets first.
+  the right. Time is measured from entry into the ticket's current status.
+  Done shows when it was completed. Hover or focus shows the exact local time.
+  Needs you puts the reviews that unblock the most tickets first, then the
+  longest waiting.
   In progress puts the latest updates first. Both show the first sentence of
   the latest update under the title, with 8px above and below a row with a note.
   Ready puts the most unblocking work first and shows Parent of N or Unblocks N.

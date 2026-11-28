@@ -140,6 +140,8 @@ export function TicketWorkspaceView({
     () =>
       overviewView
         ? planWorkModel(overviewView.members, {
+            statusSince: (ticket) =>
+              overviewView.status_since[ticket.reference],
             latestUpdate: (ticket) =>
               overviewView.latest_updates[ticket.reference]?.reported_at ??
               ticket.latest_update?.reported_at,

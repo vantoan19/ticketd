@@ -351,6 +351,11 @@ tickets in Can start, After one step, and Later. Later appears when it has ticke
 Outside blockers are named on the tickets that wait on them. The CLI's `plan`
 command group includes `spec`, `document`, and `context`.
 
+The Plan Overview shows when a ticket entered its current status and puts
+reviews that unblock the most work first, with longer waits breaking ties.
+The head links to the newest pull request attached as evidence to one of
+the Plan's tickets, when one exists.
+
 On an active Plan's Overview, Since you last looked shows the latest change
 for up to five tickets. It includes status changes, tickets joining the Plan,
 and the first sentence of authored updates. Each entry opens its ticket.

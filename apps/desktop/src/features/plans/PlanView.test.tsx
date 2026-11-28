@@ -49,6 +49,7 @@ type Fake = {
   reference: string;
   status: string;
   plan: string;
+  status_since?: string;
 } & Partial<Pick<Ticket, "availability" | "prerequisites" | "updated_at">>;
 let plans: { id: string; name: string; archived: boolean; purpose: string }[] =
   [];
@@ -100,6 +101,11 @@ beforeEach(() => {
           },
           documents,
           members: members.map(ticket),
+          status_since: Object.fromEntries(
+            members.flatMap((item) =>
+              item.status_since ? [[item.reference, item.status_since]] : [],
+            ),
+          ),
           counts: {
             todo: count("Todo"),
             in_progress: count("In progress"),
@@ -262,10 +268,10 @@ test("the progress strip names counted tickets in progress order", async () => {
   };
   const members = [
     { id: "1", status: "Todo", availability: "Ready" },
-    { id: "2", status: "Done", updated_at: "2026-11-28T03:00:00Z" },
+    { id: "2", status: "Done", status_since: "2026-11-28T03:00:00Z" },
     { id: "3", status: "Todo", ...blocked },
     { id: "4", status: "Canceled" },
-    { id: "5", status: "Done", updated_at: "2026-11-28T02:00:00Z" },
+    { id: "5", status: "Done", status_since: "2026-11-28T02:00:00Z" },
     { id: "6", status: "In progress" },
     { id: "7", status: "In review" },
     { id: "8", status: "In review" },

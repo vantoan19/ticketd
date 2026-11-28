@@ -6,7 +6,7 @@ import {
   type KeyboardEvent,
   type RefObject,
 } from "react";
-import { FileText, Pencil } from "lucide-react";
+import { FileText, GitPullRequest, Pencil } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { FailureState } from "@/components/ui/failure-alert";
 import { Input } from "@/components/ui/input";
@@ -14,6 +14,7 @@ import { RecordLink } from "@/components/ui/record-link";
 import { Skeleton } from "@/components/ui/skeleton";
 import { StatusLineRegion } from "@/components/ui/status-line";
 import { Tooltip } from "@/components/ui/tooltip";
+import { useStatusLine } from "@/components/ui/use-status-line";
 import { DocumentNavigation } from "@/features/documents/navigation";
 import type { Project } from "@/lib/api/client";
 import { plansClient, type Plan, type View } from "@/lib/api/plans";
@@ -74,18 +75,26 @@ export function PlanOverview({
                 {current.name}
               </h1>
               <PlanPurpose key={plan.id} plan={current} state={state} />
-              {spec && (
+              {(spec || view?.pull_request) && (
                 <div className="plan-overview-links">
-                  <RecordLink
-                    variant="row"
-                    onClick={() =>
-                      openDocument?.(spec.id, `Back to ${current.name}`)
-                    }
-                    aria-label={`Spec: ${spec.heading}`}
-                  >
-                    <FileText aria-hidden="true" />
-                    {spec.heading}
-                  </RecordLink>
+                  {spec && (
+                    <RecordLink
+                      variant="row"
+                      onClick={() =>
+                        openDocument?.(spec.id, `Back to ${current.name}`)
+                      }
+                      aria-label={`Spec: ${spec.heading}`}
+                    >
+                      <FileText aria-hidden="true" />
+                      {spec.heading}
+                    </RecordLink>
+                  )}
+                  {view?.pull_request && (
+                    <PlanPullRequestLink
+                      planId={current.id}
+                      url={view.pull_request}
+                    />
+                  )}
                 </div>
               )}
             </header>
@@ -108,6 +117,7 @@ export function PlanOverview({
                   <PlanOverviewSections
                     work={work}
                     updates={view.latest_updates}
+                    statusSince={view.status_since}
                     projects={projects}
                     selected={selected}
                     onOpen={onOpen}
@@ -145,6 +155,33 @@ export function PlanOverview({
         </div>
       </StatusLineRegion>
     </section>
+  );
+}
+
+function PlanPullRequestLink({ planId, url }: { planId: string; url: string }) {
+  const statusLine = useStatusLine();
+  let number: string | undefined;
+  try {
+    number = new URL(url).pathname.match(/\/(\d+)\/?$/)?.[1];
+  } catch {
+    return null;
+  }
+  return (
+    <RecordLink
+      variant="row"
+      aria-label={number ? `Pull request #${number}` : "Pull request"}
+      onClick={() => {
+        void plansClient.openPullRequest(planId, url).catch(() => {
+          statusLine.show({
+            tone: "error",
+            message: "Couldn’t open the pull request.",
+          });
+        });
+      }}
+    >
+      <GitPullRequest aria-hidden="true" />
+      {number ? `#${number}` : "Pull request"}
+    </RecordLink>
   );
 }
 
