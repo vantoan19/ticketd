@@ -8,7 +8,7 @@ import {
 } from "react";
 import { FileText, GitPullRequest, Pencil } from "lucide-react";
 import { Button } from "@/components/ui/button";
-import { FailureState } from "@/components/ui/failure-alert";
+import { FailureAlert, FailureState } from "@/components/ui/failure-alert";
 import { Input } from "@/components/ui/input";
 import { RecordLink } from "@/components/ui/record-link";
 import { Skeleton } from "@/components/ui/skeleton";
@@ -20,6 +20,7 @@ import type { Project } from "@/lib/api/client";
 import { plansClient, type Plan, type View } from "@/lib/api/plans";
 import { compactAgo, formatDateTime } from "@/lib/format";
 import { matchesShortcut } from "@/lib/shortcuts";
+import { useNow } from "@/lib/use-now";
 import { PlanDocuments } from "./PlanDocuments";
 import { PlanEmptyState } from "./PlanEmptyState";
 import { PlanOverviewChanges } from "./PlanOverviewChanges";
@@ -108,10 +109,15 @@ export function PlanOverview({
                 </div>
               )}
             </header>
-            {loadError ? (
-              <FailureState failure={loadError} onRetry={reload} />
-            ) : view && work ? (
+            {view && work ? (
               <>
+                {loadError && (
+                  <FailureAlert
+                    failure={loadError}
+                    onRetry={reload}
+                    size="compact"
+                  />
+                )}
                 {view.members.length > 0 ? (
                   <>
                     <div className="plan-overview-progress">
@@ -156,6 +162,8 @@ export function PlanOverview({
                 )}
                 <PlanDocuments view={view} state={state} />
               </>
+            ) : loadError ? (
+              <FailureState failure={loadError} onRetry={reload} />
             ) : (
               <div
                 className="plan-overview-loading"
@@ -248,6 +256,7 @@ function PlanOverviewProgress({
   work: PlanOverviewWork;
 }) {
   const { counts } = view;
+  const now = useNow();
   const words = [
     { count: counts.in_review, label: "in review", status: "review" },
     { count: counts.in_progress, label: "in progress", status: "progress" },
@@ -257,7 +266,11 @@ function PlanOverviewProgress({
       label: "blocked",
       status: "blocked",
     },
-    { count: work.sections.held.length, label: "held by source", status: "held" },
+    {
+      count: work.sections.held.length,
+      label: "held by source",
+      status: "held",
+    },
   ];
   let newest: { timestamp: string; epoch: number } | undefined;
   for (const member of view.members) {
@@ -271,7 +284,7 @@ function PlanOverviewProgress({
         newest = { timestamp, epoch };
     }
   }
-  const age = newest && compactAgo(newest.timestamp);
+  const age = newest && compactAgo(newest.timestamp, now);
   const moved =
     age === "now"
       ? "just now"

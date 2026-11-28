@@ -229,25 +229,36 @@ export function TicketWorkspaceView({
         board.scrollLeft = boardScrollLeft.current;
       // Closing clears selection before this effect runs. Keep the ticket being
       // viewed at return time, including navigation within details, independently.
-      const trigger = overviewTrigger.current;
-      const target =
-        reference &&
-        overviewPlan &&
-        trigger?.reference === reference &&
-        listRef.current?.contains(trigger.element)
-          ? trigger.element
-          : reference
-            ? listRef.current?.querySelector<HTMLElement>(
-                overviewPlan
-                  ? `[data-overview-reference="${reference}"]`
-                  : board
-                    ? `[data-board-reference="${reference}"]`
-                    : `[data-ticket-reference="${reference}"]`,
-              )
+      if (overviewPlan) {
+        const row = reference
+          ? listRef.current?.querySelector<HTMLElement>(
+              `[data-overview-reference="${reference}"]`,
+            )
+          : null;
+        const trigger = overviewTrigger.current;
+        const opener =
+          trigger?.reference === reference &&
+          listRef.current?.contains(trigger.element)
+            ? trigger.element
             : null;
-      (target ?? document.getElementById("tickets-heading"))?.focus({
-        preventScroll: true,
-      });
+        const target = [row, opener].find(
+          (element) =>
+            element &&
+            !element.closest('[hidden], [inert], [aria-hidden="true"]'),
+        );
+        (target ?? listRef.current?.querySelector("h1"))?.focus();
+      } else {
+        const target = reference
+          ? listRef.current?.querySelector<HTMLElement>(
+              board
+                ? `[data-board-reference="${reference}"]`
+                : `[data-ticket-reference="${reference}"]`,
+            )
+          : null;
+        (target ?? document.getElementById("tickets-heading"))?.focus({
+          preventScroll: true,
+        });
+      }
     }
     focusPane.current = null;
   });
