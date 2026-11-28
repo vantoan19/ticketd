@@ -1,5 +1,6 @@
 // @vitest-environment jsdom
 import {
+  act,
   cleanup,
   fireEvent,
   render,
@@ -7,6 +8,7 @@ import {
   waitFor,
   within,
 } from "@testing-library/react";
+import userEvent from "@testing-library/user-event";
 import { afterEach, beforeEach, expect, test, vi } from "vitest";
 import { bridgeDefault, unknownCommands } from "@/test/bridge-defaults";
 import { TestOpenTicket } from "./open-ticket/testing";
@@ -607,6 +609,32 @@ test("Next to review checks the suggested ticket again before opening it", async
   expect(screen.queryByRole("link", { name: "Next to review" })).toBeNull();
 });
 
+test("Next to review keeps a candidate that re-entered review during the fresh queue read", async () => {
+  const select = vi.fn();
+  const suggested = { ...review, reference: "T-KQ2" };
+  const originalQueue = [review, suggested];
+  const readQueue = vi
+    .fn()
+    .mockResolvedValueOnce(originalQueue)
+    .mockImplementationOnce(async () => {
+      candidates = [suggested];
+      return [suggested];
+    });
+  render(ticketView(select, originalQueue, readQueue));
+  fireEvent.click(await screen.findByRole("button", { name: "Move to Done" }));
+
+  const next = await screen.findByRole("link", { name: "Next to review" });
+  candidates = [{ ...suggested, status: "Done" }];
+  await act(async () => {
+    fireEvent.click(next);
+  });
+  expect(readQueue).toHaveBeenLastCalledWith(true);
+  expect(screen.getByRole("link", { name: "Next to review" })).toBe(next);
+  expect(select).not.toHaveBeenCalled();
+  fireEvent.click(next);
+  await waitFor(() => expect(select).toHaveBeenCalledExactlyOnceWith("T-KQ2"));
+});
+
 test("Next to review offers the next eligible ticket and checks it on its own click", async () => {
   const select = vi.fn();
   const suggested = { ...review, reference: "T-KQ2" };
@@ -642,6 +670,50 @@ test("Next to review offers the next eligible ticket and checks it on its own cl
   await waitFor(() => expect(select).toHaveBeenCalledExactlyOnceWith("T-KQ5"));
   expect(readQueue).toHaveBeenCalledTimes(3);
 });
+
+test.each(["replacement link", "queue message", "title field"])(
+  "keyboard Retry leaves focus on the %s after a stale candidate",
+  async (destination) => {
+    const suggested = { ...review, reference: "T-KQ2" };
+    const replacement = { ...review, reference: "T-KQ3" };
+    const originalQueue = [review, suggested, replacement];
+    let finish!: (queue: Ticket[]) => void;
+    const freshQueue = new Promise<Ticket[]>((resolve) => (finish = resolve));
+    const readQueue = vi
+      .fn()
+      .mockResolvedValueOnce(originalQueue)
+      .mockRejectedValueOnce({ code: "failed", message: "Cannot read queue." })
+      .mockReturnValueOnce(freshQueue);
+    const user = userEvent.setup();
+    render(ticketView(vi.fn(), originalQueue, readQueue));
+    fireEvent.click(
+      await screen.findByRole("button", { name: "Move to Done" }),
+    );
+    const next = await screen.findByRole("link", { name: "Next to review" });
+    candidates = [{ ...suggested, status: "Done" }];
+    fireEvent.click(next);
+    const retry = await screen.findByRole("button", { name: "Retry" });
+    retry.focus();
+    await user.keyboard("{Enter}");
+    await waitFor(() => expect(readQueue).toHaveBeenCalledTimes(3));
+
+    const title = screen.getByRole("textbox", { name: "Title" });
+    if (destination === "title field") title.focus();
+    if (destination === "replacement link") {
+      finish([replacement]);
+      await waitFor(() =>
+        expect(next.getAttribute("href")).toBe("ticketd://ticket/T-KQ3"),
+      );
+      expect(document.activeElement).toBe(next);
+    } else {
+      finish([]);
+      const message = await screen.findByText("T-KQ2 is no longer in review");
+      expect(document.activeElement).toBe(
+        destination === "title field" ? title : message,
+      );
+    }
+  },
+);
 
 test("a pending review decision preserves focus moved to another control", async () => {
   let finish!: () => void;
@@ -955,6 +1027,45 @@ test("a failed Send back keeps the draft and Retry repeats the same write", asyn
   );
   expect(writes).toHaveLength(2);
   expect(writes[0]).toEqual(writes[1]);
+});
+
+test("Retry keeps the original review queue when a committed Send back note only adds whitespace", async () => {
+  const earlier = { ...review, reference: "T-KQ2" };
+  const later = { ...review, reference: "T-KQ3" };
+  const originalQueue = [earlier, review, later];
+  const readQueue = vi.fn(async () =>
+    ticket.status === "In review" ? originalQueue : [earlier, later],
+  );
+  const invoke = bridge.invoke.getMockImplementation()!;
+  let lostReply = false;
+  bridge.invoke.mockImplementation(async (command: string, args?: object) => {
+    if (command !== "send_back") return invoke(command, args);
+    if (lostReply) return ticket;
+    await invoke(command, args);
+    lostReply = true;
+    throw { code: "failed", message: "The reply was lost." };
+  });
+  render(ticketView(vi.fn(), originalQueue, readQueue));
+  fireEvent.click(await screen.findByRole("button", { name: "Send back" }));
+  const field = screen.getByRole("textbox", { name: "What needs to change?" });
+  fireEvent.change(field, { target: { value: "Add one more example." } });
+  fireEvent.click(screen.getByRole("button", { name: "Send back" }));
+  const retry = await screen.findByRole("button", { name: "Retry" });
+  fireEvent.change(field, { target: { value: "Add one more example. " } });
+  fireEvent.click(retry);
+
+  const decision = within(
+    await screen.findByRole("region", { name: "Sent back" }),
+  );
+  expect(
+    decision.getByRole("link", { name: "Next to review" }).getAttribute("href"),
+  ).toBe("ticketd://ticket/T-KQ3");
+  const writes = bridge.invoke.mock.calls.filter(
+    ([command]) => command === "send_back",
+  );
+  expect(writes).toHaveLength(2);
+  expect(writes[0]).toEqual(writes[1]);
+  expect(readQueue).toHaveBeenCalledTimes(1);
 });
 
 test("Retry sends the edited Send back draft with a new request ID", async () => {

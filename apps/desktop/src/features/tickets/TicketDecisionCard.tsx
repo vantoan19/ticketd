@@ -356,12 +356,16 @@ function NextReviewAction({
   const [failure, setFailure] = useState<FailureDescription | null>(null);
   const focusMessage = useRef(false);
   useLayoutEffect(() => {
-    if (review.kind === "empty" && focusMessage.current)
+    if (
+      review.kind === "empty" &&
+      focusMessage.current &&
+      document.activeElement === document.body
+    )
       message.current?.focus();
     focusMessage.current = false;
   }, [message, review]);
 
-  async function openNext() {
+  async function openNext(origin: HTMLElement) {
     const link = anchor.current;
     if (review.kind !== "next" || checking.current || !link) return;
     const { reference } = review;
@@ -371,6 +375,8 @@ function NextReviewAction({
       !link.closest("[hidden], [inert]");
     if (!visible()) return;
     checking.current = true;
+    // Keep focus on the link while clearing the inline Retry button.
+    if (origin !== link && document.activeElement === origin) link.focus();
     setBusy(true);
     setFailure(null);
     let action = `check ${reference} for review`;
@@ -431,7 +437,7 @@ function NextReviewAction({
             href={`ticketd://ticket/${reference}`}
             onClick={(event) => {
               event.preventDefault();
-              void openNext();
+              void openNext(event.currentTarget);
             }}
           >
             Next to review
@@ -443,7 +449,7 @@ function NextReviewAction({
         <FailureState
           size="inline"
           failure={failure}
-          onRetry={() => void openNext()}
+          onRetry={(event) => void openNext(event.currentTarget)}
         />
       )}
     </>
