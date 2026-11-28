@@ -276,13 +276,18 @@ export function createHostChatClient(
         .parse(await call("chat_folder_use", { path })),
     createChat: async (input) =>
       createdChatSchema.parse(await call("chat_create", { input })),
-    async openChat(id) {
+    async openChat(id, historyStart, loadEarlier) {
       const feed: Feed = { waiting: [], last: 0, closed: false };
       const changes = bridge.channel((message) => receive(id, feed, message));
       let opened;
       try {
         opened = openedSchema.parse(
-          await call("chat_open", { chatId: id, changes }),
+          await call("chat_open", {
+            chatId: id,
+            ...(historyStart === undefined ? {} : { historyStart }),
+            ...(loadEarlier ? { loadEarlier } : {}),
+            changes,
+          }),
         );
       } catch (reason) {
         feed.closed = true;

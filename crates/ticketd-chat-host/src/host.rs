@@ -663,7 +663,22 @@ impl ChatHost {
 
     /// A snapshot and the updates that follow it. Attaching never starts a harness.
     pub async fn attach(&self, chat_id: &str) -> Result<(ChatView, Subscription), HostError> {
-        self.ask(chat_id, Command::Attach).await
+        self.attach_with_history(chat_id, None, false).await
+    }
+
+    /// Reconnect from the same first history item, optionally extending the window.
+    pub async fn attach_with_history(
+        &self,
+        chat_id: &str,
+        start: Option<i64>,
+        load_earlier: bool,
+    ) -> Result<(ChatView, Subscription), HostError> {
+        self.ask(chat_id, |reply| Command::Attach {
+            start,
+            load_earlier,
+            reply,
+        })
+        .await
     }
 
     /// Checks static attachment constraints without opening a harness.

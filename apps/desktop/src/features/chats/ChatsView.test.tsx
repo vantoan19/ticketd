@@ -133,6 +133,30 @@ const working = () => document.querySelector(".chat-working")?.textContent;
 const openMenu = (name: string) =>
   fireEvent.keyDown(button(name), { key: "Enter" });
 
+test("older replies can be loaded from the top of a long Chat", async () => {
+  await open(
+    one({ id: "c1", title: "Long Chat" }, [
+      reply("earliest", "An older reply"),
+      ...Array.from({ length: 200 }, (_, index) => ({
+        id: `recent-${index}`,
+        at,
+        kind: "user" as const,
+        text: `Recent message ${index}`,
+        delivery: "delivered" as const,
+      })),
+    ]),
+  );
+  expect(conversation().queryByText("An older reply")).toBeNull();
+
+  fireEvent.click(
+    await screen.findByRole("button", { name: "Load earlier messages" }),
+  );
+
+  expect(await conversation().findByText("An older reply")).toBeTruthy();
+  expect(conversation().getAllByText("Recent message 0")).toHaveLength(1);
+  noButton("Load earlier messages");
+});
+
 test("an idle Chat sends what was typed and shows the turn as working, not done", async () => {
   await open(one({ id: "c1", title: "Limiter" }));
   // Send names its action even while there is nothing to send; no Stop yet.
@@ -2527,7 +2551,10 @@ test("a large transcript keeps up with many small streamed updates", async () =>
       { id: "live", at, kind: "response", text: "", state: "streaming" },
     ]),
   );
-  expect(screen.getByText("Message 0")).toBeTruthy();
+  fireEvent.click(
+    await screen.findByRole("button", { name: "Load earlier messages" }),
+  );
+  expect(await conversation().findByText("Message 0")).toBeTruthy();
   // Deltas arrive in separate ticks, as coalesced host updates do.
   for (let batch = 0; batch < 20; batch += 1)
     act(() => {

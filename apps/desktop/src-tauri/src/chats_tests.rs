@@ -150,10 +150,21 @@ impl Fixture {
     }
 
     async fn open(&self, chat_id: &str) -> (Opened, Arc<Mutex<Vec<Value>>>) {
+        self.open_with_history(chat_id, None, false).await
+    }
+
+    async fn open_with_history(
+        &self,
+        chat_id: &str,
+        start: Option<i64>,
+        load_earlier: bool,
+    ) -> (Opened, Arc<Mutex<Vec<Value>>>) {
         let seen = Arc::new(Mutex::new(Vec::new()));
         let sink = seen.clone();
         let opened = self.chats.open(
             chat_id,
+            start,
+            load_earlier,
             Arc::new(move |change| {
                 // An update's items come as one array; tests read them one by one.
                 let mut seen = sink.lock().unwrap();
@@ -1016,6 +1027,91 @@ async fn reopening_attaches_to_the_running_chat_and_closing_a_view_stops_nothing
     assert_eq!(f.fake.opens().len(), 1, "no second runtime was started");
     assert_eq!(f.submitted(), ["first"]);
     assert_eq!(f.chats.working(), 1);
+}
+
+#[tokio::test(start_paused = true)]
+async fn a_long_chat_keeps_its_earlier_messages_when_the_view_resyncs() {
+    let f = Fixture::new().await;
+    let id = f.chat().await;
+    let (_, seen) = f.open(&id).await;
+    f.emit(EventKind::MessageCompleted {
+        turn: turn(),
+        item: NativeItemId::new("earlier-reply"),
+        text: "The earlier reply".to_owned(),
+    })
+    .await;
+
+    for number in 0..205 {
+        f.emit(command_tool(
+            &format!("cmd-{number}"),
+            "npm test",
+            ToolStatus::Succeeded,
+        ))
+        .await;
+    }
+    f.emit(command_tool("launch", "spawn", ToolStatus::Running))
+        .await;
+    f.emit(EventKind::SubAgentStarted(SubAgentStart {
+        sub_agent: NativeSubAgentId::new("sa-tests"),
+        run: None,
+        parent: None,
+        tool: Some(NativeItemId::new("launch")),
+        background: true,
+        native: json!({ "description": "Check the tests" }),
+    }))
+    .await;
+    assert_eq!(seen.lock().unwrap().last().unwrap()["kind"], "resync");
+
+    let (recent, _) = f.open(&id).await;
+    assert!(recent.snapshot.earlier);
+    assert!(!recent.snapshot.items.iter().any(|item| matches!(
+        item,
+        Item::User { text, .. } if text == "first"
+    )));
+
+    // A busy Chat can grow by more than a page after the snapshot. Load earlier
+    // must still reach back from that snapshot's first item.
+    for number in 0..205 {
+        f.emit(command_tool(
+            &format!("new-cmd-{number}"),
+            "npm test",
+            ToolStatus::Succeeded,
+        ))
+        .await;
+    }
+    let (opened, seen) = f
+        .open_with_history(&id, recent.snapshot.history_start, true)
+        .await;
+    assert!(!opened.snapshot.earlier);
+    let messages: Vec<_> = opened
+        .snapshot
+        .items
+        .iter()
+        .filter_map(|item| match item {
+            Item::User { text, .. } | Item::Response { text, .. } => Some(text.as_str()),
+            _ => None,
+        })
+        .collect();
+    assert_eq!(messages, ["first", "The earlier reply"]);
+    assert!(opened.snapshot.items.iter().any(|item| matches!(
+        item,
+        Item::Steps { id, .. } if id.ends_with(":cmd-0")
+    )));
+    assert_eq!(opened.snapshot.chat.activity, "working");
+
+    f.emit(EventKind::MessageCompleted {
+        turn: turn(),
+        item: NativeItemId::new("latest-reply"),
+        text: "The latest reply".to_owned(),
+    })
+    .await;
+    let feed = seen.lock().unwrap();
+    let replies: Vec<_> = feed
+        .iter()
+        .filter(|change| change["kind"] == "item" && change["item"]["kind"] == "response")
+        .filter_map(|change| change["item"]["text"].as_str())
+        .collect();
+    assert_eq!(replies, ["The latest reply"]);
 }
 
 #[tokio::test(start_paused = true)]
@@ -3899,6 +3995,8 @@ async fn a_long_codex_turn_reads_the_workspace_at_most_once_per_update_and_sends
     f.chats
         .open(
             &id,
+            None,
+            false,
             Arc::new(move |change| {
                 counted.fetch_add(1, Ordering::SeqCst);
                 let mut seen = sink.lock().unwrap();

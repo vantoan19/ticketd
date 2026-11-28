@@ -84,7 +84,11 @@ const MAX_PENDING_CONTEXTS: usize = 64;
 pub(crate) type Reply<T> = oneshot::Sender<Result<T, HostError>>;
 
 pub(crate) enum Command {
-    Attach(Reply<(ChatView, Subscription)>),
+    Attach {
+        start: Option<i64>,
+        load_earlier: bool,
+        reply: Reply<(ChatView, Subscription)>,
+    },
     Send {
         command_id: Option<String>,
         text: String,
@@ -928,8 +932,12 @@ impl Supervisor {
         // A command may follow a write made outside this task (links, folder, retention).
         self.unpublished = true;
         match command {
-            Command::Attach(reply) => {
-                let _ = reply.send(self.attach());
+            Command::Attach {
+                start,
+                load_earlier,
+                reply,
+            } => {
+                let _ = reply.send(self.attach(start, load_earlier));
             }
             Command::SendUnattended { text, reply } => {
                 let Some(unattended) = self.unattended.clone() else {
@@ -1328,13 +1336,18 @@ impl Supervisor {
         self.session_context = Some(retained.unwrap_or_else(|| Arc::from(context)));
     }
 
-    fn attach(&mut self) -> Result<(ChatView, Subscription), HostError> {
+    fn attach(
+        &mut self,
+        start: Option<i64>,
+        load_earlier: bool,
+    ) -> Result<(ChatView, Subscription), HostError> {
         // Views already attached get everything up to here, so the cursor can move to
         // the snapshot; the new view's snapshot then includes all streamed text.
         self.record(Vec::new());
         self.publish();
         let chat = self.chat_id.clone();
-        let snapshot = self.core(|core| core.chat_snapshot(&chat, SNAPSHOT_ITEMS))?;
+        let snapshot =
+            self.core(|core| core.chat_history_window(&chat, SNAPSHOT_ITEMS, start, load_earlier))?;
         self.cursor = snapshot.sequence;
         let (publisher, subscription) = subscription::channel();
         self.subscribers.push(publisher);

@@ -118,11 +118,13 @@ export function SubAgentView({
   view,
   items,
   actions,
+  historyControl,
   tray,
 }: {
   view: SubAgentViewData;
   items: TranscriptItem[];
   actions: TranscriptActions;
+  historyControl?: ReactNode;
   tray?: ReactNode;
 }) {
   const { chat, agent } = view;
@@ -160,6 +162,7 @@ export function SubAgentView({
                   lead={
                     <>
                       <Brief view={view} />
+                      {historyControl}
                       {view.limits && (
                         <div className="chat-part" data-kind="note">
                           <p className="chat-line chat-note chat-subagent-note">

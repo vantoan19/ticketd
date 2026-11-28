@@ -3,6 +3,7 @@ import {
   useContext,
   useEffect,
   useEffectEvent,
+  useRef,
   useState,
 } from "react";
 import {
@@ -139,41 +140,92 @@ export function useChat(id: string) {
   const client = useChatClient();
   const [snapshot, setSnapshot] = useState<ChatSnapshot | null>(null);
   const [error, setError] = useState<FailureDescription | null>(null);
-  // Bumped to open the Chat again after a resync.
-  const [attempt, setAttempt] = useState(0);
+  const [history, setHistory] = useState<{
+    id: string;
+    loading: boolean;
+    error?: FailureDescription;
+  } | null>(null);
+  const commands = useRef<{
+    loadEarlier: () => void;
+    retry: () => void;
+  } | null>(null);
   useEffect(() => {
     let current = true;
     let unsubscribe = () => {};
-    client.openChat(id).then(
-      (opened) => {
-        if (!current) return;
-        let latest = opened;
-        setSnapshot(opened);
-        setError(null);
-        unsubscribe = client.subscribe(id, opened.cursor, (change) => {
+    let latest: ChatSnapshot | undefined;
+    let opening = false;
+    let reconnect = false;
+
+    function open(earlier = false) {
+      opening = true;
+      const start = latest?.history_start;
+      const request =
+        start == null
+          ? client.openChat(id)
+          : client.openChat(id, start, earlier);
+      request.then(
+        (opened) => {
           if (!current) return;
-          const next = applyChange(latest, change);
-          if (next === "resync") {
-            current = false;
-            unsubscribe();
-            setAttempt((count) => count + 1);
-            return;
+          // The previous feed stays readable until the wider snapshot is ready.
+          unsubscribe();
+          opening = false;
+          reconnect = false;
+          latest = opened;
+          setSnapshot(opened);
+          setError(null);
+          setHistory(null);
+          unsubscribe = client.subscribe(id, opened.cursor, (change) => {
+            if (!current || !latest) return;
+            const next = applyChange(latest, change);
+            if (next === "resync") {
+              unsubscribe();
+              if (opening) reconnect = true;
+              else open();
+              return;
+            }
+            latest = next;
+            setSnapshot(next);
+          });
+        },
+        (reason: unknown) => {
+          if (!current) return;
+          opening = false;
+          if (earlier) {
+            setHistory({
+              id,
+              loading: false,
+              error: describeFailure(reason, "load earlier messages"),
+            });
+            if (reconnect) open();
+          } else {
+            setError(describeFailure(reason, "open this Chat"));
           }
-          latest = next;
-          setSnapshot(next);
-        });
+        },
+      );
+    }
+
+    open();
+    commands.current = {
+      loadEarlier() {
+        if (opening || !latest?.earlier) return;
+        setHistory({ id, loading: true });
+        open(true);
       },
-      (reason: unknown) =>
-        current && setError(describeFailure(reason, "open this Chat")),
-    );
+      retry() {
+        if (!opening) open();
+      },
+    };
     return () => {
       current = false;
+      commands.current = null;
       unsubscribe();
     };
-  }, [client, id, attempt]);
+  }, [client, id]);
   return {
     snapshot: snapshot?.chat.id === id ? snapshot : null,
     error,
-    retry: () => setAttempt((count) => count + 1),
+    retry: () => commands.current?.retry(),
+    history: history?.id === id ? history : null,
+    loadEarlier: () => commands.current?.loadEarlier(),
   };
 }

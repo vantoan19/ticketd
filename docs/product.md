@@ -816,7 +816,9 @@ what New Chat last started it with.
   read linked records and write progress back through the CLI as ordinary Activities,
   Documents, evidence, and status changes under native permission rules. Messages never
   become Activities or Documents automatically; Save as Document is offered.
-- **Retention and recovery.** History and queued input are saved automatically. Archive
+- **Retention and recovery.** History and queued input are saved automatically.
+  Long Chats open on recent history. Load earlier messages at the top of the
+  transcript reveals older saved messages and work. Archive
   hides a Chat while work continues; trash stops work and is recoverable. Complete
   Workspace backups preserve Chat records and the captured files on queued and sent
   messages. Harness credentials and native resume files stay with the harness.

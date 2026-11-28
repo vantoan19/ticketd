@@ -414,6 +414,7 @@ function AdoptQueueEdit({ adopt }: { adopt: () => void }) {
 
 function Conversation({
   snapshot,
+  historyControl,
   focusRequest,
   onRequestsAnswered,
   notice,
@@ -421,6 +422,7 @@ function Conversation({
   showSubAgent,
 }: {
   snapshot: ChatSnapshot;
+  historyControl: ReactNode;
   focusRequest: boolean;
   onRequestsAnswered?: () => void;
   notice?: ReactNode;
@@ -980,6 +982,7 @@ function Conversation({
                 newFrom={newFrom}
                 markerRef={marker}
                 contentRef={content}
+                lead={historyControl}
                 picked={picked ?? undefined}
                 onPick={(itemId, include) =>
                   setPicked((current) => {
@@ -1385,7 +1388,31 @@ export function ChatDetail({
   target?: ViewTarget;
 }) {
   const client = useChatClient();
-  const { snapshot, error, retry } = useChat(id);
+  const { snapshot, error, retry, history, loadEarlier } = useChat(id);
+  const historyControl = snapshot?.earlier && (
+    <div className="flex flex-col items-start gap-2">
+      <Button
+        variant="outline"
+        size="sm"
+        aria-disabled={history?.loading || undefined}
+        onClick={(event) => {
+          if (history?.loading) return;
+          event.currentTarget.closest<HTMLElement>(".chat-scroll")?.focus({
+            preventScroll: true,
+          });
+          loadEarlier();
+        }}
+      >
+        Load earlier messages
+      </Button>
+      <span className="sr-only" role="status">
+        {history?.loading ? "Loading earlier messages…" : ""}
+      </span>
+      {history?.error && (
+        <FailureAlert size="compact" failure={history.error} />
+      )}
+    </div>
+  );
   const [failure, setFailure] = useState<ChatFailureNotice | null>(null);
   const [linking, setLinking] = useState(false);
   const chat = snapshot?.chat;
@@ -1584,6 +1611,7 @@ export function ChatDetail({
         )}
       </div>
       {error && !snapshot && <FailureState failure={error} onRetry={retry} />}
+      {error && snapshot && <FailureAlert failure={error} onRetry={retry} />}
       {!snapshot && !error && (
         <p className="chat-list-empty" role="status">
           Opening the Chat…
@@ -1595,6 +1623,7 @@ export function ChatDetail({
           view={view}
           items={snapshot.items}
           actions={actionsOf}
+          historyControl={historyControl}
           tray={
             <SubAgentTray
               view={view}
@@ -1616,6 +1645,7 @@ export function ChatDetail({
         <Conversation
           key={id}
           snapshot={snapshot}
+          historyControl={historyControl}
           focusRequest={focusRequest}
           {...(onRequestsAnswered && { onRequestsAnswered })}
           notice={notice}

@@ -826,6 +826,20 @@ pub enum ChatItem {
     SubAgentRun(ChatSubAgentRun),
 }
 
+impl ChatItem {
+    pub fn position(&self) -> i64 {
+        match self {
+            Self::Session(item) => item.position,
+            Self::Message(item) => item.position,
+            Self::Turn(item) => item.position,
+            Self::Tool(item) => item.position,
+            Self::Interaction(item) => item.position,
+            Self::Notice(item) => item.position,
+            Self::SubAgentRun(item) => item.position,
+        }
+    }
+}
+
 /// Something the host observed from the harness. Record only what was actually seen:
 /// acknowledgment, correlated processing and a terminal outcome are separate facts.
 /// IDs are chosen by the host; repeating an observation leaves the record as it is.
@@ -1376,8 +1390,9 @@ fn read_item(connection: &Connection, kind: &str, id: &str) -> Result<Option<Cha
 fn read_history(
     connection: &Connection,
     chat_id: &str,
+    first: i64,
     before: i64,
-    limit: usize,
+    limit: Option<usize>,
 ) -> Result<ChatHistoryPage, Error> {
     let mut statement = connection.prepare(
         "SELECT kind, id FROM (
@@ -1388,15 +1403,21 @@ fn read_history(
              UNION ALL SELECT position, 'interaction', id, chat_id FROM chat_interactions
              UNION ALL SELECT position, 'notice', id, chat_id FROM chat_notices
              UNION ALL SELECT position, 'sub_agent_run', id, chat_id FROM chat_sub_agent_runs)
-         WHERE chat_id = ?1 AND position < ?2 ORDER BY position DESC LIMIT ?3",
+         WHERE chat_id = ?1 AND position >= ?2 AND position < ?3
+         ORDER BY position DESC LIMIT ?4",
     )?;
+    let sql_limit = limit.map_or(-1, |limit| {
+        i64::try_from(limit.saturating_add(1)).unwrap_or(i64::MAX)
+    });
     let mut subjects = statement
-        .query_map(params![chat_id, before, limit as i64 + 1], |row| {
+        .query_map(params![chat_id, first, before, sql_limit], |row| {
             Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?))
         })?
         .collect::<Result<Vec<_>, _>>()?;
-    let earlier = subjects.len() > limit;
-    subjects.truncate(limit);
+    let earlier = limit.is_some_and(|limit| subjects.len() > limit);
+    if let Some(limit) = limit {
+        subjects.truncate(limit);
+    }
     let mut items = Vec::with_capacity(subjects.len());
     for (kind, id) in subjects.iter().rev() {
         items.extend(read_item(connection, kind, id)?);
@@ -4015,9 +4036,35 @@ impl Workspace {
 
     /// The Chat and its latest `limit` history items, with the change sequence to follow from.
     pub fn chat_snapshot(&self, chat_id: &str, limit: usize) -> Result<ChatSnapshot, Error> {
+        self.chat_history_window(chat_id, limit, None, false)
+    }
+
+    /// Snapshot from the oldest item already displayed, optionally adding one page
+    /// before it. The window keeps its starting position as the Chat grows.
+    pub fn chat_history_window(
+        &self,
+        chat_id: &str,
+        page_size: usize,
+        start: Option<i64>,
+        load_earlier: bool,
+    ) -> Result<ChatSnapshot, Error> {
         crate::read_scope::run(&self.connection, |transaction| {
             let chat = read_chat(transaction, chat_id)?;
-            let page = read_history(transaction, chat_id, i64::MAX, limit)?;
+            let page = if let Some(start) = start {
+                let mut prefix = read_history(
+                    transaction,
+                    chat_id,
+                    i64::MIN,
+                    start,
+                    Some(if load_earlier { page_size } else { 0 }),
+                )?;
+                prefix
+                    .items
+                    .extend(read_history(transaction, chat_id, start, i64::MAX, None)?.items);
+                prefix
+            } else {
+                read_history(transaction, chat_id, i64::MIN, i64::MAX, Some(page_size))?
+            };
             let sequence = head(transaction)?;
             Ok(ChatSnapshot {
                 chat,
@@ -4071,6 +4118,27 @@ impl Workspace {
         })
     }
 
+    /// One stored message, tool, or turn belonging to this Chat.
+    pub fn chat_history_item(&self, chat_id: &str, id: &str) -> Result<Option<ChatItem>, Error> {
+        crate::read_scope::run(&self.connection, |connection| {
+            let kind = connection
+                .query_row(
+                    "SELECT kind FROM (
+                         SELECT 'message' AS kind FROM chat_messages WHERE chat_id = ?1 AND id = ?2
+                         UNION ALL SELECT 'tool' FROM chat_tools WHERE chat_id = ?1 AND id = ?2
+                         UNION ALL SELECT 'turn' FROM chat_turns WHERE chat_id = ?1 AND id = ?2
+                     ) LIMIT 1",
+                    params![chat_id, id],
+                    |row| row.get::<_, String>(0),
+                )
+                .optional()?;
+            match kind {
+                Some(kind) => read_item(connection, &kind, id),
+                None => Ok(None),
+            }
+        })
+    }
+
     /// Up to `limit` history items before `before`, a position from an item already read.
     pub fn chat_history(
         &self,
@@ -4080,7 +4148,7 @@ impl Workspace {
     ) -> Result<ChatHistoryPage, Error> {
         crate::read_scope::run(&self.connection, |connection| {
             read_chat(connection, chat_id)?;
-            read_history(connection, chat_id, before, limit)
+            read_history(connection, chat_id, i64::MIN, before, Some(limit))
         })
     }
 

@@ -72,11 +72,9 @@ pub(crate) fn live_requests_outside(
         })
         .collect())
 }
-// ponytail: "the whole conversation" and lookups by message id read at most this many
-// items; page through `chat_history` when a Chat outgrows it.
-const HISTORY_ITEMS: usize = 10_000;
 const MAX_TEXT_BYTES: usize = 1024 * 1024;
 const MAX_LAST_MESSAGES: usize = 200;
+const HISTORY_ITEMS: usize = 10_000;
 const RESTORING_WORKSPACE: &str =
     "The workspace is being restored from a backup. Try again when it has finished.";
 
@@ -440,6 +438,8 @@ impl From<Harness> for HarnessInfo {
 pub struct Snapshot {
     pub chat: ChatState,
     pub items: Vec<Item>,
+    pub earlier: bool,
+    pub history_start: Option<i64>,
     /// Changes on the view's feed are numbered from here, one apart.
     pub cursor: u64,
 }
@@ -944,6 +944,7 @@ struct View {
     chat: Chat,
     live: ChatLive,
     tracker: Tracker,
+    history_start: Option<i64>,
     state: ChatState,
     sequence: u64,
     /// The item last sent under each id, so an unchanged one is not sent again.
@@ -2010,7 +2011,13 @@ impl Chats {
 
     /// Attaches a view: a snapshot now, then every change after it through `sink`,
     /// numbered one apart from the snapshot's cursor. Attaching starts no harness.
-    pub async fn open(self: &Arc<Self>, chat_id: &str, sink: Sink) -> Outcome<Opened> {
+    pub async fn open(
+        self: &Arc<Self>,
+        chat_id: &str,
+        history_start: Option<i64>,
+        load_earlier: bool,
+        sink: Sink,
+    ) -> Outcome<Opened> {
         let host = self.host()?;
         // Opening a Chat any way marks it seen. A view keeps working if that fails.
         log_failure(
@@ -2019,7 +2026,10 @@ impl Chats {
             self.mark_seen(chat_id).await,
         );
         let projects = self.projects.subscribe();
-        let (attached, subscription) = host.attach(chat_id).await?;
+        let (attached, subscription) = host
+            .attach_with_history(chat_id, history_start, load_earlier)
+            .await?;
+        let history_start = attached.snapshot.items.first().map(ChatItem::position);
         let workspace = self.workspace()?;
         let tracker =
             Tracker::from_snapshot(&attached.snapshot.items, &attached.snapshot.sub_agents);
@@ -2053,6 +2063,7 @@ impl Chats {
             chat,
             live: attached.live,
             tracker,
+            history_start,
             state: state.clone(),
             sequence: 0,
             sent,
@@ -2079,6 +2090,8 @@ impl Chats {
             snapshot: Snapshot {
                 chat: state,
                 items,
+                earlier: attached.snapshot.earlier,
+                history_start,
                 cursor: 0,
             },
         })
@@ -2238,16 +2251,18 @@ impl Chats {
                             .chain(sending.iter().filter(|id| !held_before.contains(id)))
                             .collect();
                         if !moved.is_empty() {
-                            let Ok(stored) = self
-                                .workspace()
-                                .and_then(|workspace| Ok(messages(&workspace, &view.chat.id)?))
-                            else {
+                            let Ok(mut moved) = self.workspace().and_then(|workspace| {
+                                moved.iter().try_fold(Vec::new(), |mut messages, id| {
+                                    if let Some(ChatItem::Message(message)) =
+                                        workspace.chat_history_item(&view.chat.id, id)?
+                                    {
+                                        messages.push(message);
+                                    }
+                                    Ok(messages)
+                                })
+                            }) else {
                                 break;
                             };
-                            let moved: Vec<ChatMessage> = stored
-                                .into_iter()
-                                .filter(|message| moved.contains(&&message.id))
-                                .collect();
                             // Back in the queue, it has no row; a change cannot remove one.
                             if moved.iter().any(|message| {
                                 !sending.contains(&message.id)
@@ -2255,6 +2270,7 @@ impl Chats {
                             }) {
                                 break;
                             }
+                            moved.sort_by_key(|message| message.position);
                             records.extend(moved.into_iter().map(ChatItem::Message));
                         }
                         records
@@ -2275,6 +2291,15 @@ impl Chats {
             let mut batch = Vec::new();
             let fresh = self.fresh(&view.chat.id);
             for record in records {
+                // A run that began before the displayed history keeps its earlier
+                // place when it finishes. The view can reveal it with Load earlier.
+                if matches!(record, ChatItem::SubAgentRun(_))
+                    && view
+                        .history_start
+                        .is_some_and(|start| record.position() < start)
+                {
+                    continue;
+                }
                 let tracker = &view.tracker;
                 let shown = chat_view::items(&record, &view.chat, &view.live, fresh, tracker);
                 if let ChatItem::Tool(tool) = &record
@@ -2632,10 +2657,12 @@ impl Chats {
     ) -> Outcome<()> {
         let host = self.host()?;
         let mut workspace = self.workspace()?;
-        messages(&workspace, chat_id)?
-            .into_iter()
-            .find(|message| message.id == message_id && message.awaits_decision())
-            .ok_or_else(|| stale("this message is no longer waiting for your decision"))?;
+        if !matches!(
+            workspace.chat_history_item(chat_id, message_id)?,
+            Some(ChatItem::Message(message)) if message.awaits_decision()
+        ) {
+            return Err(stale("this message is no longer waiting for your decision"));
+        }
         // Either way the message and its uncertain attempt stay as they were observed;
         // the decision is recorded beside them.
         match decision {
@@ -2865,14 +2892,28 @@ impl Chats {
                     .last()
                     .is_some_and(|attempt| !attempt.received())
         };
-        let picking = matches!(selection, HistorySelection::Picked { .. });
-        let sent: Vec<_> = if import_history {
-            messages(&workspace, chat_id)?
+        let sent: Vec<_> = match &selection {
+            HistorySelection::None => Vec::new(),
+            HistorySelection::Picked { ids } => {
+                let mut picked = Vec::with_capacity(ids.len());
+                let mut seen = HashSet::new();
+                for id in ids {
+                    if seen.insert(id)
+                        && let Some(ChatItem::Message(message)) =
+                            workspace.chat_history_item(chat_id, id)?
+                        && message.owner == ChatOwner::Main
+                        && !message.queued
+                    {
+                        picked.push(message);
+                    }
+                }
+                picked.sort_by_key(|message| message.position);
+                picked
+            }
+            _ => messages(&workspace, chat_id)?
                 .into_iter()
-                .filter(|message| !message.queued && (picking || !unreceived(message)))
-                .collect()
-        } else {
-            Vec::new()
+                .filter(|message| !message.queued && !unreceived(message))
+                .collect(),
         };
         let (history, chosen): (&'static str, Vec<&ChatMessage>) = match &selection {
             HistorySelection::None => ("none", Vec::new()),
@@ -2895,11 +2936,10 @@ impl Chats {
             }
             HistorySelection::All => ("all", sent.iter().collect()),
             HistorySelection::Picked { ids } => {
-                let chosen: Vec<_> = sent.iter().filter(|m| ids.contains(&m.id)).collect();
-                if chosen.len() != ids.len() {
+                if sent.len() != ids.len() {
                     return Err(stale("some of the picked messages are no longer there"));
                 }
-                ("picked", chosen)
+                ("picked", sent.iter().collect())
             }
         };
         let chosen: Vec<_> = chosen
@@ -2948,24 +2988,24 @@ impl Chats {
     ) -> Outcome<String> {
         self.host()?;
         let mut workspace = self.workspace()?;
-        let snapshot = workspace.chat_snapshot(chat_id, HISTORY_ITEMS)?;
-        let text = snapshot.items.iter().find_map(|item| match item {
-            ChatItem::Message(message)
-                if message.id == response_id && message.role == ChatRole::Assistant =>
-            {
-                Some(message.text.clone())
+        let text = match workspace.chat_history_item(chat_id, response_id)? {
+            Some(ChatItem::Message(message)) if message.role == ChatRole::Assistant => {
+                Some(message.text)
             }
-            ChatItem::Tool(tool) if tool.id == response_id => {
-                let turn = snapshot.items.iter().find_map(|item| match item {
-                    ChatItem::Turn(turn) if tool.turn_id.as_ref() == Some(&turn.id) => Some(turn),
-                    _ => None,
-                });
-                let date = turn.map_or(String::new(), |turn| shown_date(&turn.started_at));
-                let chat_title = chat_view::title(&snapshot.chat);
-                chat_reports::plan_document(tool, &chat_title, &date)
+            Some(ChatItem::Tool(tool)) => {
+                let turn = match &tool.turn_id {
+                    Some(id) => workspace.chat_history_item(chat_id, id)?,
+                    None => None,
+                };
+                let date = match turn {
+                    Some(ChatItem::Turn(turn)) => shown_date(&turn.started_at),
+                    _ => String::new(),
+                };
+                let chat_title = chat_view::title(&workspace.chat(chat_id)?);
+                chat_reports::plan_document(&tool, &chat_title, &date)
             }
             _ => None,
-        });
+        };
         let text = text.ok_or_else(|| failed("that response is not in this Chat"))?;
         let title = Some(title.trim()).filter(|title| !title.is_empty());
         Ok(workspace.create_document(title, &text)?.id)
