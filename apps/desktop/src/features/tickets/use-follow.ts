@@ -78,21 +78,25 @@ export function useFollow(
   // A failed read offers a read again; a failed change offers sending it again.
   // Both settle when that action does, so the status line stays busy until
   // then.
-  const retry = () =>
-    failedChange ? setFollowing(failedChange.following) : read.retry();
+  const canRetry = !failedChange || !blocked;
+  const retry = canRetry
+    ? () => (failedChange ? setFollowing(failedChange.following) : read.retry())
+    : undefined;
   // A line is about the Ticket it was shown for: once the header moves on it
   // goes (below), and a Retry that still reaches here does nothing.
   const retryFromLine = useEffectEvent((target: string) =>
-    target === reference ? retry() : Promise.resolve(),
+    target === reference ? retry?.() : undefined,
   );
   useEffect(() => {
     if (!reportInStatusLine || !error || !reference) return;
     return line.show({
       tone: "error",
       message: `${error.title}. ${error.sentence}`,
-      action: { label: "Retry", run: () => retryFromLine(reference) },
+      ...(canRetry && {
+        action: { label: "Retry", run: () => retryFromLine(reference) },
+      }),
     });
-  }, [error, reportInStatusLine, line, reference]);
+  }, [canRetry, error, reportInStatusLine, line, reference]);
   return {
     following,
     blocked: blocked || pending,

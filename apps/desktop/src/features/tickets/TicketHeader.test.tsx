@@ -1,5 +1,6 @@
 // @vitest-environment jsdom
 import {
+  act,
   cleanup,
   fireEvent,
   render,
@@ -19,6 +20,10 @@ import {
   type ChatFeature,
 } from "@/features/chats/use-chats";
 import type { Ticket } from "@/lib/api/client";
+import {
+  clearWorkspaceFailure,
+  reportWorkspaceFailure,
+} from "@/lib/workspace-state";
 
 const bridge = vi.hoisted(() => ({ invoke: vi.fn() }));
 vi.mock("@tauri-apps/api/core", () => bridge);
@@ -69,6 +74,7 @@ beforeEach(() => {
 });
 afterEach(() => {
   cleanup();
+  clearWorkspaceFailure();
   writeText.mockClear();
   bridge.invoke.mockReset();
   Reflect.deleteProperty(navigator, "clipboard");
@@ -284,6 +290,51 @@ test("the actions menu captions the update and orders the available actions", as
     name: "Follow",
     checked: true,
   });
+});
+
+test("Follow offers its failed write again when the workspace unlocks", async () => {
+  const invoke = bridge.invoke.getMockImplementation()!;
+  let lockedOrFailing = true;
+  bridge.invoke.mockImplementation(async (command: string, args: object) => {
+    if (command === "set_following" && lockedOrFailing)
+      throw { code: "failed", message: "Follow write failed" };
+    return invoke(command, args);
+  });
+  header();
+  openActions();
+  fireEvent.click(
+    await screen.findByRole("menuitemcheckbox", { name: "Follow" }),
+  );
+  await screen.findByRole("button", { name: "Retry" });
+
+  act(() => {
+    reportWorkspaceFailure("workspace_locked", "Locked");
+  });
+  expect(screen.getByRole("alert").textContent).toContain(
+    "Couldn't follow T-KQ1",
+  );
+  expect(screen.queryByRole("button", { name: "Retry" })).toBeNull();
+  expect(following).toBe(false);
+
+  lockedOrFailing = false;
+  act(() => clearWorkspaceFailure());
+  fireEvent.click(await screen.findByRole("button", { name: "Retry" }));
+  await waitFor(() => expect(following).toBe(true));
+});
+
+test("Follow can retry a failed read while the workspace is locked", async () => {
+  const invoke = bridge.invoke.getMockImplementation()!;
+  const read = vi
+    .fn()
+    .mockRejectedValueOnce(new Error("Follow read failed"))
+    .mockResolvedValue(true);
+  bridge.invoke.mockImplementation(async (command: string, args: object) =>
+    command === "is_following" ? read() : invoke(command, args),
+  );
+  reportWorkspaceFailure("workspace_locked", "Locked");
+  header();
+  fireEvent.click(await screen.findByRole("button", { name: "Retry" }));
+  await waitFor(() => expect(read).toHaveBeenCalledTimes(2));
 });
 
 // The summary follows the locale's time format, so expectations use it too.
