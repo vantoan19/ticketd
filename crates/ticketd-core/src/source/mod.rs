@@ -1597,8 +1597,25 @@ fn selected_connection(
             |row| row.get(0),
         )
         .optional()?;
+    if provider == GITHUB_INTEGRATION && affinity.is_none() {
+        let repository = if let Some(enterprise) = part.strip_prefix('@') {
+            enterprise.to_owned()
+        } else {
+            format!("github.com/{part}")
+        };
+        let routed = connection.query_row(
+            "SELECT EXISTS(SELECT 1 FROM github_repository_rules r WHERE r.repository = ?1
+             AND NOT EXISTS(SELECT 1 FROM github_legacy_repository_rules l WHERE l.repository = r.repository AND l.resolved = 0))",
+            [&repository], |row| row.get::<_, bool>(0),
+        )?;
+        if routed {
+            return Ok(Some(github_integration::job_id(
+                &repository.to_ascii_lowercase(),
+            )));
+        }
+    }
     Ok(select_connection(
-        &refresh_sources_configuration(connection)?,
+        &configured_sources(connection)?,
         affinity.as_deref(),
         provider,
         part,

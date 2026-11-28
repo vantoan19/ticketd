@@ -182,6 +182,7 @@ const sourceEntrySchema = lazySchema(() =>
     connector: connectorSchema,
     saved: savedSourceSchema.nullable(),
     next_id: z.string().optional(),
+    integration_revision: z.string().optional(),
     development: z.boolean().optional(),
     unavailable: z.boolean().optional(),
     extension: extensionStateSchema.optional(),

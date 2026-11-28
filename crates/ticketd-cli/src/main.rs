@@ -853,12 +853,8 @@ enum SourceCommand {
         #[arg(long)]
         no_search: bool,
         /// Record the independently verified host of a legacy attempt without looking up an issue
-        #[arg(long, conflicts_with_all = ["issue", "attach", "not_created", "no_search", "accept_different", "agent", "using_connection"])]
+        #[arg(long, conflicts_with_all = ["issue", "attach", "not_created", "no_search", "accept_different", "agent"])]
         confirm_host: Option<String>,
-        /// The saved GitHub connection to use with --issue when the original binding is
-        /// missing. The connection must use the verified original host
-        #[arg(long, hide = true, requires = "issue", conflicts_with_all = ["not_created", "no_search"])]
-        using_connection: Option<String>,
         /// Attach an issue whose title or description differs from what was sent. Its text
         /// then replaces the ticket's, and the ticket's own text is kept as a note
         #[arg(long)]
@@ -880,7 +876,7 @@ enum GithubCommand {
         #[arg(long, default_value = "github.com")]
         host: String,
     },
-    /// Show repository refresh status and migration notices
+    /// Show saved repository rules and their last refresh results
     Status,
     /// Preview or save issue import filters for a repository
     Repository {
@@ -2572,7 +2568,6 @@ fn run(output: &mut impl Write, origin: &Origin) -> Result<(), Box<dyn std::erro
                     not_created,
                     no_search,
                     confirm_host: None,
-                    using_connection,
                     accept_different,
                     agent,
                 },
@@ -2580,12 +2575,7 @@ fn run(output: &mut impl Write, origin: &Origin) -> Result<(), Box<dyn std::erro
             use ticketd_core::source::{PublicationError, Resolution, ResolveOptions};
             let registry = ExtensionRegistry::device()?;
             let engine = registry.engine()?;
-            let resolution = if let (Some(connection), Some(issue)) = (using_connection, &issue) {
-                Some(Resolution::AttachUsingConnection {
-                    issue: issue.clone(),
-                    connection,
-                })
-            } else if not_created {
+            let resolution = if not_created {
                 Some(Resolution::NotCreated)
             } else if attach || issue.is_some() {
                 Some(Resolution::Attach { issue })
@@ -2792,8 +2782,10 @@ fn github_command(
     use ticketd_core::source::GithubRepositoryRule;
     let engine = ticketd_core::source::Engine::builtin();
     Ok(match command {
-        GithubCommand::Show | GithubCommand::Status => {
-            serde_json::to_string(&workspace.github_integration(&engine)?)?
+        GithubCommand::Show => serde_json::to_string(&workspace.github_integration(&engine)?)?,
+        GithubCommand::Status => {
+            serde_json::json!({"id": "github", "repositories": workspace.github_repositories()?})
+                .to_string()
         }
         GithubCommand::Test { host } => {
             serde_json::to_string(&workspace.github_host_readiness(&engine, &host)?)?

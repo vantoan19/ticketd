@@ -1307,14 +1307,23 @@ impl Workspace {
                 candidates.push(source);
             }
         }
-        let saved = candidates
+        let integration;
+        let saved = if let Some(source) = candidates
             .iter()
             .copied()
             .find(|source| source.derived.partitions.contains(&partition))
             .or_else(|| candidates.first().copied())
-            .ok_or_else(|| {
-                invalid("connect GitHub on this host before confirming the issue".into())
-            })?;
+        {
+            source
+        } else {
+            integration = super::github_integration::workflow_target(
+                &self.connection,
+                &host,
+                ticket.project_id.as_deref(),
+                &[destination.to_owned()],
+            )?;
+            &integration
+        };
         let (scoped, _) = saved.check(engine)?;
         let issue = scoped.locate(
             github::PROVIDER,
@@ -1333,9 +1342,20 @@ impl Workspace {
 
         crate::write_scope::run(&self.connection, |transaction| {
             let id = transaction.editable(reference)?;
-            if !super::configured_source(transaction, &saved.saved.id)?
-                .is_some_and(|current| current.revision == saved.revision)
-            {
+            if if super::github_integration::is_integration_target(saved) {
+                let current = crate::read_ticket(transaction, reference)?;
+                super::github_integration::workflow_target(
+                    transaction,
+                    &host,
+                    current.project_id.as_deref(),
+                    &[],
+                )?
+                .revision
+                    != saved.revision
+            } else {
+                !super::configured_source(transaction, &saved.saved.id)?
+                    .is_some_and(|current| current.revision == saved.revision)
+            } {
                 return Err(super::stale_source());
             }
             if let Some(owner) = ticket_for_identity(transaction, &issue.reference.identity)? {

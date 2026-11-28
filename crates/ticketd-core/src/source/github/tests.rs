@@ -3756,3 +3756,125 @@ fn the_github_cli_confirms_each_permanent_hop_of_a_transferred_issue() {
     assert_eq!(found.transferred_from, Some(original));
     assert_eq!(found.issue.reference.identity.id, "785");
 }
+
+#[test]
+fn removing_a_repository_during_refresh_preserves_its_tickets_and_leaves_the_other_rule_running() {
+    use std::sync::atomic::{AtomicBool, Ordering};
+
+    use crate::source::GithubRepositoryRule;
+
+    let directory = tempfile::tempdir().unwrap();
+    let path = directory.path().join("workspace.sqlite3");
+    let mut workspace = crate::Workspace::open(&path).unwrap();
+    let removing = Arc::new(AtomicBool::new(false));
+    let gh = gh::GhApi::new({
+        let removing = removing.clone();
+        let path = path.clone();
+        move |args, _, _, _| {
+            if args[0] == "auth" {
+                return Ok(gh::Output {
+                    success: true,
+                    stdout: b"fixture".to_vec(),
+                    stderr: Vec::new(),
+                });
+            }
+            let endpoint = *args.last().unwrap();
+            let body = match endpoint {
+                "user" => json!({"id": 1, "login": "octo"}),
+                "repos/o/one/issues?state=open&per_page=100" => {
+                    if removing.swap(false, Ordering::AcqRel) {
+                        crate::Workspace::open(&path)
+                            .unwrap()
+                            .remove_github_repository("GITHUB.COM/O/one")
+                            .unwrap();
+                        json!([public_issue(101, 1, "o/one"), public_issue(102, 2, "o/one")])
+                    } else {
+                        json!([public_issue(101, 1, "o/one")])
+                    }
+                }
+                "repos/o/two/issues?state=open&per_page=100" => {
+                    json!([public_issue(201, 1, "o/two")])
+                }
+                "graphql" => json!({"data": {}}),
+                "/user" => json!({"id": 1, "login": "octo"}),
+                endpoint if endpoint.ends_with("per_page=100") => json!([]),
+                _ => panic!("unexpected GitHub endpoint: {endpoint}"),
+            };
+            Ok(recorded_gh(200, &body))
+        }
+    });
+    let mut engine = Engine::new();
+    engine
+        .register(Box::new(GithubConnector::using_gh(
+            DEFAULT_API_URL.into(),
+            gh,
+        )))
+        .unwrap();
+    let rule = |repository: &str| GithubRepositoryRule {
+        repository: repository.into(),
+        assignee: None,
+        labels: Vec::new(),
+    };
+    workspace
+        .save_github_repository(&engine, rule("github.com/o/one"))
+        .unwrap();
+    workspace
+        .save_github_repository(&engine, rule("github.com/o/two"))
+        .unwrap();
+
+    let first = workspace
+        .refresh_connection(&engine, PROVIDER, &Default::default())
+        .unwrap();
+    assert!(first.failures.is_empty(), "{:?}", first.failures);
+    assert_eq!(first.imported.len(), 2);
+    let one = workspace
+        .list_tickets()
+        .unwrap()
+        .into_iter()
+        .find(|ticket| {
+            ticket
+                .source
+                .as_ref()
+                .is_some_and(|source| source.id == "101")
+        })
+        .unwrap();
+
+    removing.store(true, Ordering::Release);
+    let removed_during_refresh = workspace
+        .refresh_connection(&engine, PROVIDER, &Default::default())
+        .unwrap();
+    assert!(
+        removed_during_refresh.failures.is_empty(),
+        "{:?}",
+        removed_during_refresh.failures
+    );
+    assert!(removed_during_refresh.imported.is_empty());
+    let repositories = workspace.github_repositories().unwrap();
+    assert_eq!(repositories.len(), 1);
+    assert_eq!(repositories[0].rule.repository, "github.com/o/two");
+    assert_eq!(repositories[0].tracked_tickets, 1);
+    assert!(repositories[0].last_refreshed_at.is_some());
+    let preserved = workspace.show_ticket(&one.reference).unwrap();
+    assert_eq!(preserved.id, one.id);
+    let source = preserved.source.unwrap();
+    assert_eq!(source.id, "101");
+    assert_eq!(source.unavailable.unwrap().code, "connection_removed");
+
+    workspace
+        .save_github_repository(&engine, rule("github.com/o/one"))
+        .unwrap();
+    let again = workspace
+        .refresh_connection(&engine, PROVIDER, &Default::default())
+        .unwrap();
+    assert!(again.imported.is_empty());
+    assert_eq!(workspace.show_ticket(&one.reference).unwrap().id, one.id);
+    assert!(
+        workspace
+            .show_ticket(&one.reference)
+            .unwrap()
+            .source
+            .unwrap()
+            .unavailable
+            .is_none()
+    );
+}

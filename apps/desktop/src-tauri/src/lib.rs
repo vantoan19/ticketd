@@ -1546,6 +1546,8 @@ struct SourceEntry {
     connector: ticketd_core::source::SourceDescription,
     saved: Option<ticketd_core::source::SavedSource>,
     #[serde(skip_serializing_if = "Option::is_none")]
+    integration_revision: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
     next_id: Option<String>,
     /// The program behind a source a person added: what it runs and where from.
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -1580,7 +1582,15 @@ fn list_sources(
     let mut entries = Vec::new();
     for connector in engine.descriptions() {
         let provider = &connector.descriptor.provider;
-        let next_id = workspace.next_source_connection_id(provider)?;
+        let builtin = provider == ticketd_core::source::GITHUB_INTEGRATION;
+        let next_id = (!builtin)
+            .then(|| workspace.next_source_connection_id(provider))
+            .transpose()?;
+        let integration_revision = if builtin {
+            workspace.github_integration_revision()?
+        } else {
+            None
+        };
         let development = sources.is_development(provider);
         // A source whose files changed stays listed, stopped, until it is added again.
         let extension = extensions
@@ -1598,7 +1608,8 @@ fn list_sources(
                     unavailable,
                     connector: connector.clone(),
                     saved: Some(source.clone()),
-                    next_id: Some(next_id.clone()),
+                    next_id: next_id.clone(),
+                    integration_revision: None,
                     extension: extension.clone(),
                 }),
         );
@@ -1608,7 +1619,8 @@ fn list_sources(
                 unavailable,
                 connector,
                 saved: None,
-                next_id: Some(next_id),
+                next_id,
+                integration_revision,
                 extension,
             });
         }
@@ -1621,6 +1633,7 @@ fn list_sources(
                 connector: workspace.unavailable_source_description(&source.provider)?,
                 saved: Some(source),
                 next_id: None,
+                integration_revision: None,
                 extension: None,
             });
         }

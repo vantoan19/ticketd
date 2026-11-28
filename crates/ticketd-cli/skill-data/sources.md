@@ -51,6 +51,24 @@ covering connection discovers the issue again. Taking ownership makes a ticket
 local. That authority decision persists after rediscovery. Unresolved publications
 remain recorded and block a second create.
 
+## GitHub
+
+GitHub uses the GitHub CLI login on each repository's host. Configure and
+refresh it with the integration ID.
+
+```sh
+ticketd source github show
+ticketd source github repository github.com/OWNER/NAME --label bug --preview
+ticketd source github repository github.com/OWNER/NAME --label bug
+ticketd source github refresh --ticket T-KQ1
+ticketd source github remove github.com/OWNER/NAME
+```
+
+Each repository has separate import rules. Removing a repository stops refresh
+and keeps the tickets' cached content and local work. The GitHub CLI chooses the
+active login unless a Project selects another through
+`source github project-login PROJECT_ID --host HOST --login LOGIN`.
+
 ## Register and test an extension
 
 Use `source extension list` to find registered extension IDs. `source extension
@@ -78,8 +96,8 @@ ticketd project connect-source PROJECT_ID --preview
 ticketd project connect-source PROJECT_ID --expect FINGERPRINT
 ```
 
-The preview is offline. It reports whether the selected connection needs to
-add the repository to discovery, which unlinked tickets would be linked, and
+The preview is offline. It reports whether GitHub or the selected extension
+needs to add the repository to discovery, which unlinked tickets would be linked, and
 what fingerprint to confirm. If several connections match the Project remote,
 pass `--connection CONNECTION` for both preview and confirmation. If the
 repository is already listed, confirmation works offline. If the preview
@@ -95,8 +113,9 @@ ticketd source publish T-KQ1 --connection CONNECTION --preview
 ticketd source publish T-KQ1 --connection CONNECTION --expect FINGERPRINT
 ```
 
-Choose the connection's `saved.id` from `ticketd source list`. You can omit
-`--connection` when exactly one saved connection can publish.
+Choose an extension connection's `saved.id` from `ticketd source list`. For
+GitHub, use `ticketd source publish T-KQ1 --provider github --preview`. You can
+omit the selector when exactly one source can publish.
 
 The preview defaults to the ticket's Project remote when the saved source lists
 that repository on the matching host. Without a match, it selects the sole listed
@@ -118,10 +137,10 @@ different external content and has different consequences. An unknown outcome is
 not evidence that creation failed, and changing retry identity could duplicate work.
 For an unbound GitHub attempt with an unverified site, verify the original host
 and port, then run `ticketd source resolve T-KQ1 --confirm-host HOST` separately.
-Use `HOST:PORT` for a nondefault port. For GitHub Enterprise, set
-`TICKETD_GITHUB_API_URL` to that site's API address for both commands. After
-confirmation, attach the verified issue with
-`ticketd source resolve T-KQ1 --issue ISSUE --using-connection ID`.
+Use `HOST:PORT` for a nondefault port. After confirmation, attach the verified
+issue with `ticketd source resolve T-KQ1 --issue ISSUE`. When an attempt
+recorded a GitHub login, recovery verifies that same account on its original
+host.
 
 An interactive refresh reports extension progress on stderr. Press Ctrl+C to
 cancel it. A canceled refresh exits 130.

@@ -1,7 +1,7 @@
 use rusqlite::Connection;
 use ticketd_core::{
     Workspace,
-    source::{GithubMigrationNotice, VerifiedGithubLogin},
+    source::{AttemptState, GithubMigrationNotice, Ownership, VerifiedGithubLogin},
 };
 
 #[test]
@@ -15,28 +15,72 @@ fn upgrades_github_connections_and_preserves_tickets_and_recovery() {
            (id, name, provider, site, configuration, account, account_key, contract_version, saved_at, revision)
          VALUES
            ('github','First','github','','{\"repositories\":[\"Owner/One\"],\"assignee\":\"@me\"}','sam','sam',2,'2026-01-01T00:00:00Z','first'),
-           ('github-2','Second','github','','{\"repositories\":[\"Owner/Two\",\"Owner/Three\"],\"labels\":[\"bug\"]}','pat','pat',2,'2026-01-01T00:00:00Z','second'),
+           ('github-2','Second','github','','{\"repositories\":[\"Owner/Two\",\"Owner/Three\"],\"labels\":[\"bug\"]}','pat','id:22',2,'2026-01-01T00:00:00Z','second'),
            ('linear','Team','linear','','{}','lin','lin',2,'2026-01-01T00:00:00Z','linear');
          INSERT INTO projects (id, name, path, remote) VALUES ('two','Two','/tmp/ticketd-fixture','github.com/owner/two');
          INSERT INTO source_connection_status (connection_id,last_attempt_at,last_refreshed_at,error_code,error_message,read_partitions)
          VALUES ('github','2026-01-05T00:00:00Z','2026-01-04T00:00:00Z','rate_limited','Wait','[\"owner/one\"]');
-         INSERT INTO tickets (id, reference, title, status) VALUES ('issue','T-AB','Saved issue','Todo');
+         INSERT INTO tickets (id, reference, title, body, status)
+         VALUES ('issue','T-AB','Saved issue','','Todo'),
+                ('tracked','T-AB2','Cached imported issue','Cached body','In progress');
+         INSERT INTO external_identities
+           (ticket_id,provider,external_id,locator,display,url,origin,partition,repository)
+         VALUES ('tracked','github','91','owner/one#9','owner/one#9','https://github.com/owner/one/issues/9','imported','owner/one','github.com/owner/one');
+         INSERT INTO external_ownership (ticket_id,authority) VALUES ('tracked','external');
+         INSERT INTO source_sync (ticket_id,state_category,state_name,last_refreshed_at,last_attempt_at,last_error_code,last_error_message)
+         VALUES ('tracked','open','Open','2026-01-04T00:00:00Z','2026-01-05T00:00:00Z','rate_limited','Wait');
+         INSERT INTO source_connection_tickets VALUES ('tracked','github');
          INSERT INTO publication_attempts
            (id,ticket_id,provider,destination,destination_host,title,body,status,started_at,lease_expires_at,updated_at)
          VALUES
-           ('uncertain','issue','github','owner/one','github.com','Saved issue','','unresolved','2026-01-02T00:00:00Z','2026-01-02T00:01:00Z','2026-01-02T00:01:00Z');
-         INSERT INTO publication_connections VALUES ('uncertain','github','2026-01-02T00:00:01Z');",
+           ('uncertain','issue','github','owner/one','github.com','Saved issue','','unresolved','2026-01-02T00:00:00Z','2026-01-02T00:01:00Z','2026-01-02T00:01:00Z'),
+           ('finished','tracked','github','owner/one','github.com','Cached imported issue','Cached body','succeeded','2026-01-02T00:00:00Z','2026-01-02T00:01:00Z','2026-01-02T00:01:00Z');
+         INSERT INTO publication_connections VALUES
+           ('uncertain','github','2026-01-02T00:00:01Z'), ('finished','github','2026-01-02T00:00:01Z');",
     ).unwrap();
     drop(fixture);
 
     let mut workspace = Workspace::open(&path).unwrap();
+    assert_eq!(
+        workspace
+            .reconcile_github_migration(|_, _| None)
+            .unwrap()
+            .len(),
+        3
+    );
+    let changed_login = workspace
+        .reconcile_github_migration(|_, login| {
+            Some(VerifiedGithubLogin {
+                login: login.unwrap_or("SAM").into(),
+                account_id: Some("id:99".into()),
+            })
+        })
+        .unwrap();
+    assert!(
+        changed_login
+            .iter()
+            .any(|notice| notice.repository == "github.com/owner/two"
+                && notice.message.contains("could not be verified"))
+    );
+    assert_eq!(
+        workspace
+            .github_project_login(Some("two"), "github.com")
+            .unwrap(),
+        None
+    );
     let notices = workspace
         .reconcile_github_migration(|host, login| {
             assert_eq!(host, "github.com");
-            assert_eq!(login, None);
-            Some(VerifiedGithubLogin {
-                login: "SAM".into(),
-                account_id: Some("id:1".into()),
+            Some(match login {
+                Some("pat") => VerifiedGithubLogin {
+                    login: "pat".into(),
+                    account_id: Some("id:22".into()),
+                },
+                None => VerifiedGithubLogin {
+                    login: "SAM".into(),
+                    account_id: Some("id:1".into()),
+                },
+                _ => panic!("unexpected migration login"),
             })
         })
         .unwrap();
@@ -54,7 +98,31 @@ fn upgrades_github_connections_and_preserves_tickets_and_recovery() {
     assert_eq!(two.rule.labels, ["bug"]);
     assert_eq!(two.project_login.as_deref(), Some("pat"));
     assert_eq!(workspace.show_ticket("T-AB").unwrap().id, "issue");
-    assert_eq!(workspace.publication_attempts("T-AB").unwrap().len(), 1);
+    let uncertain = &workspace.publication_attempts("T-AB").unwrap()[0];
+    assert_eq!(uncertain.id, "uncertain");
+    assert_eq!(uncertain.state, AttemptState::Unresolved);
+    let cached = workspace.show_ticket("T-AB2").unwrap();
+    assert_eq!(cached.id, "tracked");
+    assert_eq!(cached.body, "Cached body");
+    assert_eq!(cached.project_id, None);
+    let source = cached.source.unwrap();
+    assert_eq!(source.id, "91");
+    assert_eq!(source.ownership, Ownership::External);
+    assert_eq!(source.last_error.unwrap().code, "rate_limited");
+    assert_eq!(
+        workspace.publication_attempts("T-AB2").unwrap()[0].state,
+        AttemptState::Succeeded
+    );
+    let export = workspace.export().unwrap();
+    let context = export["github_publication_context"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|row| row["attempt_id"] == "uncertain")
+        .unwrap();
+    assert_eq!(context["host"], "github.com");
+    assert_eq!(context["login"], "sam");
+    assert_eq!(context["tracker_started_at"], "2026-01-02T00:00:01Z");
     assert_eq!(
         workspace
             .saved_sources()

@@ -443,17 +443,35 @@ fn read_effect(
     };
     if provider == GITHUB_INTEGRATION && saved.is_none() {
         let (host, _) = remote.split_once('/').ok_or(Error::InvalidProjectRemote)?;
-        let listed = connection.query_row(
-            "SELECT EXISTS(SELECT 1 FROM github_repository_rules WHERE repository = ?1)",
-            [&remote],
-            |row| row.get::<_, bool>(0),
+        let mut statement = connection.prepare(
+            "SELECT host FROM github_repository_rules
+             WHERE repository = ?1 COLLATE NOCASE OR repository LIKE ?2 COLLATE NOCASE",
         )?;
-        let repositories = listed
-            .then(|| vec![repository.to_owned()])
-            .unwrap_or_default();
+        let with_port = format!("{host}:%/{repository}");
+        let sites = statement
+            .query_map(params![remote, with_port], |row| row.get::<_, String>(0))?
+            .collect::<Result<Vec<_>, _>>()?;
+        let site = match sites.as_slice() {
+            [] => host,
+            [site] => site,
+            _ => {
+                return Err(
+                    SourceError::InvalidConfiguration(vec![super::FieldIssue::for_field(
+                        "repository",
+                        "this Project remote has more than one saved GitHub site",
+                    )])
+                    .into(),
+                );
+            }
+        };
+        let repositories = if sites.is_empty() {
+            Vec::new()
+        } else {
+            vec![repository.to_owned()]
+        };
         saved = Some(github_integration::workflow_target(
             connection,
-            host,
+            site,
             Some(&project_id),
             &repositories,
         )?);

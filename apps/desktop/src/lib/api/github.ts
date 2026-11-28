@@ -43,29 +43,46 @@ export type GithubMigrationNotice = z.infer<typeof migrationNoticeSchema>;
 export type GithubIntegration = z.infer<typeof integrationSchema>;
 
 export async function getGithubIntegration() {
-  return integrationSchema.parse(await structured(invoke("get_github_integration")));
+  return integrationSchema.parse(
+    await structured(invoke("get_github_integration")),
+  );
 }
 
 export async function previewGithubRepository(rule: GithubRepositoryRule) {
-  return previewSchema.parse(await structured(invoke("preview_github_repository", { rule })));
+  return previewSchema.parse(
+    await structured(invoke("preview_github_repository", { rule })),
+  );
 }
 
 export async function saveGithubRepository(rule: GithubRepositoryRule) {
-  return repositorySchema.parse(await structured(invoke("save_github_repository", { rule })));
+  return repositorySchema.parse(
+    await structured(invoke("save_github_repository", { rule })),
+  );
 }
 
 export async function removeGithubRepository(repository: string) {
   await structured(invoke("remove_github_repository", { repository }));
 }
 
-export async function setGithubProjectLogin(projectId: string, host: string, login: string | null) {
-  await structured(invoke("set_github_project_login", { projectId, host, login }));
+export async function setGithubProjectLogin(
+  projectId: string,
+  host: string,
+  login: string | null,
+) {
+  await structured(
+    invoke("set_github_project_login", { projectId, host, login }),
+  );
 }
 
-export async function signInGithub(host: string, onCode: (code: string) => void) {
+export async function signInGithub(
+  host: string,
+  onCode: (code: string) => void,
+) {
   const codes = new Channel<unknown>();
   codes.onmessage = (value) => onCode(z.string().parse(value));
-  return hostSchema.parse(await structured(invoke("start_github_sign_in", { host, codes })));
+  return hostSchema.parse(
+    await structured(invoke("start_github_sign_in", { host, codes })),
+  );
 }
 
 export async function cancelGithubSignIn(host: string) {

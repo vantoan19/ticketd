@@ -116,9 +116,8 @@ pub(crate) fn migrate(connection: &Connection) -> Result<(), Error> {
          INSERT INTO github_legacy_ticket_bindings SELECT t.* FROM source_connection_tickets t
            JOIN github_legacy_accounts a USING (connection_id);
          INSERT INTO github_publication_context
-           SELECT p.attempt_id, COALESCE(NULLIF(a.destination_host, ''), c.host), c.login, c.account_key, p.tracker_started_at
-           FROM publication_connections p JOIN github_legacy_accounts c USING (connection_id)
-           JOIN publication_attempts a ON a.id = p.attempt_id;",
+           SELECT p.attempt_id, c.host, c.login, c.account_key, p.tracker_started_at
+           FROM publication_connections p JOIN github_legacy_accounts c USING (connection_id);",
     )?;
     let mut rows = connection.prepare(
         "SELECT a.connection_id, a.host, s.configuration FROM github_legacy_accounts a
@@ -163,7 +162,7 @@ pub(crate) fn migrate(connection: &Connection) -> Result<(), Error> {
         let Some((id, rule)) = candidates.first() else {
             continue;
         };
-        if normalize_project_remote(&repository).is_none()
+        if normalize_repository(&repository).is_none()
             || candidates
                 .iter()
                 .skip(1)
@@ -224,19 +223,43 @@ fn repository_parts(repository: &str) -> Result<(&str, &str), Error> {
         .ok_or(Error::InvalidProjectRemote)
 }
 
-pub(super) fn normalized_host(host: &str) -> Result<String, Error> {
-    let candidate = normalize_project_remote(&format!("{host}/owner/repo"))
-        .ok_or(Error::InvalidProjectRemote)?;
-    let (host, rest) = repository_parts(&candidate)?;
-    if rest != "owner/repo" {
+pub(super) fn normalized_host(input: &str) -> Result<String, Error> {
+    if input.is_empty()
+        || input.contains(['/', '?', '#', '@', '\\'])
+        || input.contains(|ch: char| ch.is_whitespace() || ch.is_control())
+    {
         return Err(Error::InvalidProjectRemote);
     }
-    Ok(host.into())
+    let hostname = github::site_host(input);
+    let candidate = normalize_project_remote(&format!("{hostname}/owner/repo"))
+        .ok_or(Error::InvalidProjectRemote)?;
+    let (host, _) = repository_parts(&candidate)?;
+    let suffix = input
+        .strip_prefix(hostname)
+        .ok_or(Error::InvalidProjectRemote)?;
+    if suffix.is_empty() {
+        return Ok(host.into());
+    }
+    let port = suffix
+        .strip_prefix(':')
+        .ok_or(Error::InvalidProjectRemote)?;
+    let port: u16 = port.parse().map_err(|_| Error::InvalidProjectRemote)?;
+    if port == 443 {
+        return Ok(host.into());
+    }
+    if port == 0 {
+        return Err(Error::InvalidProjectRemote);
+    }
+    Ok(format!("{host}:{port}"))
 }
 
-fn normalize_repository(repository: &str) -> Option<String> {
-    // The source API identity and repository rules ignore case on all hosts.
-    normalize_project_remote(repository).map(|value| value.to_ascii_lowercase())
+pub(super) fn normalize_repository(input: &str) -> Option<String> {
+    let (site, path) = input.trim().split_once('/')?;
+    let host = normalized_host(site).ok()?;
+    let hostname = github::site_host(&host);
+    let valid = normalize_project_remote(&format!("{hostname}/{path}"))?;
+    let (_, path) = valid.split_once('/')?;
+    Some(format!("{host}/{path}").to_ascii_lowercase())
 }
 
 pub async fn sign_in_github(
@@ -271,11 +294,13 @@ fn project_login(
         .optional()?)
 }
 
-fn project_route(
+pub(super) fn project_route(
     connection: &Connection,
     repository: &str,
 ) -> Result<Option<SourceRepositoryProject>, Error> {
-    Ok(projects::find_by_remote(connection, repository)?
+    let (site, path) = repository_parts(repository)?;
+    let remote = format!("{}/{path}", github::site_host(site));
+    Ok(projects::find_by_remote(connection, &remote)?
         .filter(|project| !project.archived)
         .map(|project| SourceRepositoryProject {
             id: project.id,
@@ -496,7 +521,7 @@ impl Workspace {
             for group in pending.chunk_by(|left, right| left.repository == right.repository) {
                 let Some(rule) = group.first() else { continue };
                 let repository = &rule.repository;
-                let notice = if normalize_project_remote(repository).is_none() {
+                let notice = if normalize_repository(repository).is_none() {
                     Some("The previous GitHub repository has an invalid name. Add its corrected name to resume import.".into())
                 } else if group
                     .iter()
@@ -646,10 +671,11 @@ impl Workspace {
             repository_route(connection, &rule.repository)
         })?;
         let (host, _) = repository_parts(&rule.repository)?;
-        let config = rule_configuration(rule, route.1.as_deref())?;
+        let mut config = rule_configuration(rule, route.1.as_deref())?;
         let scoped = engine
             .for_connection(GITHUB_INTEGRATION, GITHUB_INTEGRATION, &config)
             .with_workflow_credentials(GITHUB_INTEGRATION, &config)?;
+        config.remove(github::SITE_CONFIG);
         let validated = scoped.validate_configuration(GITHUB_INTEGRATION, &config)?;
         let (preview, _, _) =
             self.preview_source_with_config(&scoped, GITHUB_INTEGRATION, &validated)?;
@@ -679,7 +705,7 @@ impl Workspace {
                 "INSERT INTO source_connection_removals (ticket_id, removed_at)
                  SELECT i.ticket_id, strftime('%Y-%m-%dT%H:%M:%fZ','now') FROM external_identities i
                  JOIN external_ownership o USING(ticket_id)
-                 WHERE i.provider = 'github' AND (i.repository = ?1 COLLATE NOCASE OR i.partition = ?2 COLLATE NOCASE)
+                 WHERE i.provider = 'github' AND (i.partition = ?2 COLLATE NOCASE OR (i.partition IS NULL AND i.repository = ?1 COLLATE NOCASE))
                    AND o.authority = 'external' ON CONFLICT DO NOTHING",
                 params![repository, partition],
             )?;
@@ -739,7 +765,8 @@ fn repositories(connection: &Connection) -> Result<Vec<GithubRepository>, Error>
         "SELECT r.repository, r.assignee, r.labels, s.last_refreshed_at,s.error_code,s.error_message,
                 (SELECT count(*) FROM external_identities i JOIN external_ownership o USING(ticket_id)
                  JOIN tickets t ON t.id = i.ticket_id
-                 WHERE i.provider = 'github' AND i.repository = r.repository COLLATE NOCASE
+                 WHERE i.provider = 'github'
+                   AND (CASE WHEN r.host = 'github.com' THEN substr(r.repository, 12) ELSE '@' || r.repository END) = i.partition COLLATE NOCASE
                    AND o.authority = 'external' AND t.trashed = 0)
          FROM github_repository_rules r LEFT JOIN github_repository_status s USING(repository)
          ORDER BY r.repository",
@@ -994,4 +1021,20 @@ pub(super) fn retain_device_settings(
         )?;
     }
     Ok(())
+}
+
+impl Workspace {
+    /// A version of local GitHub settings for desktop consumers that need to reload
+    /// their previews after someone changes repositories or Project login choices.
+    pub fn github_integration_revision(&self) -> Result<Option<String>, Error> {
+        Ok(self.connection.query_row(
+            "SELECT group_concat(value, ',') FROM (
+                SELECT revision AS value FROM github_repository_rules
+                UNION ALL SELECT project_id || '/' || host || '/' || login FROM github_project_logins
+                ORDER BY value
+             )",
+            [],
+            |row| row.get(0),
+        )?)
+    }
 }

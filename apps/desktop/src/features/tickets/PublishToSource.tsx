@@ -51,7 +51,7 @@ export function LocalPublication({
   ticket: Ticket;
   refresh: () => Promise<void>;
 }) {
-  const target = usePublishTarget();
+  const target = usePublishTarget(ticket);
   const activity = useSourceActivity();
   const preview = usePublicationPreview(ticket, target);
   const [publishing, setPublishing] = useState(false);
@@ -221,8 +221,11 @@ export function PublishDialog({
   const { entries } = useSources();
   const [provider, setProvider] = useState(defaultConnection);
   const connections = entries.filter(
-    ({ connector, saved }) =>
-      saved && connector.capabilities.includes("publish"),
+    ({ connector, saved, integration_revision }) =>
+      (saved ||
+        integration_revision !== undefined ||
+        (connector.provider === "github" && ticket.project_id)) &&
+      connector.capabilities.includes("publish"),
   );
   const [phase, setPhase] = useState<Phase>({ kind: "loading" });
   const [destination, setDestination] = useState(initialDestination);
@@ -426,7 +429,7 @@ export function PublishDialog({
       {connections.length > 1 && !recovering && (
         <div className="publication-field">
           <span className="publication-label" id="publication-connection">
-            Connection
+            Ticket source
           </span>
           <Select
             value={provider}
@@ -449,7 +452,9 @@ export function PublishDialog({
                 const id = saved?.id ?? connector.provider;
                 return (
                   <SelectItem key={id} value={id}>
-                    {saved?.name ?? connector.name} · {saved?.account}
+                    {saved
+                      ? `${saved.name ?? connector.name} · ${saved.account}`
+                      : connector.name}
                   </SelectItem>
                 );
               })}

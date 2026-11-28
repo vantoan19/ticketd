@@ -84,7 +84,13 @@ The system that currently owns a ticket's authoritative record: ticketd or an ex
 A separate program that connects ticketd to an external ticket source through a versioned contract.
 
 **Source connection**:
-A named, device-local configuration for an account and site at a ticket source, with its own settings and credentials.
+A named, device-local configuration for an account and site at a ticket source extension, with its own settings and credentials.
+
+**GitHub integration**:
+The built-in issue integration on a device. It uses the GitHub CLI for sign-in and holds a list of repositories with their issue import filters.
+
+**GitHub Project login**:
+An optional GitHub CLI login that a Project selects for a particular host on this device. A Project without a selection uses the active login on that host.
 
 **Conformance suite**:
 The shared checks that verify whether a connector follows the ticket source contract.
