@@ -60,6 +60,19 @@ export function plainText(markdown: string): string {
   );
 }
 
+const sentences =
+  typeof Intl.Segmenter === "function"
+    ? new Intl.Segmenter(undefined, { granularity: "sentence" })
+    : null;
+
+/** The first sentence of a Markdown update, displayed outside its reader. */
+export function firstSentence(markdown: string): string {
+  const text = plainText(markdown);
+  if (sentences)
+    return sentences.segment(text).containing(0)?.segment.trim() ?? "";
+  return text.match(/^.*?[.!?](?=\s|$)/)?.[0] ?? text;
+}
+
 /**
  * A list excerpt: table cells and blocks the excerpt ran together read as
  * "a · b" instead of "| a | b |".
