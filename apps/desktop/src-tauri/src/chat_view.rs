@@ -349,6 +349,9 @@ pub enum Item {
         resolved_at: Option<String>,
         /// Exactly what would run, when `subject` shows it shortened or as sentences.
         command: Option<String>,
+        /// The command’s execution folder when it differs from the Chat’s.
+        #[serde(skip_serializing_if = "Option::is_none")]
+        folder: Option<String>,
         /// A command that only calls ticketd, as sentences after the title.
         ticketd: Option<Vec<Call>>,
     },
@@ -649,6 +652,9 @@ pub struct Summary {
     pub harness_id: String,
     pub harness_name: String,
     pub folder_name: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub model: Option<String>,
+    pub turn_running: bool,
     pub first_ticket: Option<String>,
     /// The Chat's Project, as the header names its folder's Project.
     pub project: Option<ProjectRef>,
@@ -1477,6 +1483,9 @@ fn request(interaction: &ChatInteraction, live: &ChatLive, harness: &str, steps:
             .filter(|_| approval)
             .and_then(|step| step.command.clone())
             .filter(|command| Some(command) != subject.as_ref()),
+        folder: step
+            .filter(|_| approval)
+            .and_then(|step| step.folder.clone()),
         ticketd: step
             .filter(|_| approval)
             .and_then(|step| step.ticketd.clone()),
@@ -2901,6 +2910,8 @@ pub fn summary(chat: &Chat, live: &ChatLive, tracker: &Tracker, around: &Surroun
         // A managed folder is named by an id and never shared: the row leaves it out.
         folder_name: (!around.folder_missing && !chat.folder_managed)
             .then(|| last_component(&chat.execution_folder)),
+        model: main_agent_model(live),
+        turn_running: chat.active_turn.is_some() && live.activity != Activity::Idle,
         first_ticket: around.links.iter().find_map(|link| match link {
             LinkedRecord::Ticket { reference, .. } => Some(reference.clone()),
             LinkedRecord::Document { .. } | LinkedRecord::Project { .. } => None,

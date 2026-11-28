@@ -4,7 +4,6 @@ import {
   archivedProjectMatch,
   projectAssignmentChoices,
 } from "@/features/projects/project-assignment";
-import { TicketAgentStrip } from "./TicketAgent";
 import { shortcutLabel, ariaKeyShortcuts } from "@/lib/shortcuts";
 import {
   TicketCommandContext,
@@ -867,10 +866,6 @@ export function TicketProperties({
           {children}
           {dialogs}
         </div>
-        <TicketAgentStrip
-          reference={ticket.reference}
-          onOpenUpdate={onOpenNote}
-        />
       </>
     );
   return (

@@ -153,10 +153,6 @@
   color: var(--foreground);
   white-space: nowrap;
 }
-.ticket-agent-copy > span {
-  white-space: nowrap;
-}
-
 /* The ticket's label: names that open each agent (DESIGN §7). */
 .ticket-agent-name,
 .ticket-agent-others {

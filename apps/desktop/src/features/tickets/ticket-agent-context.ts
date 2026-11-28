@@ -1,12 +1,11 @@
 import { createContext } from "react";
-import type { ChatSummary } from "@/features/chats/client";
-import type { TicketAgent } from "@/features/chats/ticket-agents";
 import type { LatestUpdate } from "@/lib/api/progress";
+import type { TicketAgentState } from "./ticket-agent-state";
+
 export const AgentContext = createContext<{
-  reserved: boolean;
+  reference: string | undefined;
+  openedWithCard: boolean | null;
   ready: boolean;
-  chat: ChatSummary | undefined;
-  /** The agents at work on the ticket, as the host lists them; empty when it lists none. */
-  agents: TicketAgent[];
+  state: TicketAgentState | null;
   update: LatestUpdate | null;
 } | null>(null);

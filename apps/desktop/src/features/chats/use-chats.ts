@@ -24,6 +24,8 @@ import type { ChatRequest } from "@/features/chats/ticket-chat";
 export type ChatFeature = {
   /** The Experimental switch; false until the host has answered. */
   enabled: boolean;
+  /** The saved Chat preference is still being read. */
+  checking?: boolean;
   setEnabled: (enabled: boolean) => Promise<void>;
   overview: ChatOverview;
   /** Rises whenever any Chat's summary may have changed. */

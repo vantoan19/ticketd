@@ -32,6 +32,7 @@ function quitText({ chats, runs }: Stopping) {
 export function ChatProvider({ children }: { children: ReactNode }) {
   const client = useChatClient();
   const [enabled, setEnabledState] = useState(false);
+  const [checking, setChecking] = useState(true);
   const [overview, setOverview] = useState<ChatOverview>(NO_CHAT_OVERVIEW);
   const [revision, setRevision] = useState(0);
   const [openRequest, setOpenRequest] = useState<{
@@ -54,8 +55,12 @@ export function ChatProvider({ children }: { children: ReactNode }) {
   useEffect(() => {
     let current = true;
     client.getEnabled().then(
-      (value) => current && setEnabledState(value),
-      () => {},
+      (value) => {
+        if (!current) return;
+        setEnabledState(value);
+        setChecking(false);
+      },
+      () => current && setChecking(false),
     );
     const stopQuit = client.onQuitRequested((stopping) => {
       // Nothing is working: there is nothing to confirm.
@@ -98,6 +103,7 @@ export function ChatProvider({ children }: { children: ReactNode }) {
   const feature = useMemo(
     () => ({
       enabled,
+      checking,
       overview: enabled ? overview : NO_CHAT_OVERVIEW,
       revision,
       openRequest,
@@ -121,7 +127,7 @@ export function ChatProvider({ children }: { children: ReactNode }) {
         }
       },
     }),
-    [client, enabled, overview, revision, openRequest, chatRequest],
+    [client, enabled, checking, overview, revision, openRequest, chatRequest],
   );
   const answerQuit = (quit: boolean) => {
     setQuitting(null);
