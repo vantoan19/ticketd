@@ -3,20 +3,20 @@
   padding: 0;
   list-style: none;
 }
-.plan-overview-changes .plan-overview-change {
+.plan-overview-changes [data-slot="record-link"] {
   align-items: center;
   min-height: 36px;
   max-width: 100%;
 }
-.plan-overview-change [data-slot="record-title"] {
+.plan-overview-changes [data-slot="record-title"] {
   display: flex;
   align-items: center;
   gap: 6px;
 }
-.plan-overview-change [data-slot="record-title"] > svg {
+.plan-overview-changes [data-slot="record-title"] > svg {
   flex: none;
 }
-.plan-overview-change [data-slot="record-title"] > span:first-of-type {
+.plan-overview-changes [data-slot="record-title"] > span:first-of-type {
   overflow: hidden;
   text-overflow: ellipsis;
 }

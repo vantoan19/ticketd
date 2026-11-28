@@ -46,7 +46,6 @@ export function PlanOverviewChanges({
           {changes.map((event) => (
             <li key={event.reference}>
               <RecordLink
-                className="plan-overview-change"
                 variant="row"
                 reference={event.reference}
                 aria-current={selected === event.reference ? "true" : undefined}
@@ -77,10 +76,6 @@ function ChangeText({ event }: { event: PlanActivity }) {
     case "joined":
       return <span>Joined · {event.title}</span>;
     case "update":
-      return (
-        <span title={event.title}>
-          {firstSentence(event.brief) || event.title}
-        </span>
-      );
+      return <span>{firstSentence(event.brief) || event.title}</span>;
   }
 }
