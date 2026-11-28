@@ -20,7 +20,7 @@ use rusqlite::{Connection, Transaction, TransactionBehavior};
 
 use crate::{
     Error, activities, attachment_cleanup, attachment_retention, attachments, automation_agents,
-    automation_background, automation_runs, automations, change_token, chats, device,
+    automation_background, automation_runs, automations, backlinks, change_token, chats, device,
     document_links, documents, drive, duplicates, embedded_attachments, events, hierarchy, history,
     inbox, plans, projects, relationships, retry, search, source, sync, tags, ticket_documents,
     upload_destination, versions,
@@ -28,7 +28,7 @@ use crate::{
 
 /// The workspace format version this application reads and writes. The next
 /// format change bumps this and adds one step to [`LADDER`]; nothing else holds the number.
-pub const FORMAT_VERSION: i64 = 105;
+pub const FORMAT_VERSION: i64 = 106;
 
 /// One change to what a Workspace stores. The second argument is the format version
 /// the run started from, `0` for a new Workspace.
@@ -187,6 +187,7 @@ const LADDER: [(i64, Step); FORMAT_VERSION as usize] = [
         chats::sub_agents::migrate(tx)?;
         chats::migrate_credit(tx)
     }),
+    (106, |tx, _| backlinks::migrate(tx)),
 ];
 
 /// Takes a Workspace at format version `from` to the current one, or creates it when

@@ -1926,6 +1926,51 @@ fn ticket_mentions_page_newest_tickets_and_keep_distinct_passages() {
 }
 
 #[test]
+fn ticket_mentions_page_passages_without_losing_exact_board_counts() {
+    let dir = tempfile::tempdir().unwrap();
+    let mut workspace = Workspace::open(dir.path().join("workspace.sqlite3")).unwrap();
+    let target = workspace.create_ticket("Target").unwrap();
+    let source = workspace.create_ticket("Source").unwrap();
+    let link_only = workspace.create_ticket("Link only").unwrap();
+    workspace
+        .change_ticket(
+            &link_only.reference,
+            TicketPatch {
+                body: Some(format!(
+                    "[different label](ticketd://ticket/{})",
+                    target.reference
+                )),
+                ..Default::default()
+            },
+        )
+        .unwrap();
+    workspace
+        .change_ticket(
+            &source.reference,
+            TicketPatch {
+                body: Some("One T-KQ1.\nTwo T-KQ1.\nSame T-KQ1.\nSame T-KQ1.".into()),
+                ..Default::default()
+            },
+        )
+        .unwrap();
+    let mentions = workspace.ticket_mentions(&target.reference, 3, 0).unwrap();
+    assert_eq!(mentions.total, 1);
+    let only = &mentions.items[0];
+    assert_eq!(only.reference, source.reference);
+    assert_eq!(only.passages.len(), 3);
+    assert_eq!(only.next_offset, Some(3));
+    let rest = workspace
+        .ticket_mention_passages(&target.reference, &source.reference, 3, 3)
+        .unwrap();
+    assert_eq!(rest.items.len(), 1);
+    assert_eq!(rest.items[0].passage, "Same T-KQ1.");
+    assert!(rest.items[0].mention_start > only.passages[2].mention_start);
+    assert_eq!(rest.next_offset, None);
+    let counts = workspace.ticket_peek_counts(&target.reference).unwrap();
+    assert_eq!(counts.linked, 1);
+}
+
+#[test]
 fn backlinks_ignore_fenced_code_and_reference_prefixes() {
     let dir = tempfile::tempdir().unwrap();
     let mut workspace = Workspace::open(dir.path().join("workspace.sqlite3")).unwrap();

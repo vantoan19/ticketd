@@ -710,6 +710,31 @@ fn ticket_backlinks(
         .map_err(BridgeFailure::from)
 }
 
+#[tauri::command(async)]
+fn ticket_mention_passages(
+    reference: String,
+    source_reference: String,
+    limit: u32,
+    offset: u32,
+) -> Result<ticketd_core::MentionPassagePage, BridgeFailure> {
+    open_workspace()
+        .and_then(|workspace| {
+            workspace.ticket_mention_passages(&reference, &source_reference, limit, offset)
+        })
+        .map_err(BridgeFailure::from)
+}
+
+#[tauri::command(async)]
+fn ticket_document_mentions(
+    reference: String,
+    limit: u32,
+    offset: u32,
+) -> Result<ticketd_core::TicketDocumentMentions, BridgeFailure> {
+    open_workspace()
+        .and_then(|workspace| workspace.ticket_document_mentions(&reference, limit, offset))
+        .map_err(BridgeFailure::from)
+}
+
 /// The source's comments and events retrieved for a ticket (read-only).
 #[tauri::command(async)]
 fn source_conversation(
@@ -2745,6 +2770,8 @@ pub fn run() -> Result<(), tauri::Error> {
             edit_evidence,
             delete_evidence,
             ticket_backlinks,
+            ticket_mention_passages,
+            ticket_document_mentions,
             source_conversation,
             latest_update,
             activity_feed,

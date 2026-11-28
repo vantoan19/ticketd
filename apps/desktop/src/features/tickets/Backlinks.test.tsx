@@ -73,7 +73,8 @@ test("mentions start closed, reveal three tickets and keep them when showing mor
               ],
           total: 4,
         };
-      if (command === "document_context_links") return [[], []];
+      if (command === "ticket_document_mentions")
+        return { items: [], total: 0 };
       throw new Error(`Unexpected ${command}`);
     },
   );
@@ -114,45 +115,85 @@ test("mentions start closed, reveal three tickets and keep them when showing mor
   );
 });
 
-test("finds Document mentions beyond the first hundred incoming links", async () => {
-  const link = (index: number, kind: string) => ({
-    source_id: `${kind}-${index}`,
-    target_id: "ticket",
-    source_kind: kind,
-    target_kind: "ticket",
+test("a failed later Document mention page keeps the first page and retries that read", async () => {
+  const link = (index: number) => ({
+    source_id: `document-${index}`,
     passage: `Mentions T-KQ1 ${index}`,
-    source_label: `${kind} ${index}`,
-    target_label: "T-KQ1",
+    source_label: `Document ${index}`,
     source_trashed: false,
-    target_trashed: false,
-    activity_id: null,
   });
+  let unavailable = true;
   bridge.invoke.mockImplementation(
     async (command: string, args?: { offset?: number }) => {
       if (command === "ticket_backlinks") return { items: [], total: 0 };
-      if (command === "document_context_links")
-        return [
-          [],
-          args?.offset
-            ? [link(1, "document")]
-            : Array.from({ length: 100 }, (_, index) => link(index, "ticket")),
-        ];
+      if (command === "ticket_document_mentions") {
+        if (args?.offset && unavailable)
+          throw { code: "failed", message: "Document page unavailable" };
+        return {
+          items: args?.offset ? [link(4)] : [link(1), link(2), link(3)],
+          total: 4,
+        };
+      }
       throw new Error(`Unexpected ${command}`);
     },
   );
   render(backlinks());
+  fireEvent.click(await screen.findByRole("button", { name: /Mentioned in/ }));
+  expect(await screen.findByText("Document 1")).toBeTruthy();
   fireEvent.click(
-    await screen.findByRole("button", {
-      name: /Mentioned in/,
-      expanded: false,
-    }),
+    screen.getByRole("button", { name: "Show 1 more Document mentions" }),
   );
-  expect(await screen.findByText("document 1")).toBeTruthy();
-  // Page 0 is the read Files shares; only the pages after it are read here.
+  const retry = await screen.findByRole("button", { name: "Retry" });
+  expect(screen.getByText("Document 1")).toBeTruthy();
+  unavailable = false;
+  fireEvent.click(retry);
+  expect(await screen.findByText("Document 4")).toBeTruthy();
+  expect(screen.getByText("Document 1")).toBeTruthy();
+  expect(bridge.invoke).toHaveBeenLastCalledWith("ticket_document_mentions", {
+    reference: "T-KQ1",
+    limit: 3,
+    offset: 3,
+  });
+});
+
+test("one mentioning ticket can reveal passages beyond the first three", async () => {
+  bridge.invoke.mockImplementation(async (command: string) => {
+    if (command === "ticket_backlinks")
+      return {
+        items: [
+          {
+            ...mention(2, [
+              passage("First T-KQ1", "n1"),
+              passage("Second T-KQ1", "n2"),
+              passage("Third T-KQ1", "n3"),
+            ]),
+            next_offset: 3,
+          },
+        ],
+        total: 1,
+      };
+    if (command === "ticket_document_mentions") return { items: [], total: 0 };
+    if (command === "ticket_mention_passages")
+      return {
+        items: [passage("Fourth T-KQ1", "n4")],
+        next_offset: null,
+      };
+    throw new Error(`Unexpected ${command}`);
+  });
+  render(backlinks());
+  fireEvent.click(
+    await screen.findByRole("button", { name: /Mentioned in 1 ticket/ }),
+  );
+  expect(screen.queryByRole("button", { name: /Fourth T-KQ1/ })).toBeNull();
+  fireEvent.click(screen.getByRole("button", { name: /Show more passages/ }));
   expect(
-    bridge.invoke.mock.calls.filter(
-      ([command, args]) =>
-        command === "document_context_links" && args.offset === 0,
-    ),
-  ).toHaveLength(1);
+    await screen.findByRole("button", { name: /Fourth T-KQ1/ }),
+  ).toBeTruthy();
+  expect(screen.getByRole("button", { name: /Third T-KQ1/ })).toBeTruthy();
+  expect(bridge.invoke).toHaveBeenCalledWith("ticket_mention_passages", {
+    reference: "T-KQ1",
+    sourceReference: "T-REF2",
+    limit: 3,
+    offset: 3,
+  });
 });

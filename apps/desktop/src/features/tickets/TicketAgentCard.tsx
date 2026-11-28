@@ -1,6 +1,7 @@
 import {
   useEffect,
   useEffectEvent,
+  useId,
   useRef,
   useState,
   type KeyboardEvent,
@@ -261,6 +262,7 @@ function ApprovalChoices({
   children: React.ReactNode;
 }) {
   const client = useChatClient();
+  const choiceId = useId();
   const inFlight = useRef(false);
   const [picked, setPicked] = useState<string | null>(null);
   const [failed, setFailed] = useState(false);
@@ -304,24 +306,40 @@ function ApprovalChoices({
           Answer not sent · Pick again to retry
         </p>
       )}
-      <div className="ticket-decision-row">
-        {request.options.map((option, index) => (
-          <Button
-            key={option.id}
-            size="compact"
-            variant="outline"
-            disabled={picked !== null}
-            busy={picked === option.id}
-            onClick={() => pick(option.id)}
-            aria-keyshortcuts={index < 3 ? String(index + 1) : undefined}
-            aria-description={option.warning ?? undefined}
-          >
-            {option.label === "Allow for this session"
-              ? "Allow in this Chat"
-              : option.label}
-            {index < 3 && <Kbd aria-hidden="true">{index + 1}</Kbd>}
-          </Button>
-        ))}
+      <div className="ticket-decision-row ticket-approval-choices">
+        {request.options.map((option, index) => {
+          const warningId = option.warning ? `${choiceId}-${index}` : undefined;
+          return (
+            <div
+              className="grid min-w-0 justify-items-start gap-1"
+              key={option.id}
+            >
+              <Button
+                type="button"
+                size="compact"
+                variant="outline"
+                disabled={picked !== null}
+                busy={picked === option.id}
+                onClick={() => pick(option.id)}
+                aria-keyshortcuts={index < 3 ? String(index + 1) : undefined}
+                aria-describedby={warningId}
+              >
+                {option.label === "Allow for this session"
+                  ? "Allow in this Chat"
+                  : option.label}
+                {index < 3 && <Kbd aria-hidden="true">{index + 1}</Kbd>}
+              </Button>
+              {option.warning && (
+                <p
+                  id={warningId}
+                  className="ticket-decision-byline max-w-40 whitespace-pre-wrap wrap-anywhere"
+                >
+                  {option.warning}
+                </p>
+              )}
+            </div>
+          );
+        })}
         {children}
       </div>
     </div>

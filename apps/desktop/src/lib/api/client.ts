@@ -555,6 +555,13 @@ const agentUpdateSchema = lazySchema(() =>
   }),
 );
 export type AgentUpdate = z.infer<typeof agentUpdateSchema>;
+const mentionPassageSchema = z.object({
+  activity_id: z.string().nullable(),
+  passage: z.string(),
+  mention_start: z.number().int().nonnegative(),
+  mention_end: z.number().int().nonnegative(),
+});
+
 export const client = {
   /** The oldest Activity with an author name (an agent's), or null while no agent has written one. */
   async firstAgentUpdate() {
@@ -883,20 +890,57 @@ export const client = {
             title: z.string(),
             status: z.string(),
             mentioned_at: z.string(),
-            passages: z
-              .array(
-                z.object({
-                  activity_id: z.string().nullable(),
-                  passage: z.string(),
-                  mention_start: z.number().int().nonnegative(),
-                  mention_end: z.number().int().nonnegative(),
-                }),
-              )
-              .min(1),
+            passages: z.array(mentionPassageSchema).min(1),
+            next_offset: z
+              .number()
+              .int()
+              .nonnegative()
+              .nullable()
+              .default(null),
           }),
         ),
       })
       .parse(await invoke("ticket_backlinks", { reference, limit: 3, offset }));
+  },
+  async mentionPassages(
+    reference: string,
+    sourceReference: string,
+    offset: number,
+  ) {
+    return z
+      .object({
+        items: z.array(mentionPassageSchema),
+        next_offset: z.number().int().nonnegative().nullable(),
+      })
+      .parse(
+        await invoke("ticket_mention_passages", {
+          reference,
+          sourceReference,
+          limit: 3,
+          offset,
+        }),
+      );
+  },
+  async documentMentions(reference: string, offset: number) {
+    return z
+      .object({
+        items: z.array(
+          z.object({
+            source_id: z.string(),
+            source_label: z.string(),
+            source_trashed: z.boolean(),
+            passage: z.string(),
+          }),
+        ),
+        total: z.number().int().nonnegative(),
+      })
+      .parse(
+        await invoke("ticket_document_mentions", {
+          reference,
+          limit: 3,
+          offset,
+        }),
+      );
   },
   async activityFeed(reference: string, offset: number, updatesOnly = false) {
     return z.array(activityFeedSchema).parse(

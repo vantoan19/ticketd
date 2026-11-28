@@ -6,7 +6,11 @@ import {
   useLatestUpdate,
 } from "./activity";
 import { useFollowing, useReminder } from "./attention";
-import { useBacklinks, useDocumentBacklinks } from "./backlinks";
+import {
+  useBacklinks,
+  useDocumentBacklinks,
+  useMentionPassages,
+} from "./backlinks";
 import { useEvidence } from "./evidence";
 import { useAttachments, useDocuments } from "./files";
 import { useLinkedWork, usePeekCounts } from "./linked-work";
@@ -37,6 +41,7 @@ const declared = {
   documents: useDocuments,
   backlinks: useBacklinks,
   documentBacklinks: useDocumentBacklinks,
+  mentionPassages: useMentionPassages,
 };
 type Declared = typeof declared;
 

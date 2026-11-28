@@ -14,6 +14,7 @@ import { StatusLineRegion } from "@/components/ui/status-line";
 import { isMacPlatform } from "@/lib/platform";
 import type { Evidence, Ticket } from "@/lib/api/client";
 import { TicketPage } from "./TicketPage";
+import { applyTokens, instantTokens, rootTokens } from "@/test/motion-tokens";
 
 const bridge = vi.hoisted(() => ({ invoke: vi.fn() }));
 vi.mock("@tauri-apps/api/core", () => bridge);
@@ -144,7 +145,14 @@ afterEach(() => {
 });
 
 function open(select = vi.fn(), reviewQueue = [ticket]) {
-  return render(
+  return render(ticketView(select, reviewQueue));
+}
+
+function ticketView(
+  select: (reference: string | null) => void,
+  reviewQueue: Ticket[],
+) {
+  return (
     <StatusLineRegion>
       <TestOpenTicket ticket={ticket}>
         <TicketPage
@@ -158,7 +166,7 @@ function open(select = vi.fn(), reviewQueue = [ticket]) {
           onMention={vi.fn()}
         />
       </TestOpenTicket>
-    </StatusLineRegion>,
+    </StatusLineRegion>
   );
 }
 
@@ -557,6 +565,34 @@ test("Send back keeps its draft after Escape and reopening, then sends and offer
     sendRequestId: send?.[1].requestId,
     requestId: expect.any(String),
   });
+});
+
+test("Next to review keeps focus when motion resumes after a keyboard Send back", async () => {
+  const queued = [ticket, { ...review, reference: "T-KQ2" }];
+  const select = vi.fn();
+  const restore = applyTokens({ ...rootTokens, ...instantTokens });
+  try {
+    const view = open(select, queued);
+    fireEvent.click(await screen.findByRole("button", { name: "Send back" }));
+    const field = await screen.findByRole("textbox", {
+      name: "What needs to change?",
+    });
+    fireEvent.change(field, { target: { value: "Please verify the retry." } });
+    fireEvent.keyDown(field, {
+      key: "Enter",
+      [isMacPlatform() ? "metaKey" : "ctrlKey"]: true,
+    });
+    const next = await screen.findByRole("link", { name: "Next to review" });
+    expect(document.activeElement).toBe(next);
+
+    applyTokens(rootTokens);
+    view.rerender(ticketView(select, queued));
+    expect(document.activeElement).toBe(next);
+    expect(screen.getByText("Please verify the retry.")).toBeTruthy();
+    expect(screen.getByRole("button", { name: "Undo" })).toBeTruthy();
+  } finally {
+    restore();
+  }
 });
 
 test("a failed Send back keeps the draft and Retry repeats the same write", async () => {

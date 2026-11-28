@@ -3,7 +3,9 @@ pub mod agent_skills;
 pub mod harnesses;
 pub use search::{MetadataSelection, TicketMetadata, TicketMetadataPage, TicketWithUpdate};
 mod backlinks;
-pub use backlinks::{Backlink, MentionPassage, MentioningTicket, TicketMentions};
+pub use backlinks::{
+    Backlink, MentionPassage, MentionPassagePage, MentioningTicket, TicketMentions,
+};
 mod backup;
 mod backup_archive;
 mod restore;
@@ -23,7 +25,10 @@ pub use context_graph::{
     WorkspaceGraph, WorkspaceGraphRequest,
 };
 mod document_links;
-pub use document_links::{ContextLink, DocumentBacklink, derive_brief_heading, derive_heading};
+pub use document_links::{
+    ContextLink, DocumentBacklink, TicketDocumentMention, TicketDocumentMentions,
+    derive_brief_heading, derive_heading,
+};
 mod current_work;
 pub use current_work::{CurrentWork, CurrentWorkGroup, CurrentWorkPlan};
 mod documents;

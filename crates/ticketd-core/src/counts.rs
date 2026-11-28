@@ -59,7 +59,7 @@ impl Workspace {
             let id = relationships::id(tx, reference)?;
             // A blocking subticket is one row in Linked, and a Document can
             // appear in Files through several independent sources.
-            let (linked, files): (u64, u64) = tx.prepare_cached(&format!(
+            let (linked, files): (u64, u64) = tx.prepare_cached(
                 "SELECT
                   (SELECT COUNT(*) FROM ticket_parents WHERE child_id = ?1 OR parent_id = ?1)
                   + (SELECT COUNT(*) FROM dependencies WHERE blocker_id = ?1)
@@ -70,9 +70,7 @@ impl Workspace {
                   + (SELECT COUNT(*) FROM duplicate_tickets WHERE source_id = ?1 OR canonical_id = ?1)
                   + (SELECT COUNT(*) FROM external_duplicate_targets e JOIN tickets t ON t.id = e.ticket_id
                      WHERE e.ticket_id = ?1 AND t.status = 'Duplicate'
-                       AND NOT EXISTS (SELECT 1 FROM duplicate_tickets WHERE source_id = ?1))
-                  + (SELECT COUNT(*) FROM {mentions} m JOIN documents d ON d.id = m.source_id
-                     WHERE m.target_id = ?1),
+                       AND NOT EXISTS (SELECT 1 FROM duplicate_tickets WHERE source_id = ?1)),
                   (SELECT COUNT(*) FROM ticket_attachments WHERE ticket_id = ?1)
                   + (SELECT COUNT(*) FROM documents WHERE id IN (
                        SELECT document_id FROM ticket_documents WHERE ticket_id = ?1
@@ -80,11 +78,12 @@ impl Workspace {
                        UNION SELECT m.target_id FROM activity_mentions m JOIN activities a ON a.id = m.activity_id
                        WHERE a.ticket_id = ?1
                   ))",
-                mentions = crate::document_links::DOCUMENT_MENTIONS
-            ))?.query_row([&id], |row| Ok((row.get(0)?, row.get(1)?)))?;
+            )?.query_row([&id], |row| Ok((row.get(0)?, row.get(1)?)))?;
             let mentions = crate::backlinks::mentioning_ticket_count(tx, reference)?;
+            let documents =
+                crate::document_links::ticket_document_mention_count(tx, &id, reference)?;
             Ok(TicketPeekCounts {
-                linked: linked + mentions as u64,
+                linked: linked + mentions as u64 + documents as u64,
                 files,
             })
         })
