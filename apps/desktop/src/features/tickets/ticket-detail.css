@@ -187,13 +187,6 @@
 .source-readonly-explanation .source-caption {
   margin: 0;
 }
-.source-description-clip[data-collapsed] {
-  max-height: 260px;
-  overflow: hidden;
-}
-.source-description-toggle {
-  margin: 0 4px 8px;
-}
 .source-card-actions {
   margin-left: auto;
 }
