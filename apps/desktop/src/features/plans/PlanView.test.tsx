@@ -440,6 +440,62 @@ test("the progress strip names counted tickets in progress order", async () => {
   );
 });
 
+test("a source-held Todo still appears in work and progress", async () => {
+  tickets[0]!.availability = null;
+  await openLaunch();
+
+  const overview = within(context());
+  expect(overview.getByText("1 of 2 done")).toBeTruthy();
+  expect(overview.getByText("1 held by source")).toBeTruthy();
+  const held = within(overview.getByRole("region", { name: "Held by source" }));
+  expect(
+    held.getByRole("button", {
+      name: "T-KQ1 Title of T-KQ1, Held by source",
+    }),
+  ).toBeTruthy();
+  const strip = within(
+    overview.getByRole("toolbar", { name: "Plan progress" }),
+  );
+  expect(
+    strip.getByRole("button", {
+      name: "T-KQ1 Title of T-KQ1 · Held by source",
+    }),
+  ).toBeTruthy();
+  expect(overview.queryByRole("region", { name: "Ready" })).toBeNull();
+  expect(
+    overview.queryByRole("region", { name: "Ready to wrap up" }),
+  ).toBeNull();
+});
+
+test("a blocked row names every unresolved blocker, including one in Trash", async () => {
+  tickets[0]!.availability = "Blocked";
+  tickets[0]!.prerequisites = [
+    outsideBlocker,
+    {
+      ...outsideBlocker,
+      reference: "T-KQ4",
+      title: "Trashed blocker",
+      trashed: true,
+    },
+    {
+      ...outsideBlocker,
+      reference: "T-KQ5",
+      status: "Done",
+      unresolved: false,
+    },
+  ];
+  await openLaunch();
+
+  const overview = within(context());
+  const row = overview.getByRole("button", {
+    name: "T-KQ1 Title of T-KQ1, Blocked by T-KQ3 Outside blocker, T-KQ4 Trashed blocker (in Trash)",
+  });
+  expect(within(row).getByText("after T-KQ3 +1")).toBeTruthy();
+  expect(
+    overview.queryByRole("region", { name: "Ready to wrap up" }),
+  ).toBeNull();
+});
+
 test("the progress strip has one Tab stop and opens the focused ticket beside it", async () => {
   tickets = [
     { id: "1", reference: "T-KQ1", status: "Done", plan: "e1" },

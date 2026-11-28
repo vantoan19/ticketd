@@ -47,6 +47,9 @@
 :is(.plan-overview-swatch, .plan-overview-strip-mark)[data-status="blocked"] {
   border: 1px solid var(--control-boundary);
 }
+:is(.plan-overview-swatch, .plan-overview-strip-mark)[data-status="held"] {
+  border: 1px dashed var(--control-boundary);
+}
 .plan-overview-section-heading {
   font-size: var(--text-ui);
   line-height: var(--text-ui-line);
