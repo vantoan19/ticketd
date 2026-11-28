@@ -14002,8 +14002,11 @@ test("Source refresh and its persisted failure keep raw diagnostics behind Detai
     },
   });
   fireEvent.click(screen.getByRole("button", { name: /T-KQ1.*First/ }));
-  await screen.findByRole("button", { name: "Source: acme/api#98" });
-  fireEvent.click(screen.getByRole("button", { name: "Source: acme/api#98" }));
+  fireEvent.click(
+    await screen.findByRole("button", {
+      name: "Explain read-only description",
+    }),
+  );
   expect(screen.queryByText(raw)).toBeNull();
   fireEvent.click(screen.getByRole("button", { name: "Details" }));
   expect(screen.getByText(raw)).toBeTruthy();
