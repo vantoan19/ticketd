@@ -1,3 +1,4 @@
+import { bridgeDefault } from "@/test/bridge-defaults";
 import { revealFailureDetails } from "@/test/failure-details";
 // @vitest-environment jsdom
 import { addableKinds } from "@/features/tickets/linked-work";
@@ -12,12 +13,13 @@ import {
 } from "@testing-library/react";
 import { afterEach, expect, test, vi } from "vitest";
 import { invoke } from "@tauri-apps/api/core";
-import { ContextGraphNavigation } from "@/features/documents/navigation";
 import { LinkedWork, LinkedWorkDialogs } from "@/features/tickets/LinkedWork";
-import { Subtickets } from "@/features/tickets/Subtickets";
 import { useLinkedWork } from "@/features/tickets/useLinkedWork";
 import { TestOpenTicket } from "@/features/tickets/open-ticket/testing";
 import type { Ticket } from "@/lib/api/client";
+import { StatusLineRegion } from "@/components/ui/status-line";
+import { RailPlacement } from "./rail-placement";
+import { TicketContextLine } from "./TicketContextLine";
 import type { ChangeSignal } from "@/lib/workspace-reads";
 import { fakeChangeSignal } from "@/lib/workspace-reads/fake-signal";
 
@@ -32,6 +34,7 @@ Element.prototype.scrollIntoView = () => {};
 afterEach(() => {
   cleanup();
   vi.clearAllMocks();
+  localStorage.clear();
 });
 
 const base: Ticket = {
@@ -83,32 +86,41 @@ function bridge(
     related?: Item[];
     parent?: Item;
     children?: Item[];
+    finishedChildren?: Item[];
+    discovered?: Item[];
+    nextRelated?: Item[];
     duplicate_of?: Item;
     duplicates?: Item[];
-    more?: number;
     fail?: Record<string, string>;
     never?: boolean;
   } = {},
 ) {
-  vi.mocked(invoke).mockImplementation(async (command: string) => {
+  vi.mocked(invoke).mockImplementation(async (command: string, args) => {
     const failure = options.fail?.[command];
     if (failure) throw failure;
     if (command === "contextual_relationships") {
       if (options.never) return new Promise(() => {});
+      const offset = (args as { offset?: number } | undefined)?.offset ?? 0;
+      const totalChildren = [
+        ...(options.children ?? []),
+        ...(options.finishedChildren ?? []),
+      ];
       return {
         relationships: {
           parent: options.parent ? related(options.parent) : null,
-          children: pageOf(options.children),
+          children: offset
+            ? pageOf(options.finishedChildren)
+            : pageOf(options.children, options.finishedChildren ? 20 : null),
           children_progress: {
-            total: options.children?.length ?? 0,
-            done:
-              options.children?.filter((item) => item.status === "Done")
-                .length ?? 0,
+            total: totalChildren.length,
+            done: totalChildren.filter((item) => item.status === "Done").length,
           },
           prerequisites: pageOf(options.prerequisites),
           blocking: pageOf(options.blocking),
-          related: pageOf(options.related, options.more ?? null),
-          discovered_while: page,
+          related: offset
+            ? pageOf(options.nextRelated)
+            : pageOf(options.related, options.nextRelated ? 20 : null),
+          discovered_while: pageOf(options.discovered),
           discoveries: page,
           duplicate_of: options.duplicate_of
             ? related(options.duplicate_of)
@@ -119,16 +131,33 @@ function bridge(
     }
     if (command === "search_tickets")
       return [other("T-KQ5", "Target"), other("T-KQ1", "Itself")];
-    return base;
+    if (
+      [
+        "show_ticket",
+        "remove_dependency",
+        "add_dependency",
+        "remove_duplicate",
+        "change_contextual_relationship",
+      ].includes(command)
+    )
+      return base;
+    return bridgeDefault(command, args as { reference?: string });
   });
 }
-/** The rail's Relationships and the Subtickets section share one read. */
-function Sections({ onOpenGraph }: { onOpenGraph: () => void }) {
+function Sections() {
   const work = useLinkedWork();
   return (
     <>
-      <Subtickets work={work} select={vi.fn()} />
-      <LinkedWork work={work} select={vi.fn()} onOpenGraph={onOpenGraph} />
+      <TicketContextLine
+        projects={[]}
+        plans={[]}
+        work={work}
+        select={vi.fn()}
+        onOpenSubtickets={vi.fn()}
+      />
+      <RailPlacement value="column">
+        <LinkedWork work={work} select={vi.fn()} onMention={vi.fn()} />
+      </RailPlacement>
       <LinkedWorkDialogs work={work} />
     </>
   );
@@ -136,30 +165,20 @@ function Sections({ onOpenGraph }: { onOpenGraph: () => void }) {
 function Section({
   ticket,
   signal,
-  onOpenGraph = vi.fn(),
 }: {
   ticket: Ticket;
   signal?: ChangeSignal;
-  onOpenGraph?: () => void;
 }) {
   return (
     <TestOpenTicket ticket={ticket} {...(signal && { signal })}>
-      <Sections onOpenGraph={onOpenGraph} />
+      <StatusLineRegion>
+        <Sections />
+      </StatusLineRegion>
     </TestOpenTicket>
   );
 }
-function renderSection(
-  ticket: Ticket,
-  onOpenGraph = vi.fn(),
-  signal?: ChangeSignal,
-) {
-  return render(
-    <Section
-      ticket={ticket}
-      onOpenGraph={onOpenGraph}
-      {...(signal && { signal })}
-    />,
-  );
+function renderSection(ticket: Ticket, signal?: ChangeSignal) {
+  return render(<Section ticket={ticket} {...(signal && { signal })} />);
 }
 /** How many times the relationships were read from the core. */
 const relationshipReads = () =>
@@ -168,30 +187,79 @@ const relationshipReads = () =>
     .mock.calls.filter(([command]) => command === "contextual_relationships")
     .length;
 
-test("a ticket with no links shows only Add relationship once the read succeeds", async () => {
+test("Linked prioritizes open groups and keeps finished work folded", async () => {
+  bridge({
+    prerequisites: [{ reference: "T-KQ2", title: "Open blocker" }],
+    children: [
+      { reference: "T-KQ3", title: "Completed child", status: "Done" },
+    ],
+    blocking: [{ reference: "T-KQ4", title: "Open dependent" }],
+    related: [
+      { reference: "T-KQ5", title: "Completed neighbour", status: "Done" },
+    ],
+  });
+  renderSection(base);
+  await screen.findByText("All 1 done");
+  const linked = screen.getByRole("region", { name: "Linked" });
+  expect(
+    within(linked)
+      .getAllByRole("button", {
+        name: /^(Blocked by|Subtickets|Blocks|Related)/,
+      })
+      .map((group) => group.textContent),
+  ).toEqual([
+    "Blocked by 1 open1",
+    "Subtickets all done1",
+    "Blocks 1 open1",
+    "Related all finished1",
+  ]);
+  expect(
+    within(linked).getByRole("button", {
+      name: /Blocked by 1 open/,
+      expanded: true,
+    }),
+  ).toBeTruthy();
+  expect(
+    within(linked).getByRole("button", {
+      name: /Subtickets all done/,
+      expanded: false,
+    }),
+  ).toBeTruthy();
+  expect(
+    within(linked).getByRole("button", {
+      name: /Blocks 1 open/,
+      expanded: true,
+    }),
+  ).toBeTruthy();
+  expect(
+    within(linked).getByRole("button", {
+      name: /Related all finished/,
+      expanded: false,
+    }),
+  ).toBeTruthy();
+  expect(within(linked).getByText("All 1 done")).toBeTruthy();
+  expect(
+    within(linked).getByRole("button", { name: "Open blocker" }),
+  ).toBeTruthy();
+  expect(
+    within(linked).queryByRole("button", { name: "Completed child" }),
+  ).toBeNull();
+  expect(within(linked).queryByRole("button", { name: /Add / })).toBeNull();
+});
+
+test("a ticket with no links leaves the add action in the context line", async () => {
   bridge();
   renderSection(base);
-  await waitFor(() => expect(screen.queryByRole("status")).toBeNull());
-  expect(screen.getByRole("button", { name: "Add relationship" })).toBeTruthy();
-  expect(
-    screen.getByRole("heading", { name: "Relationships" }).textContent,
-  ).toBe("Relationships");
-  expect(screen.queryByRole("alert")).toBeNull();
-  expect(screen.queryByRole("button", { name: "Dependencies" })).toBeNull();
-});
-
-test("a ticket with no links still offers its graph", async () => {
-  bridge();
-  const open = vi.fn();
-  render(
-    <ContextGraphNavigation.Provider value={open}>
-      <Section ticket={base} />
-    </ContextGraphNavigation.Provider>,
+  await waitFor(() =>
+    expect(
+      screen.queryByRole("status", { name: "Loading relationships" }),
+    ).toBeNull(),
   );
-  fireEvent.click(await screen.findByRole("button", { name: "Open graph" }));
-  expect(open).toHaveBeenCalledWith("T-KQ1", { dependencies: true });
+  expect(screen.queryByRole("heading", { name: "Linked" })).toBeNull();
+  expect(
+    screen.getByRole("button", { name: "Add ticket property" }),
+  ).toBeTruthy();
 });
-
 test("a trashed ticket still shows its relationships, without actions to change them", async () => {
   bridge({
     prerequisites: [
@@ -201,7 +269,9 @@ test("a trashed ticket still shows its relationships, without actions to change 
   renderSection({ ...base, trashed: true });
   await screen.findByText("Blocker");
   expect(screen.getByText("In progress · not done")).toBeTruthy();
-  expect(screen.queryByRole("button", { name: "Add relationship" })).toBeNull();
+  expect(
+    screen.queryByRole("button", { name: "Add ticket property" }),
+  ).toBeNull();
   expect(
     screen.queryByRole("button", { name: /Remove relationship/ }),
   ).toBeNull();
@@ -248,14 +318,9 @@ test("builds every row from the one relationships read, including all dependents
   renderSection(base);
   await screen.findByText("Sibling");
   const rows = screen.getAllByRole("listitem");
-  expect(rows.map((row) => row.getAttribute("data-kind"))).toEqual([
-    "parent",
-    "blocked_by",
-    "blocks",
-    "blocks",
-    "related",
-    "duplicate_of",
-  ]);
+  expect(
+    rows.map((row) => within(row).getAllByRole("button")[0]?.textContent),
+  ).toEqual(["Blocker", "Waiting", "Also waiting", "Sibling", "Original"]);
   expect(screen.getByText("In progress · not done · in Trash")).toBeTruthy();
   const blocker = screen
     .getByRole("button", { name: "Blocker" })
@@ -274,64 +339,130 @@ test("builds every row from the one relationships read, including all dependents
   expect(commands).not.toContain("show_ticket");
 });
 
-test("shows n+ and loads the next page when more links exist", async () => {
-  bridge({ related: [{ reference: "T-KQ4", title: "Sibling" }], more: 20 });
-  renderSection(base);
-  await screen.findByText("Sibling");
+test("loads further pages of an open group and keeps them on refresh", async () => {
+  const signal = fakeChangeSignal();
+  bridge({
+    related: [{ reference: "T-KQ4", title: "Sibling" }],
+    nextRelated: [{ reference: "T-KQ5", title: "Cousin" }],
+    discovered: [{ reference: "T-KQ6", title: "Discovered elsewhere" }],
+  });
+  renderSection(base, signal);
+  expect(await screen.findByRole("button", { name: "Cousin" })).toBeTruthy();
   expect(
-    screen.getByRole("button", { name: "Show more relationships" }),
+    screen.getByRole("button", { name: "Discovered elsewhere" }),
   ).toBeTruthy();
-});
-
-test("Show more reads one more page and adds its links to the list", async () => {
-  bridge({ related: [{ reference: "T-KQ4", title: "Sibling" }], more: 20 });
-  renderSection(base);
-  await screen.findByText("Sibling");
-  vi.mocked(invoke).mockClear();
-  bridge({ related: [{ reference: "T-KQ5", title: "Cousin" }] });
-  fireEvent.click(
-    screen.getByRole("button", { name: "Show more relationships" }),
-  );
-  await screen.findByText("Cousin");
-  expect(screen.getByText("Sibling")).toBeTruthy();
-  expect(vi.mocked(invoke)).toHaveBeenCalledTimes(1);
-  expect(vi.mocked(invoke)).toHaveBeenCalledWith("contextual_relationships", {
+  expect(invoke).toHaveBeenCalledWith("contextual_relationships", {
     reference: "T-KQ1",
     offset: 20,
   });
-  expect(
-    screen.queryByRole("button", { name: "Show more relationships" }),
-  ).toBeNull();
-});
-
-test("a change elsewhere re-reads every loaded page and keeps the extra ones", async () => {
-  const signal = fakeChangeSignal();
-  bridge({ related: [{ reference: "T-KQ4", title: "Sibling" }], more: 20 });
-  renderSection(base, undefined, signal);
-  await screen.findByText("Sibling");
   vi.mocked(invoke).mockClear();
-  bridge({ related: [{ reference: "T-KQ5", title: "Cousin" }] });
-  fireEvent.click(
-    screen.getByRole("button", { name: "Show more relationships" }),
-  );
-  await screen.findByText("Cousin");
-  vi.mocked(invoke).mockClear();
-
   bridge({
     related: [
       { reference: "T-KQ4", title: "Sibling" },
       { reference: "T-KQ6", title: "New neighbour" },
     ],
-    more: 20,
+    nextRelated: [{ reference: "T-KQ5", title: "Cousin" }],
   });
   await act(async () => signal.change());
-  await screen.findByText("New neighbour");
+  expect(
+    await screen.findByRole("button", { name: "New neighbour" }),
+  ).toBeTruthy();
+  expect(screen.getByRole("button", { name: "Cousin" })).toBeTruthy();
   expect(
     vi
       .mocked(invoke)
       .mock.calls.filter(([command]) => command === "contextual_relationships")
       .map(([, args]) => (args as { offset: number }).offset),
   ).toEqual([0, 20]);
+});
+
+test("opening a finished group reveals every subticket and remembers explicit choices", async () => {
+  const children = Array.from({ length: 20 }, (_, index) => ({
+    reference: `T-D${index + 1}`,
+    title: `Finished task ${index + 1}`,
+    status: "Done",
+  }));
+  bridge({
+    children,
+    finishedChildren: [
+      { reference: "T-D21", title: "Finished task 21", status: "Done" },
+    ],
+    related: [{ reference: "T-KQ5", title: "Related task" }],
+  });
+  const view = renderSection(base);
+  const linked = within(await screen.findByRole("region", { name: "Linked" }));
+  const subtickets = await linked.findByRole("button", {
+    name: /Subtickets all done/,
+    expanded: false,
+  });
+  expect(linked.getByText("All 21 done")).toBeTruthy();
+  expect(relationshipReads()).toBe(1);
+  fireEvent.click(subtickets);
+  fireEvent.click(
+    linked.getByRole("button", { name: "21 done: T-D1, T-D2 +19" }),
+  );
+  expect(
+    await linked.findByRole("button", { name: "Finished task 21" }),
+  ).toBeTruthy();
+  fireEvent.click(
+    linked.getByRole("button", { name: /Related 1 open/, expanded: true }),
+  );
+  view.unmount();
+  renderSection(base);
+  expect(
+    await screen.findByRole("button", {
+      name: /Subtickets all done/,
+      expanded: true,
+    }),
+  ).toBeTruthy();
+  expect(
+    screen.getByRole("button", { name: /Related 1 open/, expanded: false }),
+  ).toBeTruthy();
+});
+
+test("subtickets show seven in review, in progress and Todo, with named folds", async () => {
+  const children = [
+    ...Array.from({ length: 6 }, (_, index) => ({
+      reference: `T-T${index + 1}`,
+      title: `Todo task ${index + 1}`,
+    })),
+    { reference: "T-P1", title: "In progress task", status: "In progress" },
+    { reference: "T-R1", title: "Review task", status: "In review" },
+    ...Array.from({ length: 3 }, (_, index) => ({
+      reference: `T-D${index + 1}`,
+      title: `Done task ${index + 1}`,
+      status: "Done",
+    })),
+  ];
+  bridge({ children });
+  renderSection(base);
+  await screen.findByText("3 of 11 done");
+  const linked = within(screen.getByRole("region", { name: "Linked" }));
+  expect(
+    linked.getByRole("button", {
+      name: /Subtickets 1 in review/,
+      expanded: true,
+    }),
+  ).toBeTruthy();
+  expect(
+    linked
+      .getAllByRole("listitem")
+      .map((row) => within(row).getAllByRole("button")[0]?.textContent),
+  ).toEqual([
+    "Review task",
+    "In progress task",
+    "Todo task 1",
+    "Todo task 2",
+    "Todo task 3",
+    "Todo task 4",
+    "Todo task 5",
+  ]);
+  fireEvent.click(linked.getByRole("button", { name: "1 more open: T-T6" }));
+  fireEvent.click(
+    linked.getByRole("button", { name: "3 done: T-D1, T-D2 +1" }),
+  );
+  expect(linked.getByRole("button", { name: "Todo task 6" })).toBeTruthy();
+  expect(linked.getByRole("button", { name: "Done task 3" })).toBeTruthy();
 });
 
 test("a row whose removal failed comes back, with the reason", async () => {
@@ -352,29 +483,28 @@ test("a row whose removal failed comes back, with the reason", async () => {
   expect(relationshipReads()).toBe(1);
 });
 
-test("Open graph opens the ticket graph without a navigation provider", async () => {
-  bridge({ prerequisites: [{ reference: "T-KQ2", title: "Blocker" }] });
-  const onOpenGraph = vi.fn();
-  renderSection(base, onOpenGraph);
-  fireEvent.click(await screen.findByRole("button", { name: "Open graph" }));
-  expect(onOpenGraph).toHaveBeenCalled();
-});
-
-test("Remove relationship takes the link off the ticket", async () => {
-  bridge({ prerequisites: [{ reference: "T-KQ2", title: "Blocker" }] });
+test("removing a relationship offers Undo and restores it", async () => {
+  const blocker = { reference: "T-KQ2", title: "Blocker" };
+  bridge({ prerequisites: [blocker] });
   renderSection(base);
-  fireEvent.click(
-    await screen.findByRole("button", {
-      name: "Remove T-KQ2 from Blocked by",
-    }),
-  );
-  await waitFor(() =>
-    expect(invoke).toHaveBeenCalledWith("remove_dependency", {
-      blocker: "T-KQ2",
-      dependent: "T-KQ1",
-    }),
-  );
-  await waitFor(() => expect(relationshipReads()).toBe(2));
+  const remove = await screen.findByRole("button", {
+    name: "Remove T-KQ2 from Blocked by",
+  });
+  bridge();
+  fireEvent.click(remove);
+  expect(invoke).toHaveBeenCalledWith("remove_dependency", {
+    blocker: "T-KQ2",
+    dependent: "T-KQ1",
+  });
+  const undo = await screen.findByRole("button", { name: "Undo" });
+  expect(screen.queryByRole("button", { name: "Blocker" })).toBeNull();
+  bridge({ prerequisites: [blocker] });
+  fireEvent.click(undo);
+  expect(invoke).toHaveBeenCalledWith("add_dependency", {
+    blocker: "T-KQ2",
+    dependent: "T-KQ1",
+  });
+  expect(await screen.findByRole("button", { name: "Blocker" })).toBeTruthy();
 });
 
 test("removing a duplicate link explains the result before anything changes", async () => {
@@ -394,12 +524,6 @@ test("removing a duplicate link explains the result before anything changes", as
     "T-KQ1 returns to the status it had before",
   );
   expect(confirm.textContent).toContain("Dependencies moved to T-KQ9 stay");
-  // Cancel first; the destructive action is named for its result.
-  expect(
-    within(confirm)
-      .getByRole("button", { name: "Remove duplicate link" })
-      .getAttribute("data-variant"),
-  ).toBe("destructive");
   expect(invoke).not.toHaveBeenCalledWith(
     "remove_duplicate",
     expect.anything(),
@@ -448,8 +572,12 @@ test("a double-click removes one relationship, not the next row's too", async ()
 });
 
 async function chooseTarget() {
+  fireEvent.keyDown(
+    screen.getByRole("button", { name: "Add ticket property" }),
+    { key: "Enter" },
+  );
   fireEvent.click(
-    await screen.findByRole("button", { name: "Add relationship" }),
+    await screen.findByRole("menuitem", { name: "Link a ticket…" }),
   );
   fireEvent.change(
     await screen.findByLabelText("Search tickets by title or reference"),
@@ -511,8 +639,12 @@ test("choosing a new parent says it replaces the current one", async () => {
     ...base,
     parent: { reference: "T-KQ3", title: "Epic", trashed: false },
   });
+  fireEvent.keyDown(
+    screen.getByRole("button", { name: "Add ticket property" }),
+    { key: "Enter" },
+  );
   fireEvent.click(
-    await screen.findByRole("button", { name: "Add relationship" }),
+    await screen.findByRole("menuitem", { name: "Link a ticket…" }),
   );
   const dialog = await screen.findByRole("dialog");
   expect(within(dialog).queryByRole("status")).toBeNull();
@@ -522,47 +654,8 @@ test("choosing a new parent says it replaces the current one", async () => {
   );
 });
 
-test("subtickets read under the description with local progress, not in the rail", async () => {
-  bridge({
-    children: [
-      { reference: "T-KQ8", title: "Finished part", status: "Done" },
-      { reference: "T-KQ9", title: "Open part", status: "In progress" },
-    ],
-  });
-  renderSection(base);
-  expect(await screen.findByText("1 of 2 done")).toBeTruthy();
-  const progress = screen.getByRole("progressbar", {
-    name: "Subticket progress",
-  });
-  expect(progress.getAttribute("aria-valuemax")).toBe("2");
-  expect(progress.getAttribute("aria-valuenow")).toBe("1");
-  // The rail's Relationships holds no subtickets, so it collapses to its action.
-  expect(screen.getByRole("button", { name: "Add relationship" })).toBeTruthy();
-  expect(screen.getAllByRole("listitem").map((row) => row.textContent)).toEqual(
-    [expect.stringContaining("T-KQ8"), expect.stringContaining("T-KQ9")],
-  );
-});
-
-test("Add subticket opens the link dialog already saying this ticket is the parent", async () => {
-  bridge({
-    children: [{ reference: "T-KQ8", title: "Part", status: "Todo" }],
-  });
-  renderSection(base);
-  fireEvent.click(await screen.findByRole("button", { name: "Add subticket" }));
-  const dialog = await screen.findByRole("dialog", { name: "Link a ticket" });
-  expect(
-    within(dialog).getByRole("combobox", { name: /^Relationship: / })
-      .textContent,
-  ).toContain("parent of");
-  // The primary waits for a chosen ticket and says why.
-  expect(
-    within(dialog).getByRole("button", { name: "Link ticket" }),
-  ).toHaveProperty("disabled", true);
-  expect(within(dialog).getByText("Choose a ticket to link")).toBeTruthy();
-});
-
 test("a source-closed duplicate shows its external, resolved or unknown target without a remove action", async () => {
-  bridge();
+  bridge({ children: [{ reference: "T-KQ8", title: "Local work" }] });
   const target = (extra: object) => ({
     kind: "external" as const,
     identity: { provider: "github", id: "9" },
@@ -599,6 +692,11 @@ test("a source-closed duplicate shows its external, resolved or unknown target w
   const view = render(
     <Section key="external" ticket={duplicate(target({}))} />,
   );
+  expect(
+    await screen.findByText(
+      "Subtickets stay local; publishing never includes them.",
+    ),
+  ).toBeTruthy();
   const row = (await screen.findByText("acme/api#9")).closest("section")!;
   expect(within(row).getByText("Duplicate of")).toBeTruthy();
   expect(within(row).getByText("Not imported into ticketd.")).toBeTruthy();

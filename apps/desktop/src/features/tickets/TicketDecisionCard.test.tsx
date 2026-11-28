@@ -153,7 +153,6 @@ function open(select = vi.fn(), reviewQueue = [ticket]) {
           projects={[]}
           plans={[]}
           select={select}
-          onOpenGraph={vi.fn()}
           noteTarget={null}
           mention={null}
           onMention={vi.fn()}

@@ -704,9 +704,9 @@ fn ticket_backlinks(
     reference: String,
     limit: u32,
     offset: u32,
-) -> Result<Vec<ticketd_core::Backlink>, BridgeFailure> {
+) -> Result<ticketd_core::TicketMentions, BridgeFailure> {
     open_workspace()
-        .and_then(|workspace| workspace.backlinks(&reference, limit, offset))
+        .and_then(|workspace| workspace.ticket_mentions(&reference, limit, offset))
         .map_err(BridgeFailure::from)
 }
 

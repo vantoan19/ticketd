@@ -91,8 +91,8 @@ it("offers more when the total exceeds the first page, and Show more reads exact
 
 it("has no more when a full first page contains every record", async () => {
   bridge.invoke.mockImplementation(async () => ({
-    items: records("a", 49),
-    total: 49,
+    items: records("a", 50),
+    total: 50,
   }));
   render(
     <TestOpenTicket ticket={ticket}>
