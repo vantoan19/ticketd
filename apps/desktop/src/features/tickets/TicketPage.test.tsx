@@ -6,6 +6,7 @@ import {
   render,
   screen,
   waitFor,
+  within,
 } from "@testing-library/react";
 import { afterEach, beforeEach, expect, test, vi } from "vitest";
 import type { Ticket } from "@/lib/api/client";
@@ -50,7 +51,8 @@ beforeEach(() => {
     if (command === "show_ticket") return ticket;
     if (command === "is_following") return false;
     if (command === "reminder") return null;
-    if (command === "list_evidence") return evidence;
+    if (command === "ticket_evidence_page")
+      return { items: evidence, total: evidence.length };
     return bridgeDefault(command, args as { reference?: string });
   });
 });
@@ -94,6 +96,64 @@ test("a change made by the CLI appears in a section of the open page", async () 
   expect(
     await screen.findByText("Unit tests passed", {}, { timeout: 5000 }),
   ).toBeTruthy();
+});
+
+test("Evidence previews the newest three and names the records behind the fold", async () => {
+  const items = [
+    "Deploy check",
+    "Main build",
+    "Unit tests",
+    "Smoke run",
+    "First check",
+  ].map((name, index) => ({
+    id: String(index),
+    name,
+    kind: "verification",
+    value: `Outcome ${index}`,
+    editing_agent: null,
+    created_at: `2026-11-2${5 - index}T15:00:00Z`,
+    updated_at: `2026-11-2${5 - index}T15:00:00Z`,
+  }));
+  bridge.invoke.mockImplementation(async (command: string, args?: object) => {
+    if (command === "ticket_evidence_page") return { items, total: 5 };
+    return bridgeDefault(command, args as { reference?: string });
+  });
+  render(
+    <TestOpenTicket ticket={ticket}>
+      <TicketPage
+        active
+        projects={[]}
+        plans={[]}
+        select={vi.fn()}
+        onOpenGraph={vi.fn()}
+        noteTarget={null}
+        mention={null}
+        onMention={vi.fn()}
+      />
+    </TestOpenTicket>,
+  );
+  const section = within(
+    await screen.findByRole("region", { name: "Evidence" }),
+  );
+  const fold = await section.findByRole("button", {
+    name: "2 more: Smoke run, First check",
+  });
+  const rows = () =>
+    section
+      .getAllByRole("listitem")
+      .map((row) => within(row).getByText(/Outcome \d/).textContent);
+  expect(rows()).toEqual(["Outcome 0", "Outcome 1", "Outcome 2"]);
+  expect(fold.getAttribute("aria-expanded")).toBe("false");
+  expect(section.queryByRole("button", { name: "Add evidence" })).toBeNull();
+  fireEvent.click(fold);
+  expect(fold.getAttribute("aria-expanded")).toBe("true");
+  expect(rows()).toEqual([
+    "Outcome 0",
+    "Outcome 1",
+    "Outcome 2",
+    "Outcome 3",
+    "Outcome 4",
+  ]);
 });
 
 test("saving a property reports the write once", async () => {

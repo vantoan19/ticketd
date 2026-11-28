@@ -107,17 +107,17 @@ function keptEnd(name: string): string {
 }
 
 /** Greedy wrap at `-`, `_`, `.` and spaces, as the card's two lines do. */
-function firstLine(name: string, measure: Measure): string {
+function firstLine(name: string, measure: Measure, width: number): string {
   let line = "";
   for (const token of tokens(name)) {
-    if (measure(line + token) <= WIDTH) {
+    if (measure(line + token) <= width) {
       line += token;
       continue;
     }
     if (line) return line;
     // One word wider than the card breaks wherever it must.
     for (const character of token) {
-      if (measure(line + character) > WIDTH) return line || character;
+      if (measure(line + character) > width) return line || character;
       line += character;
     }
   }
@@ -129,7 +129,11 @@ function firstLine(name: string, measure: Measure): string {
  * second line, so its end stays visible; the cut falls between words and the
  * ellipsis sits right against the end that is kept.
  */
-export function fitName(name: string, measure = measurer()): FittedName {
+export function fitName(
+  name: string,
+  measure = measurer(),
+  width = WIDTH,
+): FittedName {
   const tail = keptEnd(name);
   if (!measure) {
     return name.length <= LIMIT
@@ -139,16 +143,16 @@ export function fitName(name: string, measure = measurer()): FittedName {
           cut: true,
         };
   }
-  if (measure(name) <= WIDTH) return { text: name, cut: false };
-  const first = firstLine(name, measure);
+  if (measure(name) <= width) return { text: name, cut: false };
+  const first = firstLine(name, measure, width);
   const rest = name.slice(first.length);
-  if (measure(rest) <= WIDTH) return { text: name, cut: false };
+  if (measure(rest) <= width) return { text: name, cut: false };
   // The end comes from the second line, never from the first, and gives up
   // letters until it fits: a wide script can make 14 of them wider than a line.
   let end = keptEnd(rest);
-  while (end.length > 1 && measure(`…${end}`) > WIDTH) end = dropFirst(end);
+  while (end.length > 1 && measure(`…${end}`) > width) end = dropFirst(end);
   let head = rest.slice(0, Math.max(0, rest.length - end.length));
-  while (head && measure(`${head}…${end}`) > WIDTH) head = dropLast(head);
+  while (head && measure(`${head}…${end}`) > width) head = dropLast(head);
   // The cut falls between words when there is a word to fall between, and the
   // ellipsis sits against the words it joins, not against a separator.
   const wholeWords = head.match(/^(.*[-_. ])[^-_. ]*$/)?.[1];

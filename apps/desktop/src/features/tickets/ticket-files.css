@@ -1,0 +1,16 @@
+.ticket-files {
+  display: grid;
+  min-width: 0;
+  gap: 8px;
+}
+.ticket-files-grid.file-grid {
+  grid-template-columns: repeat(auto-fill, var(--ticket-file-width));
+}
+.ticket-files-grid:not([data-show-all]) {
+  grid-template-columns: none;
+  grid-auto-columns: var(--ticket-file-width);
+  grid-auto-flow: column;
+  margin: -2px;
+  padding: 2px;
+  overflow-x: auto;
+}

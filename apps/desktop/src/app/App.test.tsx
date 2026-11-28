@@ -8497,7 +8497,8 @@ test("empty Ticket evidence adds, removes, and restores through Undo", async () 
     ) => {
       if (command === "find_tickets") return [current];
       if (command === "show_ticket") return current;
-      if (command === "list_evidence") return items;
+      if (command === "ticket_evidence_page")
+        return { items, total: items.length };
       if (command === "add_evidence") {
         const key = args?.requestId ?? "";
         const known = writes.get(key);
@@ -11009,7 +11010,8 @@ test("pointer Delete removes existing evidence directly and Undo restores its fi
     (command: string, args?: { input?: typeof original }) => {
       if (command === "find_tickets") return [current];
       if (command === "show_ticket") return current;
-      if (command === "list_evidence") return items;
+      if (command === "ticket_evidence_page")
+        return { items, total: items.length };
       if (command === "delete_evidence") {
         items = [];
         return;
@@ -11162,7 +11164,10 @@ test("Evidence announces a pending initial read without claiming empty and retai
   bridge.invoke.mockImplementation((command: string) => {
     if (command === "find_tickets") return [current];
     if (command === "show_ticket") return current;
-    if (command === "list_evidence") return initial ? firstRead : [record];
+    if (command === "ticket_evidence_page")
+      return initial
+        ? firstRead.then((items) => ({ items, total: items.length }))
+        : { items: [record], total: 1 };
     return bridgeDefault(command);
   });
   render(<App />);
@@ -11196,7 +11201,7 @@ test("Evidence announces a pending initial read without claiming empty and retai
   bridge.invoke.mockImplementation((command: string) => {
     if (command === "find_tickets") return [current];
     if (command === "show_ticket") return current;
-    if (command === "list_evidence")
+    if (command === "ticket_evidence_page")
       throw new Error("SYNTHETIC_REFRESH_FAILURE");
     return bridgeDefault(command);
   });

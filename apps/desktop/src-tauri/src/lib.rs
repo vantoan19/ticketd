@@ -951,6 +951,17 @@ fn list_evidence(reference: String, offset: u32) -> Result<Vec<Evidence>, Bridge
         .and_then(|w| w.evidence(&reference, 50, offset))
         .map_err(BridgeFailure::from)
 }
+
+#[tauri::command(async)]
+fn ticket_evidence_page(
+    reference: String,
+    offset: u32,
+) -> Result<ticketd_core::EvidencePage, BridgeFailure> {
+    open_workspace()
+        .and_then(|w| w.evidence_page(&reference, 50, offset))
+        .map_err(BridgeFailure::from)
+}
+
 #[tauri::command(async)]
 fn add_evidence(
     reference: String,
@@ -2664,6 +2675,7 @@ pub fn run() -> Result<(), tauri::Error> {
             sidebar_counts,
             workspace_change_token,
             list_evidence,
+            ticket_evidence_page,
             add_evidence,
             edit_evidence,
             delete_evidence,

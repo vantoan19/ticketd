@@ -51,6 +51,8 @@ export function bridgeDefault(
     case "find_tickets":
     case "search_tickets":
     case "recent_documents":
+    case "ticket_evidence_page":
+      return { items: [], total: 0 };
     case "search_documents":
     case "all_documents":
     case "finished_documents":

@@ -216,6 +216,7 @@ export function TicketDetails({
                     key={reference}
                     reference={reference}
                     active={reference === selected}
+                    expanded={expanded}
                     hidden={hidden || reference !== selected}
                     swap={swap.swapped && reference === selected}
                     leaving={reference === swap.leaving}
@@ -252,6 +253,7 @@ type PageActions = {
 const OpenedPage = memo(function OpenedPage({
   reference,
   active,
+  expanded,
   hidden,
   swap,
   leaving,
@@ -265,6 +267,7 @@ const OpenedPage = memo(function OpenedPage({
 }: {
   reference: string;
   active: boolean;
+  expanded: boolean;
   hidden: boolean;
   swap: boolean;
   leaving: boolean;
@@ -282,6 +285,7 @@ const OpenedPage = memo(function OpenedPage({
     <OpenTicket reference={reference} seed={seed} hidden={hidden}>
       <TicketPage
         active={active}
+        expanded={expanded}
         swap={swap}
         leaving={leaving}
         outsideResults={outsideResults}

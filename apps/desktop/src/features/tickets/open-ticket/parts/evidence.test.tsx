@@ -41,8 +41,12 @@ function Probe() {
   const evidence = useOpenTicket("evidence");
   return (
     <>
-      <output aria-label="count">{evidence.value?.length ?? "none"}</output>
-      <output aria-label="first">{evidence.value?.[0]?.name ?? "none"}</output>
+      <output aria-label="count">
+        {evidence.value?.items.length ?? "none"}
+      </output>
+      <output aria-label="first">
+        {evidence.value?.items[0]?.name ?? "none"}
+      </output>
       <output aria-label="more">{String(evidence.more)}</output>
       <output aria-label="failure">{evidence.failure?.title ?? "none"}</output>
       <button onClick={evidence.showMore}>Show more</button>
@@ -53,7 +57,7 @@ function Probe() {
 const text = (label: string) => screen.getByLabelText(label).textContent;
 const offsets = () =>
   bridge.invoke.mock.calls
-    .filter(([command]) => command === "list_evidence")
+    .filter(([command]) => command === "ticket_evidence_page")
     .map(([, args]) => (args as { offset: number }).offset);
 
 beforeEach(() => {
@@ -62,12 +66,14 @@ beforeEach(() => {
 });
 afterEach(cleanup);
 
-it("offers more only after a full page, and Show more reads exactly one more page", async () => {
-  bridge.invoke.mockImplementation(async (_command, args) =>
-    (args as { offset: number }).offset === 0
-      ? records("a", 50)
-      : records("b", 3),
-  );
+it("offers more when the total exceeds the first page, and Show more reads exactly one more page", async () => {
+  bridge.invoke.mockImplementation(async (_command, args) => ({
+    total: 53,
+    items:
+      (args as { offset: number }).offset === 0
+        ? records("a", 50)
+        : records("b", 3),
+  }));
   render(
     <TestOpenTicket ticket={ticket}>
       <Probe />
@@ -83,25 +89,30 @@ it("offers more only after a full page, and Show more reads exactly one more pag
   expect(offsets()).toEqual([0, 50]);
 });
 
-it("has no more after a short first page", async () => {
-  bridge.invoke.mockImplementation(async () => records("a", 49));
+it("has no more when a full first page contains every record", async () => {
+  bridge.invoke.mockImplementation(async () => ({
+    items: records("a", 49),
+    total: 49,
+  }));
   render(
     <TestOpenTicket ticket={ticket}>
       <Probe />
     </TestOpenTicket>,
   );
-  await screen.findByText("49");
+  await screen.findByText("50");
   expect(text("more")).toBe("false");
 });
 
 it("re-reads every loaded page when the workspace changes, and keeps them all", async () => {
   const signal = fakeChangeSignal();
   let prefix = "a";
-  bridge.invoke.mockImplementation(async (_command, args) =>
-    (args as { offset: number }).offset === 0
-      ? records(prefix, 50)
-      : records(`${prefix}-more`, 2),
-  );
+  bridge.invoke.mockImplementation(async (_command, args) => ({
+    total: 52,
+    items:
+      (args as { offset: number }).offset === 0
+        ? records(prefix, 50)
+        : records(`${prefix}-more`, 2),
+  }));
   render(
     <TestOpenTicket ticket={ticket} signal={signal}>
       <Probe />
@@ -121,7 +132,7 @@ it("re-reads every loaded page when the workspace changes, and keeps them all", 
 
 it("keeps the records shown when a refresh fails, and says what failed", async () => {
   const signal = fakeChangeSignal();
-  bridge.invoke.mockResolvedValueOnce(records("a", 2));
+  bridge.invoke.mockResolvedValueOnce({ items: records("a", 2), total: 2 });
   render(
     <TestOpenTicket ticket={ticket} signal={signal}>
       <Probe />

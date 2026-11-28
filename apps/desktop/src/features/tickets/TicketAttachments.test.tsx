@@ -12,7 +12,8 @@ import { beforeEach, afterEach, expect, test, vi } from "vitest";
 import userEvent from "@testing-library/user-event";
 import { invoke } from "@tauri-apps/api/core";
 import { open, save } from "@tauri-apps/plugin-dialog";
-import { TicketFiles as TicketAttachments } from "./TicketFiles";
+import { useState } from "react";
+import { TicketFiles, type FileAddRequest } from "./TicketFiles";
 import type { Ticket } from "@/lib/api/client";
 import { TestOpenTicket } from "@/features/tickets/open-ticket/testing";
 
@@ -33,13 +34,29 @@ afterEach(() => {
   vi.resetAllMocks();
 });
 Element.prototype.scrollIntoView ??= () => {};
-/** Files' Attach menu → File…: the row when empty, the "+" otherwise. */
+function TicketAttachments({ hideEmpty = false }: { hideEmpty?: boolean }) {
+  const [request, setRequest] = useState<FileAddRequest | null>(null);
+  const [trigger, setTrigger] = useState<HTMLButtonElement | null>(null);
+  return (
+    <>
+      <button
+        type="button"
+        ref={setTrigger}
+        onClick={() => setRequest({ kind: "file", key: Date.now() })}
+      >
+        File…
+      </button>
+      <TicketFiles
+        addRequest={request}
+        addTrigger={trigger}
+        hideEmpty={hideEmpty}
+      />
+    </>
+  );
+}
+
 async function attachFile() {
-  const trigger = (
-    await screen.findAllByRole("button", { name: /^Attach/ })
-  )[0]!;
-  fireEvent.pointerDown(trigger, { button: 0, ctrlKey: false });
-  fireEvent.click(await screen.findByRole("menuitem", { name: "File…" }));
+  fireEvent.click(await screen.findByRole("button", { name: "File…" }));
 }
 
 test.each(["close", "navigate"])(
@@ -367,11 +384,9 @@ test("detaching the last file lands focus on the File button when the empty sect
     }
     return null;
   });
-  // The ticket page gives an empty section's File button a place in its header.
-  const header = document.body.appendChild(document.createElement("span"));
   render(
     <TestOpenTicket ticket={ticket}>
-      <TicketAttachments emptyTarget={header} />
+      <TicketAttachments hideEmpty />
     </TestOpenTicket>,
   );
   const row = await screen.findByRole("button", { name: "Trace" });
@@ -387,9 +402,10 @@ test("detaching the last file lands focus on the File button when the empty sect
   );
   await waitFor(() => expect(screen.queryByRole("dialog")).toBeNull());
   await waitFor(() =>
-    expect(document.activeElement).toBe(header.querySelector("button")),
+    expect(document.activeElement).toBe(
+      screen.getByRole("button", { name: "File…" }),
+    ),
   );
-  header.remove();
 });
 
 test("detaching the open file lands focus on the Files heading even when the files are read again slowly", async () => {
@@ -500,7 +516,7 @@ test("Files shows cards for a mixed set, with a tile for the file that has no st
   expect(document.activeElement).toBe(log);
 });
 
-test("eight files and no Documents fold after six cards", async () => {
+test("eight files open in place from the Files heading", async () => {
   const many = Array.from({ length: 8 }, (_, index) => ({
     ...file,
     id: `f${index}`,
@@ -518,8 +534,8 @@ test("eight files and no Documents fold after six cards", async () => {
       <TicketAttachments />
     </TestOpenTicket>,
   );
-  const more = await screen.findByRole("button", { name: /Show all 8 files/ });
-  expect(screen.queryByRole("button", { name: "file-6.zip" })).toBeNull();
+  const more = await screen.findByRole("button", { name: "Show all 8" });
+  expect(screen.queryByRole("button", { name: "file-3.zip" })).toBeNull();
   fireEvent.click(more);
   expect(screen.getByRole("button", { name: "file-7.zip" })).toBeTruthy();
 });

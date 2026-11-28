@@ -1,6 +1,7 @@
 import { useSources } from "@/features/settings/sources/use-sources";
 import type { SourceEntry } from "@/lib/api/sources";
 import { useStatusLine } from "@/components/ui/use-status-line";
+import { Disclosure } from "@/components/ui/disclosure";
 import { Pager } from "@/components/ui/pager";
 import { Skeleton } from "@/components/ui/skeleton";
 import { EmptyState } from "@/components/ui/empty-state";
@@ -22,7 +23,6 @@ import {
   GitCommitHorizontal,
   GitPullRequest,
   MoreHorizontal,
-  Plus,
 } from "lucide-react";
 import { DialogShell } from "@/components/ui/dialog-shell";
 import {
@@ -111,7 +111,7 @@ export function Evidence({
   trashed,
   folded = false,
   addRequest = 0,
-  onCount,
+  addTrigger,
 }: {
   trashed: boolean;
   /**
@@ -121,8 +121,7 @@ export function Evidence({
   folded?: boolean;
   /** Bump to open Add evidence from outside the section. */
   addRequest?: number;
-  /** How many records there are, once loaded. */
-  onCount?: (count: number) => void;
+  addTrigger?: HTMLElement | null;
 }) {
   const { entries: sources } = useSources();
   const formId = useId();
@@ -133,7 +132,9 @@ export function Evidence({
   // page it has loaded whenever the workspace changes.
   const read = useOpenTicket("evidence");
   const loaded = read.value !== undefined;
-  const items = read.value ?? noItems;
+  const items = read.value?.items ?? noItems;
+  const total = read.value?.total ?? 0;
+  const [expanded, setExpanded] = useState(false);
   const [composing, setComposing] = useState(false);
   const [draft, setDraft] = useState<EvidenceInput>(blank);
   const [editing, setEditing] = useState<EvidenceRecord | null>(null);
@@ -229,7 +230,7 @@ export function Evidence({
       current.name !== editing.name ||
       current.kind !== editing.kind);
   function startAdding() {
-    returnFocus.current = null;
+    returnFocus.current = addTrigger ?? null;
     setDialogError(null);
     if (editing) {
       setEditing(null);
@@ -244,27 +245,99 @@ export function Evidence({
     seenAddRequest.current = addRequest;
     startAdding();
   });
-  useEffect(() => {
-    if (loaded) onCount?.(items.length);
-  }, [loaded, items.length, onCount]);
-  const empty = loaded && !items.length;
+  const empty = loaded && total === 0;
+  const hiddenCount = total - 3;
+  const hiddenNames = items
+    .slice(3, 5)
+    .map((item) => item.name)
+    .join(", ");
+  const remainingNames = hiddenCount > 2 ? ` +${hiddenCount - 2}` : "";
+  function evidenceRow(item: EvidenceRecord) {
+    const Icon = evidenceIcons[item.kind];
+    return (
+      <li key={item.id} className="evidence-item">
+        <span
+          className="evidence-kind-icon"
+          role="img"
+          aria-label={typeNames[item.kind]}
+        >
+          <Icon aria-hidden="true" />
+        </span>
+        <strong className="evidence-item-name">{item.name}</strong>
+        <EvidenceValue
+          sources={sources}
+          item={item}
+          onOpenFailed={() => {
+            setDeleteRetry(null);
+            setError(
+              plainFailure("Couldn't open the link", "Copy it instead."),
+            );
+          }}
+        />
+        <Time className="evidence-item-meta" value={item.created_at} />
+        <span className="evidence-item-actions">
+          <span className="evidence-reveal">
+            <CopyButton label="Copy" subject={item.name} text={item.value} />
+          </span>
+          {!trashed && (
+            <span className="evidence-reveal">
+              <DropdownMenu>
+                <DropdownMenuTrigger asChild>
+                  <IconButton
+                    ref={(element) => {
+                      if (element) menuTriggers.current.set(item.id, element);
+                      else menuTriggers.current.delete(item.id);
+                    }}
+                    tooltipSide="top"
+                    type="button"
+                    disabled={pending}
+                    label={`Actions for ${item.name}`}
+                  >
+                    <MoreHorizontal />
+                  </IconButton>
+                </DropdownMenuTrigger>
+                <DropdownMenuContent align="end">
+                  <DropdownMenuItem
+                    onSelect={() => {
+                      // The menu closes as the dialog opens, so name the
+                      // control focus should come back to.
+                      returnFocus.current =
+                        menuTriggers.current.get(item.id) ?? null;
+                      setDialogError(null);
+                      setComposing(true);
+                      setEditing(item);
+                      setDraft({
+                        kind: item.kind,
+                        name: item.name,
+                        value: item.value,
+                        editing_agent: item.editing_agent,
+                      });
+                    }}
+                  >
+                    Edit
+                  </DropdownMenuItem>
+                  <DropdownMenuSeparator />
+                  <DropdownMenuItem
+                    variant="destructive"
+                    onSelect={() => void remove(item.id)}
+                  >
+                    Delete
+                  </DropdownMenuItem>
+                </DropdownMenuContent>
+              </DropdownMenu>
+            </span>
+          )}
+        </span>
+      </li>
+    );
+  }
   return (
     <section
       aria-label="Evidence"
       className="evidence-section"
       hidden={empty && folded && !error}
     >
-      <SectionHeader
-        title="Evidence"
-        count={items.length || undefined}
-        actions={
-          !trashed && (
-            <IconButton label="Add evidence" onClick={startAdding}>
-              <Plus />
-            </IconButton>
-          )
-        }
-      />
+      <SectionHeader title="Evidence" level={2} count={total || undefined} />
       {!loaded && !error && (
         <div role="status" aria-label="Loading evidence">
           <ol className="evidence-list" aria-hidden="true">
@@ -273,13 +346,9 @@ export function Evidence({
                 <span className="evidence-kind-icon">
                   <Skeleton className="h-4 w-4" />
                 </span>
-                <span className="evidence-item-heading">
-                  <Skeleton className="h-4 w-28" />
-                </span>
-                <span className="evidence-item-meta">
-                  <Skeleton className="h-4 w-24" />
-                </span>
-                <Skeleton className="h-4 w-24" />
+                <Skeleton className="evidence-item-name h-4 w-28 max-w-full" />
+                <Skeleton className="evidence-item-value h-4 w-24 max-w-full" />
+                <Skeleton className="evidence-item-meta h-4 w-12" />
               </li>
             ))}
           </ol>
@@ -302,94 +371,25 @@ export function Evidence({
           }}
         />
       )}
-      <ol className="evidence-list">
-        {items.map((item) => (
-          <li key={item.id} className="evidence-item">
-            <span className="evidence-kind-icon" aria-hidden="true">
-              {(() => {
-                const Icon = evidenceIcons[item.kind];
-                return <Icon />;
-              })()}
-            </span>
-            <div className="evidence-item-heading">
-              <strong className="evidence-item-name">{item.name}</strong>
-              <span className="evidence-item-actions">
-                <span className="evidence-reveal">
-                  <CopyButton
-                    label="Copy"
-                    subject={item.name}
-                    text={item.value}
-                  />
-                </span>
-                {!trashed && (
-                  <span className="evidence-reveal">
-                    <DropdownMenu>
-                      <DropdownMenuTrigger asChild>
-                        <IconButton
-                          ref={(element) => {
-                            if (element)
-                              menuTriggers.current.set(item.id, element);
-                            else menuTriggers.current.delete(item.id);
-                          }}
-                          tooltipSide="top"
-                          type="button"
-                          disabled={pending}
-                          label={`Actions for ${item.name}`}
-                        >
-                          <MoreHorizontal />
-                        </IconButton>
-                      </DropdownMenuTrigger>
-                      <DropdownMenuContent align="end">
-                        <DropdownMenuItem
-                          onSelect={() => {
-                            // The menu closes as the dialog opens, so name the
-                            // control focus should come back to.
-                            returnFocus.current =
-                              menuTriggers.current.get(item.id) ?? null;
-                            setDialogError(null);
-                            setComposing(true);
-                            setEditing(item);
-                            setDraft({
-                              kind: item.kind,
-                              name: item.name,
-                              value: item.value,
-                              editing_agent: item.editing_agent,
-                            });
-                          }}
-                        >
-                          Edit
-                        </DropdownMenuItem>
-                        <DropdownMenuSeparator />
-                        <DropdownMenuItem
-                          variant="destructive"
-                          onSelect={() => void remove(item.id)}
-                        >
-                          Delete
-                        </DropdownMenuItem>
-                      </DropdownMenuContent>
-                    </DropdownMenu>
-                  </span>
-                )}
-              </span>
-            </div>
-            <p className="evidence-item-meta">
-              {typeNames[item.kind]} · <Time value={item.updated_at} />
-              {item.editing_agent && ` · ${item.editing_agent}`}
-            </p>
-            <EvidenceValue
-              sources={sources}
-              item={item}
-              onOpenFailed={() => {
-                setDeleteRetry(null);
-                setError(
-                  plainFailure("Couldn't open the link", "Copy it instead."),
-                );
-              }}
-            />
-          </li>
-        ))}
-      </ol>
-      {read.more && <Pager noun="evidence" onMore={read.showMore} />}
+      {items.length > 0 && (
+        <ol className="evidence-list">{items.slice(0, 3).map(evidenceRow)}</ol>
+      )}
+      {hiddenCount > 0 && (
+        <Disclosure
+          label={`${hiddenCount} more: ${hiddenNames}${remainingNames}`}
+          open={expanded}
+          onOpenChange={setExpanded}
+        >
+          {expanded && (
+            <>
+              <ol className="evidence-list" start={4}>
+                {items.slice(3).map(evidenceRow)}
+              </ol>
+              {read.more && <Pager noun="evidence" onMore={read.showMore} />}
+            </>
+          )}
+        </Disclosure>
+      )}
       <DialogShell
         open={!trashed && composing}
         // Escape and an outside click keep the draft; Cancel or a save clears it.
@@ -530,7 +530,7 @@ function pullRequest(value: string, sources: readonly SourceEntry[]) {
 }
 
 /**
- * The record's value, line 3 of its row: a link that opens when it is an
+ * The record's value: a link that opens when it is an
  * address (a pull request reads "owner/repo #57"), a short commit with the
  * full hash in a tooltip, or the text itself.
  */
@@ -549,6 +549,7 @@ function EvidenceValue({
       <Tooltip content={item.value}>
         <Button
           type="button"
+          className="evidence-item-value"
           variant="link"
           size="inline"
           aria-label={`Open ${item.name}`}
@@ -564,11 +565,11 @@ function EvidenceValue({
     );
   }
   return (
-    <Tooltip content={item.kind === "commit" ? item.value : null}>
+    <Tooltip content={item.value}>
       <p
         className="evidence-item-value"
         data-kind={item.kind === "verification" ? "text" : "code"}
-        {...(item.kind === "commit" && { tabIndex: 0 })}
+        tabIndex={0}
       >
         {item.kind === "commit" ? shortCommit(item.value) : item.value}
       </p>
