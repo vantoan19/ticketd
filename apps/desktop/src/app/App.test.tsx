@@ -3414,15 +3414,18 @@ test("the ticket detail bounds one document scroller and keeps properties in the
   const bounded = detail.querySelectorAll(".detail-scroll");
   expect(bounded).toHaveLength(1);
   expect(bounded[0]!.parentElement).toBe(detail);
-  // The property bar and connected context share one document scroller.
+  // The context line shares the document's scroller.
   await act(async () => {
     await vi.advanceTimersByTimeAsync(0);
   });
   const content = bounded[0]!.querySelector<HTMLElement>(".detail-content")!;
-  expect(content.querySelector(":scope > .detail-document")).toBeTruthy();
+  const reading = content.querySelector<HTMLElement>(
+    ":scope > .detail-document",
+  )!;
+  expect(reading).toBeTruthy();
   expect(content.querySelector(":scope > .ticket-properties")).toBeNull();
   expect(
-    content.querySelector(".detail-document .property-strip"),
+    within(reading).getByRole("group", { name: "Ticket properties" }),
   ).toBeTruthy();
 });
 
