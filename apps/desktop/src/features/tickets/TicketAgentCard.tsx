@@ -332,7 +332,7 @@ function ApprovalChoices({
               {option.warning && (
                 <p
                   id={warningId}
-                  className="ticket-decision-byline max-w-40 whitespace-pre-wrap [overflow-wrap:anywhere]"
+                  className="ticket-decision-byline max-w-40 whitespace-pre-wrap wrap-anywhere"
                 >
                   {option.warning}
                 </p>
