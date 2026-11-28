@@ -88,7 +88,7 @@ export function SettingsView({
     setRestores((count) => count + 1);
     await onRestore();
   };
-  const { entries: sources, github, readCatalog } = useSources();
+  const { entries: sources, github, githubFailure, readCatalog } = useSources();
   const chosen = resolveSettingsPage(chosenName);
   // Choosing another page fades the open one out, then the next arrives.
   const { shown: selected, leaving } = useFadeThrough(chosen);
@@ -210,6 +210,8 @@ export function SettingsView({
         <GithubPage
           key={restores}
           integration={github}
+          failure={githubFailure}
+          onCheck={() => readCatalog?.()}
           onBack={() => onSelect?.("ticket-sources")}
           {...(projectSourceSetup?.provider === "github" &&
             onProjectSourceSaved &&
@@ -221,8 +223,8 @@ export function SettingsView({
               },
             })}
           onChanged={() => {
-            readCatalog?.();
             if (onSourcesChanged) void onSourcesChanged();
+            else readCatalog?.();
           }}
         />
       )}

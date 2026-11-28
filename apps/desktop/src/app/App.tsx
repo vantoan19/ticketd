@@ -569,7 +569,9 @@ function AppContent() {
     readSourceHealth,
     sourceEntries,
     githubIntegration,
-    sourceCatalogObservation,
+    sourceCatalogFailure,
+    githubCatalogFailure,
+    sourceCatalogLoading,
     readSourceEntries,
     sourceConnectionsChanged,
     sourceRefresh,
@@ -1006,8 +1008,10 @@ function AppContent() {
                     sources: sourceHealth.sources,
                     entries: sourceEntries,
                     github: githubIntegration,
-                    catalogObservation: sourceCatalogObservation,
-                    readCatalog: () => readSourceEntries().generation,
+                    catalogFailure: sourceCatalogFailure,
+                    githubFailure: githubCatalogFailure,
+                    catalogLoading: sourceCatalogLoading,
+                    readCatalog: readSourceEntries,
                     intervalSecs: sourceHealth.interval_secs ?? null,
                     openSettings: (connection) => {
                       openView("settings");

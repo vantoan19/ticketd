@@ -1,5 +1,6 @@
 import { useEffect, useState } from "react";
 import { ChevronRight } from "lucide-react";
+import { FailureAlert } from "@/components/ui/failure-alert";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { StatusLabel } from "@/components/ui/status-label";
@@ -48,7 +49,14 @@ export function SourcesPage({
     onCancel: () => void;
   };
 }) {
-  const { entries, github, loading, readCatalog } = useSources();
+  const {
+    entries,
+    github,
+    loading,
+    catalogFailure,
+    githubFailure,
+    readCatalog,
+  } = useSources();
   // A source just added opens once the catalog lists it.
   const [opening, setOpening] = useState<string | null>(null);
   useEffect(() => {
@@ -88,8 +96,16 @@ export function SourcesPage({
   }
 
   const rows = sourceRows(entries, health, github, now);
+  const failure = catalogFailure ?? githubFailure;
   return (
     <SettingsPage {...sectionMeta("ticket-sources")}>
+      {failure && (
+        <FailureAlert
+          size="compact"
+          failure={failure}
+          {...(readCatalog && { onRetry: readCatalog })}
+        />
+      )}
       {loading ? (
         <p role="status">Loading sources…</p>
       ) : (

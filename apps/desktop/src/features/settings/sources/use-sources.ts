@@ -1,6 +1,10 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { useSourceActivity } from "@/features/tickets/source-activity";
 import { getGithubIntegration, type GithubIntegration } from "@/lib/api/github";
+import {
+  describeFailure,
+  type FailureDescription,
+} from "@/lib/api/describe-failure";
 import { sourcesClient, type SourceEntry } from "@/lib/api/sources";
 
 /**
@@ -13,8 +17,9 @@ export function useSources(): {
   entries: SourceEntry[];
   github: GithubIntegration | null;
   loading: boolean;
-  observation: number;
-  readCatalog: (() => number) | undefined;
+  catalogFailure: FailureDescription | null;
+  githubFailure: FailureDescription | null;
+  readCatalog: (() => void) | undefined;
 } {
   const schedule = useSourceActivity();
   const provided = schedule.entries !== null;
@@ -23,8 +28,15 @@ export function useSources(): {
     entries: SourceEntry[];
     github: GithubIntegration | null;
     loading: boolean;
-    observation: number;
-  }>({ entries: [], github: null, loading: true, observation: 0 });
+    catalogFailure: FailureDescription | null;
+    githubFailure: FailureDescription | null;
+  }>({
+    entries: [],
+    github: null,
+    loading: true,
+    catalogFailure: null,
+    githubFailure: null,
+  });
   const generation = useRef(0);
   const readCatalog = useCallback(() => {
     const id = ++generation.current;
@@ -36,21 +48,31 @@ export function useSources(): {
               ...current,
               entries,
               loading: false,
-              observation: id,
+              catalogFailure: null,
             }));
         },
-        () => {
+        (reason: unknown) => {
           if (id === generation.current)
-            setState((current) => ({ ...current, loading: false }));
+            setState((current) => ({
+              ...current,
+              loading: false,
+              catalogFailure: describeFailure(reason, "load ticket sources"),
+            }));
         },
       );
     }
     void getGithubIntegration().then(
       (github) => {
         if (id === generation.current)
-          setState((current) => ({ ...current, github }));
+          setState((current) => ({ ...current, github, githubFailure: null }));
       },
-      () => {},
+      (reason: unknown) => {
+        if (id === generation.current)
+          setState((current) => ({
+            ...current,
+            githubFailure: describeFailure(reason, "load GitHub settings"),
+          }));
+      },
     );
     return id;
   }, [provided]);
@@ -65,8 +87,11 @@ export function useSources(): {
     ? {
         entries: schedule.entries,
         github: schedule.github === undefined ? state.github : schedule.github,
-        loading: false,
-        observation: schedule.catalogObservation ?? 0,
+        loading: schedule.catalogLoading ?? false,
+        catalogFailure: schedule.catalogFailure ?? null,
+        githubFailure: providedGithub
+          ? (schedule.githubFailure ?? null)
+          : state.githubFailure,
         readCatalog: providedGithub
           ? schedule.readCatalog
           : (schedule.readCatalog ?? readCatalog),

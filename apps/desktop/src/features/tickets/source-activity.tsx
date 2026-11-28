@@ -1,4 +1,5 @@
 import { createContext, useContext } from "react";
+import type { FailureDescription } from "@/lib/api/describe-failure";
 import type { GithubIntegration } from "@/lib/api/github";
 import type {
   SourceEntry,
@@ -22,10 +23,11 @@ export type SourceActivity = {
    */
   entries: SourceEntry[] | null;
   github?: GithubIntegration | null;
-  /** Generation of the last successful catalog observation. */
-  catalogObservation?: number;
-  /** Starts a catalog read and returns its generation. */
-  readCatalog?: () => number;
+  catalogFailure?: FailureDescription | null;
+  githubFailure?: FailureDescription | null;
+  catalogLoading?: boolean;
+  /** Requests a new read of the source catalog. */
+  readCatalog?: () => void;
   /** How often sources refresh by themselves, in seconds; `null` when unknown. */
   intervalSecs: number | null;
   /** Opens the connection's settings, or the Sources overview. */

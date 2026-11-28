@@ -1,5 +1,7 @@
 import type { ComponentProps } from "react";
 import { CircleDot, UserRound } from "lucide-react";
+import { FailureAlert } from "@/components/ui/failure-alert";
+import type { FailureDescription } from "@/lib/api/describe-failure";
 import { Button } from "@/components/ui/button";
 import { StatusLabel } from "@/components/ui/status-label";
 import { SettingsDrillIn } from "@/features/settings/layout/SettingsDrillIn";
@@ -15,11 +17,15 @@ import type { GithubIntegration } from "@/lib/api/github";
 
 export function GithubPage({
   integration,
+  failure,
+  onCheck,
   onBack,
   onChanged,
   projectSetup,
 }: {
   integration: GithubIntegration | null;
+  failure: FailureDescription | null;
+  onCheck: () => void;
   onBack: () => void;
   onChanged: () => void;
   projectSetup?: ComponentProps<typeof GithubRepositories>["projectSetup"];
@@ -33,6 +39,9 @@ export function GithubPage({
       iconContent={<GithubMark />}
       onBack={onBack}
     >
+      {failure && (
+        <FailureAlert size="compact" failure={failure} onRetry={onCheck} />
+      )}
       <section className="settings-section" aria-label="GitHub sign-in">
         <SettingsList>
           {integration ? (
@@ -40,8 +49,8 @@ export function GithubPage({
               <GithubSignInRow
                 key={host.host}
                 host={host}
-                onChanged={onChanged}
-                onCheck={onChanged}
+                onChanged={onCheck}
+                onCheck={onCheck}
               />
             ))
           ) : (
@@ -53,7 +62,7 @@ export function GithubPage({
               }
               title={<StatusLabel tone="attention">Unavailable</StatusLabel>}
               trailing={
-                <Button variant="outline" size="sm" onClick={onChanged}>
+                <Button variant="outline" size="sm" onClick={onCheck}>
                   Check again
                 </Button>
               }
