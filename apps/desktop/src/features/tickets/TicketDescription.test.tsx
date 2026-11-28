@@ -266,6 +266,42 @@ test("find highlights stay with each cached ticket and closing one preserves the
   }
 });
 
+test("refreshing a hidden description's find match leaves the shared scroll position alone", () => {
+  const platform = vi
+    .spyOn(window.navigator, "platform", "get")
+    .mockReturnValue("MacIntel");
+  const page = (hidden: boolean, source: string) => (
+    <div className="detail-scroll">
+      <section hidden={hidden}>
+        <TicketDescription ticketId="cached" source={source} />
+      </section>
+    </div>
+  );
+  try {
+    const view = render(page(false, "Find this phrase."));
+    const scroller =
+      view.container.querySelector<HTMLElement>(".detail-scroll")!;
+    Object.defineProperty(scroller, "clientHeight", { value: 100 });
+    scroller.scrollTop = 250;
+    fireEvent.keyDown(window, { key: "f", metaKey: true });
+    fireEvent.change(screen.getByRole("searchbox"), {
+      target: { value: "this phrase" },
+    });
+    expect(scroller.scrollTop).toBeLessThan(250);
+
+    scroller.scrollTop = 250;
+    view.rerender(page(true, "A refresh repeats this phrase and this phrase."));
+    expect(scroller.scrollTop).toBe(250);
+    view.rerender(
+      page(false, "A refresh repeats this phrase and this phrase."),
+    );
+    expect(screen.getByRole("status").textContent).toBe("1 of 2");
+    expect(scroller.scrollTop).toBe(250);
+  } finally {
+    platform.mockRestore();
+  }
+});
+
 test("the review card's acceptance count returns from Edit to the visible checklist", async () => {
   detail(longSpec, "in-review", "In review");
   const acceptance = screen.getByRole("button", { name: "Acceptance 0 of 1" });

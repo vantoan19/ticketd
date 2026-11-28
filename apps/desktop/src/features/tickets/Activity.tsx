@@ -665,9 +665,12 @@ function RecoveredActivity({
     0,
     totalUpdates - Number(Boolean(pagedStubNote)) - recentNotes.length,
   );
+  const currentUpdateCount = updateCount.current
+    ? updateCount.value
+    : undefined;
   const moreEarlier =
     updates.more &&
-    (updateCount.value === undefined || notes.length < updateCount.value);
+    (currentUpdateCount === undefined || notes.length < currentUpdateCount);
   const { failedMore, loadingMore, showMore } = updates;
   useEffect(() => {
     if (
@@ -732,7 +735,7 @@ function RecoveredActivity({
               },
             }));
         })
-        .catch(() => {});
+        .catch(() => reads.ids.delete(id));
     }
   }, [active, detailIdsKey, revision]);
   useLayoutEffect(() => {

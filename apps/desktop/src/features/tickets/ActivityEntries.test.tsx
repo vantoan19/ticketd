@@ -179,6 +179,52 @@ test("counts earlier authored updates even when recorded changes fill the All fe
   });
 });
 
+test("Earlier uses the authored feed when the last count is stale", async () => {
+  const updates = Array.from({ length: 52 }, (_, index) => ({
+    type: "authored",
+    activity: { ...note, id: String(index), brief: `Authored update ${index}` },
+  }));
+  let revised = false;
+  bridge.invoke.mockImplementation(
+    async (
+      command: string,
+      args?: { updatesOnly?: boolean; offset: number },
+    ) => {
+      if (command === "activity_feed" && args?.updatesOnly)
+        return updates.slice(
+          args.offset,
+          Math.min(args.offset + 50, revised ? 52 : 50),
+        );
+      if (command === "activity_update_count") {
+        if (revised) throw new Error("Could not refresh the count");
+        return 50;
+      }
+      throw new Error(`Unexpected ${command}`);
+    },
+  );
+  const laterPage = {
+    reference: "T-KQ20",
+    offset: 50,
+    limit: 50,
+    updatesOnly: true,
+  };
+  const signal = fakeChangeSignal();
+  render(<Activity {...props} reference="T-KQ20" signal={signal} />);
+  const earlier = await screen.findByRole("button", {
+    name: "47 earlier updates",
+  });
+  // A full page can also be the last one, so let the first count arrive.
+  await act(async () => {});
+  await act(async () => fireEvent.click(earlier));
+  await screen.findByText("Authored update 49");
+  expect(bridge.invoke).not.toHaveBeenCalledWith("activity_feed", laterPage);
+
+  revised = true;
+  await act(async () => signal.change());
+  expect(await screen.findByText("Authored update 51")).toBeTruthy();
+  expect(bridge.invoke).toHaveBeenCalledWith("activity_feed", laterPage);
+});
+
 test("Earlier reuses detail Document reads until the workspace revision changes", async () => {
   const detailIds = new Map([
     [0, "current"],
@@ -251,6 +297,45 @@ test("Earlier reuses detail Document reads until the workspace revision changes"
   expect(
     screen.queryByRole("button", { name: "Attached: Stale title" }),
   ).toBeNull();
+});
+
+test("reopening a cached ticket retries its failed detail Document read", async () => {
+  const document: Document = {
+    id: "details",
+    title: "Recovered details",
+    trashed: false,
+    body: "",
+    created_at: note.reported_at,
+    updated_at: note.updated_at,
+  };
+  const showDocument = vi
+    .fn()
+    .mockRejectedValueOnce(new Error("Read failed"))
+    .mockResolvedValue(document);
+  bridge.invoke.mockImplementation(async (command: string) => {
+    if (command === "activity_feed")
+      return [
+        {
+          type: "authored",
+          activity: { ...note, supporting_document_id: document.id },
+        },
+      ];
+    if (command === "show_document") return showDocument();
+    throw new Error(`Unexpected ${command}`);
+  });
+  const reference = "T-KQ20";
+  const view = render(<Activity {...props} reference={reference} />);
+  await screen.findByRole("button", { name: "Open details" });
+  expect(showDocument).toHaveBeenCalledTimes(1);
+
+  view.rerender(
+    <Activity {...props} reference={reference} active={false} hidden />,
+  );
+  view.rerender(<Activity {...props} reference={reference} />);
+  expect(
+    await screen.findByRole("button", { name: "Attached: Recovered details" }),
+  ).toBeTruthy();
+  expect(showDocument).toHaveBeenCalledTimes(2);
 });
 
 test("an update that occupies seven lines offers Show more", async () => {

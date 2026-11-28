@@ -26,7 +26,7 @@ export function FollowToggle({
     <FailureCaption
       failure={error}
       label={changeError ? "Not saved" : "Not checked"}
-      onRetry={() => void retry()}
+      {...(retry && { onRetry: () => void retry() })}
     />
   );
   if (variant === "strip")

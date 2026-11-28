@@ -29,6 +29,10 @@ import {
 
 const emptyDraft: TicketUpdateDraft = { brief: "", requestId: null };
 
+function sameDraft(left: TicketUpdateDraft | null, right: TicketUpdateDraft) {
+  return left?.requestId === right.requestId && left.brief === right.brief;
+}
+
 export function TicketReply({
   active,
   disabled,
@@ -40,12 +44,17 @@ export function TicketReply({
   const line = useStatusLine();
   const recovery = useDraftRecovery();
   const [replying, setReplying] = useState(false);
-  const [draft, setDraft] = useState(emptyDraft);
+  const [draft, setDraftValue] = useState(emptyDraft);
+  const currentDraft = useRef(draft);
   const [pending, setPending] = useState(false);
   const composing = useRef<HTMLTextAreaElement>(null);
   const trigger = useRef<HTMLButtonElement>(null);
   const restoreFocus = useRef(false);
   const writing = useRef(false);
+  const setDraft = useCallback((next: TicketUpdateDraft) => {
+    currentDraft.current = next;
+    setDraftValue(next);
+  }, []);
   const open = useCallback(() => {
     if (!replying)
       setDraft(
@@ -53,7 +62,7 @@ export function TicketReply({
       );
     setReplying(true);
     composing.current?.focus();
-  }, [recovery, replying, ticket.id]);
+  }, [recovery, replying, setDraft, ticket.id]);
   useEffect(() => {
     if (!active || disabled) return;
     return onTicketCardReply(ticket.reference, open);
@@ -90,21 +99,31 @@ export function TicketReply({
     const requestId = draft.requestId ?? crypto.randomUUID();
     const submission = { brief: draft.brief, requestId };
     setDraft(submission);
-    const retained = keepTicketUpdateDraft(
-      recovery,
-      ticket.id,
-      "reply",
-      submission,
-    );
-    void retained.catch(() => {});
+    let attempted = false;
     async function post() {
       if (writing.current) return;
+      // An unsent reply can be superseded by editing the draft. Once a write
+      // was attempted, Retry must replay the same submission and request ID.
+      if (!attempted && !sameDraft(currentDraft.current, submission)) return;
       writing.current = true;
       setPending(true);
       try {
-        // Flush the queued submission, including when Retry follows a recovery failure.
-        if (recovery.active) await recovery.flush();
-        else await retained;
+        if (!attempted) {
+          const retained = keepTicketUpdateDraft(
+            recovery,
+            ticket.id,
+            "reply",
+            submission,
+          );
+          if (recovery.active) {
+            // The recovery store retries queued writes when explicitly flushed.
+            void retained.catch(() => {});
+            await recovery.flush();
+          } else {
+            await retained;
+          }
+        }
+        attempted = true;
         await client.addActivityWithDetails(
           ticket.reference,
           submission.brief.trim(),
@@ -112,10 +131,12 @@ export function TicketReply({
           null,
           requestId,
         );
-        const current = readTicketUpdateDraft(recovery, ticket.id, "reply");
         if (
-          current?.requestId === requestId &&
-          current.brief === submission.brief
+          sameDraft(currentDraft.current, submission) &&
+          sameDraft(
+            readTicketUpdateDraft(recovery, ticket.id, "reply"),
+            submission,
+          )
         ) {
           void keepTicketUpdateDraft(recovery, ticket.id, "reply", null).catch(
             () => {},

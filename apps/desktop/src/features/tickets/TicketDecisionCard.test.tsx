@@ -351,6 +351,58 @@ test("a successful Reply retry leaves a newer draft open", async () => {
   expect(writes[1]).toEqual(writes[0]);
 });
 
+test.each([false, true])(
+  "Reply retries failed draft storage only for an unchanged submission (edited=%s)",
+  async (edited) => {
+    ticket = { ...review, status: "In progress" };
+    open();
+    const card = within(
+      await screen.findByRole("region", { name: "Latest update" }),
+    );
+    fireEvent.click(card.getByRole("button", { name: "Reply" }));
+    const field = card.getByRole("textbox", { name: "Reply" });
+    fireEvent.change(field, { target: { value: "First reply" } });
+
+    const storage = vi
+      .spyOn(Storage.prototype, "setItem")
+      .mockImplementationOnce(() => {
+        throw new Error("Local storage is unavailable");
+      });
+    try {
+      fireEvent.click(card.getByRole("button", { name: "Post update" }));
+      const retry = await screen.findByRole("button", { name: "Retry" });
+      const writes = () =>
+        bridge.invoke.mock.calls.filter(
+          ([command]) => command === "add_activity_with_details",
+        );
+      expect(writes()).toHaveLength(0);
+      const submitted = storage.mock.calls.find(
+        ([key]) => key === "ticketd:reply:review",
+      );
+      const requestId = JSON.parse(submitted![1]).requestId;
+
+      if (edited)
+        fireEvent.change(field, { target: { value: "A newer draft" } });
+      fireEvent.click(retry);
+      if (edited) {
+        await waitFor(() => expect(retry).toHaveProperty("disabled", false));
+        expect(writes()).toHaveLength(0);
+        expect(field).toHaveProperty("value", "A newer draft");
+      } else {
+        expect(await card.findByText("First reply")).toBeTruthy();
+        expect(writes()).toEqual([
+          [
+            "add_activity_with_details",
+            expect.objectContaining({ brief: "First reply", requestId }),
+          ],
+        ]);
+      }
+    } finally {
+      storage.mockRestore();
+    }
+  },
+);
+
 test.each(["Todo", "Done", "Canceled", "Duplicate", "Trash"])(
   "the review and update cards stay out of %s",
   async (status) => {

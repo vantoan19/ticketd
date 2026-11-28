@@ -230,12 +230,13 @@ function TicketDescriptionReading({ ticketId, peek, ...markdown }: Props) {
   useLayoutEffect(() => {
     if (!currentMatch) return;
     const { block, range } = currentMatch;
-    revealInDetail(
-      block,
-      typeof range.getBoundingClientRect === "function"
-        ? range.getBoundingClientRect()
-        : undefined,
-    );
+    if (!root.current?.closest("[hidden], [inert], [data-graph]"))
+      revealInDetail(
+        block,
+        typeof range.getBoundingClientRect === "function"
+          ? range.getBoundingClientRect()
+          : undefined,
+      );
     const highlights = globalThis.CSS?.highlights;
     if (typeof Highlight === "undefined" || !highlights) return;
     const name = "ticket-description-find";
